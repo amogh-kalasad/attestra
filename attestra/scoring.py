@@ -2,6 +2,7 @@
 
 The risk score ranks work. Reports still show CVSS as the severity of record.
 """
+# @lat: [[findings#Risk score]]
 
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
 """Hash-chained audit log: each event's hash covers the previous event's hash."""
+# @lat: [[audit]]
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
 """Business operations shared by the API and the CLI. Every write is audited."""
+# @lat: [[architecture#System layers]]
+# @lat: [[interfaces]]
 
 from __future__ import annotations
 
@@ -281,6 +283,8 @@ def match_asset(assets: list[Asset], location: str) -> Asset | None:
 
 def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, data: bytes, actor: str) -> ImportRun:
     """Import a scanner result file. Requires a currently valid signed authorization."""
+    # @lat: [[authorization#Import gate]]
+    # @lat: [[import-pipeline#Import run]]
     eng = get_engagement(s, engagement_id)
     if not any(a.is_valid() for a in eng.authorizations):
         raise ServiceError("record a currently valid signed authorization before importing results")

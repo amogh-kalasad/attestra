@@ -3,6 +3,8 @@
 Attestra does not run scanners. Testers run them under their own signed
 authorization and import the results here.
 """
+# @lat: [[architecture#Import do not execute]]
+# @lat: [[import-pipeline#Supported formats]]
 
 from __future__ import annotations
 

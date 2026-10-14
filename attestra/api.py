@@ -4,6 +4,8 @@ Identity: v0.1 takes the acting user from the `X-Attestra-Actor` header so the
 audit trail and four-eyes rules work end to end. Replace with Keycloak OIDC
 before any shared deployment (see docs/ARCHITECTURE.md).
 """
+# @lat: [[interfaces#REST API]]
+# @lat: [[authorization#Identity placeholder]]
 
 from __future__ import annotations
 

@@ -3,6 +3,8 @@
 The engine proposes; a named assessor confirms (ControlAssessment). A confirmed
 status always wins over the proposal.
 """
+# @lat: [[compliance]]
+# @lat: [[architecture#Propose then confirm]]
 
 from __future__ import annotations
 

@@ -1,4 +1,6 @@
 """Core data model. See docs/ARCHITECTURE.md, section "Common finding schema"."""
+# @lat: [[findings#Data model]]
+# @lat: [[authorization#Authorization record]]
 
 from __future__ import annotations
 

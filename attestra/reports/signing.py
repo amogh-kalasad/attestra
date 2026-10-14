@@ -5,6 +5,7 @@ report has not changed since this Attestra instance signed it. It is not a
 public-key signature: for customer-verifiable signatures, swap in Sigstore
 cosign or an X.509 document signature (see docs/ARCHITECTURE.md).
 """
+# @lat: [[reports#Signing]]
 
 from __future__ import annotations
 

@@ -1,6 +1,135 @@
-.venv/
+# --- Python ---
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
 *.egg-info/
-/data/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+.python-version
+
+# Packaging / installers
+*.manifest
+*.spec
+
+# Type checkers / linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+.pyre/
+.pyright/
+
+# Testing / coverage
 .pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- Attestra runtime data (DB, evidence, imports, reports, signing keys) ---
+/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Secrets & local env ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!.gitkeep
+secrets/
+credentials.json
+service-account*.json
+
+# --- OS ---
 .DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
+
+# --- Editors / IDEs ---
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.code-workspace
+.history/
+
+# Cursor: keep shared project rules; ignore local/machine state
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+
+# --- lat.md tooling ---
+.lat-build/
+lat.md/.cache/
+lat.md/config.local.yaml
+
+# --- Node (if lat/npm used locally) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# --- Logs & temp ---
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+
+# --- Misc ---
+*.pid
+*.seed
+*.pid.lock
+celerybeat-schedule
+celerybeat.pid

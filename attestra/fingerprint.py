@@ -1,4 +1,5 @@
 """Stable finding fingerprints so the same issue from two tools or two runs dedupes."""
+# @lat: [[findings#Deduplication]]
 
 from __future__ import annotations
 
