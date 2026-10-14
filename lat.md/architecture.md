@@ -91,3 +91,9 @@ Capabilities intentionally left for later phases (see [[docs/GAP_ANALYSIS_CURREN
 - Full Keycloak UI login flow (OIDC flag and claim validation exist; enable when IdP is provisioned)
 - Client portal polish, ticket sync, extra scanners (Phase 7)
 - External pentest / GA (Phase 8)
+
+## Observability
+
+Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
+
+[[attestra/observability.py#MetricsMiddleware]] counts requests by route template and records latency into [[attestra/observability.py#REGISTRY]], served by [[attestra/api.py#metrics]] (optional `ATTESTRA_METRICS_TOKEN`). [[attestra/observability.py#setup_otel]] activates only with `ATTESTRA_OTEL_ENABLED` and the `observability` extra. [[attestra/observability.py#JsonLogFormatter]] is enabled by `ATTESTRA_LOG_JSON`. Grafana, Prometheus and Promtail stubs live in `deploy/observability/`.

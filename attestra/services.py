@@ -778,10 +778,15 @@ def add_scan_schedule(
     return row
 
 
-def enqueue_due_schedules(s: Session, *, today: date | None = None, actor: str = "system") -> list[ScanRun]:
+def enqueue_due_schedules(
+    s: Session, *, today: date | None = None, actor: str = "system", engagement_id: int | None = None
+) -> list[ScanRun]:
     """Enqueue scan runs for schedules that are due; update next_due and quarter_clean."""
     today = today or date.today()
-    due = list(s.scalars(select(ScanSchedule).where(ScanSchedule.next_due <= today)))
+    q = select(ScanSchedule).where(ScanSchedule.next_due <= today)
+    if engagement_id is not None:
+        q = q.where(ScanSchedule.engagement_id == engagement_id)
+    due = list(s.scalars(q))
     created: list[ScanRun] = []
     for sch in due:
         try:
@@ -950,7 +955,10 @@ def request_scan(
     )
     s.add(run)
     s.flush()
-    enqueue(s, run.id)
+    job = enqueue(s, run.id)
+    from attestra.orchestration import dispatch_scan
+
+    dispatch_scan(s, run.id, job.id)
     audit.record(s, actor, "scan.request", "scan_run", run.id, tool=tool, profile=profile, asset_id=asset_id)
     return run
 
@@ -996,3 +1004,99 @@ def resume_engagement(s: Session, engagement_id: int, *, actor: str) -> Engageme
     durable_mod.clear_engagement_cancel(engagement_id)
     audit.record(s, actor, "engagement.resume", "engagement", eng.id)
     return eng
+
+
+# ---------------------------------------------------------------- Step 6.7: scheduler UI + CI/CD gate
+# @lat: [[interfaces#Scheduled scans and CI gates]]
+
+GATE_LEVELS = ("critical", "high", "medium", "low", "info")
+
+
+def list_scan_schedules(s: Session, engagement_id: int) -> list[ScanSchedule]:
+    get_engagement(s, engagement_id)
+    return list(
+        s.scalars(
+            select(ScanSchedule)
+            .where(ScanSchedule.engagement_id == engagement_id)
+            .order_by(ScanSchedule.next_due, ScanSchedule.id)
+        )
+    )
+
+
+def _schedule_on(s: Session, engagement_id: int, schedule_id: int) -> ScanSchedule:
+    row = s.get(ScanSchedule, schedule_id)
+    if not row or row.engagement_id != engagement_id:
+        raise LookupError(f"schedule {schedule_id} not found on engagement")
+    return row
+
+
+def update_scan_schedule(
+    s: Session,
+    engagement_id: int,
+    schedule_id: int,
+    *,
+    actor: str,
+    cadence: str | None = None,
+    next_due: date | None = None,
+) -> ScanSchedule:
+    row = _schedule_on(s, engagement_id, schedule_id)
+    if cadence is not None:
+        if cadence not in ("quarterly", "monthly"):
+            raise ServiceError("cadence must be quarterly or monthly")
+        row.cadence = cadence
+    if next_due is not None:
+        row.next_due = next_due
+    s.flush()
+    audit.record(s, actor, "schedule.update", "scan_schedule", row.id, cadence=row.cadence, next_due=str(row.next_due))
+    return row
+
+
+def remove_scan_schedule(s: Session, engagement_id: int, schedule_id: int, *, actor: str) -> None:
+    row = _schedule_on(s, engagement_id, schedule_id)
+    audit.record(s, actor, "schedule.remove", "scan_schedule", row.id, tool=row.tool)
+    s.delete(row)
+    s.flush()
+
+
+def ci_gate(
+    s: Session,
+    engagement_id: int,
+    *,
+    fail_on: str = "high",
+    tool: str | None = None,
+    max_findings: int = 0,
+) -> dict:
+    """CI/CD policy: fail when open findings at/above ``fail_on`` exceed ``max_findings``.
+
+    Accepted-risk, fixed and false-positive findings are not open, so they never block.
+    ``tool`` limits the check to findings reported by that importer (e.g. the one the
+    pipeline just uploaded).
+    """
+    get_engagement(s, engagement_id)
+    fail_on = (fail_on or "high").lower()
+    if fail_on not in GATE_LEVELS:
+        raise ServiceError(f"fail_on must be one of {', '.join(GATE_LEVELS)}")
+    if max_findings < 0:
+        raise ServiceError("max_findings must be >= 0")
+    threshold = _rank(fail_on)
+    open_rows = [
+        f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id))
+        if f.status in OPEN_STATUSES and (not tool or tool in (f.tools or []))
+    ]
+    counts = {lvl: 0 for lvl in GATE_LEVELS}
+    for f in open_rows:
+        counts[f.severity if f.severity in counts else "info"] += 1
+    blocking = [f for f in open_rows if _rank(f.severity) >= threshold]
+    blocking.sort(key=lambda f: (-_rank(f.severity), -(f.risk_score or 0), f.id))
+    passed = len(blocking) <= max_findings
+    return {
+        "engagement_id": engagement_id,
+        "policy": {"fail_on": fail_on, "tool": tool or None, "max_findings": max_findings},
+        "passed": passed,
+        "open_counts": counts,
+        "blocking_count": len(blocking),
+        "blocking": [
+            {"id": f.id, "severity": f.severity, "title": f.title, "location": f.location, "tools": f.tools}
+            for f in blocking[:50]
+        ],
+    }

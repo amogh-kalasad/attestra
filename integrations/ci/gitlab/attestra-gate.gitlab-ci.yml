@@ -1,0 +1,46 @@
+# Attestra CI/CD gate for GitLab CI (Phase 6.7).
+# Use from .gitlab-ci.yml:
+#   include:
+#     - local: integrations/ci/gitlab/attestra-gate.gitlab-ci.yml
+# CI/CD variables (Settings > CI/CD > Variables):
+#   ATTESTRA_URL, ATTESTRA_ENGAGEMENT_ID, ATTESTRA_TOKEN (masked + protected)
+#   optional: ATTESTRA_FAIL_ON (default high), ATTESTRA_MAX_FINDINGS (default 0)
+
+stages:
+  - scan
+  - gate
+
+variables:
+  ATTESTRA_FAIL_ON: "high"
+  ATTESTRA_MAX_FINDINGS: "0"
+
+attestra:semgrep:
+  stage: scan
+  image: semgrep/semgrep:latest
+  script:
+    - semgrep scan --config auto --sarif --output semgrep.sarif || true
+  artifacts:
+    when: always
+    paths: [semgrep.sarif]
+
+attestra:trivy:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy fs --format json --output trivy.json --exit-code 0 .
+  artifacts:
+    when: always
+    paths: [trivy.json]
+
+attestra:gate:
+  stage: gate
+  image: python:3.12-slim
+  needs: ["attestra:semgrep", "attestra:trivy"]
+  script:
+    - test -f attestra_ci.py || cp integrations/ci/attestra_ci.py attestra_ci.py
+    - python attestra_ci.py --file sarif=semgrep.sarif --file trivy=trivy.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

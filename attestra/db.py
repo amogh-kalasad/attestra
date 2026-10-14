@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from attestra import config
@@ -19,6 +20,33 @@ class Base(DeclarativeBase):
 _engine = None
 _SessionLocal: sessionmaker | None = None
 
+# Tenant ids the current request may see (None = unrestricted). Read by session()
+# and pushed to Postgres as ``app.tenant_id`` for row-level security (Phase 6.1).
+_UNSET = object()
+current_tenant_ids: ContextVar[frozenset[int] | None] = ContextVar("attestra_tenant_ids", default=None)
+
+
+def normalize_url(url: str) -> str:
+    """Use the psycopg 3 driver for bare ``postgres://`` / ``postgresql://`` URLs."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def is_postgres(url: str) -> bool:
+    return normalize_url(url).startswith("postgresql")
+
+
+@contextmanager
+def tenant_scope(tenant_ids: Iterable[int] | None) -> Iterator[None]:
+    """Restrict sessions opened inside this block to ``tenant_ids`` (RLS on Postgres)."""
+    token = current_tenant_ids.set(None if tenant_ids is None else frozenset(int(t) for t in tenant_ids))
+    try:
+        yield
+    finally:
+        current_tenant_ids.reset(token)
+
 
 def upgrade(url: str | None = None) -> None:
     """Apply Alembic migrations to head (production / `attestra init` / serve startup)."""
@@ -26,7 +54,7 @@ def upgrade(url: str | None = None) -> None:
     from alembic.config import Config
 
     cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
-    cfg.set_main_option("sqlalchemy.url", url or config.DATABASE_URL)
+    cfg.set_main_option("sqlalchemy.url", normalize_url(url or config.DATABASE_URL).replace("%", "%%"))
     command.upgrade(cfg, "head")
 
 
@@ -40,8 +68,11 @@ def init(url: str | None = None, *, use_migrations: bool = False) -> None:
     if url is None and _engine is not None:
         return
     config.ensure_dirs()
-    url = url or config.DATABASE_URL
-    kwargs = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {}
+    url = normalize_url(url or config.DATABASE_URL)
+    if url.startswith("sqlite"):
+        kwargs = {"connect_args": {"check_same_thread": False}}
+    else:
+        kwargs = {"pool_pre_ping": True}
     _engine = create_engine(url, **kwargs)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     from attestra import models  # noqa: F401  (register tables)
@@ -105,11 +136,35 @@ def _install_audit_triggers(engine) -> None:
         )
 
 
+def _apply_tenant_setting(s: Session, transaction, connection) -> None:
+    """Set ``app.tenant_id`` for this transaction (SET LOCAL semantics, pool-safe)."""
+    if connection.dialect.name != "postgresql":
+        return
+    from attestra.rls import SETTING, setting_value
+
+    ids = s.info.get("tenant_ids")
+    connection.execute(
+        text("SELECT set_config(:k, :v, true)"), {"k": SETTING, "v": setting_value(ids)}
+    )
+
+
 @contextmanager
-def session() -> Iterator[Session]:
+def session(tenant_ids: Iterable[int] | None | object = _UNSET) -> Iterator[Session]:
+    """Unit-of-work session.
+
+    ``tenant_ids`` (or the surrounding :func:`tenant_scope`) limits which tenants'
+    rows Postgres RLS exposes. ``None`` means unrestricted. Re-applied on every
+    transaction because ``set_config(..., true)`` is transaction-local.
+    """
     if _SessionLocal is None:
         init()
+    if tenant_ids is _UNSET:
+        ids = current_tenant_ids.get()
+    else:
+        ids = None if tenant_ids is None else frozenset(int(t) for t in tenant_ids)
     s = _SessionLocal()
+    s.info["tenant_ids"] = ids
+    event.listen(s, "after_begin", _apply_tenant_setting)
     try:
         yield s
         s.commit()

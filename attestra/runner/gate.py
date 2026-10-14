@@ -1,4 +1,10 @@
-"""Dispatch gate: authorization, window, intrusive flag, rate limit, ownership, pin."""
+"""Dispatch gate: authorization, window, intrusive flag, rate limit, ownership, pin.
+
+Phase 6.3: the allow/refuse decisions are made by the scope policy
+(``policy/scope.rego``, see :mod:`attestra.runner.policy`). This module gathers
+the facts, asks the policy, audits refusals, then authorizes and pins the
+target (network IO stays in Python).
+"""
 # @lat: [[authorization#Runner scope]]
 
 from __future__ import annotations
@@ -10,10 +16,10 @@ from sqlalchemy.orm import Session
 
 from attestra import audit, config, services
 from attestra.models import Asset, ScanRun, utcnow
+from attestra.runner import policy
 from attestra.runner.authorization import AuthorizationError, authorize_target, scope_for_engagement
 from attestra.runner.dns_pin import PinnedTarget, pin_url
 from attestra.runner.ownership import is_verified
-from attestra.runner.scanners.nuclei_policy import is_active_profile
 
 
 class GateError(Exception):
@@ -22,6 +28,52 @@ class GateError(Exception):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+def policy_input(
+    s: Session,
+    engagement_id: int,
+    asset_id: int,
+    *,
+    tool: str,
+    profile: str,
+    now: datetime | None = None,
+) -> dict:
+    """Collect the facts the scope policy needs (the OPA ``input`` document)."""
+    now = now or utcnow()
+    today = now.date() if isinstance(now, datetime) else date.today()
+    eng = services.get_engagement(s, engagement_id)
+    asset = s.get(Asset, asset_id)
+    found = bool(asset and asset.engagement_id == engagement_id)
+
+    count = 0
+    if found:
+        since = now - timedelta(hours=1) if isinstance(now, datetime) else utcnow() - timedelta(hours=1)
+        count = s.scalar(
+            select(func.count(ScanRun.id)).where(
+                ScanRun.asset_id == asset_id,
+                ScanRun.started_at.is_not(None),
+                ScanRun.started_at >= since,
+                ScanRun.status.not_in(["refused"]),
+            )
+        ) or 0
+
+    return policy.build_input(
+        asset_found=found,
+        engagement_status=eng.status,
+        asset_environment=asset.environment if found else "",
+        authorized_environments=services.authorized_environments(eng, today),
+        today=today,
+        window_start=eng.window_start,
+        window_end=eng.window_end,
+        tool=tool,
+        profile=profile,
+        intrusive_allowed=bool(asset.intrusive_allowed) if found else False,
+        recent_scan_count=count,
+        rate_limit=config.SCAN_RATE_PER_ASSET,
+        asset_kind=asset.kind if found else "",
+        ownership_verified=is_verified(asset) if found else False,
+    )
 
 
 def check(
@@ -37,45 +89,13 @@ def check(
     """Validate a scan request. Returns a PinnedTarget (URL tools) or path/image string."""
     now = now or utcnow()
     today = now.date() if isinstance(now, datetime) else date.today()
-    eng = services.get_engagement(s, engagement_id)
+
+    # 1-5: policy decision (authorization env, window, intrusive, rate, ownership)
+    decision = policy.decide(policy_input(s, engagement_id, asset_id, tool=tool, profile=profile, now=now))
+    if not decision.allow:
+        return _refuse(s, actor, asset_id, decision.reason or "refused by scope policy")
+
     asset = s.get(Asset, asset_id)
-    if not asset or asset.engagement_id != engagement_id:
-        return _refuse(s, actor, asset_id, "asset not found for engagement")
-
-    if eng.status == "halted":
-        return _refuse(s, actor, asset_id, "engagement is halted")
-
-    # 1 valid authorization covering the asset environment
-    envs = services.authorized_environments(eng, today)
-    if asset.environment not in envs:
-        return _refuse(s, actor, asset_id, "no valid authorization for asset environment")
-
-    # 2 test window
-    if eng.window_start and today < eng.window_start:
-        return _refuse(s, actor, asset_id, "before engagement window")
-    if eng.window_end and today > eng.window_end:
-        return _refuse(s, actor, asset_id, "after engagement window")
-
-    # 3 intrusive / active profile
-    if (profile == "active" or (tool == "nuclei" and is_active_profile(profile))) and not asset.intrusive_allowed:
-        return _refuse(s, actor, asset_id, "intrusive/active profile not allowed on asset")
-
-    # 4 rate limit
-    since = now - timedelta(hours=1) if isinstance(now, datetime) else utcnow() - timedelta(hours=1)
-    count = s.scalar(
-        select(func.count(ScanRun.id)).where(
-            ScanRun.asset_id == asset_id,
-            ScanRun.started_at.is_not(None),
-            ScanRun.started_at >= since,
-            ScanRun.status.not_in(["refused"]),
-        )
-    ) or 0
-    if count >= config.SCAN_RATE_PER_ASSET:
-        return _refuse(s, actor, asset_id, "scan rate limit exceeded for asset")
-
-    # 5 ownership (first scan)
-    if not is_verified(asset) and asset.kind in ("web_app", "api", "host"):
-        return _refuse(s, actor, asset_id, "asset ownership not verified")
 
     # 6 authorize target + pin
     try:

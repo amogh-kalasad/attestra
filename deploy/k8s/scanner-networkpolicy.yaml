@@ -1,0 +1,23 @@
+# Pair with scanner-job.yaml: deny all ingress; allow egress only to the pinned IP.
+# Per-runner egress IP: configure an egress gateway (Cilium CiliumEgressGatewayPolicy /
+# Calico EgressGateway) selecting label attestra.io/runner=${RUNNER_ID} -> ${RUNNER_EGRESS_IP}
+# so the target sees one known source IP per runner (VERIFY for your CNI).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: attestra-scan-${SCAN_ID}
+  labels:
+    app.kubernetes.io/name: attestra
+    app.kubernetes.io/component: scanner
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: scanner
+      attestra.io/scan: "${SCAN_ID}"
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - ipBlock: { cidr: "${PINNED_IP}/32" }
+      ports:
+        - { protocol: TCP, port: ${TARGET_PORT} }

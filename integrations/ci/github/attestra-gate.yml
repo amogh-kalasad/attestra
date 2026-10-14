@@ -1,0 +1,70 @@
+# Attestra CI/CD gate for GitHub Actions (Phase 6.7).
+# Copy to .github/workflows/attestra-gate.yml in the repo being scanned.
+# Required secrets:   ATTESTRA_TOKEN  (API key, role tester/lead)
+# Required variables: ATTESTRA_URL, ATTESTRA_ENGAGEMENT_ID
+# Optional variables: ATTESTRA_FAIL_ON (default high), ATTESTRA_MAX_FINDINGS (default 0)
+name: attestra-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan-and-gate:
+    runs-on: ubuntu-latest
+    env:
+      ATTESTRA_URL: ${{ vars.ATTESTRA_URL }}
+      ATTESTRA_ENGAGEMENT_ID: ${{ vars.ATTESTRA_ENGAGEMENT_ID }}
+      ATTESTRA_TOKEN: ${{ secrets.ATTESTRA_TOKEN }}
+      ATTESTRA_FAIL_ON: ${{ vars.ATTESTRA_FAIL_ON || 'high' }}
+      ATTESTRA_MAX_FINDINGS: ${{ vars.ATTESTRA_MAX_FINDINGS || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # SAST -> SARIF (Semgrep). Never fail here; the Attestra gate decides.
+      - name: Semgrep (SARIF)
+        run: |
+          pip install --quiet semgrep
+          semgrep scan --config auto --sarif --output semgrep.sarif || true
+
+      # Dependencies / filesystem -> Trivy JSON
+      - name: Trivy (JSON)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          output: trivy.json
+          exit-code: "0"
+
+      - name: Locate Attestra CI client
+        run: |
+          if [ -f integrations/ci/attestra_ci.py ]; then
+            cp integrations/ci/attestra_ci.py attestra_ci.py
+          elif [ -f .github/workflows/attestra_ci.py ]; then
+            cp .github/workflows/attestra_ci.py attestra_ci.py
+          else
+            echo "Copy attestra_ci.py next to this workflow (from Attestra integrations/ci/) before running." >&2
+            exit 1
+          fi
+
+      - name: Upload to Attestra and enforce policy
+        run: python attestra_ci.py --file sarif=semgrep.sarif --file trivy=trivy.json
+
+      - name: Keep raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: attestra-scan-results
+          path: |
+            semgrep.sarif
+            trivy.json

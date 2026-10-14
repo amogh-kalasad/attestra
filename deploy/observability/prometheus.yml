@@ -1,0 +1,9 @@
+# Prometheus scrape config stub for Attestra (Phase 6.6). Not installed by Attestra.
+global:
+  scrape_interval: 30s
+scrape_configs:
+  - job_name: attestra-api
+    metrics_path: /metrics
+    # authorization: { credentials: <ATTESTRA_METRICS_TOKEN> }   # if the token is set
+    static_configs:
+      - targets: ["attestra-api:8000"]   # VERIFY: service host:port in your deployment

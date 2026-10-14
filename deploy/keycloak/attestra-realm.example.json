@@ -1,0 +1,58 @@
+{
+  "realm": "attestra",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "requiredActions": [
+    { "alias": "CONFIGURE_TOTP", "name": "Configure OTP", "providerId": "CONFIGURE_TOTP", "enabled": true, "defaultAction": true }
+  ],
+  "roles": {
+    "realm": [
+      { "name": "attestra-admin" },
+      { "name": "attestra-lead" },
+      { "name": "attestra-tester" },
+      { "name": "attestra-reviewer" },
+      { "name": "attestra-client_viewer" },
+      { "name": "attestra-auditor" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "attestra",
+      "name": "Attestra",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://attestra.example.com/*"],
+      "webOrigins": ["https://attestra.example.com"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "audience-attestra",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "attestra", "access.token.claim": "true", "id.token.claim": "false" }
+        },
+        {
+          "name": "attestra_tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "attestra_tenant_id",
+            "claim.name": "attestra_tenant_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

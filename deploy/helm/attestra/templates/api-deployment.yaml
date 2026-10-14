@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "attestra.fullname" . }}-api
+  labels: {{- include "attestra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "attestra.selector" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels: {{- include "attestra.selector" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: migrate
+          image: {{ include "attestra.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["attestra", "init"]
+          env: {{- include "attestra.env" . | nindent 12 }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      containers:
+        - name: api
+          image: {{ include "attestra.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["attestra", "serve", "--host", "0.0.0.0", "--port", "{{ .Values.api.port }}"]
+          ports:
+            - { name: http, containerPort: {{ .Values.api.port }} }
+          env: {{- include "attestra.env" . | nindent 12 }}
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes: {{- include "attestra.volumes" . | nindent 8 }}

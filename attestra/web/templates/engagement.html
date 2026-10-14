@@ -245,6 +245,55 @@
   </table>
 </div>
 
+<div class="card" id="schedules">
+  <h2>Scheduled scans</h2>
+  <p>Recurring scans (PCI 11.3.1 quarterly internal / monthly). Due scans are queued through the same scope and authorization gate as manual scans. A quarter stays open until a run leaves no open high/critical findings on that target.</p>
+  <table>
+    <tr><th>#</th><th>Target</th><th>Tool</th><th>Cadence</th><th>Next due</th><th>Last queued</th><th>Quarter clean</th><th></th></tr>
+    {% for sch in schedules %}
+    <tr>
+      <td>{{ sch.id }}</td>
+      <td>{{ sch.asset.identifier if sch.asset else sch.asset_id }}</td>
+      <td>{{ sch.tool }}</td>
+      <td colspan="2">
+        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/update" style="display:flex;gap:6px;align-items:center">
+          <select name="cadence">
+            <option value="quarterly" {{ "selected" if sch.cadence == "quarterly" }}>quarterly</option>
+            <option value="monthly" {{ "selected" if sch.cadence == "monthly" }}>monthly</option>
+          </select>
+          <input type="date" name="next_due" value="{{ sch.next_due }}" required>
+          <button type="submit">Save</button>
+          {% if sch.next_due <= today %}<span class="badge">due</span>{% endif %}
+        </form>
+      </td>
+      <td>{{ sch.last_enqueued_at.strftime("%Y-%m-%d %H:%M") if sch.last_enqueued_at else "-" }}</td>
+      <td>{{ "yes" if sch.quarter_clean else "no" }}</td>
+      <td>
+        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/remove" onsubmit="return confirm('Remove this schedule?')">
+          <button type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="8">No schedules yet.</td></tr>{% endfor %}
+  </table>
+  {% if e.assets %}
+  <form method="post" action="/engagements/{{ e.id }}/schedules" style="margin-top:12px">
+    <div class="fields">
+      <div><label>Target</label><select name="asset_id" required>
+        {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>{% endfor %}
+      </select></div>
+      <div><label>Tool</label><input name="tool" value="nuclei" required></div>
+      <div><label>Cadence</label><select name="cadence"><option value="quarterly">quarterly</option><option value="monthly">monthly</option></select></div>
+      <div><label>First due</label><input type="date" name="next_due" value="{{ today }}" required></div>
+    </div>
+    <button type="submit">Add schedule</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" style="margin-top:8px">
+    <button type="submit">Queue due scans now</button>
+  </form>
+</div>
+
 <div class="card" id="pci-records">
   <h2>PCI records (ASV &amp; segmentation)</h2>
   <div class="grid">

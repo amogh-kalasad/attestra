@@ -152,7 +152,7 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | Step | Requirement | Status |
 | --- | --- | --- |
 | 6.1 | PostgreSQL 16 default + RLS | **Pending / infra** |
-| 6.2 | Temporal workflows | **Pending / infra** |
+| 6.2 | Temporal workflows | **Done locally (optional, ATTESTRA_ORCHESTRATOR=temporal; scan step only) - see docs/TEMPORAL.md** |
 | 6.3 | OPA/Rego scope policy | **Pending / infra** |
 | 6.4 | Keycloak MFA default + Vault/OpenBao keys | **Pending / infra** |
 | 6.5 | Dockerfile + Helm + NetworkPolicy | **Pending / infra** |

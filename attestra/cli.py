@@ -369,7 +369,20 @@ def cmd_serve(args) -> None:
 
 
 def cmd_worker(args) -> None:
-    """Claim and run scan jobs until interrupted."""
+    """Claim and run scan jobs until interrupted (or run a Temporal worker, Phase 6.2)."""
+    from attestra.orchestration import orchestrator
+
+    if orchestrator() == "temporal":
+        import asyncio
+
+        from attestra.orchestration.temporal_worker import run_worker
+
+        db.init(use_migrations=True)
+        try:
+            asyncio.run(run_worker(poll=max(args.poll, 5.0)))
+        except KeyboardInterrupt:
+            print("worker stopping")
+        return
     import time
 
     from attestra.jobs.durable import (

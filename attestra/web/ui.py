@@ -255,6 +255,7 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         asv_scans = list(e.asv_scans)
         segmentation_tests = list(e.segmentation_tests)
         nonconformities = list(e.nonconformities)
+        schedules = services.list_scan_schedules(s, eid)
         return _render(request, "engagement.html", {
             "e": e,
             "type_label": ENGAGEMENT_TYPE_LABELS.get(e.type, e.type),
@@ -265,6 +266,7 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
             "asv_scans": asv_scans,
             "segmentation_tests": segmentation_tests,
             "nonconformities": nonconformities,
+            "schedules": schedules,
             "results": results,
             "fw": fw,
             "fw_names": {k: v["name"] for k, v in lib.frameworks.items()},
@@ -416,3 +418,56 @@ def halt_engagement(request: Request, eid: int):
 @router.post("/engagements/{eid}/resume")
 def resume_engagement(request: Request, eid: int):
     return _do(request, f"/engagements/{eid}", "#scans", "Engagement resumed.", services.resume_engagement, eid)
+
+
+# ---------------------------------------------------------------- Step 6.7: scheduler UI
+
+
+@router.post("/engagements/{eid}/schedules")
+def ui_add_schedule(
+    request: Request,
+    eid: int,
+    asset_id: int = Form(...),
+    tool: str = Form(...),
+    cadence: str = Form("quarterly"),
+    next_due: date = Form(...),
+):
+    return _do(
+        request, f"/engagements/{eid}", "#schedules", f"Scheduled {tool} ({cadence}).",
+        services.add_scan_schedule, eid, asset_id=asset_id, tool=tool, cadence=cadence, next_due=next_due,
+    )
+
+
+@router.post("/engagements/{eid}/schedules/{sid}/update")
+def ui_update_schedule(
+    request: Request,
+    eid: int,
+    sid: int,
+    cadence: str = Form(...),
+    next_due: date = Form(...),
+):
+    return _do(
+        request, f"/engagements/{eid}", "#schedules", "Schedule updated.",
+        services.update_scan_schedule, eid, sid, cadence=cadence, next_due=next_due,
+    )
+
+
+@router.post("/engagements/{eid}/schedules/{sid}/remove")
+def ui_remove_schedule(request: Request, eid: int, sid: int):
+    return _do(
+        request, f"/engagements/{eid}", "#schedules", "Schedule removed.",
+        services.remove_scan_schedule, eid, sid,
+    )
+
+
+@router.post("/engagements/{eid}/schedules/run-due")
+def ui_run_due(request: Request, eid: int):
+    who = _actor(request)
+    if not who:
+        return _back("/login", error="Sign in to continue.", anchor="#schedules")
+    try:
+        with db.session() as s:
+            runs = services.enqueue_due_schedules(s, engagement_id=eid, actor=who)
+    except (services.ServiceError, LookupError) as e:
+        return _back(f"/engagements/{eid}", error=str(e), anchor="#schedules")
+    return _back(f"/engagements/{eid}", msg=f"{len(runs)} due scan(s) enqueued.", anchor="#schedules")

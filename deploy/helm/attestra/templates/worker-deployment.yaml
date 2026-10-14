@@ -1,0 +1,33 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "attestra.fullname" . }}-worker
+  labels: {{- include "attestra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  strategy: { type: Recreate }   # one worker at a time (InstanceLock)
+  selector:
+    matchLabels: {{- include "attestra.selector" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels: {{- include "attestra.selector" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "attestra.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["attestra", "worker", "--poll", "{{ .Values.worker.pollSeconds }}"]
+          env: {{- include "attestra.env" . | nindent 12 }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes: {{- include "attestra.volumes" . | nindent 8 }}
+{{- end }}

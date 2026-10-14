@@ -13,8 +13,14 @@ from attestra import config
 COOKIE_NAME = "attestra_session"
 
 
+def _secret() -> bytes:
+    from attestra.secret_store import get_secret
+
+    return get_secret("session_secret", config.SESSION_SECRET).encode("utf-8")
+
+
 def _sign(payload: bytes) -> str:
-    sig = hmac.new(config.SESSION_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+    sig = hmac.new(_secret(), payload, hashlib.sha256).digest()
     return urlsafe_b64encode(payload + b"." + sig).decode("ascii")
 
 
@@ -22,7 +28,7 @@ def _unsign(token: str, *, max_age_s: int = 86400 * 7) -> dict | None:
     try:
         raw = urlsafe_b64decode(token.encode("ascii"))
         payload, sig = raw.rsplit(b".", 1)
-        expected = hmac.new(config.SESSION_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+        expected = hmac.new(_secret(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(sig, expected):
             return None
         data = json.loads(payload.decode("utf-8"))

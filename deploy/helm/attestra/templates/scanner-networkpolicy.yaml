@@ -1,0 +1,27 @@
+{{- with .Values.scanner.exampleJob }}
+{{- if .enabled }}
+# Scanner pods: no ingress; egress ONLY to the pinned target IP on the allowed ports.
+# No DNS egress (hostAliases pins the name). Per-runner egress IP (SNAT) is enforced
+# by the CNI/egress gateway (e.g. Cilium/Calico egress gateway), not by this object.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "attestra.fullname" $ }}-scan-example
+  labels: {{- include "attestra.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: scanner
+      attestra.io/scan: example
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - ipBlock: { cidr: {{ printf "%s/32" .pinnedIP }} }
+      ports:
+        {{- range .ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+{{- end }}
+{{- end }}

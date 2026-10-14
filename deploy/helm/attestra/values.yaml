@@ -1,0 +1,99 @@
+image:
+  repository: attestra
+  tag: dev
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  port: 8000
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+worker:
+  # attestra worker holds an InstanceLock; keep at 1 until Temporal (Step 6.2).
+  enabled: true
+  replicas: 1
+  pollSeconds: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Empty = SQLite on the PVC. Set to postgresql+psycopg://... for Step 6.1.
+databaseUrl: ""
+# Use an existing Secret with keys ATTESTRA_API_KEY_PEPPER, ATTESTRA_SESSION_SECRET
+# (and optionally ATTESTRA_DATABASE_URL). If empty, the chart creates one from `secrets`.
+existingSecret: ""
+secrets:
+  apiKeyPepper: ""     # REQUIRED in production; install fails if empty and no existingSecret
+  sessionSecret: ""
+
+env: {}   # extra ATTESTRA_* env vars
+
+# Step 6.4: OIDC bearer tokens (Keycloak). Example realm: deploy/keycloak/attestra-realm.example.json
+oidc:
+  enabled: false
+  issuer: ""            # https://sso.example.com/realms/attestra
+  clientId: attestra
+  audience: ""          # empty = clientId
+  jwksUrl: ""           # empty = <issuer>/protocol/openid-connect/certs
+  tenantClaim: attestra_tenant_id
+  autoProvision: true
+
+# Step 6.4: where api_key_pepper / session_secret come from.
+secretsStore:
+  backend: env          # env (from the chart Secret above) | vault (Vault/OpenBao KV v2)
+  vault:
+    addr: ""            # https://vault.vault.svc:8200
+    kvMount: secret
+    kvPath: attestra
+    namespace: ""
+    # Existing k8s Secret holding the Vault token (never put the token in values).
+    tokenSecret: ""
+    tokenSecretKey: token
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+networkPolicy:
+  # Default-deny for the app namespace pods; API ingress only on its port.
+  enabled: true
+  # CIDRs the API/worker may reach (e.g. Postgres, Keycloak, Vault). DNS is always allowed.
+  appEgressCIDRs: []
+
+scanner:
+  # Example scanner Job + its NetworkPolicy. Normally the worker creates one Job per
+  # scan; this renders a single example so the policy shape can be reviewed and smoke-tested.
+  exampleJob:
+    enabled: false
+    tool: zap
+    image: ghcr.io/zaproxy/zaproxy@sha256:0000000000000000000000000000000000000000000000000000000000000001
+    targetHost: example.invalid
+    targetUrl: https://example.invalid/
+    # Pinned IP from runner/dns_pin.py. The Job may ONLY reach this IP.
+    pinnedIP: 192.0.2.10
+    ports: [443]
+  activeDeadlineSeconds: 600
+  # Per-runner egress IP (source NAT). Enforced by the CNI/egress gateway, recorded as a label here.
+  egressIP: ""
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }

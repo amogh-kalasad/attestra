@@ -1,0 +1,9 @@
+Attestra {{ .Chart.AppVersion }} installed as {{ include "attestra.fullname" . }}.
+
+  kubectl port-forward svc/{{ include "attestra.fullname" . }} 8000:{{ .Values.service.port }}
+  open http://127.0.0.1:8000
+
+Create the first admin:
+  kubectl exec deploy/{{ include "attestra.fullname" . }}-api -- attestra user add admin --role admin --password '<pw>'
+
+Scanner pods are isolated: egress only to the pinned IP (scanner.exampleJob.pinnedIP).

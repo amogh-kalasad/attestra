@@ -1,0 +1,15 @@
+.git
+.github
+.cursor
+.ruff_cache
+.venv
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+**/*.bak
+*.egg-info
+data
+tests
+docs
+lat.md
+deploy

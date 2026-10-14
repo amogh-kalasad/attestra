@@ -31,7 +31,9 @@ class Principal:
 
 
 def _pepper() -> bytes:
-    return config.API_KEY_PEPPER.encode("utf-8")
+    from attestra.secret_store import get_secret
+
+    return get_secret("api_key_pepper", config.API_KEY_PEPPER).encode("utf-8")
 
 
 def hash_api_key(raw_key: str) -> str:

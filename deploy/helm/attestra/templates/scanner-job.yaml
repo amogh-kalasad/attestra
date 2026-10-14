@@ -1,0 +1,53 @@
+{{- with .Values.scanner.exampleJob }}
+{{- if .enabled }}
+{{- if not (contains "@sha256:" .image) }}{{ fail "scanner.exampleJob.image must be pinned with @sha256: digest" }}{{- end }}
+# One scanner run = one Job. Pod is labelled so the matching NetworkPolicy
+# (scanner-networkpolicy.yaml) allows egress ONLY to the pinned IP.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "attestra.fullname" $ }}-scan-{{ .tool }}-example
+  labels: {{- include "attestra.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: scanner
+    attestra.io/tool: {{ .tool }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ $.Values.scanner.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "attestra.selector" $ | nindent 8 }}
+        app.kubernetes.io/component: scanner
+        attestra.io/scan: example
+        {{- with $.Values.scanner.egressIP }}
+        attestra.io/egress-ip: {{ . | replace "." "-" | quote }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      # Pin DNS: the target host resolves only to the pinned IP inside the pod (mirrors --add-host).
+      hostAliases:
+        - ip: {{ .pinnedIP | quote }}
+          hostnames: [{{ .targetHost | quote }}]
+      dnsPolicy: None
+      dnsConfig:
+        nameservers: ["127.0.0.1"]   # no external resolution; hostAliases is the only lookup
+      containers:
+        - name: {{ .tool }}
+          image: {{ .image }}
+          {{- if eq .tool "zap" }}
+          args: ["zap-baseline.py", "-t", {{ .targetUrl | quote }}, "-J", "zap-report.json"]
+          {{- end }}
+          resources: {{- toYaml $.Values.scanner.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: work, mountPath: /zap/wrk }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: work, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+{{- end }}
+{{- end }}

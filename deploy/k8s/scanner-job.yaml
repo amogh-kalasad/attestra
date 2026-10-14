@@ -1,0 +1,50 @@
+# Raw template for one scanner run (what the worker/runner will create per scan).
+# Replace ${...} placeholders. Image MUST be digest-pinned (config.require_image_digest).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: attestra-scan-${SCAN_ID}
+  labels:
+    app.kubernetes.io/name: attestra
+    app.kubernetes.io/component: scanner
+    attestra.io/scan: "${SCAN_ID}"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600          # ATTESTRA_SCANNER_TIMEOUT_S
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: attestra
+        app.kubernetes.io/component: scanner
+        attestra.io/scan: "${SCAN_ID}"
+        attestra.io/runner: "${RUNNER_ID}"   # selects the per-runner egress IP in the egress gateway
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      hostAliases:
+        - ip: "${PINNED_IP}"
+          hostnames: ["${TARGET_HOST}"]
+      dnsPolicy: None
+      dnsConfig:
+        nameservers: ["127.0.0.1"]
+      containers:
+        - name: scanner
+          image: "${SCANNER_IMAGE}"          # e.g. ghcr.io/zaproxy/zaproxy@sha256:...
+          args: ["zap-baseline.py", "-t", "${TARGET_URL}", "-J", "zap-report.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          volumeMounts:
+            - { name: work, mountPath: /zap/wrk }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: work, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }

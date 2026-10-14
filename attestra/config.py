@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("ATTESTRA_DATA_DIR", Path.cwd() / "data")).resolve()
+# Production default is PostgreSQL 16 (Phase 6.1), e.g.
+#   ATTESTRA_DATABASE_URL=postgresql+psycopg://attestra_app:***@db:5432/attestra
+# (install the ``postgres`` extra). SQLite stays as the zero-config local/dev fallback.
+POSTGRES_URL_EXAMPLE = "postgresql+psycopg://attestra_app:change-me@localhost:5432/attestra"
 DATABASE_URL = os.environ.get("ATTESTRA_DATABASE_URL", f"sqlite:///{DATA_DIR / 'attestra.db'}")
 
 # Remediation SLA in days per severity. Critical within 30 days aligns with PCI DSS 6.3.3.
@@ -16,6 +20,11 @@ SCANNER_TIMEOUT_S = int(os.environ.get("ATTESTRA_SCANNER_TIMEOUT_S", "600"))
 SCAN_RATE_PER_ASSET = int(os.environ.get("ATTESTRA_SCAN_RATE_PER_ASSET", "10"))
 JOB_MAX_ATTEMPTS = int(os.environ.get("ATTESTRA_JOB_MAX_ATTEMPTS", "3"))
 JOB_STALE_HEARTBEAT_S = int(os.environ.get("ATTESTRA_JOB_STALE_HEARTBEAT_S", "120"))
+# Phase 6.2: scan orchestration. inline = polling durable worker; temporal = Temporal workflows.
+ORCHESTRATOR = os.environ.get("ATTESTRA_ORCHESTRATOR", "inline")
+TEMPORAL_ADDRESS = os.environ.get("ATTESTRA_TEMPORAL_ADDRESS", "localhost:7233")
+TEMPORAL_NAMESPACE = os.environ.get("ATTESTRA_TEMPORAL_NAMESPACE", "default")
+TEMPORAL_TASK_QUEUE = os.environ.get("ATTESTRA_TEMPORAL_TASK_QUEUE", "attestra-scans")
 
 API_KEY_PEPPER = os.environ.get("ATTESTRA_API_KEY_PEPPER", "attestra-dev-pepper-change-me")
 SESSION_SECRET = os.environ.get("ATTESTRA_SESSION_SECRET", "attestra-dev-session-change-me")
@@ -25,6 +34,16 @@ OIDC_ENABLED = os.environ.get("ATTESTRA_OIDC_ENABLED", "").lower() in ("1", "tru
 OIDC_ISSUER = os.environ.get("ATTESTRA_OIDC_ISSUER", "")
 OIDC_CLIENT_ID = os.environ.get("ATTESTRA_OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET = os.environ.get("ATTESTRA_OIDC_CLIENT_SECRET", "")
+
+# Step 6.4: bearer JWT validation (Keycloak access tokens). Local API keys/sessions stay the default.
+OIDC_AUDIENCE = os.environ.get("ATTESTRA_OIDC_AUDIENCE", "")  # empty -> OIDC_CLIENT_ID
+OIDC_JWKS_URL = os.environ.get("ATTESTRA_OIDC_JWKS_URL", "")  # empty -> <issuer>/protocol/openid-connect/certs
+OIDC_ALGORITHMS = os.environ.get("ATTESTRA_OIDC_ALGORITHMS", "RS256,ES256")
+OIDC_USERNAME_CLAIM = os.environ.get("ATTESTRA_OIDC_USERNAME_CLAIM", "preferred_username")
+OIDC_TENANT_CLAIM = os.environ.get("ATTESTRA_OIDC_TENANT_CLAIM", "attestra_tenant_id")
+OIDC_AUTO_PROVISION = os.environ.get("ATTESTRA_OIDC_AUTO_PROVISION", "true").lower() in ("1", "true", "yes")
+# Secrets backend (attestra/secret_store.py): env (default) or vault (Vault/OpenBao KV v2).
+SECRETS_BACKEND = os.environ.get("ATTESTRA_SECRETS_BACKEND", "env")
 
 STORAGE_BACKEND = os.environ.get("ATTESTRA_STORAGE", "local")
 S3_BUCKET = os.environ.get("ATTESTRA_S3_BUCKET", "")

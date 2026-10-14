@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled }}
+# API: ingress only on its HTTP port. API + worker: egress only to DNS and configured CIDRs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "attestra.fullname" . }}-app
+  labels: {{- include "attestra.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+      - { key: app.kubernetes.io/component, operator: In, values: [api, worker] }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - { protocol: TCP, port: {{ .Values.api.port }} }
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    {{- range .Values.networkPolicy.appEgressCIDRs }}
+    - to:
+        - ipBlock: { cidr: {{ . }} }
+    {{- end }}
+{{- end }}

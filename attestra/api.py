@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from attestra import __version__, audit, db, services
+from attestra import __version__, audit, config, db, observability, services
 from attestra.api_security import RateLimitMiddleware, SecurityHeadersMiddleware
 from attestra.auth.keys import Principal, authenticate_api_key
 from attestra.auth.roles import has_permission
@@ -37,20 +37,29 @@ from attestra.reports import (
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init(use_migrations=True)
+    observability.instrument_engine(db._engine)
     yield
 
 
 app = FastAPI(title="Attestra", version=__version__, description="From findings to signed attestation.", lifespan=lifespan)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitMiddleware)
+if observability.METRICS_ENABLED:
+    app.add_middleware(observability.MetricsMiddleware)
+observability.configure_json_logging()
+observability.setup_otel(app)
 
 
 def get_principal(request: Request) -> Principal:
-    """Resolve the caller from Bearer API key or session cookie."""
+    """Resolve the caller from Bearer API key, OIDC access token (if enabled) or session cookie."""
     auth = request.headers.get("authorization") or ""
     with db.session() as s:
         if auth.lower().startswith("bearer "):
             principal = authenticate_api_key(s, auth[7:].strip())
+            if principal is None and config.OIDC_ENABLED:
+                from attestra.auth.oidc import authenticate_bearer_jwt  # Step 6.4
+
+                principal = authenticate_bearer_jwt(s, auth[7:].strip())
             if principal:
                 return principal
         data = read_session(request.cookies.get(COOKIE_NAME))
@@ -203,6 +212,14 @@ def _report_dict(r) -> dict:
 
 
 # ---------------------------------------------------------------- API
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(request: Request):
+    """Prometheus scrape endpoint (Phase 6.6). Optional token via ATTESTRA_METRICS_TOKEN."""
+    if not observability.METRICS_ENABLED:
+        raise HTTPException(404, "metrics disabled")
+    return observability.metrics_response(request)
 
 
 @app.get("/api/health")
@@ -790,6 +807,95 @@ def resume(eid: int, principal: Principal = Depends(require("engagement.resume")
     def fn(s):
         services.get_engagement(s, eid, principal)
         return {"id": eid, "status": services.resume_engagement(s, eid, actor=principal.actor).status}
+
+    return _run(fn)
+
+
+# ---------------------------------------------------------------- Step 6.7: schedules + CI gate
+
+
+class ScheduleIn(BaseModel):
+    asset_id: int
+    tool: str
+    cadence: str = Field("quarterly", description="quarterly | monthly")
+    next_due: date
+
+
+class ScheduleUpdateIn(BaseModel):
+    cadence: str | None = None
+    next_due: date | None = None
+
+
+def _schedule_dict(r) -> dict:
+    return {
+        "id": r.id,
+        "engagement_id": r.engagement_id,
+        "asset_id": r.asset_id,
+        "tool": r.tool,
+        "cadence": r.cadence,
+        "next_due": r.next_due,
+        "last_enqueued_at": r.last_enqueued_at,
+        "quarter_clean": bool(r.quarter_clean),
+    }
+
+
+@app.get("/api/engagements/{eid}/schedules")
+def list_schedules(eid: int, principal: Principal = Depends(require("scan.read"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return [_schedule_dict(r) for r in services.list_scan_schedules(s, eid)]
+
+    return _run(fn)
+
+
+@app.post("/api/engagements/{eid}/schedules", status_code=201)
+def add_schedule(eid: int, body: ScheduleIn, principal: Principal = Depends(require("scan.start"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return _schedule_dict(services.add_scan_schedule(s, eid, **body.model_dump(), actor=principal.actor))
+
+    return _run(fn)
+
+
+@app.patch("/api/engagements/{eid}/schedules/{sid}")
+def update_schedule(eid: int, sid: int, body: ScheduleUpdateIn, principal: Principal = Depends(require("scan.start"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return _schedule_dict(services.update_scan_schedule(s, eid, sid, **body.model_dump(), actor=principal.actor))
+
+    return _run(fn)
+
+
+@app.delete("/api/engagements/{eid}/schedules/{sid}", status_code=204)
+def delete_schedule(eid: int, sid: int, principal: Principal = Depends(require("scan.start"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        services.remove_scan_schedule(s, eid, sid, actor=principal.actor)
+
+    _run(fn)
+
+
+@app.post("/api/engagements/{eid}/schedules/run-due")
+def run_due_schedules(eid: int, principal: Principal = Depends(require("scan.start"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        runs = services.enqueue_due_schedules(s, engagement_id=eid, actor=principal.actor)
+        return {"enqueued": [_scan_dict(r) for r in runs]}
+
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/gate")
+def ci_gate(
+    eid: int,
+    fail_on: str = Query("high", description="critical | high | medium | low | info"),
+    tool: str | None = Query(None, description="only findings reported by this importer"),
+    max_findings: int = Query(0, ge=0),
+    principal: Principal = Depends(require("finding.read")),
+):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return services.ci_gate(s, eid, fail_on=fail_on, tool=tool, max_findings=max_findings)
 
     return _run(fn)
 
