@@ -15,7 +15,7 @@ named assessor. It supports, and does not replace, the assessor's or auditor's o
 </div>
 
 <table>
-  <tr><th style="width:90px">Ref</th><th>Requirement</th><th style="width:110px">Status</th><th>Basis</th><th style="width:110px">Findings</th></tr>
+  <tr><th style="width:90px">Ref</th><th>Requirement</th><th style="width:110px">Status</th><th>Basis</th><th style="width:150px">Mapping</th><th style="width:110px">Findings</th></tr>
   {% for r in fw.results %}
   <tr>
     <td><b>{{ r.ref }}</b></td>
@@ -23,6 +23,7 @@ named assessor. It supports, and does not replace, the assessor's or auditor's o
     <td><span class="st st-{{ r.status }}">{{ r.status|replace("_", " ") }}</span><br>
         <span class="meta">{{ "confirmed by " ~ r.assessor if r.confirmed else "proposed" }}</span></td>
     <td>{{ r.rationale if r.confirmed else r.reason }}</td>
+    <td>{% if r.mapping_strength %}<b>{{ r.mapping_strength }}</b><br><span class="meta">{{ r.mapping_rationale }}</span>{% else %}<span class="meta">process control</span>{% endif %}</td>
     <td>{% for fid in r.finding_ids %}F-{{ fid }}{{ ", " if not loop.last }}{% else %}-{% endfor %}</td>
   </tr>
   {% endfor %}

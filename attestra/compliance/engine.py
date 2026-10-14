@@ -106,6 +106,36 @@ def mapping_for_cwe(cwe: int, lib: Library | None = None) -> CweMapping | None:
     return lib.cwe_map.get(cwe)
 
 
+STRENGTH_RANK = {"full": 2, "partial": 1}
+
+
+def mappings_for_objective(findings: list[Finding], objective: str, lib: Library | None = None) -> list[dict]:
+    """C7: the CWE mappings (strength + rationale from cwe_map.yaml) that link these
+    findings to one objective. One entry per CWE, sorted by CWE id."""
+    lib = lib or load_library()
+    seen: dict[int, dict] = {}
+    for f in findings:
+        m = lib.cwe_map.get(f.cwe) if f.cwe else None
+        if m and objective in m.objectives and f.cwe not in seen:
+            seen[f.cwe] = {"cwe": f.cwe, "objective": objective, "strength": m.strength, "rationale": m.rationale}
+    return [seen[k] for k in sorted(seen)]
+
+
+def _apply_mappings(r: ControlResult, new: list[dict]) -> None:
+    known = {(m["cwe"], m["objective"]) for m in r.mappings}
+    r.mappings.extend(m for m in new if (m["cwe"], m["objective"]) not in known)
+    if not r.mappings:
+        return
+    # The weakest mapping sets the control's strength: one partial link is a partial claim.
+    r.mapping_strength = min((m["strength"] for m in r.mappings), key=lambda s: STRENGTH_RANK.get(s, 0))
+    rationales: list[str] = []
+    for m in r.mappings:
+        line = f"CWE-{m['cwe']} ({m['strength']}): {m['rationale']}"
+        if line not in rationales:
+            rationales.append(line)
+    r.mapping_rationale = " ".join(rationales)
+
+
 def in_framework_scope(finding: Finding, framework: str) -> bool:
     """PCI DSS applies to the cardholder data environment. Findings on assets marked
     out of CDE are excluded; findings with no matched asset stay in (conservative)."""
@@ -128,6 +158,7 @@ class ControlResult:
     rationale: str = ""
     mapping_strength: str = ""
     mapping_rationale: str = ""
+    mappings: list[dict] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -261,9 +292,11 @@ def evaluate(
             open_f = open_by_objective.get(key, [])
             status, reason = _finding_status(open_f)
             ids = [f.id for f in open_f]
+            maps = mappings_for_objective(open_f, key, lib)
         else:
             status, reason = _process_status(obj["rule"], eng, findings, import_count)
             ids = []
+            maps = []
         for ref in refs:
             cur = results.get(ref)
             if cur is None:
@@ -276,12 +309,14 @@ def evaluate(
                     reason=f"[{obj['name']}] {reason}",
                     finding_ids=ids,
                 )
+                _apply_mappings(results[ref], maps)
             else:
                 cur.objectives.append(key)
                 cur.finding_ids = sorted(set(cur.finding_ids) | set(ids))
                 cur.reason += f" [{obj['name']}] {reason}"
                 if order[status] > order[cur.proposed]:
                     cur.proposed = status
+                _apply_mappings(cur, maps)
 
     for a in assessments:
         if a.framework == framework and a.control_ref in results:

@@ -1,0 +1,17 @@
+{
+  "catalog": {
+    "uuid": "00000000-0000-4000-8000-000000000001",
+    "metadata": {"title": "Sample Security Catalog", "version": "1.0", "oscal-version": "1.1.2", "last-modified": "2026-10-01T00:00:00Z"},
+    "groups": [
+      {"id": "ra", "title": "Risk Assessment", "controls": [
+        {"id": "ra-5", "title": "Vulnerability Monitoring and Scanning", "props": [{"name": "label", "value": "RA-5"}],
+         "controls": [{"id": "ra-5.2", "title": "Update Vulnerabilities to Be Scanned", "props": [{"name": "label", "value": "RA-5(2)"}]}]},
+        {"id": "ra-3", "title": "Risk Assessment", "props": [{"name": "label", "value": "RA-3"}, {"name": "attestra-objective", "value": "risk_assessment_process"}]}
+      ]},
+      {"id": "sc", "title": "System and Communications Protection", "controls": [
+        {"id": "sc-8", "title": "Transmission Confidentiality and Integrity", "props": [{"name": "label", "value": "SC-8"}]},
+        {"id": "sc-99", "title": "Unmapped example control", "props": [{"name": "label", "value": "SC-99"}]}
+      ]}
+    ]
+  }
+}

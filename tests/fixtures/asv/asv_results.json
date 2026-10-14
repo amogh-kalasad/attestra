@@ -1,0 +1,9 @@
+{
+  "vendor": "Example ASV Ltd",
+  "scan_date": "2026-09-15",
+  "components": [
+    {"host": "203.0.113.10", "port": 443, "title": "TLS 1.0 enabled", "severity": "medium", "cvss": 5.3, "cve": "", "status": ""},
+    {"host": "203.0.113.10", "port": 80, "title": "HTTP server banner disclosed", "severity": "low", "cvss": 2.6},
+    {"host": "203.0.113.11", "port": 22, "title": "SSH weak MAC algorithms", "severity": "low", "cvss": 2.6, "status": "pass"}
+  ]
+}

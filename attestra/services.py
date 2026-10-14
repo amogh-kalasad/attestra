@@ -758,15 +758,26 @@ def add_segmentation_test(
     tested_on: date,
     actor: str,
     evidence_id: int | None = None,
+    source_zone: str = "",
+    target_zone: str = "",
+    tester: str = "",
+    notes: str = "",
 ) -> SegmentationTest:
     get_engagement(s, engagement_id)
+    result = result.strip().lower()
+    if result not in ("pass", "fail", "inconclusive"):
+        raise ServiceError("result must be pass, fail or inconclusive")
     row = SegmentationTest(
         engagement_id=engagement_id,
         boundary=boundary.strip(),
         method=method.strip(),
-        result=result.strip().lower(),
+        result=result,
         tested_on=tested_on,
         evidence_id=evidence_id,
+        source_zone=source_zone.strip(),
+        target_zone=target_zone.strip(),
+        tester=tester.strip() or actor,
+        notes=notes.strip(),
     )
     s.add(row)
     s.flush()
@@ -847,8 +858,14 @@ def add_nonconformity(
     actor: str,
     finding_id: int | None = None,
     due: date | None = None,
+    description: str = "",
+    grade: str = "minor",
 ) -> Nonconformity:
     get_engagement(s, engagement_id)
+    if grade not in ("major", "minor", "observation"):
+        raise ServiceError("grade must be major, minor or observation")
+    if not control_ref.strip():
+        raise ServiceError("control_ref is required")
     row = Nonconformity(
         engagement_id=engagement_id,
         control_ref=control_ref.strip(),
@@ -856,6 +873,9 @@ def add_nonconformity(
         corrective_action=corrective_action.strip(),
         owner=owner.strip(),
         due=due,
+        description=description.strip(),
+        grade=grade,
+        status="open",
     )
     s.add(row)
     s.flush()
@@ -1125,3 +1145,287 @@ def ci_gate(
             for f in blocking[:50]
         ],
     }
+
+
+# ---------------------------------------------------------------- C9: PCI calendar, ASV import, segmentation
+
+
+def _quarter_of(d: date) -> tuple[int, int]:
+    return d.year, (d.month - 1) // 3 + 1
+
+
+def _quarter_bounds(year: int, q: int) -> tuple[date, date]:
+    start = date(year, 3 * (q - 1) + 1, 1)
+    end = date(year + (q == 4), 1 if q == 4 else 3 * q + 1, 1) - timedelta(days=1)
+    return start, end
+
+
+def _prev_quarter(year: int, q: int) -> tuple[int, int]:
+    return (year - 1, 4) if q == 1 else (year, q - 1)
+
+
+def pci_scan_calendar(
+    s: Session, engagement_id: int, *, today: date | None = None, quarters: int = 4
+) -> dict:
+    """PCI 11.3.1/11.3.2 quarterly calendar: one row per quarter, newest first.
+
+    Status per quarter: ``done`` (passing ASV scan and, if scheduled, a clean
+    internal scan), ``due`` (current quarter, not yet done), ``overdue`` (past
+    quarter, not done). The engagement status is the worst of the rows.
+    """
+    today = today or date.today()
+    eng = get_engagement(s, engagement_id)
+    scans = list(s.scalars(select(AsvScan).where(AsvScan.engagement_id == engagement_id)))
+    schedules = list_scan_schedules(s, engagement_id)
+    y, q = _quarter_of(today)
+    rows = []
+    for _ in range(max(1, quarters)):
+        start, end = _quarter_bounds(y, q)
+        in_q = [a for a in scans if start <= a.scan_date <= end]
+        passing = [a for a in in_q if a.passing]
+        current = start <= today <= end
+        if passing:
+            status = "done"
+        elif current:
+            status = "due"
+        else:
+            status = "overdue"
+        rows.append({
+            "quarter": f"{y}-Q{q}",
+            "start": start,
+            "due": end,
+            "external_scans": len(in_q),
+            "external_passing": len(passing),
+            "status": status,
+            "days_left": (end - today).days if current else None,
+        })
+        y, q = _prev_quarter(y, q)
+    internal_due = [sc for sc in schedules if sc.next_due < today]
+    if any(r["status"] == "overdue" for r in rows) or internal_due:
+        overall = "overdue"
+    elif rows[0]["status"] == "due":
+        overall = "due"
+    else:
+        overall = "done"
+    return {
+        "engagement_id": eng.id,
+        "engagement": eng.name,
+        "status": overall,
+        "quarters": rows,
+        "internal_overdue": [{"id": sc.id, "tool": sc.tool, "next_due": sc.next_due} for sc in internal_due],
+    }
+
+
+def pci_calendar_overview(s: Session, principal=None, *, today: date | None = None) -> list[dict]:
+    """Calendar status for every PCI engagement the principal can see."""
+    out = []
+    for e in s.scalars(scoped(s, Engagement, principal).order_by(Engagement.id)):
+        if "pci_dss_4" in (e.frameworks or []):
+            out.append(pci_scan_calendar(s, e.id, today=today))
+    return out
+
+
+def import_asv_results(
+    s: Session, engagement_id: int, *, filename: str, data: bytes, actor: str
+) -> AsvScan:
+    """Import scan-vendor results in the generic CSV/JSON layout (importers/asv.py)."""
+    from attestra.importers import asv as asv_importer
+    from attestra.models import AsvScanItem
+
+    eng = get_engagement(s, engagement_id)
+    try:
+        result = asv_importer.parse(data)
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ServiceError(f"could not parse ASV results: {exc}") from exc
+    sha = _sha256(data)
+    path = _store(eng.tenant_id, "evidence", sha, filename, data)
+    row = AsvScan(
+        engagement_id=engagement_id,
+        vendor=result.vendor,
+        scan_date=result.scan_date,
+        passing=result.passing,
+        attestation_path=str(path),
+        sha256=sha,
+        source="import",
+        filename=_safe_name(filename),
+        item_count=len(result.items),
+        failing_count=result.failing_count,
+    )
+    s.add(row)
+    s.flush()
+    for it in result.items:
+        s.add(AsvScanItem(
+            asv_scan_id=row.id, host=it.host, port=it.port, title=it.title, severity=it.severity,
+            cvss_score=it.cvss_score, cve=it.cve, passing=it.passing, note=it.note,
+        ))
+    s.flush()
+    audit.record(
+        s, actor, "asv.import", "asv_scan", row.id,
+        vendor=row.vendor, passing=row.passing, items=row.item_count, failing=row.failing_count, sha256=sha,
+    )
+    return row
+
+
+def list_asv_scans(s: Session, engagement_id: int) -> list[AsvScan]:
+    get_engagement(s, engagement_id)
+    return list(s.scalars(
+        select(AsvScan).where(AsvScan.engagement_id == engagement_id).order_by(AsvScan.scan_date.desc(), AsvScan.id.desc())
+    ))
+
+
+def list_segmentation_tests(s: Session, engagement_id: int) -> list[SegmentationTest]:
+    get_engagement(s, engagement_id)
+    return list(s.scalars(
+        select(SegmentationTest).where(SegmentationTest.engagement_id == engagement_id)
+        .order_by(SegmentationTest.tested_on.desc(), SegmentationTest.id.desc())
+    ))
+
+
+# ---------------------------------------------------------------- C10: ISO SoA, NC/CA, 9.2 sampling
+
+SOA_IMPLEMENTATION = ("implemented", "partial", "planned", "not_implemented")
+NC_STATUSES = ("open", "in_progress", "closed")
+NC_GRADES = ("major", "minor", "observation")
+ISO_FRAMEWORK = "iso_27001_2022"
+
+
+def list_soa(s: Session, engagement_id: int):
+    from attestra.models import SoaEntry
+
+    get_engagement(s, engagement_id)
+    return list(s.scalars(select(SoaEntry).where(SoaEntry.engagement_id == engagement_id).order_by(SoaEntry.id)))
+
+
+def generate_soa(s: Session, engagement_id: int, *, actor: str) -> int:
+    """Seed SoA rows from the ISO library and current control results. Keeps existing rows."""
+    from attestra.models import SoaEntry
+
+    existing = {e.control_ref for e in list_soa(s, engagement_id)}
+    added = 0
+    status_map = {"met": "implemented", "no_exceptions": "implemented", "partial": "partial", "not_met": "not_implemented"}
+    for r in compliance(s, engagement_id, ISO_FRAMEWORK):
+        if r.ref in existing:
+            continue
+        st = r.confirmed or r.proposed
+        s.add(SoaEntry(
+            engagement_id=engagement_id, control_ref=r.ref, title=r.title[:300],
+            applicable=st != "not_applicable",
+            justification="" if st != "not_applicable" else (r.rationale or "Not applicable"),
+            implementation=status_map.get(st, "planned"), updated_by=actor,
+        ))
+        added += 1
+    s.flush()
+    audit.record(s, actor, "soa.generate", "engagement", engagement_id, added=added)
+    return added
+
+
+def update_soa_entry(
+    s: Session, engagement_id: int, entry_id: int, *, applicable: bool, justification: str,
+    implementation: str, actor: str,
+):
+    from attestra.models import SoaEntry
+
+    get_engagement(s, engagement_id)
+    row = s.get(SoaEntry, entry_id)
+    if not row or row.engagement_id != engagement_id:
+        raise LookupError(f"SoA entry {entry_id} not found on engagement")
+    if implementation not in SOA_IMPLEMENTATION:
+        raise ServiceError(f"implementation must be one of {', '.join(SOA_IMPLEMENTATION)}")
+    if not applicable and not justification.strip():
+        raise ServiceError("an excluded control needs a justification (ISO 27001 6.1.3 d)")
+    row.applicable = applicable
+    row.justification = justification.strip()
+    row.implementation = implementation if applicable else "not_implemented"
+    row.updated_by = actor
+    row.updated_at = utcnow()
+    audit.record(s, actor, "soa.update", "soa_entry", row.id, control_ref=row.control_ref, applicable=applicable)
+    return row
+
+
+def list_nonconformities(s: Session, engagement_id: int) -> list[Nonconformity]:
+    get_engagement(s, engagement_id)
+    return list(s.scalars(select(Nonconformity).where(Nonconformity.engagement_id == engagement_id).order_by(Nonconformity.id)))
+
+
+def update_nonconformity(
+    s: Session, engagement_id: int, nc_id: int, *, actor: str, status: str | None = None,
+    root_cause: str | None = None, corrective_action: str | None = None, verified_by: str = "",
+) -> Nonconformity:
+    """Move an NC through open -> in_progress -> closed. Closing needs a corrective action and a verifier."""
+    get_engagement(s, engagement_id)
+    row = s.get(Nonconformity, nc_id)
+    if not row or row.engagement_id != engagement_id:
+        raise LookupError(f"nonconformity {nc_id} not found on engagement")
+    if row.status == "closed":
+        raise ServiceError("nonconformity is already closed")
+    if root_cause is not None:
+        row.root_cause = root_cause.strip()
+    if corrective_action is not None and corrective_action.strip():
+        row.corrective_action = corrective_action.strip()
+    if status:
+        if status not in NC_STATUSES:
+            raise ServiceError(f"status must be one of {', '.join(NC_STATUSES)}")
+        if status == "closed":
+            if not row.corrective_action:
+                raise ServiceError("record the corrective action before closing (ISO 27001 10.2)")
+            if not verified_by.strip():
+                raise ServiceError("closing needs the name of who verified the corrective action")
+            row.verified_by = verified_by.strip()
+            row.closed_at = utcnow()
+        row.status = status
+    audit.record(s, actor, "nonconformity.update", "nonconformity", row.id, status=row.status)
+    return row
+
+
+def default_sample_size(population: int) -> int:
+    """Simple audit-sampling rule: all if <= 5, else max(5, ceil(sqrt(n)))."""
+    import math
+
+    if population <= 5:
+        return population
+    return min(population, max(5, math.ceil(math.sqrt(population))))
+
+
+def draw_audit_sample(
+    s: Session, engagement_id: int, *, actor: str, population: str = "soa_applicable",
+    sample_size: int | None = None, seed: str = "",
+):
+    """ISO 27001 9.2 internal audit sample, reproducible from the stored seed."""
+    import random
+    import secrets
+
+    from attestra.models import AuditSample
+
+    eng = get_engagement(s, engagement_id)
+    if population == "soa_applicable":
+        items = [e.control_ref for e in list_soa(s, engagement_id) if e.applicable]
+        if not items:
+            items = [r.ref for r in compliance(s, engagement_id, ISO_FRAMEWORK)]
+    elif population == "findings":
+        items = [f"finding:{f.id}" for f in s.scalars(select(Finding).where(Finding.engagement_id == eng.id).order_by(Finding.id))]
+    elif population == "nonconformities":
+        items = [f"nc:{n.id}" for n in list_nonconformities(s, engagement_id)]
+    else:
+        raise ServiceError("population must be soa_applicable, findings or nonconformities")
+    if not items:
+        raise ServiceError("the population is empty; nothing to sample")
+    n = default_sample_size(len(items)) if not sample_size else int(sample_size)
+    if n < 1 or n > len(items):
+        raise ServiceError(f"sample size must be between 1 and {len(items)}")
+    seed = seed.strip() or secrets.token_hex(8)
+    picked = sorted(random.Random(f"{engagement_id}:{population}:{seed}").sample(sorted(items), n))
+    row = AuditSample(
+        engagement_id=engagement_id, clause="9.2", population=population, population_size=len(items),
+        sample_size=n, seed=seed, items=picked, created_by=actor,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "audit_sample.draw", "audit_sample", row.id, population=population, size=n, seed=seed)
+    return row
+
+
+def list_audit_samples(s: Session, engagement_id: int):
+    from attestra.models import AuditSample
+
+    get_engagement(s, engagement_id)
+    return list(s.scalars(select(AuditSample).where(AuditSample.engagement_id == engagement_id).order_by(AuditSample.id.desc())))

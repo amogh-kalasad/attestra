@@ -377,8 +377,31 @@ class AsvScan(Base):
     passing: Mapped[bool] = mapped_column(Boolean, default=False)
     attestation_path: Mapped[str] = mapped_column(String(500), default="")
     sha256: Mapped[str] = mapped_column(String(64), default="")
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | import
+    filename: Mapped[str] = mapped_column(String(300), default="")
+    item_count: Mapped[int] = mapped_column(Integer, default=0)
+    failing_count: Mapped[int] = mapped_column(Integer, default=0)
 
     engagement: Mapped[Engagement] = relationship(back_populates="asv_scans")
+    items: Mapped[list[AsvScanItem]] = relationship(back_populates="asv_scan")
+
+
+class AsvScanItem(Base):
+    """One component result from an imported ASV scan (C9)."""
+
+    __tablename__ = "asv_scan_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asv_scan_id: Mapped[int] = mapped_column(ForeignKey("asv_scans.id"))
+    host: Mapped[str] = mapped_column(String(300), default="")
+    port: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    severity: Mapped[str] = mapped_column(String(10), default="info")
+    cvss_score: Mapped[float | None] = mapped_column(Float)
+    cve: Mapped[str] = mapped_column(String(50), default="")
+    passing: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+    asv_scan: Mapped[AsvScan] = relationship(back_populates="items")
 
 
 class SegmentationTest(Base):
@@ -392,6 +415,10 @@ class SegmentationTest(Base):
     result: Mapped[str] = mapped_column(String(50), default="")  # pass | fail | inconclusive
     tested_on: Mapped[date] = mapped_column(Date)
     evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"))
+    source_zone: Mapped[str] = mapped_column(String(200), default="")
+    target_zone: Mapped[str] = mapped_column(String(200), default="")
+    tester: Mapped[str] = mapped_column(String(200), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
 
     engagement: Mapped[Engagement] = relationship(back_populates="segmentation_tests")
 
@@ -426,8 +453,46 @@ class Nonconformity(Base):
     due: Mapped[date | None] = mapped_column(Date)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retest_id: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text, default="")
+    grade: Mapped[str] = mapped_column(String(10), default="minor")  # major | minor | observation
+    root_cause: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | in_progress | closed
+    verified_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     engagement: Mapped[Engagement] = relationship(back_populates="nonconformities")
+
+
+class SoaEntry(Base):
+    """ISO 27001 Statement of Applicability row (6.1.3 d) (C10)."""
+
+    __tablename__ = "soa_entries"
+    __table_args__ = (UniqueConstraint("engagement_id", "control_ref"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    control_ref: Mapped[str] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(String(300), default="")
+    applicable: Mapped[bool] = mapped_column(Boolean, default=True)
+    justification: Mapped[str] = mapped_column(Text, default="")
+    implementation: Mapped[str] = mapped_column(String(20), default="planned")
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuditSample(Base):
+    """ISO 27001 clause 9.2 internal audit sample, reproducible from its seed (C10)."""
+
+    __tablename__ = "audit_samples"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    clause: Mapped[str] = mapped_column(String(20), default="9.2")
+    population: Mapped[str] = mapped_column(String(50), default="soa_applicable")
+    population_size: Mapped[int] = mapped_column(Integer, default=0)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    seed: Mapped[str] = mapped_column(String(64), default="")
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Retest(Base):

@@ -60,6 +60,9 @@ def build_framework_pack(s: Session, engagement_id: int, framework: str) -> Path
             fw.writerow([f.id, f.severity, f.status, f.title, f.cwe or "", f.location])
         add("findings.csv", findings_csv.getvalue().encode("utf-8"))
 
+        for name, data in _framework_extras(s, engagement_id, framework).items():
+            add(name, data)
+
         meta = {
             "framework": framework,
             "engagement_id": eng.id,
@@ -79,4 +82,55 @@ def build_framework_pack(s: Session, engagement_id: int, framework: str) -> Path
     out = out_dir / f"eng{eng.id}-{framework}-pack.zip"
     out.write_bytes(buf.getvalue())
     out.chmod(0o444)
+    return out
+
+
+def _csv_bytes(header: list[str], rows) -> bytes:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    for r in rows:
+        w.writerow(r)
+    return buf.getvalue().encode("utf-8")
+
+
+def _framework_extras(s: Session, engagement_id: int, framework: str) -> dict[str, bytes]:
+    """Extra pack files: PCI calendar/ASV/segmentation (C9), ISO SoA/NC/9.2 samples (C10)."""
+    out: dict[str, bytes] = {}
+    if framework == "pci_dss_4":
+        cal = services.pci_scan_calendar(s, engagement_id)
+        out["pci/scan_calendar.csv"] = _csv_bytes(
+            ["quarter", "due", "external_scans", "external_passing", "status"],
+            [[q["quarter"], q["due"], q["external_scans"], q["external_passing"], q["status"]] for q in cal["quarters"]],
+        )
+        out["pci/asv_scans.csv"] = _csv_bytes(
+            ["id", "vendor", "scan_date", "passing", "source", "components", "failing", "sha256"],
+            [[a.id, a.vendor, a.scan_date, a.passing, a.source, a.item_count, a.failing_count, a.sha256]
+             for a in services.list_asv_scans(s, engagement_id)],
+        )
+        out["pci/segmentation_tests.csv"] = _csv_bytes(
+            ["id", "boundary", "source_zone", "target_zone", "method", "result", "tested_on", "tester", "notes"],
+            [[t.id, t.boundary, t.source_zone, t.target_zone, t.method, t.result, t.tested_on, t.tester, t.notes]
+             for t in services.list_segmentation_tests(s, engagement_id)],
+        )
+    elif framework == "iso_27001_2022":
+        out["iso/statement_of_applicability.csv"] = _csv_bytes(
+            ["control_ref", "title", "applicable", "implementation", "justification", "updated_by"],
+            [[r.control_ref, r.title, r.applicable, r.implementation, r.justification, r.updated_by]
+             for r in services.list_soa(s, engagement_id)],
+        )
+        out["iso/nonconformities.csv"] = _csv_bytes(
+            ["id", "control_ref", "grade", "status", "description", "root_cause", "corrective_action",
+             "owner", "due", "verified_by", "closed_at"],
+            [[n.id, n.control_ref, n.grade, n.status, n.description, n.root_cause, n.corrective_action,
+              n.owner, n.due or "", n.verified_by, n.closed_at or ""]
+             for n in services.list_nonconformities(s, engagement_id)],
+        )
+        out["iso/audit_samples_9_2.json"] = json.dumps(
+            [{"id": a.id, "clause": a.clause, "population": a.population, "population_size": a.population_size,
+              "sample_size": a.sample_size, "seed": a.seed, "items": a.items, "created_by": a.created_by,
+              "created_at": a.created_at.isoformat() if a.created_at else ""}
+             for a in services.list_audit_samples(s, engagement_id)],
+            indent=2,
+        ).encode("utf-8")
     return out

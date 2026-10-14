@@ -502,3 +502,167 @@ def ui_run_due(request: Request, eid: int):
     except (services.ServiceError, LookupError) as e:
         return _back(f"/engagements/{eid}", error=str(e), anchor="#schedules")
     return _back(f"/engagements/{eid}", msg=f"{len(runs)} due scan(s) enqueued.", anchor="#schedules")
+
+
+# ---------------------------------------------------------------- C9 / C10: PCI calendar and ISO pages
+
+
+def _staff_page(request: Request):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return None, redirect
+    if principal.role in READ_ONLY_ROLES:
+        return None, RedirectResponse("/portal", status_code=303)
+    return principal, None
+
+
+@router.get("/compliance/pci-calendar", response_class=HTMLResponse)
+def ui_pci_calendar(request: Request):
+    principal, redirect = _staff_page(request)
+    if redirect:
+        return redirect
+    with db.session() as s:
+        return _render(request, "pci_calendar.html", {"rows": services.pci_calendar_overview(s, principal)})
+
+
+@router.get("/engagements/{eid}/pci", response_class=HTMLResponse)
+def ui_pci_page(request: Request, eid: int):
+    principal, redirect = _staff_page(request)
+    if redirect:
+        return redirect
+    with db.session() as s:
+        try:
+            e = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "engagement not found")
+        return _render(request, "pci.html", {
+            "e": e,
+            "cal": services.pci_scan_calendar(s, eid),
+            "asv_scans": services.list_asv_scans(s, eid),
+            "segmentation_tests": services.list_segmentation_tests(s, eid),
+            "today": date.today(),
+        })
+
+
+@router.post("/engagements/{eid}/asv/import")
+async def ui_import_asv(request: Request, eid: int, file: UploadFile = File(...)):
+    data = await file.read()
+    return _do(
+        request, f"/engagements/{eid}/pci", "#asv", "ASV results imported.",
+        services.import_asv_results, eid, filename=file.filename or "asv.json", data=data,
+    )
+
+
+@router.post("/engagements/{eid}/pci/segmentation")
+def ui_pci_segmentation(
+    request: Request,
+    eid: int,
+    boundary: str = Form(...),
+    method: str = Form(""),
+    result: str = Form(...),
+    tested_on: date = Form(...),
+    source_zone: str = Form(""),
+    target_zone: str = Form(""),
+    tester: str = Form(""),
+    notes: str = Form(""),
+):
+    return _do(
+        request, f"/engagements/{eid}/pci", "#segmentation", "Segmentation test recorded.",
+        services.add_segmentation_test, eid, boundary=boundary, method=method, result=result, tested_on=tested_on,
+        source_zone=source_zone, target_zone=target_zone, tester=tester, notes=notes,
+    )
+
+
+@router.get("/engagements/{eid}/iso", response_class=HTMLResponse)
+def ui_iso_page(request: Request, eid: int):
+    principal, redirect = _staff_page(request)
+    if redirect:
+        return redirect
+    with db.session() as s:
+        try:
+            e = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "engagement not found")
+        return _render(request, "iso.html", {
+            "e": e,
+            "soa": services.list_soa(s, eid),
+            "ncs": services.list_nonconformities(s, eid),
+            "samples": services.list_audit_samples(s, eid),
+            "soa_impl": services.SOA_IMPLEMENTATION,
+            "nc_statuses": services.NC_STATUSES,
+            "nc_grades": services.NC_GRADES,
+        })
+
+
+@router.post("/engagements/{eid}/iso/soa/generate")
+def ui_soa_generate(request: Request, eid: int):
+    return _do(request, f"/engagements/{eid}/iso", "#soa", "SoA updated from the library.", services.generate_soa, eid)
+
+
+@router.post("/engagements/{eid}/iso/soa/{entry_id}")
+def ui_soa_update(
+    request: Request,
+    eid: int,
+    entry_id: int,
+    applicable: str = Form(""),
+    implementation: str = Form("planned"),
+    justification: str = Form(""),
+):
+    return _do(
+        request, f"/engagements/{eid}/iso", "#soa", "SoA entry saved.",
+        services.update_soa_entry, eid, entry_id, applicable=bool(applicable),
+        implementation=implementation, justification=justification,
+    )
+
+
+@router.post("/engagements/{eid}/iso/nc")
+def ui_nc_add(
+    request: Request,
+    eid: int,
+    control_ref: str = Form(...),
+    description: str = Form(...),
+    grade: str = Form("minor"),
+    corrective_action: str = Form(""),
+    owner: str = Form(""),
+    due: str = Form(""),
+):
+    try:
+        due_d = date.fromisoformat(due) if due else None
+    except ValueError:
+        return _back(f"/engagements/{eid}/iso", error="Due date must be YYYY-MM-DD.", anchor="#nc")
+    return _do(
+        request, f"/engagements/{eid}/iso", "#nc", "Nonconformity raised.",
+        services.add_nonconformity, eid, control_ref=control_ref, description=description, grade=grade,
+        corrective_action=corrective_action, owner=owner, due=due_d,
+    )
+
+
+@router.post("/engagements/{eid}/iso/nc/{nc_id}")
+def ui_nc_update(
+    request: Request,
+    eid: int,
+    nc_id: int,
+    status: str = Form(""),
+    root_cause: str = Form(""),
+    verified_by: str = Form(""),
+):
+    return _do(
+        request, f"/engagements/{eid}/iso", "#nc", "Nonconformity updated.",
+        services.update_nonconformity, eid, nc_id, status=status or None, root_cause=root_cause,
+        verified_by=verified_by,
+    )
+
+
+@router.post("/engagements/{eid}/iso/sample")
+def ui_iso_sample(
+    request: Request,
+    eid: int,
+    population: str = Form("soa_applicable"),
+    sample_size: str = Form(""),
+    seed: str = Form(""),
+):
+    size = int(sample_size) if sample_size.strip().isdigit() else None
+    return _do(
+        request, f"/engagements/{eid}/iso", "#sampling", "Audit sample drawn.",
+        services.draw_audit_sample, eid, population=population, sample_size=size, seed=seed,
+    )

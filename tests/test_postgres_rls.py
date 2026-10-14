@@ -71,7 +71,7 @@ def test_migration_is_noop_on_sqlite(tmp_path, monkeypatch):
 
     eng = create_engine(url)
     with eng.connect() as c:
-        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0008_tuning"
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0010_iso_soa"
     eng.dispose()
 
 
@@ -99,6 +99,10 @@ def test_cross_tenant_raw_sql_returns_zero_rows_under_rls(monkeypatch):
         db._engine = None
         db._SessionLocal = None
         db.init(app_url, use_migrations=True)  # table owner = non-superuser app role; FORCE applies
+        with db.session() as s:
+            have = set(s.execute(text("SELECT tablename FROM pg_policies WHERE policyname = :p"),
+                                 {"p": rls.POLICY_NAME}).scalars())
+        assert set(rls.POLICIES) <= have, sorted(set(rls.POLICIES) - have)
         with db.session() as s:
             s.execute(text("INSERT INTO tenants (id, name, industry, contact_name, contact_email, data_region, plan) "
                            "VALUES (1,'A','','','','default','standard'),(2,'B','','','','default','standard')"))

@@ -77,7 +77,7 @@ objectives:
     kind: finding
     evidence: ["authn_policy", "mfa_evidence"]
     controls:
-      pci_dss_4: ["8.3.1"]
+      pci_dss_4: ["8.3.1", "8.4.2"]
       iso_27001_2022: ["A.8.5"]
       soc2: ["CC6.1"]
 
@@ -87,14 +87,15 @@ objectives:
     evidence: ["rbac_matrix", "access_reviews"]
     controls:
       pci_dss_4: ["7.2.1"]
-      iso_27001_2022: ["A.8.3"]
-      soc2: ["CC6.1"]
+      iso_27001_2022: ["A.8.3", "A.5.15"]
+      soc2: ["CC6.1", "CC6.3"]
 
   data_protection:
     name: Prevent leakage of sensitive data
     kind: finding
     evidence: ["dlp_controls", "data_flow"]
     controls:
+      pci_dss_4: ["3.5.1"]
       iso_27001_2022: ["A.8.12"]
       soc2: ["CC6.7"]
 
@@ -112,9 +113,9 @@ objectives:
     kind: finding
     evidence: ["log_samples", "siem_alerts"]
     controls:
-      pci_dss_4: ["10.2.1"]
-      iso_27001_2022: ["A.8.15"]
-      soc2: ["CC7.2"]
+      pci_dss_4: ["10.2.1", "10.4.1"]
+      iso_27001_2022: ["A.8.15", "A.8.16"]
+      soc2: ["CC7.2", "CC7.3"]
 
   supply_chain:
     name: Manage third-party and open-source component risk
@@ -130,6 +131,7 @@ objectives:
     kind: finding
     evidence: ["network_diagram", "firewall_rules"]
     controls:
+      pci_dss_4: ["1.2.1", "1.3.1"]
       iso_27001_2022: ["A.8.22"]
       soc2: ["CC6.6"]
 
@@ -138,8 +140,8 @@ objectives:
     kind: finding
     evidence: ["change_tickets", "cab_records"]
     controls:
-      pci_dss_4: ["6.4.2"]
-      iso_27001_2022: ["A.8.9"]
+      pci_dss_4: ["6.4.2", "6.5.1"]
+      iso_27001_2022: ["A.8.9", "A.8.32"]
       soc2: ["CC8.1"]
 
   internal_scanning:
@@ -236,7 +238,10 @@ objectives:
 
 control_titles:
   pci_dss_4:
+    "1.2.1": Network security control configuration standards are defined and maintained
+    "1.3.1": Inbound traffic to the cardholder data environment is restricted to what is needed
     "2.2.1": Configuration standards are developed, implemented and maintained
+    "3.5.1": Stored PAN is rendered unreadable wherever it is kept
     "4.2.1": Strong cryptography protects PAN during transmission over open, public networks
     "6.2.4": Software engineering techniques prevent or mitigate common software attacks
     "6.3.1": Security vulnerabilities are identified and managed
@@ -244,10 +249,13 @@ control_titles:
     "6.3.3": Components are protected from known vulnerabilities by installing patches
     "6.4.1": Public-facing web applications are protected against attacks
     "6.4.2": An automated technical solution detects and prevents web-based attacks
+    "6.5.1": Changes to system components follow documented change procedures
     "7.2.1": An access control model is defined
     "8.3.1": User access is authenticated
+    "8.4.2": Multi-factor authentication is used for all access into the cardholder data environment
     "8.6.2": Passwords for application and system accounts are not hard coded in scripts, files or source code
     "10.2.1": Audit logs are enabled and active
+    "10.4.1": Audit logs are reviewed at least daily to spot anomalies or suspicious activity
     "11.3.1": Internal vulnerability scans are performed
     "11.3.1.1": All other applicable vulnerabilities are managed
     "11.3.1.2": Internal vulnerability scans address all high-risk and critical vulnerabilities
@@ -260,6 +268,7 @@ control_titles:
     "11.4.6": Segmentation controls are verified at least every six months and after changes
     "12.3.1": A targeted risk analysis is documented and performed
   iso_27001_2022:
+    "A.5.15": Access control
     "A.5.17": Authentication information
     "A.5.21": Managing information security in the ICT supply chain
     "A.8.3": Information access restriction
@@ -268,11 +277,13 @@ control_titles:
     "A.8.9": Configuration management
     "A.8.12": Data leakage prevention
     "A.8.15": Logging
+    "A.8.16": Monitoring activities
     "A.8.22": Segregation of networks
     "A.8.24": Use of cryptography
     "A.8.26": Application security requirements
     "A.8.28": Secure coding
     "A.8.29": Security testing in development and acceptance
+    "A.8.32": Change management
     "A.8.34": Protection of information systems during audit testing
     "Clause 6.1.2": Information security risk assessment
     "Clause 8.2": Information security risk assessment (operation)
@@ -282,11 +293,13 @@ control_titles:
     "CC4.1": The entity selects, develops and performs ongoing and/or separate evaluations
     "CC4.2": The entity evaluates and communicates internal control deficiencies
     "CC6.1": Logical access security software, infrastructure and architectures
+    "CC6.3": Authorizes, modifies or removes access based on roles and least privilege
     "CC6.6": Logical access security measures against threats from outside system boundaries
     "CC6.7": Restricts the transmission, movement and removal of information
     "CC6.8": Prevents or detects introduction of unauthorized or malicious software
     "CC7.1": Detection and monitoring procedures identify configuration changes and vulnerabilities
     "CC7.2": Monitors system components for anomalies
+    "CC7.3": Evaluates security events to determine whether they are incidents
     "CC7.4": Responds to identified security incidents
     "CC8.1": Authorizes, designs, develops, tests and implements changes
     "CC9.2": Assesses and manages risks associated with vendors and business partners

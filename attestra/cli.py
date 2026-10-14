@@ -204,8 +204,8 @@ def cmd_compliance(args) -> None:
     with db.session() as s:
         for r in services.compliance(s, args.engagement, args.framework):
             mark = "*" if r.confirmed else " "
-            print(f"{r.ref:<12} {r.status:<13}{mark} {r.title[:70]}")
-        print("\n* = confirmed by an assessor; others are proposed.")
+            print(f"{r.ref:<12} {r.status:<13}{mark} {(r.mapping_strength or '-'):<8} {r.title[:60]}")
+        print("\n* = confirmed by an assessor; others are proposed. Third column: CWE mapping strength.")
 
 
 def cmd_report(args) -> None:
@@ -269,8 +269,43 @@ def cmd_expire_risk(args) -> None:
     print(f"expired {n} risk acceptance(s)")
 
 
+def cmd_library_import(args) -> None:
+    from attestra.compliance.libraries import import_oscal_catalog, import_scf_csv, install_pack, write_pack
+
+    data = Path(args.file).read_bytes()
+    omap = Path(args.map) if args.map else None
+    if args.format == "oscal":
+        lib = import_oscal_catalog(data, framework=args.framework, name=args.name or None, objective_map=omap)
+    else:
+        lib = import_scf_csv(data, framework=args.framework or "scf", name=args.name or None, objective_map=omap)
+    out = {**lib.summary()}
+    if args.install:
+        out["installed"] = str(install_pack(lib))
+    elif args.output:
+        out["written"] = str(write_pack(lib, Path(args.output)))
+    _print(out)
+
+
 def cmd_compliance_export(args) -> None:
     text = services.export_compliance_library_csv()
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+        print(f"wrote {args.output}")
+    else:
+        sys.stdout.write(text)
+
+
+def cmd_soc2_sample(args) -> None:
+    from attestra.reports import soc2_sampling
+
+    with db.session() as s:
+        result = soc2_sampling.build_sample(
+            s, args.engagement, args.population,
+            period_start=date.fromisoformat(args.period_start) if args.period_start else None,
+            period_end=date.fromisoformat(args.period_end) if args.period_end else None,
+            seed=args.seed, size=args.size,
+        )
+    text = soc2_sampling.to_csv(result) if args.format == "csv" else json.dumps(result, indent=2, default=str) + "\n"
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
         print(f"wrote {args.output}")
@@ -502,6 +537,27 @@ def main(argv: list[str] | None = None) -> None:
     sp = sub.add_parser("compliance-export", help="export control library CSV for external review")
     sp.add_argument("-o", "--output", default="")
     sp.set_defaults(fn=cmd_compliance_export)
+
+    sp = sub.add_parser("library-import", help="import an external control library (OSCAL catalog JSON or SCF CSV)")
+    sp.add_argument("format", choices=["oscal", "scf"])
+    sp.add_argument("file")
+    sp.add_argument("--framework", default="", help="framework key for the pack, e.g. nist_800_53")
+    sp.add_argument("--name", default="")
+    sp.add_argument("--map", default="", help="objective map YAML {objective: [control ids]}")
+    sp.add_argument("-o", "--output", default="", help="write the pack YAML here")
+    sp.add_argument("--install", action="store_true", help="add the pack to compliance/data/packs")
+    sp.set_defaults(fn=cmd_library_import)
+
+    sp = sub.add_parser("soc2-sample", help="SOC 2 Type II population + seeded sample export")
+    sp.add_argument("engagement", type=int)
+    sp.add_argument("--population", default="findings", choices=["findings", "remediations"])
+    sp.add_argument("--period-start", default="")
+    sp.add_argument("--period-end", default="")
+    sp.add_argument("--seed", type=int, default=None)
+    sp.add_argument("--size", type=int, default=None)
+    sp.add_argument("--format", default="csv", choices=["csv", "json"])
+    sp.add_argument("-o", "--output", default="")
+    sp.set_defaults(fn=cmd_soc2_sample)
 
     sp = sub.add_parser("submit", help="submit a draft report for QA")
     sp.add_argument("report", type=int)

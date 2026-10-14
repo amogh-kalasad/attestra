@@ -432,6 +432,9 @@ def compliance(
                 "reason": r.reason,
                 "objectives": r.objectives,
                 "finding_ids": r.finding_ids,
+                "mapping_strength": r.mapping_strength,
+                "mapping_rationale": r.mapping_rationale,
+                "mappings": r.mappings,
             }
             for r in results
         ]
@@ -902,6 +905,38 @@ def ci_gate(
 
 # ---------------------------------------------------------------- dashboard
 
+@app.get("/api/engagements/{eid}/soc2/sample")
+def soc2_sample(
+    eid: int,
+    population: str = Query("findings", description="findings | remediations"),
+    period_start: date | None = None,
+    period_end: date | None = None,
+    seed: int | None = None,
+    size: int | None = Query(None, ge=0),
+    format: str = Query("json", pattern="^(json|csv)$"),
+    principal: Principal = Depends(require("compliance.read")),
+):
+    """C11: SOC 2 Type II population with a reproducible seeded sample."""
+    from fastapi.responses import PlainTextResponse
+
+    from attestra.reports import soc2_sampling
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return soc2_sampling.build_sample(
+            s, eid, population, period_start=period_start, period_end=period_end, seed=seed, size=size
+        )
+
+    result = _run(fn)
+    if format == "csv":
+        return PlainTextResponse(
+            soc2_sampling.to_csv(result),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="eng{eid}-soc2-{population}-sample.csv"'},
+        )
+    return result
+
+
 from attestra.web.ui import router as ui_router  # noqa: E402
 
 app.include_router(ui_router)
@@ -917,3 +952,69 @@ from attestra.web.ai_routes import ui_router as ai_ui_router  # noqa: E402
 
 app.include_router(ai_api_router)
 app.include_router(ai_ui_router)
+
+
+# ---------------------------------------------------------------- C9 / C10: PCI calendar, ASV import, ISO records
+
+
+@app.get("/api/engagements/{eid}/pci/calendar")
+def pci_calendar(eid: int, principal: Principal = Depends(require("finding.read"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return services.pci_scan_calendar(s, eid)
+
+    return _run(fn)
+
+
+@app.post("/api/engagements/{eid}/asv/import", status_code=201)
+async def import_asv(
+    eid: int,
+    file: UploadFile = File(...),
+    principal: Principal = Depends(require("compliance.confirm")),
+):
+    data = await file.read()
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        row = services.import_asv_results(s, eid, filename=file.filename or "asv.json", data=data, actor=principal.actor)
+        return {"id": row.id, "vendor": row.vendor, "scan_date": row.scan_date, "passing": row.passing,
+                "items": row.item_count, "failing": row.failing_count, "sha256": row.sha256}
+
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/iso/soa")
+def iso_soa(eid: int, principal: Principal = Depends(require("finding.read"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return [{"id": r.id, "control_ref": r.control_ref, "title": r.title, "applicable": r.applicable,
+                 "implementation": r.implementation, "justification": r.justification}
+                for r in services.list_soa(s, eid)]
+
+    return _run(fn)
+
+
+@app.post("/api/engagements/{eid}/iso/soa/generate")
+def iso_soa_generate(eid: int, principal: Principal = Depends(require("compliance.confirm"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return {"added": services.generate_soa(s, eid, actor=principal.actor)}
+
+    return _run(fn)
+
+
+class AuditSampleIn(BaseModel):
+    population: str = "soa_applicable"
+    sample_size: int | None = None
+    seed: str = ""
+
+
+@app.post("/api/engagements/{eid}/iso/samples", status_code=201)
+def iso_sample(eid: int, body: AuditSampleIn, principal: Principal = Depends(require("compliance.confirm"))):
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        row = services.draw_audit_sample(s, eid, actor=principal.actor, **body.model_dump())
+        return {"id": row.id, "population_size": row.population_size, "sample_size": row.sample_size,
+                "seed": row.seed, "items": row.items}
+
+    return _run(fn)

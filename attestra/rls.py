@@ -32,6 +32,13 @@ def _via_finding(col: str = "finding_id") -> str:
     )
 
 
+def _via_asv_scan(col: str = "asv_scan_id") -> str:
+    return (
+        f"({_UNRESTRICTED} OR EXISTS (SELECT 1 FROM asv_scans a JOIN engagements e ON e.id = a.engagement_id "
+        f"WHERE a.id = {col} AND e.tenant_id = ANY({_ALLOWED})))"
+    )
+
+
 # table -> USING / WITH CHECK expression
 POLICIES: dict[str, str] = {
     "tenants": _tenant("id"),
@@ -62,6 +69,15 @@ TUNING_POLICIES: dict[str, str] = {
     "suppression_rules": _tenant("tenant_id"),
 }
 POLICIES.update(TUNING_POLICIES)
+# C9 (migration 0009_pci_asv).
+ASV_POLICIES: dict[str, str] = {"asv_scan_items": _via_asv_scan()}
+POLICIES.update(ASV_POLICIES)
+# C10 (migration 0010_iso_soa).
+ISO_POLICIES: dict[str, str] = {
+    "soa_entries": _via_engagement(),
+    "audit_samples": _via_engagement(),
+}
+POLICIES.update(ISO_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

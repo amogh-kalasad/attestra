@@ -22,6 +22,7 @@ First general-availability release, covering Phases 0 to 7 of the implementation
 - Completed PCI DSS v4, ISO 27001:2022 and SOC 2 control libraries with mapping strength and rationale.
 - Risk acceptance, ASV import and segmentation records, PCI quarterly scan calendar, OWASP references.
 - ISO SoA view and nonconformities, ageing and SLA breach report.
+- C9-C11: PCI quarterly scan calendar with rescan-until-clean, segmentation records and ASV results import (migration `0009_pci_asv`); ISO SoA entries, nonconformity/corrective-action workflow and clause 9.2 audit sampling (migration `0010_iso_soa`); seeded SOC 2 Type II population/sample export (`soc2-sample` CLI, `GET /api/engagements/{id}/soc2/sample`, CSV/JSON).
 
 ### Phase 4 - Reports and signing
 - Three-step report workflow (draft, QA, sign), retests with false-fix guards.

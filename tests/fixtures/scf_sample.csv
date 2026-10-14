@@ -1,0 +1,6 @@
+SCF Domain,SCF Control,SCF #,Secure Controls Framework (SCF) Control Description,PCI DSS v4.0.1,ISO 27001 v2022,AICPA TSC 2017 (with 2022 revised POF)
+Vulnerability Management,Vulnerability Remediation Process,VPM-02,Remediate identified vulnerabilities in a timely way.,6.3.3,A.8.8,CC7.1
+Cryptographic Protections,Transmission Confidentiality,CRY-03,Protect data confidentiality while in transit.,4.2.1,8.24,CC6.7
+Network Security,Network Segmentation,NET-06,Logically or physically separate networks.,1.3.1,A.8.22,
+Identification & Authentication,Multi-Factor Authentication,IAC-06,Require MFA for access.,8.3.1,,cc6.1
+Security Awareness,Security Awareness Training,SAT-02,Train staff on security.,12.6.1,A.6.3,

@@ -40,10 +40,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
-        response.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
-        )
+        if request.url.path in ("/docs", "/redoc"):
+            # API docs pages load Swagger UI / ReDoc from the jsDelivr CDN.
+            csp = (
+                "default-src 'self'; img-src 'self' data: https://fastapi.tiangolo.com; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "worker-src blob:; frame-ancestors 'none'"
+            )
+        else:
+            csp = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+        response.headers.setdefault("Content-Security-Policy", csp)
         return response
 
 

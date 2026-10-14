@@ -148,14 +148,14 @@ Status counts: Done 19, Done-untested 3, Partial 19, Stub 3, Not done 44
 | C1 | Hub CWE->objective->framework mapping | How mapping works | **Done** | engine.py:44-51; test_library_integrity |
 | C2 | Status roll-up + process controls | Mapping step 4-5 | **Done** | engine.py:80-118; test_pci_status_rollup |
 | C3 | Assessor confirmation with rationale | Mapping step 5 | **Done** | services.confirm_control; test_assessor_confirmation |
-| C4 | PCI DSS 4.0.1 refs coverage (10/19) | Crosswalk | **Partial** | controls.yaml |
-| C5 | ISO 27001:2022 refs coverage (9/12) | Crosswalk | **Partial** | controls.yaml |
-| C6 | SOC 2 refs coverage (8/11) | Crosswalk | **Partial** | controls.yaml |
-| C7 | Mapping strength + rationale | Entities/Mapping | **Not done** |  |
-| C8 | CISO Assistant/OSCAL/SCF libraries | Mapping step 2-3 | **Not done** |  |
-| C9 | PCI quarterly calendar, segmentation, ASV import | PCI features | **Not done** |  |
-| C10 | ISO SoA, NC/CA, 9.2 sampling | ISO features | **Partial** | compliance report only |
-| C11 | SOC 2 Type II population/sample export | SOC2 features | **Not done** |  |
+| C4 | PCI DSS 4.0.1 refs coverage (19/19; 29 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_pci_crosswalk_coverage |
+| C5 | ISO 27001:2022 refs coverage (12/12; 20 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_iso_crosswalk_coverage |
+| C6 | SOC 2 refs coverage (11/11; 14 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_soc2_crosswalk_coverage |
+| C7 | Mapping strength + rationale | Entities/Mapping | **Done** | compliance/engine.py:mappings_for_objective, ControlResult.mapping_*; API /compliance, CLI, compliance.html.j2 Mapping column; tests/test_c7_c11_mapping_soc2.py |
+| C8 | CISO Assistant/OSCAL/SCF libraries | Mapping step 2-3 | **Done** | compliance/libraries/ (oscal.py, scf.py, common.py); cli `library-import`; test_control_libraries.py |
+| C9 | PCI quarterly calendar, segmentation, ASV import | PCI features | **Done** | services.pci_scan_calendar, import_asv_results, importers/asv.py, migration 0009; /engagements/{id}/pci; test_c9_c10_pci_iso |
+| C10 | ISO SoA, NC/CA, 9.2 sampling | ISO features | **Done** | SoaEntry, Nonconformity workflow, AuditSample (migration 0010); packs iso/*; /engagements/{id}/iso; test_c9_c10_pci_iso |
+| C11 | SOC 2 Type II population/sample export | SOC2 features | **Done** | reports/soc2_sampling.py (seeded, SAMPLE_SIZE_TABLE); GET /api/engagements/{id}/soc2/sample (json/csv); CLI soc2-sample; tests/test_c7_c11_mapping_soc2.py |
 
 ### Reports & signing — 50%
 
