@@ -1,0 +1,38 @@
+"""RBAC roles and permission map."""
+
+from __future__ import annotations
+
+ROLES = ("admin", "lead", "tester", "reviewer", "client_viewer", "auditor")
+
+# permission → roles that may perform it
+PERMISSIONS: dict[str, frozenset[str]] = {
+    "engagement.create": frozenset({"admin", "lead"}),
+    "engagement.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
+    "engagement.write": frozenset({"admin", "lead", "tester"}),
+    "authorization.add": frozenset({"admin", "lead"}),
+    "asset.write": frozenset({"admin", "lead", "tester"}),
+    "import.create": frozenset({"admin", "lead", "tester"}),
+    "finding.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
+    "finding.write": frozenset({"admin", "lead", "tester"}),
+    "scan.start": frozenset({"admin", "lead", "tester"}),
+    "scan.read": frozenset({"admin", "lead", "tester", "reviewer", "auditor"}),
+    "engagement.halt": frozenset({"admin", "lead"}),
+    "engagement.resume": frozenset({"admin", "lead"}),
+    "compliance.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
+    "compliance.confirm": frozenset({"admin", "lead", "reviewer", "auditor"}),
+    "report.generate": frozenset({"admin", "lead", "tester"}),
+    "report.submit": frozenset({"admin", "lead", "tester"}),
+    "report.approve": frozenset({"admin", "lead", "reviewer"}),
+    "report.sign": frozenset({"admin", "lead"}),
+    "report.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
+    "retest.manage": frozenset({"admin", "lead", "tester"}),
+    "audit.read": frozenset({"admin", "lead", "auditor"}),
+    "user.manage": frozenset({"admin"}),
+}
+
+
+def has_permission(role: str, permission: str) -> bool:
+    allowed = PERMISSIONS.get(permission)
+    if allowed is None:
+        return False
+    return role in allowed

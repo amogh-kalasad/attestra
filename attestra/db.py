@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
+from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -19,8 +20,22 @@ _engine = None
 _SessionLocal: sessionmaker | None = None
 
 
-def init(url: str | None = None) -> None:
-    """Create the engine and tables. Without a URL, keeps an engine that already exists."""
+def upgrade(url: str | None = None) -> None:
+    """Apply Alembic migrations to head (production / `attestra init` / serve startup)."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", url or config.DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
+def init(url: str | None = None, *, use_migrations: bool = False) -> None:
+    """Create the engine and tables.
+
+    Tests and quick local use call ``create_all`` (fast). Production start-up should
+    pass ``use_migrations=True`` or call :func:`upgrade` so schema comes from Alembic.
+    """
     global _engine, _SessionLocal
     if url is None and _engine is not None:
         return
@@ -31,15 +46,15 @@ def init(url: str | None = None) -> None:
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     from attestra import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(_engine)
-    _add_missing_columns(_engine)
+    if use_migrations:
+        upgrade(url)
+    else:
+        Base.metadata.create_all(_engine)
+        _add_missing_columns(_engine)
 
 
 def _add_missing_columns(engine) -> None:
-    """Minimal forward migration: add columns that exist in the models but not in the database.
-
-    Enough for additive changes in early versions; switch to Alembic before production.
-    """
+    """Deprecated ad-hoc migration for additive columns. Prefer Alembic (``upgrade``)."""
     insp = inspect(engine)
     with engine.begin() as conn:
         for table in Base.metadata.sorted_tables:

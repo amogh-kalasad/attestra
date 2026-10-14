@@ -1,0 +1,99 @@
+"""HTTP client that connects only to a pinned IP and re-authorizes every redirect."""
+
+from __future__ import annotations
+
+import ssl
+from dataclasses import dataclass
+from http.client import HTTPConnection, HTTPSConnection
+from urllib.parse import urljoin, urlsplit
+
+from sqlalchemy.orm import Session
+
+from attestra import audit
+from attestra.runner.authorization import AuthorizationError, AuthorizedScope, authorize_target
+from attestra.runner.dns_pin import PinnedTarget, pin_url
+
+MAX_REDIRECTS = 5
+MAX_BODY = 2_000_000
+
+
+@dataclass
+class SafeResponse:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+    final_url: str
+
+
+def resolve_redirect_url(current: str, location: str) -> str:
+    return urljoin(current, location)
+
+
+def safe_request(
+    method: str,
+    url: str,
+    *,
+    scope: AuthorizedScope,
+    session: Session | None = None,
+    actor: str = "runner",
+    pin: PinnedTarget | None = None,
+    max_redirects: int = MAX_REDIRECTS,
+    max_body: int = MAX_BODY,
+    resolver=None,
+) -> SafeResponse:
+    current = url
+    pin_fn = (lambda u, sc: pin_url(u, sc, resolver=resolver)) if resolver else pin_url
+    for _ in range(max_redirects + 1):
+        try:
+            authorize_target(scope, current, "url")
+        except AuthorizationError as exc:
+            _refuse(session, actor, current, str(exc))
+            raise
+        target = pin or pin_fn(current, scope)
+        pin = None  # only first hop may reuse an explicit pin
+        conn = _connect(target)
+        try:
+            path = urlsplit(current).path or "/"
+            query = urlsplit(current).query
+            if query:
+                path = f"{path}?{query}"
+            conn.request(method, path, headers={"Host": target.host_header, "User-Agent": "attestra-safe/0.1"})
+            resp = conn.getresponse()
+            body = resp.read(max_body + 1)
+            if len(body) > max_body:
+                raise AuthorizationError("response body exceeds size limit")
+            headers = {k.lower(): v for k, v in resp.getheaders()}
+            if resp.status in (301, 302, 303, 307, 308) and "location" in headers:
+                nxt = resolve_redirect_url(current, headers["location"])
+                try:
+                    authorize_target(scope, nxt, "url")
+                except AuthorizationError as exc:
+                    _refuse(session, actor, nxt, str(exc))
+                    raise
+                current = nxt
+                continue
+            return SafeResponse(status=resp.status, headers=headers, body=body, final_url=current)
+        finally:
+            conn.close()
+    raise AuthorizationError("too many redirects")
+
+
+def safe_get(url: str, **kwargs) -> SafeResponse:
+    return safe_request("GET", url, **kwargs)
+
+
+def _connect(pin: PinnedTarget):
+    if pin.scheme == "https":
+        ctx = ssl.create_default_context()
+        # For loopback fixtures in tests, callers may use http only.
+        conn = HTTPSConnection(pin.ip, pin.port, context=ctx, timeout=30)
+        # SNI via tunnel host header is set on request; store for wrap
+        conn._sni_hostname = pin.sni_hostname  # type: ignore[attr-defined]
+        return conn
+    return HTTPConnection(pin.ip, pin.port, timeout=30)
+
+
+def _refuse(session: Session | None, actor: str, url: str, reason: str) -> None:
+    if session is None:
+        return
+    audit.record(session, actor, "http.refused", "url", None, url=url, reason=reason)

@@ -1,0 +1,16 @@
+{% extends "_layout.html" %}
+{% block title %}Sign in · Attestra{% endblock %}
+{% block main %}
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h1>Sign in</h1>
+  <p class="meta">Use your Attestra username and password (or an API key via the REST API).</p>
+  <form method="post" action="/login">
+    <div class="fields" style="grid-template-columns:1fr">
+      <div><label for="username">Username</label><input id="username" name="username" required autocomplete="username"></div>
+      <div><label for="password">Password</label><input id="password" name="password" type="password" required autocomplete="current-password"></div>
+    </div>
+    <input type="hidden" name="next" value="{{ path if path != '/login' else '/' }}">
+    <div style="margin-top:12px"><button type="submit">Sign in</button></div>
+  </form>
+</div>
+{% endblock %}

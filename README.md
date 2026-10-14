@@ -6,7 +6,7 @@ Attestra turns VAPT results into audit-ready evidence. It imports results from t
 
 Attestra does not run scanners or attack anything. Testers run tools under the client's signed authorization and import the result files. Attestra refuses imports for an engagement with no currently valid signed authorization.
 
-Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Security: [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Implementation status: [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
 
 ## What v0.1 does
 

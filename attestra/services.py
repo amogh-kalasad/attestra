@@ -9,7 +9,7 @@ import hashlib
 import io
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,16 +24,26 @@ from attestra.models import (
     ENGAGEMENT_TYPES,
     ENVIRONMENTS,
     FRAMEWORKS,
+    OPEN_STATUSES,
     TEST_TYPES,
     TRANSITIONS,
     Asset,
+    AsvScan,
     Authorization,
     ControlAssessment,
     Engagement,
     Evidence,
     Finding,
     ImportRun,
+    Job,
+    Nonconformity,
+    RiskAcceptance,
+    ScanRun,
+    ScanSchedule,
+    ScopeRule,
+    SegmentationTest,
     Tenant,
+    TenantMembership,
     utcnow,
 )
 
@@ -50,14 +60,86 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", Path(name).name)[:120] or "file"
 
 
-def _store(sub: str, sha: str, filename: str, data: bytes) -> Path:
-    """Content-addressed, write-once storage. Existing files are never overwritten."""
+def _store(tenant_id: int | None, sub: str, sha: str, filename: str, data: bytes) -> Path:
+    """Content-addressed, write-once storage under a per-tenant prefix."""
     config.ensure_dirs()
-    path = config.DATA_DIR / sub / f"{sha[:16]}_{_safe_name(filename)}"
+    if tenant_id is None:
+        base = config.DATA_DIR / sub
+    else:
+        base = config.DATA_DIR / "tenants" / str(tenant_id) / sub
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / f"{sha[:16]}_{_safe_name(filename)}"
     if not path.exists():
         path.write_bytes(data)
         path.chmod(0o444)
     return path
+
+
+def tenant_ids_for(s: Session, principal) -> set[int] | None:
+    """Tenant IDs the principal may access. ``None`` means unrestricted.
+
+    Admin is always unrestricted. Client viewers are limited to their home tenant
+    and memberships (empty set if none). Other staff with no home tenant and no
+    memberships are treated as platform operators (unrestricted); once assigned,
+    they see only those tenants.
+    """
+    if principal is None:
+        return None
+    role = getattr(principal, "role", None)
+    if role == "admin":
+        return None
+    ids: set[int] = set()
+    if principal.tenant_id is not None:
+        ids.add(principal.tenant_id)
+    for m in s.scalars(select(TenantMembership).where(TenantMembership.user_id == principal.user_id)):
+        ids.add(m.tenant_id)
+    if not ids:
+        if role == "client_viewer":
+            return set()
+        return None
+    return ids
+
+
+def ensure_tenant_membership(s: Session, principal, tenant_id: int) -> None:
+    """Grant membership so a scoped staff user can access a tenant they create."""
+    if principal is None or getattr(principal, "role", None) == "admin":
+        return
+    allowed = tenant_ids_for(s, principal)
+    if allowed is None or tenant_id in allowed:
+        return
+    if s.scalar(
+        select(TenantMembership).where(
+            TenantMembership.user_id == principal.user_id, TenantMembership.tenant_id == tenant_id
+        )
+    ):
+        return
+    s.add(TenantMembership(user_id=principal.user_id, tenant_id=tenant_id, role=principal.role))
+    s.flush()
+
+
+def scoped(s: Session, model, principal):
+    """Return a ``select(model)`` filtered by the principal's tenant access."""
+    q = select(model)
+    allowed = tenant_ids_for(s, principal)
+    if allowed is None:
+        return q
+    if model is Engagement:
+        return q.where(Engagement.tenant_id.in_(allowed))
+    if model is Tenant:
+        return q.where(Tenant.id.in_(allowed))
+    if hasattr(model, "engagement_id"):
+        return q.join(Engagement, model.engagement_id == Engagement.id).where(Engagement.tenant_id.in_(allowed))
+    return q.where(False)
+
+
+def assert_engagement_access(s: Session, engagement_id: int, principal) -> Engagement:
+    eng = s.get(Engagement, engagement_id)
+    if not eng:
+        raise LookupError(f"engagement {engagement_id} not found")
+    allowed = tenant_ids_for(s, principal)
+    if allowed is not None and eng.tenant_id not in allowed:
+        raise LookupError(f"engagement {engagement_id} not found")
+    return eng
 
 
 # ---------------------------------------------------------------- engagements
@@ -100,6 +182,7 @@ def create_engagement(
     industry: str = "",
     contact_name: str = "",
     contact_email: str = "",
+    principal=None,
 ) -> Engagement:
     if not name.strip():
         raise ServiceError("engagement name is required")
@@ -111,6 +194,7 @@ def create_engagement(
     if window_start and window_end and window_end < window_start:
         raise ServiceError("window_end is before window_start")
     t = get_or_create_tenant(s, tenant, actor, industry=industry, contact_name=contact_name, contact_email=contact_email)
+    ensure_tenant_membership(s, principal, t.id)
     e = Engagement(
         tenant_id=t.id, name=name.strip(), type=type, frameworks=frameworks, window_start=window_start, window_end=window_end
     )
@@ -120,7 +204,9 @@ def create_engagement(
     return e
 
 
-def get_engagement(s: Session, engagement_id: int) -> Engagement:
+def get_engagement(s: Session, engagement_id: int, principal=None) -> Engagement:
+    if principal is not None:
+        return assert_engagement_access(s, engagement_id, principal)
     e = s.get(Engagement, engagement_id)
     if not e:
         raise LookupError(f"engagement {engagement_id} not found")
@@ -152,7 +238,7 @@ def add_authorization(
     if bad:
         raise ServiceError(f"unknown environments {bad}; choose from {ENVIRONMENTS}")
     sha = _sha256(data)
-    path = _store("evidence", sha, filename, data)
+    path = _store(eng.tenant_id, "evidence", sha, filename, data)
     a = Authorization(
         engagement_id=engagement_id,
         document_name=filename,
@@ -305,7 +391,7 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
         )
 
     sha = _sha256(data)
-    path = _store("imports", sha, filename, data)
+    path = _store(eng.tenant_id, "imports", sha, filename, data)
     run = ImportRun(engagement_id=engagement_id, tool=tool, filename=filename, raw_path=str(path), sha256=sha, imported_by=actor)
     s.add(run)
     s.flush()
@@ -315,7 +401,15 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
     new = updated = 0
     unmatched = sum(1 for _, a in matched if a is None)
     for nf, asset in matched:
-        fp = fingerprint(location=nf.location, cwe=nf.cwe, cves=nf.cves, title=nf.title, param=nf.param, package=nf.package)
+        fp = fingerprint(
+            location=nf.location,
+            cwe=nf.cwe,
+            cves=nf.cves,
+            title=nf.title,
+            param=nf.param,
+            package=nf.package,
+            asset_id=asset.id if asset else None,
+        )
         f = existing.get(fp)
         if f is None:
             f = Finding(
@@ -337,6 +431,7 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
                 last_seen=now,
             )
             f.asset = asset
+            _apply_owasp(f)
             s.add(f)
             existing[fp] = f
             new += 1
@@ -354,6 +449,7 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
                 f.cvss_score, f.cvss_vector = nf.cvss_score, nf.cvss_vector
             if not f.cwe and nf.cwe:
                 f.cwe = nf.cwe
+                _apply_owasp(f)
             if f.status == "fixed":
                 # Reappeared after being marked fixed: reopen.
                 f.status = "validated" if f.validated_by else "triaged"
@@ -373,6 +469,15 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
 
 def _rank(sev: str) -> int:
     return {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(sev, 0)
+
+
+def _apply_owasp(f: Finding) -> None:
+    from attestra.compliance.owasp import map_finding_to_owasp
+
+    refs = map_finding_to_owasp(f)
+    f.owasp_top10 = refs["owasp_top10"]
+    f.asvs_ref = refs["asvs_ref"]
+    f.wstg_ref = refs["wstg_ref"]
 
 
 def rescore(f: Finding) -> None:
@@ -397,7 +502,7 @@ def enrich(s: Session, *, kev_json: bytes | None = None, epss_csv: bytes | None 
     epss: dict[str, float] = {}
     if epss_csv:
         text = epss_csv.decode("utf-8", errors="replace")
-        lines = [l for l in text.splitlines() if not l.startswith("#")]
+        lines = [line for line in text.splitlines() if not line.startswith("#")]
         for row in csv.DictReader(io.StringIO("\n".join(lines))):
             try:
                 epss[row["cve"].upper()] = float(row["epss"])
@@ -455,8 +560,9 @@ def add_evidence(s: Session, finding_id: int, *, kind: str, filename: str, data:
     f = s.get(Finding, finding_id)
     if not f:
         raise LookupError(f"finding {finding_id} not found")
+    eng = get_engagement(s, f.engagement_id)
     sha = _sha256(data)
-    path = _store("evidence", sha, filename, data)
+    path = _store(eng.tenant_id, "evidence", sha, filename, data)
     ev = Evidence(finding_id=finding_id, kind=kind, filename=filename, path=str(path), sha256=sha, note=note, captured_by=actor)
     s.add(ev)
     s.flush()
@@ -504,3 +610,365 @@ def confirm_control(
     s.flush()
     audit.record(s, assessor, "control.confirm", "control_assessment", a.id, framework=framework, ref=ref, status=status)
     return a
+
+
+def accept_risk(
+    s: Session,
+    finding_id: int,
+    *,
+    expires_on: date,
+    rationale: str,
+    actor: str,
+    owner_user_id: int | None = None,
+) -> RiskAcceptance:
+    f = s.get(Finding, finding_id)
+    if not f:
+        raise LookupError(f"finding {finding_id} not found")
+    if not rationale.strip():
+        raise ServiceError("a rationale is required for risk acceptance")
+    if expires_on < date.today():
+        raise ServiceError("expires_on must be today or later")
+    if f.status == "new":
+        transition(s, finding_id, to="triaged", actor=actor, note="auto-triage for risk acceptance")
+        s.refresh(f)
+    if f.status != "risk_accepted":
+        transition(s, finding_id, to="risk_accepted", actor=actor, note=rationale)
+    row = RiskAcceptance(
+        engagement_id=f.engagement_id,
+        finding_id=f.id,
+        owner_user_id=owner_user_id,
+        rationale=rationale.strip(),
+        expires_on=expires_on,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "risk.accept", "risk_acceptance", row.id, finding_id=f.id, expires_on=str(expires_on))
+    return row
+
+
+def expire_risk_acceptances(s: Session, *, today: date | None = None, actor: str = "system") -> int:
+    """Revoke expired acceptances and reopen findings to ``validated`` (no bare ``open`` status)."""
+    today = today or date.today()
+    rows = list(
+        s.scalars(
+            select(RiskAcceptance).where(
+                RiskAcceptance.revoked_at.is_(None),
+                RiskAcceptance.expires_on < today,
+            )
+        )
+    )
+    n = 0
+    for row in rows:
+        f = s.get(Finding, row.finding_id)
+        row.revoked_at = utcnow()
+        if f and f.status == "risk_accepted":
+            f.status = "validated"
+            audit.record(
+                s, actor, "risk.expire", "risk_acceptance", row.id,
+                finding_id=f.id, frm="risk_accepted", to="validated",
+            )
+            n += 1
+    return n
+
+
+def add_asv_scan(
+    s: Session,
+    engagement_id: int,
+    *,
+    vendor: str,
+    scan_date: date,
+    passing: bool,
+    filename: str,
+    data: bytes,
+    actor: str,
+) -> AsvScan:
+    eng = get_engagement(s, engagement_id)
+    sha = _sha256(data)
+    path = _store(eng.tenant_id, "evidence", sha, filename, data)
+    row = AsvScan(
+        engagement_id=engagement_id,
+        vendor=vendor.strip(),
+        scan_date=scan_date,
+        passing=passing,
+        attestation_path=str(path),
+        sha256=sha,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "asv.add", "asv_scan", row.id, vendor=vendor, passing=passing)
+    return row
+
+
+def add_segmentation_test(
+    s: Session,
+    engagement_id: int,
+    *,
+    boundary: str,
+    method: str,
+    result: str,
+    tested_on: date,
+    actor: str,
+    evidence_id: int | None = None,
+) -> SegmentationTest:
+    get_engagement(s, engagement_id)
+    row = SegmentationTest(
+        engagement_id=engagement_id,
+        boundary=boundary.strip(),
+        method=method.strip(),
+        result=result.strip().lower(),
+        tested_on=tested_on,
+        evidence_id=evidence_id,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "segmentation.add", "segmentation_test", row.id, result=row.result)
+    return row
+
+
+def add_scan_schedule(
+    s: Session,
+    engagement_id: int,
+    *,
+    asset_id: int,
+    tool: str,
+    cadence: str,
+    next_due: date,
+    actor: str,
+) -> ScanSchedule:
+    get_engagement(s, engagement_id)
+    if cadence not in ("quarterly", "monthly"):
+        raise ServiceError("cadence must be quarterly or monthly")
+    asset = s.get(Asset, asset_id)
+    if not asset or asset.engagement_id != engagement_id:
+        raise LookupError(f"asset {asset_id} not found on engagement")
+    row = ScanSchedule(
+        engagement_id=engagement_id,
+        asset_id=asset_id,
+        tool=tool,
+        cadence=cadence,
+        next_due=next_due,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "schedule.add", "scan_schedule", row.id, tool=tool, cadence=cadence)
+    return row
+
+
+def enqueue_due_schedules(s: Session, *, today: date | None = None, actor: str = "system") -> list[ScanRun]:
+    """Enqueue scan runs for schedules that are due; update next_due and quarter_clean."""
+    today = today or date.today()
+    due = list(s.scalars(select(ScanSchedule).where(ScanSchedule.next_due <= today)))
+    created: list[ScanRun] = []
+    for sch in due:
+        try:
+            run = request_scan(s, sch.engagement_id, asset_id=sch.asset_id, tool=sch.tool, profile="baseline", actor=actor)
+        except (ServiceError, LookupError, OSError) as exc:
+            audit.record(s, actor, "schedule.enqueue_failed", "scan_schedule", sch.id, error=str(exc)[:300])
+            sch.next_due = today + timedelta(days=1)
+            continue
+        sch.last_enqueued_at = utcnow()
+        if sch.cadence == "monthly":
+            sch.next_due = today + timedelta(days=30)
+        else:
+            sch.next_due = today + timedelta(days=90)
+        findings = list(s.scalars(select(Finding).where(Finding.engagement_id == sch.engagement_id)))
+        open_high = [
+            f for f in findings
+            if f.status in OPEN_STATUSES and _rank(f.severity) >= 3
+            and (f.asset_id is None or f.asset_id == sch.asset_id)
+        ]
+        sch.quarter_clean = not open_high and run.status != "refused"
+        created.append(run)
+        audit.record(s, actor, "schedule.enqueue", "scan_schedule", sch.id, scan_run_id=run.id)
+    return created
+
+
+def add_nonconformity(
+    s: Session,
+    engagement_id: int,
+    *,
+    control_ref: str,
+    corrective_action: str,
+    owner: str,
+    actor: str,
+    finding_id: int | None = None,
+    due: date | None = None,
+) -> Nonconformity:
+    get_engagement(s, engagement_id)
+    row = Nonconformity(
+        engagement_id=engagement_id,
+        control_ref=control_ref.strip(),
+        finding_id=finding_id,
+        corrective_action=corrective_action.strip(),
+        owner=owner.strip(),
+        due=due,
+    )
+    s.add(row)
+    s.flush()
+    audit.record(s, actor, "nonconformity.add", "nonconformity", row.id, control_ref=control_ref)
+    return row
+
+
+def sla_breaches(s: Session, engagement_id: int, *, today: date | None = None) -> list[Finding]:
+    """Open findings past their SLA due date."""
+    today = today or date.today()
+    rows = list(
+        s.scalars(
+            select(Finding).where(
+                Finding.engagement_id == engagement_id,
+                Finding.status.in_(OPEN_STATUSES),
+                Finding.sla_due.is_not(None),
+                Finding.sla_due < today,
+            ).order_by(Finding.severity, Finding.sla_due)
+        )
+    )
+    return rows
+
+
+def export_compliance_library_csv() -> str:
+    """CSV export of control titles for external QSA / ISO review."""
+    from attestra.compliance import load_library
+
+    lib = load_library()
+    lines = ["framework,ref,title"]
+    for fw, titles in lib.titles.items():
+        for ref, title in sorted(titles.items(), key=lambda x: x[0]):
+            safe = title.replace('"', '""')
+            lines.append(f'{fw},{ref},"{safe}"')
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------- runner / scope / halt
+
+
+def add_scope_rule(
+    s: Session,
+    engagement_id: int,
+    *,
+    action: str,
+    kind: str,
+    pattern: str,
+    actor: str,
+    note: str = "",
+) -> ScopeRule:
+    get_engagement(s, engagement_id)
+    if action not in ("allow", "deny"):
+        raise ServiceError("action must be allow or deny")
+    if kind not in ("host", "url", "path", "image", "cidr"):
+        raise ServiceError("kind must be host|url|path|image|cidr")
+    if not pattern.strip():
+        raise ServiceError("pattern is required")
+    rule = ScopeRule(
+        engagement_id=engagement_id,
+        action=action,
+        kind=kind,
+        pattern=pattern.strip(),
+        note=note,
+        created_by=actor,
+    )
+    s.add(rule)
+    s.flush()
+    audit.record(
+        s, actor, "scope_rule.add", "scope_rule", rule.id,
+        rule_action=action, kind=kind, pattern=pattern,
+    )
+    return rule
+
+
+def remove_scope_rule(s: Session, rule_id: int, *, actor: str) -> None:
+    rule = s.get(ScopeRule, rule_id)
+    if not rule:
+        raise LookupError(f"scope rule {rule_id} not found")
+    audit.record(
+        s, actor, "scope_rule.remove", "scope_rule", rule.id,
+        rule_action=rule.action, kind=rule.kind, pattern=rule.pattern,
+    )
+    s.delete(rule)
+
+
+def request_scan(
+    s: Session,
+    engagement_id: int,
+    *,
+    asset_id: int,
+    tool: str,
+    profile: str = "baseline",
+    actor: str,
+) -> ScanRun:
+    """Create a ScanRun + Job after the dispatch gate accepts the request."""
+    from attestra.jobs.durable import enqueue
+    from attestra.runner.gate import GateError, check
+
+    get_engagement(s, engagement_id)
+    try:
+        check(s, engagement_id, asset_id, tool=tool, profile=profile, actor=actor)
+    except GateError as exc:
+        run = ScanRun(
+            engagement_id=engagement_id,
+            asset_id=asset_id,
+            tool=tool,
+            profile=profile,
+            status="refused",
+            requested_by=actor,
+            refuse_reason=exc.reason,
+        )
+        s.add(run)
+        s.flush()
+        return run
+
+    run = ScanRun(
+        engagement_id=engagement_id,
+        asset_id=asset_id,
+        tool=tool,
+        profile=profile,
+        status="queued",
+        requested_by=actor,
+    )
+    s.add(run)
+    s.flush()
+    enqueue(s, run.id)
+    audit.record(s, actor, "scan.request", "scan_run", run.id, tool=tool, profile=profile, asset_id=asset_id)
+    return run
+
+
+def list_scans(s: Session, engagement_id: int) -> list[ScanRun]:
+    get_engagement(s, engagement_id)
+    return list(s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id.desc())))
+
+
+def get_scan(s: Session, scan_id: int) -> ScanRun:
+    run = s.get(ScanRun, scan_id)
+    if not run:
+        raise LookupError(f"scan {scan_id} not found")
+    return run
+
+
+def halt_engagement(s: Session, engagement_id: int, *, actor: str) -> Engagement:
+    """Engagement kill switch: halt, cancel jobs, signal running scanners."""
+    from attestra.jobs import durable as durable_mod
+
+    eng = get_engagement(s, engagement_id)
+    eng.status = "halted"
+    jobs = list(
+        s.scalars(
+            select(Job).join(ScanRun, Job.scan_run_id == ScanRun.id).where(ScanRun.engagement_id == engagement_id)
+        )
+    )
+    for job in jobs:
+        if job.status in ("queued", "running"):
+            job.cancel_requested = True
+    durable_mod.signal_engagement_cancel(engagement_id)
+    audit.record(s, actor, "engagement.halt", "engagement", eng.id)
+    return eng
+
+
+def resume_engagement(s: Session, engagement_id: int, *, actor: str) -> Engagement:
+    eng = get_engagement(s, engagement_id)
+    if eng.status != "halted":
+        raise ServiceError("engagement is not halted")
+    eng.status = "active"
+    from attestra.jobs import durable as durable_mod
+
+    durable_mod.clear_engagement_cancel(engagement_id)
+    audit.record(s, actor, "engagement.resume", "engagement", eng.id)
+    return eng

@@ -26,13 +26,22 @@ def normalize_title(title: str) -> str:
 
 
 def fingerprint(
-    *, location: str, cwe: int | None, cves: list[str], title: str, param: str = "", package: str = ""
+    *,
+    location: str,
+    cwe: int | None,
+    cves: list[str],
+    title: str,
+    param: str = "",
+    package: str = "",
+    asset_id: int | None = None,
 ) -> str:
+    """Stable fingerprint. Optional ``asset_id`` scopes DAST issues per target."""
     loc = normalize_location(location)
+    asset_part = str(asset_id) if asset_id is not None else ""
     if cves:
-        key = ["cve", ",".join(sorted(c.upper() for c in cves)), package.lower(), loc]
+        key = ["cve", ",".join(sorted(c.upper() for c in cves)), package.lower(), loc, asset_part]
     elif cwe:
-        key = ["cwe", str(cwe), loc, param.lower()]
+        key = ["cwe", str(cwe), loc, param.lower(), asset_part]
     else:
-        key = ["title", normalize_title(title), loc, param.lower()]
+        key = ["title", normalize_title(title), loc, param.lower(), asset_part]
     return hashlib.sha256("|".join(key).encode()).hexdigest()

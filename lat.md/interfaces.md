@@ -25,17 +25,17 @@ Notable routes:
 | POST | `/api/reports/{rid}/approve` | Four-eyes approve |
 | GET | `/api/audit/verify` | Audit chain check |
 
-Writes require [[attestra/api.py#actor]] (`X-Attestra-Actor`). Service errors map via [[attestra/api.py#_run]].
+Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attestra/api.py#require]] for the route permission. Service errors map via [[attestra/api.py#_run]].
 
 ## CLI
 
 Command-line entrypoint sharing the same services layer.
 
-[[attestra/cli.py]] — `attestra` entrypoint: demo, serve, import, enrich, transition, compliance, report, approve, verify-report, verify-audit, findings.
+[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, key create, migrate-storage, serve, worker, import, enrich, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
 
 ## Web dashboard
 
-Server-rendered UI served alongside the API.
+Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/ui.py#login]]); session cookie replaces the old free-text actor bar.
 
 [[attestra/web/ui.py]] — server-rendered UI mounted with the API.
 

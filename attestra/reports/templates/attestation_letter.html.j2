@@ -1,0 +1,25 @@
+{% extends "_base.html.j2" %}
+{% block title %}Attestation letter{% endblock %}
+{% block body %}
+<h1>Attestation letter</h1>
+<div class="meta">{{ tenant }} · {{ eng.name }} · {{ today }}</div>
+
+<p>Attestra records that security testing activities for
+<strong>{{ eng.name }}</strong> ({{ eng.type|upper }}) were performed under a
+signed client authorization covering the approved environments for this engagement.</p>
+
+<p>This attestation does <strong>not</strong> list individual vulnerabilities,
+proof-of-concept details, or remediation guidance. Those appear only in the
+technical report under dual-control approval.</p>
+
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Client</td><td>{{ tenant }}</td></tr>
+  <tr><td>Engagement</td><td>{{ eng.name }}</td></tr>
+  <tr><td>Frameworks in scope</td><td>{{ eng.frameworks|join(", ") or "n/a" }}</td></tr>
+  <tr><td>Authorizations on file</td><td>{{ authorizations|length }}</td></tr>
+  <tr><td>Open critical/high (count only)</td><td>{{ open_critical_high }}</td></tr>
+</table>
+
+<p>Prepared by {{ generated_by }} on {{ generated_at }}.</p>
+{% endblock %}

@@ -8,7 +8,7 @@ authorization and import the results here.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from attestra.importers import nuclei, sarif, trivy, zap
 from attestra.importers.base import NormalizedFinding

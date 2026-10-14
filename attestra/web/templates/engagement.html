@@ -74,6 +74,45 @@
   </details>
 </div>
 
+<div class="card" id="scans">
+  <h2>Scans (runner)</h2>
+  <p class="meta">Dispatch a scoped scanner run. Requires valid authorization, window, ownership verification, and (for active profiles) intrusive permission. Halt stops all jobs for this engagement.</p>
+  <div class="row" style="margin-bottom:10px">
+    <form method="post" action="/engagements/{{ e.id }}/halt" style="display:inline">{% if e.status != 'halted' %}<button type="submit" class="secondary">Halt engagement</button>{% endif %}</form>
+    <form method="post" action="/engagements/{{ e.id }}/resume" style="display:inline">{% if e.status == 'halted' %}<button type="submit">Resume engagement</button>{% endif %}</form>
+    <span class="meta">Status: <b>{{ e.status }}</b></span>
+  </div>
+  <table>
+    <tr><th>ID</th><th>Tool</th><th>Asset</th><th>Profile</th><th>Status</th><th>SHA-256</th></tr>
+    {% for r in scans %}
+    <tr>
+      <td>{{ r.id }}</td><td>{{ r.tool }}</td><td class="mono">{{ r.asset_id }}</td>
+      <td>{{ r.profile }}</td><td>{{ r.status }}{% if r.refuse_reason %}<div class="meta st-not_met">{{ r.refuse_reason }}</div>{% endif %}</td>
+      <td class="mono">{{ r.raw_sha256[:16] + "…" if r.raw_sha256 else "-" }}</td>
+    </tr>
+    {% else %}<tr><td colspan="6">No scan runs yet.</td></tr>{% endfor %}
+  </table>
+  <details>
+    <summary>+ Queue a scan</summary>
+    <form method="post" action="/engagements/{{ e.id }}/scans">
+      <div class="fields">
+        <div><label for="scan_asset">Target *</label>
+          <select id="scan_asset" name="asset_id" required>
+            {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="scan_tool">Tool *</label>
+          <select id="scan_tool" name="tool"><option value="trivy">trivy</option><option value="semgrep">semgrep</option><option value="nuclei">nuclei</option><option value="zap">zap</option></select>
+        </div>
+        <div><label for="scan_profile">Profile</label>
+          <select id="scan_profile" name="profile"><option value="baseline">baseline</option><option value="active">active</option></select>
+        </div>
+      </div>
+      <div style="margin-top:10px"><button type="submit">Queue scan</button></div>
+    </form>
+  </details>
+</div>
+
 <div class="card">
   <h2>2. Targets in scope</h2>
   <p class="meta">Each website, API, host, repository, image, cloud account or app the client wants tested, its environment, and which tests are planned for it.</p>
@@ -182,7 +221,7 @@
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">unmatched</span>{% endif %}</td>
-      <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}</td>
+      <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
       <td>{{ f.tools|join(", ") }}</td>
       <td>{{ f.status|replace("_"," ") }}</td>
       <td>{{ f.sla_due or "" }}</td>
@@ -203,6 +242,55 @@
       <td>{% for fid in r.finding_ids %}F-{{ fid }} {% endfor %}</td>
     </tr>
     {% endfor %}
+  </table>
+</div>
+
+<div class="card" id="pci-records">
+  <h2>PCI records (ASV &amp; segmentation)</h2>
+  <div class="grid">
+    <div>
+      <h3>ASV scans</h3>
+      <table>
+        <tr><th>Vendor</th><th>Date</th><th>Passing</th><th>SHA-256</th></tr>
+        {% for a in asv_scans %}
+        <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "yes" if a.passing else "no" }}</td><td class="mono">{{ a.sha256[:16] }}…</td></tr>
+        {% else %}<tr><td colspan="4">None recorded.</td></tr>{% endfor %}
+      </table>
+      <form method="post" action="/engagements/{{ e.id }}/asv" enctype="multipart/form-data" style="margin-top:12px">
+        <div class="fields">
+          <div><label>Vendor</label><input name="vendor" required></div>
+          <div><label>Scan date</label><input type="date" name="scan_date" value="{{ today }}" required></div>
+          <div><label><input type="checkbox" name="passing" value="true"> Passing</label></div>
+          <div><label>Attestation file</label><input type="file" name="file" required></div>
+        </div>
+        <button type="submit">Add ASV record</button>
+      </form>
+    </div>
+    <div>
+      <h3>Segmentation tests</h3>
+      <table>
+        <tr><th>Boundary</th><th>Result</th><th>Date</th></tr>
+        {% for t in segmentation_tests %}
+        <tr><td>{{ t.boundary }}</td><td>{{ t.result }}</td><td>{{ t.tested_on }}</td></tr>
+        {% else %}<tr><td colspan="3">None recorded.</td></tr>{% endfor %}
+      </table>
+      <form method="post" action="/engagements/{{ e.id }}/segmentation" style="margin-top:12px">
+        <div class="fields">
+          <div><label>Boundary</label><input name="boundary" required></div>
+          <div><label>Method</label><input name="method"></div>
+          <div><label>Result</label><select name="result"><option value="pass">pass</option><option value="fail">fail</option></select></div>
+          <div><label>Tested on</label><input type="date" name="tested_on" value="{{ today }}" required></div>
+        </div>
+        <button type="submit">Add segmentation test</button>
+      </form>
+    </div>
+  </div>
+  <h3 style="margin-top:16px">ISO nonconformities</h3>
+  <table>
+    <tr><th>Control</th><th>Action</th><th>Owner</th><th>Due</th></tr>
+    {% for n in nonconformities %}
+    <tr><td>{{ n.control_ref }}</td><td>{{ n.corrective_action }}</td><td>{{ n.owner }}</td><td>{{ n.due or "" }}</td></tr>
+    {% else %}<tr><td colspan="4">None.</td></tr>{% endfor %}
   </table>
 </div>
 

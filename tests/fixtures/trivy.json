@@ -1,0 +1,55 @@
+{
+  "ArtifactName": "registry.example.com/shop/api",
+  "ArtifactType": "container_image",
+  "Results": [
+    {
+      "Target": "registry.example.com/shop/api (alpine 3.18)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-9999",
+          "PkgName": "example-lib",
+          "InstalledVersion": "2.0.0",
+          "FixedVersion": "2.1.0",
+          "Title": "Critical RCE in example-lib",
+          "Description": "Remote code execution via unsafe deserialization in example-lib before 2.1.0.",
+          "Severity": "CRITICAL",
+          "CweIDs": ["CWE-94"],
+          "CVSS": {
+            "nvd": {
+              "V3Score": 9.8,
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+            }
+          }
+        },
+        {
+          "VulnerabilityID": "CVE-2023-5678",
+          "PkgName": "libssl",
+          "InstalledVersion": "1.1.1t",
+          "FixedVersion": "1.1.1u",
+          "Title": "OpenSSL memory corruption",
+          "Description": "Memory corruption in OpenSSL 1.1.1 before 1.1.1u.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-119"],
+          "CVSS": {
+            "nvd": {
+              "V3Score": 7.4,
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+            }
+          }
+        }
+      ],
+      "Misconfigurations": [
+        {
+          "ID": "DS002",
+          "Title": "Image user should not be root",
+          "Severity": "HIGH",
+          "Description": "Running containers as root is a security risk.",
+          "Resolution": "Specify a non-root user in the Dockerfile using USER directive.",
+          "Status": "FAIL"
+        }
+      ]
+    }
+  ]
+}

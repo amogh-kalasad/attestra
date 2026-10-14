@@ -8,10 +8,11 @@ How framework and CWE YAML become the in-memory Library.
 
 [[attestra/compliance/engine.py#load_library]] reads:
 
-- [[attestra/compliance/data/controls.yaml]] — frameworks, objectives, control titles
-- [[attestra/compliance/data/cwe_map.yaml]] — CWE → objectives (+ defaults)
+- [[attestra/compliance/data/controls.yaml]] — frameworks, objectives, evidence expectations, control titles
+- [[attestra/compliance/data/cwe_map.yaml]] — CWE → objectives with `strength`/`rationale` (+ defaults)
+- [[attestra/compliance/data/owasp.yaml]] — CWE → OWASP Top 10 / ASVS / WSTG (via [[attestra/compliance/owasp.py#map_finding_to_owasp]])
 
-Cached as [[attestra/compliance/engine.py#Library]].
+Cached as [[attestra/compliance/engine.py#Library]] with [[attestra/compliance/engine.py#CweMapping]] entries.
 
 ## Finding to objectives
 
@@ -32,9 +33,20 @@ How [[attestra/compliance/engine.py#evaluate]] builds proposed control statuses.
 Builds [[attestra/compliance/engine.py#ControlResult]] per control ref:
 
 - **Finding objectives** — open findings drive `not_met` / `partial` / `no_exceptions` via [[attestra/compliance/engine.py#_finding_status]]
-- **Process objectives** — engagement evidence via [[attestra/compliance/engine.py#_process_status]] (`has_imports`, `has_valid_authorization`, `has_validated_pt`, `no_open_high_after_retest`)
+- **Process objectives** — engagement evidence via [[attestra/compliance/engine.py#_process_status]] (`has_imports`, `has_valid_authorization`, `has_validated_pt`, `no_open_high_after_retest`, `asv_passing_scan`, `segmentation_tested`, `internal_scan_quarterly`, `has_risk_assessment`)
 
 Weakest claim wins when several objectives feed one control ref.
+
+## PCI / ISO records
+
+ASV attestations, segmentation tests, risk acceptances, scan schedules, and nonconformities feed process rules and reports.
+
+- ASV: [[attestra/services.py#add_asv_scan]] → [[attestra/models.py#AsvScan]] (PCI 11.3.2)
+- Segmentation: [[attestra/services.py#add_segmentation_test]]
+- Risk acceptance + expiry: [[attestra/services.py#accept_risk]], [[attestra/services.py#expire_risk_acceptances]] (CLI `attestra expire-risk`)
+- Quarterly calendar: [[attestra/services.py#enqueue_due_schedules]] (worker loop)
+- SLA breaches: [[attestra/services.py#sla_breaches]]; reports `iso_soa` / `ageing`
+- External review log: [[attestra/compliance/data/REVIEW.md]]; export via [[attestra/services.py#export_compliance_library_csv]]
 
 ## Assessor confirmation
 

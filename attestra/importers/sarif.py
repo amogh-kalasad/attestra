@@ -40,8 +40,8 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             else:
                 severity = norm_severity(LEVEL_TO_SEVERITY.get(res.get("level") or rule.get("defaultConfiguration", {}).get("level", "warning")))
             loc = ""
-            for l in res.get("locations", []) or []:
-                pl = l.get("physicalLocation", {})
+            for location in res.get("locations", []) or []:
+                pl = location.get("physicalLocation", {})
                 uri = pl.get("artifactLocation", {}).get("uri", "")
                 line = pl.get("region", {}).get("startLine")
                 loc = f"{uri}:{line}" if line else uri

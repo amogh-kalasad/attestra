@@ -1,6 +1,6 @@
 # Authorization and scope
 
-No valid signed client authorization means no import. This is the v0.1 scope gate (ISO A.8.34 / PCI 11.4.1 spirit).
+No valid signed client authorization means no import. Runner dispatch adds URL/path/image checks, deny rules, and ownership verification ([[runner#Scope authorization]]).
 
 ## Authorization record
 
@@ -33,8 +33,18 @@ In-scope targets for an engagement and how import locations are matched.
 
 Asset matching for imported locations: [[attestra/services.py#match_asset]] (host/URL normalization via [[attestra/services.py#_asset_key]]).
 
-## Identity placeholder
+## Identity
 
-Temporary actor identity until SSO lands.
+Bearer API keys and signed session cookies identify callers; roles gate every route.
 
-Write APIs require `X-Attestra-Actor` ([[attestra/api.py#actor]]). This is not SSO. Replace with Keycloak OIDC and RBAC before shared deployment.
+[[attestra/api.py#get_principal]] resolves `Authorization: Bearer` via [[attestra/auth/keys.py#authenticate_api_key]] or the `attestra_session` cookie via [[attestra/auth/session.py#read_session]]. [[attestra/api.py#require]] checks [[attestra/auth/roles.py#has_permission]] against the six roles in [[attestra/auth/roles.py#ROLES]].
+
+UI login: [[attestra/web/ui.py#login]]. Passwords use scrypt ([[attestra/auth/keys.py#hash_password]]). Report workflow enforces distinct author / QA / signer user ids ([[attestra/reports/render.py#sign_report]]).
+
+Optional Keycloak OIDC sits behind `ATTESTRA_OIDC_ENABLED` ([[attestra/auth/oidc.py#oidc_enabled]], [[attestra/auth/oidc.py#validate_id_token_claims]]).
+
+## Tenant isolation
+
+Queries and storage are scoped per tenant for non-admin principals.
+
+[[attestra/services.py#scoped]] and [[attestra/services.py#tenant_ids_for]] filter engagement access. Evidence/imports/reports land under `DATA_DIR/tenants/<id>/` via [[attestra/services.py#_store]]. Rate limits and security headers: [[attestra/api_security.py#RateLimitMiddleware]], [[attestra/api_security.py#SecurityHeadersMiddleware]].

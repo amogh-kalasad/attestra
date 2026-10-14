@@ -1,0 +1,58 @@
+{
+  "site": [
+    {
+      "@name": "https://shop.example.com",
+      "alerts": [
+        {
+          "pluginid": "40012",
+          "alert": "Cross Site Scripting (Reflected)",
+          "riskcode": "3",
+          "confidence": "2",
+          "cweid": "79",
+          "desc": "<p>Cross-site scripting vulnerability allows attackers to inject client-side scripts.</p>",
+          "solution": "<p>Phase: Architecture and Design. Use a vetted library or framework. Filter all input.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/search", "param": "q"},
+            {"uri": "https://shop.example.com/product", "param": "name"}
+          ]
+        },
+        {
+          "pluginid": "10202",
+          "alert": "Absence of Anti-CSRF Tokens",
+          "riskcode": "2",
+          "confidence": "2",
+          "cweid": "352",
+          "desc": "<p>No anti-CSRF tokens found in a HTML submission form.</p>",
+          "solution": "<p>Phase: Architecture and Design. Use a vetted library or framework that provides CSRF protection.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/checkout", "param": ""}
+          ]
+        },
+        {
+          "pluginid": "10021",
+          "alert": "X-Content-Type-Options Header Missing",
+          "riskcode": "1",
+          "confidence": "2",
+          "cweid": "693",
+          "desc": "<p>The Anti-MIME-Sniffing header X-Content-Type-Options was not set to 'nosniff'.</p>",
+          "solution": "<p>Ensure that the application/web server sets the Content-Type header appropriately.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/", "param": ""}
+          ]
+        },
+        {
+          "pluginid": "99001",
+          "alert": "False Positive — Should Be Skipped",
+          "riskcode": "2",
+          "confidence": "0",
+          "cweid": "0",
+          "desc": "<p>Confidence 0 means ZAP marked this a false positive; Attestra skips it.</p>",
+          "solution": "<p>N/A</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/skip-me", "param": "test"}
+          ]
+        }
+      ]
+    }
+  ]
+}

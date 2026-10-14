@@ -1,62 +1,196 @@
 # CWE -> control objectives (keys in controls.yaml).
 # Every finding also maps to vuln_identification; findings with a CVE also map
 # to patching. Unknown CWEs fall back to `default`.
-default: [vuln_identification]
+# Each entry includes strength (full|partial) and rationale for library integrity.
+
+default: ['vuln_identification']
 
 cwe:
-  # Injection and input handling (OWASP A03)
-  20: [secure_coding, web_app_protection]
-  74: [secure_coding, web_app_protection]
-  77: [secure_coding, web_app_protection]
-  78: [secure_coding, web_app_protection]
-  79: [secure_coding, web_app_protection]
-  89: [secure_coding, web_app_protection]
-  94: [secure_coding, web_app_protection]
-  611: [secure_coding, web_app_protection]
-  917: [secure_coding, web_app_protection]
-  # Broken access control (OWASP A01)
-  22: [access_control, secure_coding]
-  284: [access_control]
-  285: [access_control]
-  352: [secure_coding, web_app_protection]
-  601: [secure_coding, web_app_protection]
-  639: [access_control]
-  862: [access_control]
-  863: [access_control]
-  918: [secure_coding, web_app_protection]
-  # Cryptographic failures (OWASP A02)
-  295: [crypto_in_transit]
-  311: [crypto_in_transit, data_protection]
-  319: [crypto_in_transit]
-  326: [crypto_in_transit]
-  327: [crypto_in_transit]
-  # Authentication failures (OWASP A07)
-  287: [authentication]
-  306: [authentication]
-  307: [authentication]
-  384: [authentication]
-  521: [authentication]
-  798: [secrets_management, authentication]
-  259: [secrets_management]
-  321: [secrets_management, crypto_in_transit]
-  # Security misconfiguration (OWASP A05)
-  16: [secure_config]
-  693: [secure_config, web_app_protection]
-  1004: [secure_config]
-  1021: [secure_config, web_app_protection]
-  614: [secure_config]
-  525: [secure_config]
-  # Sensitive data exposure
-  200: [data_protection]
-  209: [data_protection, secure_config]
-  497: [data_protection, secure_config]
-  532: [data_protection, logging]
-  # Logging and monitoring failures (OWASP A09)
-  778: [logging]
-  # Vulnerable and outdated components (OWASP A06)
-  937: [supply_chain, patching]
-  1035: [supply_chain, patching]
-  1104: [supply_chain, patching]
-  # Insecure deserialization / integrity (OWASP A08)
-  502: [secure_coding]
-  829: [supply_chain]
+  16:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  20:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  22:
+    objectives: ['access_control', 'secure_coding']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  74:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  77:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  78:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  79:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  89:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  94:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  200:
+    objectives: ['data_protection']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  209:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  259:
+    objectives: ['secrets_management']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  284:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  285:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  287:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  295:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  306:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  307:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  311:
+    objectives: ['crypto_in_transit', 'data_protection']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  319:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  321:
+    objectives: ['secrets_management', 'crypto_in_transit']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  326:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  327:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  352:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  384:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  497:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  502:
+    objectives: ['secure_coding']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  521:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  525:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  532:
+    objectives: ['data_protection', 'logging']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  601:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  611:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  614:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  639:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  693:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  778:
+    objectives: ['logging']
+    strength: full
+    rationale: 'Insufficient logging maps to monitoring and audit log controls.'
+  798:
+    objectives: ['secrets_management', 'authentication']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  829:
+    objectives: ['supply_chain']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  862:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  863:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  917:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  918:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  937:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  1004:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  1021:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  1035:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  1104:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'

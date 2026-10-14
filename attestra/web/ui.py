@@ -1,7 +1,7 @@
 """Server-rendered dashboard: clients, engagements, scope and targets, test plan, imports.
 
-The acting user's name is kept in a cookie (`attestra_actor`) so every form
-submission is attributed in the audit log. This stands in for SSO in v0.1.
+Identity is a signed session cookie (``attestra_session``) established via ``/login``.
+Every write is attributed to the authenticated username in the audit log.
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from attestra import __version__, db, services
+from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
 from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
-    ENGAGEMENT_TYPES,
     ENVIRONMENTS,
     OPEN_STATUSES,
     TEST_TYPES,
@@ -33,7 +33,6 @@ from attestra.models import (
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-COOKIE = "attestra_actor"
 
 ENGAGEMENT_TYPE_LABELS = {
     "va": "Vulnerability Assessment (VA)",
@@ -45,8 +44,33 @@ ENGAGEMENT_TYPE_LABELS = {
 
 
 def _actor(request: Request) -> str | None:
-    name = (request.cookies.get(COOKIE) or "").strip()
-    return name or None
+    from attestra.auth.session import read_session
+
+    data = read_session(request.cookies.get(COOKIE))
+    if data and data.get("u"):
+        return str(data["u"])
+    return None
+
+
+def _principal(request: Request):
+    from attestra.auth.keys import Principal
+    from attestra.auth.session import read_session
+    from attestra.models import User
+
+    data = read_session(request.cookies.get(COOKIE))
+    if not data or not data.get("uid"):
+        return None
+    with db.session() as s:
+        user = s.get(User, int(data["uid"]))
+        if not user or not user.active:
+            return None
+        return Principal(
+            user_id=user.id,
+            username=user.username,
+            display_name=user.display_name,
+            role=user.role,
+            tenant_id=user.tenant_id,
+        )
 
 
 def _render(request: Request, template: str, ctx: dict) -> HTMLResponse:
@@ -65,10 +89,17 @@ def _back(url: str, *, msg: str | None = None, error: str | None = None, anchor:
     return RedirectResponse(f"{url}{q}{anchor}", status_code=303)
 
 
+def _require_login(request: Request, next_url: str = "/"):
+    principal = _principal(request)
+    if not principal:
+        return None, _back("/login", error="Sign in to continue.")
+    return principal, None
+
+
 def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwargs) -> RedirectResponse:
     who = _actor(request)
     if not who:
-        return _back(url, error="Enter your name in the top bar first, so the action is recorded in the audit log.", anchor=anchor)
+        return _back("/login", error="Sign in to continue.", anchor=anchor)
     try:
         with db.session() as s:
             fn(s, *args, **kwargs, actor=who)
@@ -80,14 +111,31 @@ def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwarg
 # ---------------------------------------------------------------- identity
 
 
-@router.post("/actor")
-def set_actor(request: Request, name: str = Form(""), next: str = Form("/")):
+@router.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    return _render(request, "login.html", {})
+
+
+@router.post("/login")
+def login(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
+    from attestra.auth.keys import authenticate_password
+    from attestra.auth.session import issue_session
+
+    target = next if next.startswith("/") and not next.startswith("//") else "/"
+    with db.session() as s:
+        principal = authenticate_password(s, username, password)
+    if not principal:
+        return _back("/login", error="Invalid username or password.")
+    resp = RedirectResponse(target, status_code=303)
+    resp.set_cookie(COOKIE, issue_session(principal.user_id, principal.username), httponly=True, samesite="lax")
+    return resp
+
+
+@router.post("/logout")
+def logout(next: str = Form("/")):
     target = next if next.startswith("/") and not next.startswith("//") else "/"
     resp = RedirectResponse(target, status_code=303)
-    if name.strip():
-        resp.set_cookie(COOKIE, name.strip()[:100], httponly=True, samesite="lax")
-    else:
-        resp.delete_cookie(COOKIE)
+    resp.delete_cookie(COOKIE)
     return resp
 
 
@@ -96,9 +144,12 @@ def set_actor(request: Request, name: str = Form(""), next: str = Form("/")):
 
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
     with db.session() as s:
         rows = []
-        for e in s.scalars(select(Engagement).order_by(Engagement.id.desc())):
+        for e in s.scalars(services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())):
             open_f = [f for f in e.findings if f.status in OPEN_STATUSES]
             rows.append({
                 "e": e,
@@ -112,6 +163,9 @@ def home(request: Request):
 
 @router.get("/engagements/new", response_class=HTMLResponse)
 def new_engagement_form(request: Request):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
     lib = load_library()
     return _render(request, "new_engagement.html", {
         "types": ENGAGEMENT_TYPE_LABELS,
@@ -133,16 +187,17 @@ def create_engagement(
     window_start: str = Form(""),
     window_end: str = Form(""),
 ):
-    who = _actor(request)
-    if not who:
-        return _back("/engagements/new", error="Enter your name in the top bar first.")
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
     try:
         ws = date.fromisoformat(window_start) if window_start else None
         we = date.fromisoformat(window_end) if window_end else None
         with db.session() as s:
             e = services.create_engagement(
                 s, tenant=tenant, name=name, type=type, frameworks=frameworks, window_start=ws, window_end=we,
-                industry=industry, contact_name=contact_name, contact_email=contact_email, actor=who,
+                industry=industry, contact_name=contact_name, contact_email=contact_email,
+                actor=principal.actor, principal=principal,
             )
             eid = e.id
     except (services.ServiceError, ValueError) as e:
@@ -181,9 +236,12 @@ def _test_plan(e: Engagement) -> list[dict]:
 
 @router.get("/engagements/{eid}", response_class=HTMLResponse)
 def engagement_page(request: Request, eid: int, framework: str | None = None):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
     with db.session() as s:
         try:
-            e = services.get_engagement(s, eid)
+            e = services.get_engagement(s, eid, principal)
         except LookupError:
             raise HTTPException(404, "engagement not found")
         lib = load_library()
@@ -192,13 +250,21 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         findings = services.list_findings(s, eid)
         imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
         reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
+        scans = services.list_scans(s, eid)
         authorized = services.authorized_environments(e)
+        asv_scans = list(e.asv_scans)
+        segmentation_tests = list(e.segmentation_tests)
+        nonconformities = list(e.nonconformities)
         return _render(request, "engagement.html", {
             "e": e,
             "type_label": ENGAGEMENT_TYPE_LABELS.get(e.type, e.type),
             "findings": findings,
             "imports": imports,
+            "scans": scans,
             "reports": reports,
+            "asv_scans": asv_scans,
+            "segmentation_tests": segmentation_tests,
+            "nonconformities": nonconformities,
             "results": results,
             "fw": fw,
             "fw_names": {k: v["name"] for k, v in lib.frameworks.items()},
@@ -269,7 +335,7 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
     who = _actor(request)
     url = f"/engagements/{eid}"
     if not who:
-        return _back(url, error="Enter your name in the top bar first.", anchor="#import")
+        return _back("/login", error="Sign in to continue.", anchor="#import")
     try:
         with db.session() as s:
             run = services.import_results(s, eid, tool=tool, filename=file.filename or f"{tool}.json", data=data, actor=who)
@@ -279,3 +345,74 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#import")
     return _back(url, msg=msg + ".", anchor="#findings")
+
+
+@router.post("/engagements/{eid}/scans")
+def queue_scan(
+    request: Request,
+    eid: int,
+    asset_id: int = Form(...),
+    tool: str = Form(...),
+    profile: str = Form("baseline"),
+):
+    who = _actor(request)
+    url = f"/engagements/{eid}"
+    if not who:
+        return _back("/login", error="Sign in to continue.", anchor="#scans")
+    try:
+        with db.session() as s:
+            run = services.request_scan(s, eid, asset_id=asset_id, tool=tool, profile=profile, actor=who)
+            if run.status == "refused":
+                return _back(url, error=run.refuse_reason or "scan refused", anchor="#scans")
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#scans")
+    return _back(url, msg=f"Scan #{run.id} queued ({tool}/{profile}).", anchor="#scans")
+
+
+@router.post("/engagements/{eid}/asv")
+async def ui_add_asv(
+    request: Request,
+    eid: int,
+    vendor: str = Form(...),
+    scan_date: date = Form(...),
+    file: UploadFile = File(...),
+    passing: str = Form(""),
+):
+    data = await file.read()
+    who = _actor(request)
+    if not who:
+        return _back("/login", error="Sign in to continue.")
+    try:
+        with db.session() as s:
+            services.add_asv_scan(
+                s, eid, vendor=vendor, scan_date=scan_date, passing=bool(passing),
+                filename=file.filename or "asv.pdf", data=data, actor=who,
+            )
+    except (services.ServiceError, LookupError) as e:
+        return _back(f"/engagements/{eid}", error=str(e), anchor="#pci-records")
+    return _back(f"/engagements/{eid}", msg="ASV record added.", anchor="#pci-records")
+
+
+@router.post("/engagements/{eid}/segmentation")
+def ui_add_segmentation(
+    request: Request,
+    eid: int,
+    boundary: str = Form(...),
+    method: str = Form(""),
+    result: str = Form(...),
+    tested_on: date = Form(...),
+):
+    return _do(
+        request, f"/engagements/{eid}", "#pci-records", "Segmentation test recorded.",
+        services.add_segmentation_test, eid, boundary=boundary, method=method, result=result, tested_on=tested_on,
+    )
+
+
+@router.post("/engagements/{eid}/halt")
+def halt_engagement(request: Request, eid: int):
+    return _do(request, f"/engagements/{eid}", "#scans", "Engagement halted.", services.halt_engagement, eid)
+
+
+@router.post("/engagements/{eid}/resume")
+def resume_engagement(request: Request, eid: int):
+    return _do(request, f"/engagements/{eid}", "#scans", "Engagement resumed.", services.resume_engagement, eid)

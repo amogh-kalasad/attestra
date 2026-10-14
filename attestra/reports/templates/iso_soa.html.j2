@@ -1,0 +1,39 @@
+{% extends "_base.html.j2" %}
+{% block title %}ISO Statement of Applicability{% endblock %}
+{% block body %}
+<h1>Statement of Applicability — {{ soa_framework }}</h1>
+<div class="meta">{{ eng.name }} · {{ tenant }} · generated {{ generated_at }} by {{ generated_by }}</div>
+
+<p class="note">Proposed control statuses from the Attestra library. Confirmed statuses override proposals.
+Nonconformities listed below track corrective action for ISO Clause 10.2.</p>
+
+<table>
+  <tr><th>Control</th><th>Title</th><th>Status</th><th>Basis</th></tr>
+  {% for r in soa_results %}
+  <tr>
+    <td><b>{{ r.ref }}</b></td>
+    <td>{{ r.title }}</td>
+    <td><span class="st st-{{ r.status }}">{{ r.status|replace("_", " ") }}</span></td>
+    <td>{{ r.rationale if r.confirmed else r.reason }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Nonconformities</h2>
+{% if nonconformities %}
+<table>
+  <tr><th>Control</th><th>Corrective action</th><th>Owner</th><th>Due</th><th>Closed</th></tr>
+  {% for n in nonconformities %}
+  <tr>
+    <td>{{ n.control_ref }}</td>
+    <td>{{ n.corrective_action }}</td>
+    <td>{{ n.owner }}</td>
+    <td>{{ n.due or "" }}</td>
+    <td>{{ n.closed_at or "open" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No nonconformity records on this engagement.</p>
+{% endif %}
+{% endblock %}

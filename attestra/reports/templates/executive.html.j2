@@ -18,6 +18,15 @@
   {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
 </div>
 
+<h2>Trend vs prior engagement</h2>
+{% if prev_by_sev is not none %}
+<p class="meta">Solid bars: this engagement. Faded bars: previous engagement for the same client.</p>
+<div>{{ trend_svg|safe }}</div>
+{% else %}
+<p class="meta">No prior engagement for this client — trend chart shows current open counts only.</p>
+<div>{{ trend_svg|safe }}</div>
+{% endif %}
+
 <h2>Top risks</h2>
 <table>
   <tr><th>Finding</th><th>Severity</th><th>Asset / location</th><th>Fix by</th></tr>

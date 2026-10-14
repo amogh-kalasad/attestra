@@ -23,7 +23,7 @@ How the Python package is split: interfaces call shared services; importers, com
 | Compliance | CWE → objective → PCI / ISO / SOC 2 | [[attestra/compliance/engine.py]] |
 | Reports | Jinja HTML, four-eyes, HMAC signature | [[attestra/reports/render.py]], [[attestra/reports/signing.py]] |
 | Evidence and audit | Content-addressed files; hash-chained log | [[attestra/services.py#_store]], [[attestra/audit.py]] |
-| Data | SQLAlchemy models; SQLite or PostgreSQL | [[attestra/models.py]], [[attestra/db.py]], [[attestra/config.py]] |
+| Data | SQLAlchemy models; SQLite or PostgreSQL; Alembic for production schema | [[attestra/models.py]], [[attestra/db.py]], [[attestra/db.py#upgrade]], [[attestra/config.py]], [[migrations/versions/0001_baseline.py]] |
 
 ## Design decisions
 
@@ -59,6 +59,12 @@ Raw artifacts are hashed write-once; the audit log is hash-chained; reports are 
 
 Raw imports, evidence, and reports are SHA-256 hashed and stored write-once ([[attestra/services.py#_store]]). The audit log is hash-chained ([[attestra/audit.py]]). Reports carry an HMAC signature ([[attestra/reports/signing.py]]).
 
+## Schema migrations
+
+Production and `attestra init` / serve apply Alembic to head; tests still use fast `create_all`.
+
+[[attestra/db.py#upgrade]] runs Alembic (`alembic.ini`, [[migrations/env.py]]) against [[attestra/config.py#DATABASE_URL]]. [[attestra/db.py#init]] takes `use_migrations=True` for CLI/API startup; pytest uses `create_all` for speed. Baseline revision: [[migrations/versions/0001_baseline.py]].
+
 ## Engagement flow
 
 End-to-end path for one engagement from create to signed report.
@@ -71,12 +77,18 @@ End-to-end path for one engagement from create to signed report.
 6. Evaluate compliance ([[attestra/services.py#compliance]]); assessor confirms controls.
 7. Generate, four-eyes approve, and verify reports ([[attestra/reports/render.py#generate_report]]).
 
-## Out of scope in v0.1
+## Runner plane (Phase 1)
 
-Capabilities intentionally deferred; do not invent runners or SSO in this tree without an explicit product decision.
+Scoped scanner dispatch is implemented; Temporal/OPA/SSO remain later phases.
 
-- Running scanners in isolated runners
-- Temporal workflows, OPA policy engine
-- Keycloak SSO / RBAC (uses `X-Attestra-Actor` header today)
-- DefectDojo / CISO Assistant integration
-- DOCX/PDF, cosign / X.509, S3 Object Lock
+See [[runner]]. Adapters write raw output under [[attestra/config.py#RAW_DIR]] then call [[attestra/services.py#import_results]]. Identity is Bearer/session with RBAC ([[authorization#Identity]]).
+
+## Still deferred
+
+Capabilities intentionally left for later phases (see [[docs/GAP_ANALYSIS_CURRENT.md]]).
+
+- Phase 5: evidence masking, Storage Protocol/S3, retention, append-only audit, backup manifests
+- Temporal workflows, OPA policy engine, Postgres RLS, Helm (Phase 6)
+- Full Keycloak UI login flow (OIDC flag and claim validation exist; enable when IdP is provisioned)
+- Client portal polish, ticket sync, extra scanners (Phase 7)
+- External pentest / GA (Phase 8)

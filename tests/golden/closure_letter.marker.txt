@@ -1,0 +1,2 @@
+kind=closure_letter
+sha256=da8cdbd17dff8032c957467fa2b2d0cbbf516549f0760cd4b6d469eb1197ba44

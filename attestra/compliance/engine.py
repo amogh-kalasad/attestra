@@ -9,7 +9,7 @@ status always wins over the proposal.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -22,35 +22,62 @@ SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 
 
 @dataclass(frozen=True)
+class CweMapping:
+    objectives: tuple[str, ...]
+    strength: str  # full | partial
+    rationale: str
+
+
+@dataclass(frozen=True)
 class Library:
     frameworks: dict
     objectives: dict
     titles: dict
-    cwe_map: dict
+    cwe_map: dict[int, CweMapping]
     default_objectives: tuple
+
+
+def _parse_cwe_entry(value) -> CweMapping:
+    if isinstance(value, list):
+        return CweMapping(objectives=tuple(value), strength="full", rationale="Legacy list mapping.")
+    objs = tuple(value.get("objectives") or [])
+    return CweMapping(
+        objectives=objs,
+        strength=str(value.get("strength") or ""),
+        rationale=str(value.get("rationale") or "").strip(),
+    )
 
 
 @lru_cache(maxsize=1)
 def load_library() -> Library:
-    controls = yaml.safe_load((DATA / "controls.yaml").read_text())
-    cwe = yaml.safe_load((DATA / "cwe_map.yaml").read_text())
+    controls = yaml.safe_load((DATA / "controls.yaml").read_text(encoding="utf-8"))
+    cwe = yaml.safe_load((DATA / "cwe_map.yaml").read_text(encoding="utf-8"))
     return Library(
         frameworks=controls["frameworks"],
         objectives=controls["objectives"],
         titles=controls.get("control_titles", {}),
-        cwe_map={int(k): v for k, v in (cwe.get("cwe") or {}).items()},
+        cwe_map={int(k): _parse_cwe_entry(v) for k, v in (cwe.get("cwe") or {}).items()},
         default_objectives=tuple(cwe.get("default", ["vuln_identification"])),
     )
+
+
+def clear_library_cache() -> None:
+    load_library.cache_clear()
 
 
 def objectives_for(finding: Finding, lib: Library | None = None) -> list[str]:
     lib = lib or load_library()
     objs = set(lib.default_objectives)
     if finding.cwe and finding.cwe in lib.cwe_map:
-        objs.update(lib.cwe_map[finding.cwe])
+        objs.update(lib.cwe_map[finding.cwe].objectives)
     if finding.cves:
         objs.update({"patching", "vuln_identification"})
     return sorted(objs)
+
+
+def mapping_for_cwe(cwe: int, lib: Library | None = None) -> CweMapping | None:
+    lib = lib or load_library()
+    return lib.cwe_map.get(cwe)
 
 
 def in_framework_scope(finding: Finding, framework: str) -> bool:
@@ -73,6 +100,8 @@ class ControlResult:
     confirmed: str | None = None
     assessor: str = ""
     rationale: str = ""
+    mapping_strength: str = ""
+    mapping_rationale: str = ""
 
     @property
     def status(self) -> str:
@@ -90,6 +119,17 @@ def _finding_status(open_findings: list[Finding]) -> tuple[str, str]:
     if rank == 2:
         return "partial", f"{n} open finding(s); worst is medium."
     return "no_exceptions", f"Only {n} low/info finding(s) open, tracked for remediation; assessor to confirm."
+
+
+def _in_current_quarter(d: date, today: date | None = None) -> bool:
+    today = today or date.today()
+    q_start_month = ((today.month - 1) // 3) * 3 + 1
+    q_start = date(today.year, q_start_month, 1)
+    if q_start_month == 10:
+        q_end = date(today.year, 12, 31)
+    else:
+        q_end = date(today.year, q_start_month + 3, 1) - timedelta(days=1)
+    return q_start <= d <= q_end
 
 
 def _process_status(rule: str, eng: Engagement, findings: list[Finding], import_count: int) -> tuple[str, str]:
@@ -117,6 +157,48 @@ def _process_status(rule: str, eng: Engagement, findings: list[Finding], import_
         if retested or not findings:
             return "met", f"{len(retested)} finding(s) passed retest; no open critical/high."
         return "partial", "No open critical/high, but no retest recorded yet."
+    if rule == "asv_passing_scan":
+        scans = list(getattr(eng, "asv_scans", None) or [])
+        passing = [a for a in scans if a.passing and _in_current_quarter(a.scan_date)]
+        if passing:
+            a = passing[0]
+            return "met", f"Passing ASV scan on file ({a.vendor}, {a.scan_date})."
+        if scans:
+            return "not_met", "ASV scan(s) on file but none passing in the current quarter."
+        return "not_assessed", "No ASV scan attestation recorded."
+    if rule == "segmentation_tested":
+        tests = list(getattr(eng, "segmentation_tests", None) or [])
+        ok = [t for t in tests if (t.result or "").lower() in ("pass", "passed", "met")]
+        if ok:
+            t = ok[0]
+            return "met", f"Segmentation test passed ({t.boundary}, {t.tested_on})."
+        if tests:
+            return "not_met", "Segmentation test(s) recorded but none passed."
+        return "not_assessed", "No segmentation test recorded."
+    if rule == "internal_scan_quarterly":
+        schedules = list(getattr(eng, "scan_schedules", None) or [])
+        # Prefer schedule evidence; fall back to any import in the quarter via import count.
+        due_ok = any(sch.cadence == "quarterly" and sch.last_enqueued_at for sch in schedules)
+        if due_ok or import_count:
+            # Mark met if we have a quarterly schedule that has fired, or imports exist this engagement.
+            # Strict quarter cleanliness is tracked separately via ScanSchedule.quarter_clean.
+            clean = [sch for sch in schedules if sch.cadence == "quarterly" and sch.quarter_clean]
+            if clean:
+                return "met", "Quarterly internal scan schedule marked clean (no open high/critical)."
+            if due_ok or import_count:
+                return "partial", "Internal scans present; quarter not yet marked clean of high/critical."
+        return "not_assessed", "No quarterly internal scan schedule or imports."
+    if rule == "has_risk_assessment":
+        acceptances = list(getattr(eng, "risk_acceptances", None) or [])
+        # Engagement-level risk analysis evidenced by at least one risk acceptance or assessor note.
+        # Also met when any ControlAssessment exists for 12.3.1 / Clause 6.1.2 (handled by confirm).
+        if acceptances:
+            return "met", f"{len(acceptances)} risk acceptance record(s) on file."
+        # Presence of any confirmed control assessment on this engagement counts as assessment activity.
+        assessments = list(getattr(eng, "control_assessments", None) or [])
+        if assessments:
+            return "partial", "Control assessments present; document targeted risk analysis for full credit."
+        return "not_assessed", "No risk acceptance or control assessment records yet."
     return "not_assessed", f"Unknown rule '{rule}'."
 
 

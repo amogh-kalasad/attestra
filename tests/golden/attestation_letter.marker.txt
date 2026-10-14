@@ -1,0 +1,2 @@
+kind=attestation_letter
+sha256=814930c44a6dbf35941271c64688b2eafa568f5b5970ebe3a9d0095aaf26ba7d

@@ -21,6 +21,7 @@ objectives:
   vuln_identification:
     name: Identify and risk-rank security vulnerabilities
     kind: finding
+    evidence: ["finding_inventory", "risk_ranking"]
     controls:
       pci_dss_4: ["6.3.1"]
       iso_27001_2022: ["A.8.8"]
@@ -29,6 +30,7 @@ objectives:
   patching:
     name: Apply security patches within defined timeframes
     kind: finding
+    evidence: ["patch_records", "cve_remediation"]
     controls:
       pci_dss_4: ["6.3.3"]
       iso_27001_2022: ["A.8.8"]
@@ -37,6 +39,7 @@ objectives:
   secure_coding:
     name: Develop software to prevent common attacks
     kind: finding
+    evidence: ["sast_results", "code_review"]
     controls:
       pci_dss_4: ["6.2.4"]
       iso_27001_2022: ["A.8.28"]
@@ -45,6 +48,7 @@ objectives:
   web_app_protection:
     name: Protect public-facing web applications against attacks
     kind: finding
+    evidence: ["dast_results", "waf_config"]
     controls:
       pci_dss_4: ["6.4.1"]
       iso_27001_2022: ["A.8.26"]
@@ -53,6 +57,7 @@ objectives:
   secure_config:
     name: Maintain secure configuration baselines
     kind: finding
+    evidence: ["config_baseline", "hardening_evidence"]
     controls:
       pci_dss_4: ["2.2.1"]
       iso_27001_2022: ["A.8.9"]
@@ -61,6 +66,7 @@ objectives:
   crypto_in_transit:
     name: Use strong cryptography for data in transit
     kind: finding
+    evidence: ["tls_scan", "cipher_policy"]
     controls:
       pci_dss_4: ["4.2.1"]
       iso_27001_2022: ["A.8.24"]
@@ -69,6 +75,7 @@ objectives:
   authentication:
     name: Authenticate users and protect credentials
     kind: finding
+    evidence: ["authn_policy", "mfa_evidence"]
     controls:
       pci_dss_4: ["8.3.1"]
       iso_27001_2022: ["A.8.5"]
@@ -77,6 +84,7 @@ objectives:
   access_control:
     name: Restrict access by business need to know
     kind: finding
+    evidence: ["rbac_matrix", "access_reviews"]
     controls:
       pci_dss_4: ["7.2.1"]
       iso_27001_2022: ["A.8.3"]
@@ -85,6 +93,7 @@ objectives:
   data_protection:
     name: Prevent leakage of sensitive data
     kind: finding
+    evidence: ["dlp_controls", "data_flow"]
     controls:
       iso_27001_2022: ["A.8.12"]
       soc2: ["CC6.7"]
@@ -92,6 +101,7 @@ objectives:
   secrets_management:
     name: Keep credentials out of source code and configuration
     kind: finding
+    evidence: ["secret_scan", "vault_usage"]
     controls:
       pci_dss_4: ["8.6.2"]
       iso_27001_2022: ["A.5.17"]
@@ -100,6 +110,7 @@ objectives:
   logging:
     name: Log and monitor security events
     kind: finding
+    evidence: ["log_samples", "siem_alerts"]
     controls:
       pci_dss_4: ["10.2.1"]
       iso_27001_2022: ["A.8.15"]
@@ -108,45 +119,120 @@ objectives:
   supply_chain:
     name: Manage third-party and open-source component risk
     kind: finding
+    evidence: ["sbom", "vendor_assessment"]
     controls:
       pci_dss_4: ["6.3.2"]
       iso_27001_2022: ["A.5.21"]
-      soc2: ["CC9.2"]
+      soc2: ["CC9.2", "CC6.8"]
+
+  network_segmentation:
+    name: Isolate networks and verify segmentation controls
+    kind: finding
+    evidence: ["network_diagram", "firewall_rules"]
+    controls:
+      iso_27001_2022: ["A.8.22"]
+      soc2: ["CC6.6"]
+
+  change_management:
+    name: Control changes that affect security
+    kind: finding
+    evidence: ["change_tickets", "cab_records"]
+    controls:
+      pci_dss_4: ["6.4.2"]
+      iso_27001_2022: ["A.8.9"]
+      soc2: ["CC8.1"]
 
   internal_scanning:
-    name: Perform regular vulnerability scans
+    name: Perform regular internal vulnerability scans
     kind: process
     rule: has_imports
+    evidence: ["internal_scan_imports"]
     controls:
-      pci_dss_4: ["11.3.1"]
+      pci_dss_4: ["11.3.1", "11.3.1.1"]
       iso_27001_2022: ["A.8.8"]
       soc2: ["CC7.1"]
+
+  internal_scan_high_resolved:
+    name: Resolve high/critical internal scan findings or document exceptions
+    kind: process
+    rule: no_open_high_after_retest
+    evidence: ["remediation_tickets", "risk_acceptance"]
+    controls:
+      pci_dss_4: ["11.3.1.2"]
+
+  asv_scanning:
+    name: External ASV vulnerability scans pass quarterly
+    kind: process
+    rule: asv_passing_scan
+    evidence: ["asv_attestation", "passing_scan_in_quarter"]
+    controls:
+      pci_dss_4: ["11.3.2"]
+      soc2: ["CC7.1"]
+
+  quarterly_internal_scan:
+    name: Internal vulnerability scans are performed at least quarterly
+    kind: process
+    rule: internal_scan_quarterly
+    evidence: ["scan_schedule", "quarterly_imports"]
+    controls:
+      pci_dss_4: ["11.3.1"]
+      soc2: ["CC7.4"]
 
   penetration_testing:
     name: Perform penetration testing to a defined methodology
     kind: process
     rule: has_validated_pt
+    evidence: ["pt_methodology", "validated_findings"]
     controls:
-      pci_dss_4: ["11.4.1"]
+      pci_dss_4: ["11.4.1", "11.4.2"]
       iso_27001_2022: ["A.8.29"]
       soc2: ["CC4.1"]
+
+  external_pt:
+    name: External penetration testing of the CDE perimeter
+    kind: process
+    rule: has_validated_pt
+    evidence: ["external_pt_report"]
+    controls:
+      pci_dss_4: ["11.4.3"]
+
+  segmentation_testing:
+    name: Segmentation controls are tested
+    kind: process
+    rule: segmentation_tested
+    evidence: ["segmentation_test_record"]
+    controls:
+      pci_dss_4: ["11.4.5", "11.4.6"]
+      iso_27001_2022: ["A.8.22"]
 
   remediation_retest:
     name: Correct exploitable findings and retest
     kind: process
     rule: no_open_high_after_retest
+    evidence: ["retest_results"]
     controls:
       pci_dss_4: ["11.4.4"]
       iso_27001_2022: ["Clause 10.2"]
-      soc2: ["CC4.2"]
+      soc2: ["CC4.2", "CC7.4"]
 
   testing_authorization:
     name: Plan and authorize testing to protect systems
     kind: process
     rule: has_valid_authorization
+    evidence: ["signed_authorization"]
     controls:
       iso_27001_2022: ["A.8.34"]
       soc2: ["CC6.1"]
+
+  risk_assessment_process:
+    name: Information security risk assessment is performed
+    kind: process
+    rule: has_risk_assessment
+    evidence: ["risk_register", "risk_acceptance_records"]
+    controls:
+      pci_dss_4: ["12.3.1"]
+      iso_27001_2022: ["Clause 6.1.2", "Clause 8.2"]
+      soc2: ["CC3.2"]
 
 control_titles:
   pci_dss_4:
@@ -157,13 +243,22 @@ control_titles:
     "6.3.2": An inventory of bespoke and custom software and third-party components is maintained
     "6.3.3": Components are protected from known vulnerabilities by installing patches
     "6.4.1": Public-facing web applications are protected against attacks
+    "6.4.2": An automated technical solution detects and prevents web-based attacks
     "7.2.1": An access control model is defined
     "8.3.1": User access is authenticated
     "8.6.2": Passwords for application and system accounts are not hard coded in scripts, files or source code
     "10.2.1": Audit logs are enabled and active
     "11.3.1": Internal vulnerability scans are performed
+    "11.3.1.1": All other applicable vulnerabilities are managed
+    "11.3.1.2": Internal vulnerability scans address all high-risk and critical vulnerabilities
+    "11.3.2": External vulnerability scans are performed by a PCI SSC Approved Scanning Vendor
     "11.4.1": A penetration testing methodology is defined and implemented
+    "11.4.2": Internal penetration testing is performed
+    "11.4.3": External penetration testing is performed
     "11.4.4": Exploitable vulnerabilities found in penetration testing are corrected and retested
+    "11.4.5": Segmentation controls are verified by penetration testing
+    "11.4.6": Segmentation controls are verified at least every six months and after changes
+    "12.3.1": A targeted risk analysis is documented and performed
   iso_27001_2022:
     "A.5.17": Authentication information
     "A.5.21": Managing information security in the ICT supply chain
@@ -173,19 +268,25 @@ control_titles:
     "A.8.9": Configuration management
     "A.8.12": Data leakage prevention
     "A.8.15": Logging
+    "A.8.22": Segregation of networks
     "A.8.24": Use of cryptography
     "A.8.26": Application security requirements
     "A.8.28": Secure coding
     "A.8.29": Security testing in development and acceptance
     "A.8.34": Protection of information systems during audit testing
+    "Clause 6.1.2": Information security risk assessment
+    "Clause 8.2": Information security risk assessment (operation)
     "Clause 10.2": Nonconformity and corrective action
   soc2:
+    "CC3.2": The entity identifies and analyzes risk
     "CC4.1": The entity selects, develops and performs ongoing and/or separate evaluations
     "CC4.2": The entity evaluates and communicates internal control deficiencies
     "CC6.1": Logical access security software, infrastructure and architectures
     "CC6.6": Logical access security measures against threats from outside system boundaries
     "CC6.7": Restricts the transmission, movement and removal of information
+    "CC6.8": Prevents or detects introduction of unauthorized or malicious software
     "CC7.1": Detection and monitoring procedures identify configuration changes and vulnerabilities
     "CC7.2": Monitors system components for anomalies
+    "CC7.4": Responds to identified security incidents
     "CC8.1": Authorizes, designs, develops, tests and implements changes
     "CC9.2": Assesses and manages risks associated with vendors and business partners

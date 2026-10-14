@@ -16,7 +16,7 @@ def _as_list(v) -> list[str]:
 def parse(raw: bytes) -> list[NormalizedFinding]:
     out: list[NormalizedFinding] = []
     text = raw.decode("utf-8", errors="replace").strip()
-    records = json.loads(text) if text.startswith("[") else [json.loads(l) for l in text.splitlines() if l.strip()]
+    records = json.loads(text) if text.startswith("[") else [json.loads(line) for line in text.splitlines() if line.strip()]
     for rec in records:
         info = rec.get("info", {}) or {}
         cls = info.get("classification", {}) or {}

@@ -1,0 +1,23 @@
+RULES OF ENGAGEMENT — SIGNED AUTHORIZATION
+==========================================
+
+Client:        Example Retail Pvt Ltd
+CISO:          Anita Rao
+Date:          2026-10-01
+Expires:       2027-04-01
+
+Scope:
+  - https://shop.example.com (production, CDE)
+  - registry.example.com/shop/api (production, CDE)
+  - services/payments (source code)
+
+Permitted test types:
+  - Web DAST (OWASP Top 10), API DAST, SAST, SCA/container, TLS, manual PT
+
+Restrictions:
+  - Business hours only (09:00–18:00 IST, Mon–Fri)
+  - No denial-of-service testing in production
+  - Intrusive testing permitted only in staging
+
+Signed: Anita Rao, CISO, Example Retail Pvt Ltd
+SHA256: (document hash recorded in Attestra evidence store)

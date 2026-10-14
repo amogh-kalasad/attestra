@@ -1,0 +1,44 @@
+"""Signed session cookies for the web UI."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import time
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+
+from attestra import config
+
+COOKIE_NAME = "attestra_session"
+
+
+def _sign(payload: bytes) -> str:
+    sig = hmac.new(config.SESSION_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+    return urlsafe_b64encode(payload + b"." + sig).decode("ascii")
+
+
+def _unsign(token: str, *, max_age_s: int = 86400 * 7) -> dict | None:
+    try:
+        raw = urlsafe_b64decode(token.encode("ascii"))
+        payload, sig = raw.rsplit(b".", 1)
+        expected = hmac.new(config.SESSION_SECRET.encode("utf-8"), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        data = json.loads(payload.decode("utf-8"))
+        if time.time() - float(data.get("ts", 0)) > max_age_s:
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def issue_session(user_id: int, username: str) -> str:
+    payload = json.dumps({"uid": user_id, "u": username, "ts": time.time()}, separators=(",", ":")).encode()
+    return _sign(payload)
+
+
+def read_session(token: str | None) -> dict | None:
+    if not token:
+        return None
+    return _unsign(token)

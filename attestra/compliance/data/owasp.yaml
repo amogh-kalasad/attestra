@@ -1,0 +1,42 @@
+# OWASP Top 10 2021, ASVS 4.0, and WSTG v4.2 references by CWE.
+# VERIFY against https://owasp.org before production use.
+
+top10_2021:
+  A01: Broken Access Control
+  A02: Cryptographic Failures
+  A03: Injection
+  A04: Insecure Design
+  A05: Security Misconfiguration
+  A06: Vulnerable and Outdated Components
+  A07: Identification and Authentication Failures
+  A08: Software and Data Integrity Failures
+  A09: Security Logging and Monitoring Failures
+  A10: Server-Side Request Forgery
+
+cwe:
+  22: {top10: A01, asvs: "V4.3.1", wstg: "WSTG-ATHZ-01"}
+  78: {top10: A03, asvs: "V5.3.1", wstg: "WSTG-INPV-11"}
+  79: {top10: A03, asvs: "V5.2.1", wstg: "WSTG-INPV-01"}
+  89: {top10: A03, asvs: "V5.3.4", wstg: "WSTG-INPV-05"}
+  94: {top10: A03, asvs: "V5.2.1", wstg: "WSTG-INPV-11"}
+  200: {top10: A01, asvs: "V8.3.4", wstg: "WSTG-INFO-05"}
+  259: {top10: A07, asvs: "V2.10.4", wstg: "WSTG-ATHN-07"}
+  287: {top10: A07, asvs: "V2.1.1", wstg: "WSTG-ATHN-01"}
+  295: {top10: A02, asvs: "V9.2.1", wstg: "WSTG-CRYP-01"}
+  306: {top10: A07, asvs: "V2.1.1", wstg: "WSTG-ATHN-01"}
+  311: {top10: A02, asvs: "V6.2.1", wstg: "WSTG-CRYP-01"}
+  319: {top10: A02, asvs: "V9.1.1", wstg: "WSTG-CRYP-01"}
+  326: {top10: A02, asvs: "V6.2.2", wstg: "WSTG-CRYP-01"}
+  327: {top10: A02, asvs: "V6.2.2", wstg: "WSTG-CRYP-01"}
+  352: {top10: A01, asvs: "V4.2.2", wstg: "WSTG-SESS-05"}
+  502: {top10: A08, asvs: "V5.5.1", wstg: "WSTG-BUSL-08"}
+  601: {top10: A01, asvs: "V5.1.5", wstg: "WSTG-CLNT-04"}
+  611: {top10: A03, asvs: "V5.5.2", wstg: "WSTG-INPV-07"}
+  639: {top10: A01, asvs: "V4.2.1", wstg: "WSTG-ATHZ-04"}
+  798: {top10: A07, asvs: "V2.10.4", wstg: "WSTG-ATHN-07"}
+  862: {top10: A01, asvs: "V4.1.1", wstg: "WSTG-ATHZ-01"}
+  863: {top10: A01, asvs: "V4.1.2", wstg: "WSTG-ATHZ-02"}
+  918: {top10: A10, asvs: "V12.6.1", wstg: "WSTG-BUSL-09"}
+  937: {top10: A06, asvs: "V14.2.1", wstg: "WSTG-INFO-02"}
+  16: {top10: A05, asvs: "V14.1.1", wstg: "WSTG-CONF-01"}
+  778: {top10: A09, asvs: "V7.1.1", wstg: "WSTG-INFO-01"}

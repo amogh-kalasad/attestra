@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Semgrep",
+          "version": "1.60.0",
+          "rules": [
+            {
+              "id": "python.django.security.injection.tainted-sql-string",
+              "shortDescription": {"text": "SQL Injection via string concatenation"},
+              "help": {"text": "Use parameterized queries or an ORM to prevent SQL injection. Never interpolate user input into raw SQL."},
+              "properties": {
+                "cwe": ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command"],
+                "security-severity": "8.0",
+                "tags": ["security", "injection", "sql"]
+              }
+            },
+            {
+              "id": "python.lang.security.dangerous-subprocess-use",
+              "shortDescription": {"text": "Subprocess with shell=True and user input"},
+              "help": {"text": "Avoid shell=True with user-controlled input; use subprocess.run with a list of arguments."},
+              "properties": {
+                "cwe": ["CWE-78: OS Command Injection"],
+                "security-severity": "9.0"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python.django.security.injection.tainted-sql-string",
+          "level": "error",
+          "message": {"text": "User-controlled input from request.GET reaches a raw SQL query. This allows SQL injection attacks."},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "services/payments/views.py"},
+                "region": {"startLine": 42, "startColumn": 12}
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "python.lang.security.dangerous-subprocess-use",
+          "level": "error",
+          "message": {"text": "shell=True with user-controlled input enables OS command injection."},
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {"uri": "services/payments/tasks.py"},
+                "region": {"startLine": 87}
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

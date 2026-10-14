@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,7 +13,7 @@ from attestra.db import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 ENGAGEMENT_TYPES = ("va", "pt", "vapt", "retest", "continuous")
@@ -77,6 +77,47 @@ class Tenant(Base):
     industry: Mapped[str] = mapped_column(String(100), default="")
     contact_name: Mapped[str] = mapped_column(String(200), default="")
     contact_email: Mapped[str] = mapped_column(String(200), default="")
+    data_region: Mapped[str] = mapped_column(String(50), default="default")
+    plan: Mapped[str] = mapped_column(String(50), default="standard")
+
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"))
+    username: Mapped[str] = mapped_column(String(100), unique=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    password_hash: Mapped[str] = mapped_column(String(200), default="")
+    role: Mapped[str] = mapped_column(String(30), default="tester")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    tenant: Mapped[Tenant | None] = relationship()
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    prefix: Mapped[str] = mapped_column(String(16), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
+
+
+class TenantMembership(Base):
+    __tablename__ = "tenant_memberships"
+    __table_args__ = (UniqueConstraint("user_id", "tenant_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    role: Mapped[str] = mapped_column(String(30), default="")
+
+    user: Mapped[User] = relationship()
+    tenant: Mapped[Tenant] = relationship()
 
 
 class Engagement(Base):
@@ -92,9 +133,16 @@ class Engagement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     tenant: Mapped[Tenant] = relationship()
-    assets: Mapped[list["Asset"]] = relationship(back_populates="engagement")
-    authorizations: Mapped[list["Authorization"]] = relationship(back_populates="engagement")
-    findings: Mapped[list["Finding"]] = relationship(back_populates="engagement")
+    assets: Mapped[list[Asset]] = relationship(back_populates="engagement")
+    authorizations: Mapped[list[Authorization]] = relationship(back_populates="engagement")
+    findings: Mapped[list[Finding]] = relationship(back_populates="engagement")
+    asv_scans: Mapped[list[AsvScan]] = relationship(back_populates="engagement")
+    segmentation_tests: Mapped[list[SegmentationTest]] = relationship(back_populates="engagement")
+    scan_schedules: Mapped[list[ScanSchedule]] = relationship(back_populates="engagement")
+    nonconformities: Mapped[list[Nonconformity]] = relationship(back_populates="engagement")
+    risk_acceptances: Mapped[list[RiskAcceptance]] = relationship(back_populates="engagement")
+    control_assessments: Mapped[list[ControlAssessment]] = relationship()
+    import_runs: Mapped[list[ImportRun]] = relationship()
 
 
 class Authorization(Base):
@@ -138,8 +186,26 @@ class Asset(Base):
     exposure: Mapped[str] = mapped_column(String(20), default="internal")  # internet | internal
     in_cde: Mapped[bool] = mapped_column(Boolean, default=False)  # PCI cardholder data environment
     owner: Mapped[str] = mapped_column(String(200), default="")
+    ownership_token: Mapped[str] = mapped_column(String(64), default="")
+    ownership_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     engagement: Mapped[Engagement] = relationship(back_populates="assets")
+
+
+class ScopeRule(Base):
+    """Explicit allow/deny pattern for runner targets (deny beats allow)."""
+
+    __tablename__ = "scope_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    action: Mapped[str] = mapped_column(String(10))  # allow | deny
+    kind: Mapped[str] = mapped_column(String(20))  # host | url | path | image | cidr
+    pattern: Mapped[str] = mapped_column(String(500))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    engagement: Mapped[Engagement] = relationship()
 
 
 class ImportRun(Base):
@@ -157,6 +223,47 @@ class ImportRun(Base):
     new_findings: Mapped[int] = mapped_column(Integer, default=0)
     updated_findings: Mapped[int] = mapped_column(Integer, default=0)
     unmatched_findings: Mapped[int] = mapped_column(Integer, default=0)  # no in-scope target matched
+
+
+class ScanRun(Base):
+    """A scanner run Attestra dispatched (distinct from manual ImportRun uploads)."""
+
+    __tablename__ = "scan_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"))
+    tool: Mapped[str] = mapped_column(String(50))
+    tool_version: Mapped[str] = mapped_column(String(100), default="")
+    image_digest: Mapped[str] = mapped_column(String(100), default="")
+    profile: Mapped[str] = mapped_column(String(50), default="baseline")  # baseline | active
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    requested_by: Mapped[str] = mapped_column(String(200))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_artifact_uri: Mapped[str] = mapped_column(String(500), default="")
+    raw_sha256: Mapped[str] = mapped_column(String(64), default="")
+    import_run_id: Mapped[int | None] = mapped_column(ForeignKey("import_runs.id"))
+    refuse_reason: Mapped[str] = mapped_column(String(500), default="")
+
+    engagement: Mapped[Engagement] = relationship()
+    asset: Mapped[Asset] = relationship()
+
+
+class Job(Base):
+    """Durable work queue row for a ScanRun."""
+
+    __tablename__ = "jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scan_run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued|running|done|failed|cancelled
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    worker_id: Mapped[str] = mapped_column(String(100), default="")
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    scan_run: Mapped[ScanRun] = relationship()
 
 
 class Finding(Base):
@@ -188,10 +295,14 @@ class Finding(Base):
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     validated_by: Mapped[str] = mapped_column(String(200), default="")
     ticket_ref: Mapped[str] = mapped_column(String(200), default="")
+    owasp_top10: Mapped[str] = mapped_column(String(100), default="")
+    asvs_ref: Mapped[str] = mapped_column(String(50), default="")
+    wstg_ref: Mapped[str] = mapped_column(String(50), default="")
 
     engagement: Mapped[Engagement] = relationship(back_populates="findings")
     asset: Mapped[Asset | None] = relationship()
-    evidence: Mapped[list["Evidence"]] = relationship(back_populates="finding")
+    evidence: Mapped[list[Evidence]] = relationship(back_populates="finding")
+    risk_acceptances: Mapped[list[RiskAcceptance]] = relationship(back_populates="finding")
 
 
 class Evidence(Base):
@@ -224,21 +335,133 @@ class ControlAssessment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class RiskAcceptance(Base):
+    """Time-bounded acceptance of residual risk on a finding."""
+
+    __tablename__ = "risk_acceptances"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_on: Mapped[date] = mapped_column(Date)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    engagement: Mapped[Engagement] = relationship(back_populates="risk_acceptances")
+    finding: Mapped[Finding] = relationship(back_populates="risk_acceptances")
+
+
+class AsvScan(Base):
+    """PCI ASV external scan attestation for an engagement."""
+
+    __tablename__ = "asv_scans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    vendor: Mapped[str] = mapped_column(String(200))
+    scan_date: Mapped[date] = mapped_column(Date)
+    passing: Mapped[bool] = mapped_column(Boolean, default=False)
+    attestation_path: Mapped[str] = mapped_column(String(500), default="")
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+
+    engagement: Mapped[Engagement] = relationship(back_populates="asv_scans")
+
+
+class SegmentationTest(Base):
+    """PCI segmentation / network segregation test record."""
+
+    __tablename__ = "segmentation_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    boundary: Mapped[str] = mapped_column(String(300))
+    method: Mapped[str] = mapped_column(String(200), default="")
+    result: Mapped[str] = mapped_column(String(50), default="")  # pass | fail | inconclusive
+    tested_on: Mapped[date] = mapped_column(Date)
+    evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"))
+
+    engagement: Mapped[Engagement] = relationship(back_populates="segmentation_tests")
+
+
+class ScanSchedule(Base):
+    """Recurring scan calendar (PCI quarterly / monthly)."""
+
+    __tablename__ = "scan_schedules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"))
+    tool: Mapped[str] = mapped_column(String(50))
+    cadence: Mapped[str] = mapped_column(String(20), default="quarterly")  # quarterly | monthly
+    next_due: Mapped[date] = mapped_column(Date)
+    last_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    quarter_clean: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    engagement: Mapped[Engagement] = relationship(back_populates="scan_schedules")
+    asset: Mapped[Asset] = relationship()
+
+
+class Nonconformity(Base):
+    """ISO nonconformity / corrective action tracker."""
+
+    __tablename__ = "nonconformities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    control_ref: Mapped[str] = mapped_column(String(50))
+    finding_id: Mapped[int | None] = mapped_column(ForeignKey("findings.id"))
+    corrective_action: Mapped[str] = mapped_column(Text, default="")
+    owner: Mapped[str] = mapped_column(String(200), default="")
+    due: Mapped[date | None] = mapped_column(Date)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retest_id: Mapped[int | None] = mapped_column(Integer)
+
+    engagement: Mapped[Engagement] = relationship(back_populates="nonconformities")
+
+
+class Retest(Base):
+    """Retest of a finding against a ScanRun; guards against false-close."""
+
+    __tablename__ = "retests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"))
+    result: Mapped[str] = mapped_column(String(30), default="")  # fixed | still_open | inconclusive
+    requested_by: Mapped[str] = mapped_column(String(200), default="")
+    requested_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    finalized_by: Mapped[str] = mapped_column(String(200), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    asset_reached: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    finding: Mapped[Finding] = relationship()
+    scan_run: Mapped[ScanRun | None] = relationship()
+
+
 class Report(Base):
     __tablename__ = "reports"
     id: Mapped[int] = mapped_column(primary_key=True)
     engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
-    kind: Mapped[str] = mapped_column(String(30))  # technical | executive | compliance
+    kind: Mapped[str] = mapped_column(String(30))  # technical | executive | compliance | letters...
     framework: Mapped[str] = mapped_column(String(30), default="")
     version: Mapped[int] = mapped_column(Integer, default=1)
     path: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | signed
+    # draft → submitted → qa_approved → signed; rejected returns to draft
+    status: Mapped[str] = mapped_column(String(20), default="draft")
     generated_by: Mapped[str] = mapped_column(String(200))
+    generated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    qa_by: Mapped[str] = mapped_column(String(200), default="")
+    qa_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    rejection_note: Mapped[str] = mapped_column(Text, default="")
     approved_by: Mapped[str] = mapped_column(String(200), default="")
-    signature: Mapped[str] = mapped_column(String(200), default="")
+    approved_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    algorithm: Mapped[str] = mapped_column(String(40), default="")
+    signature: Mapped[str] = mapped_column(String(500), default="")
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    docx_path: Mapped[str] = mapped_column(String(500), default="")
+    docx_sha256: Mapped[str] = mapped_column(String(64), default="")
+    pdf_path: Mapped[str] = mapped_column(String(500), default="")
+    pdf_sha256: Mapped[str] = mapped_column(String(64), default="")
 
 
 class AuditEvent(Base):

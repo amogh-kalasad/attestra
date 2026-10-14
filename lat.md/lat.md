@@ -16,6 +16,8 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - [[reports]] — HTML generation, four-eyes approval, HMAC signing
 - [[audit]] — hash-chained audit log and verification
 - [[interfaces]] — REST API, CLI, web dashboard, config
+- [[runner]] — scoped scanner dispatch, SSRF/DNS pin, gate, durable jobs
+- [[tests]] — pytest suite: fixtures, test modules, and what each verifies
 
 ## Quick orientation
 

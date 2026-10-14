@@ -69,11 +69,15 @@
     <a href="/">Engagements</a>
     <a href="/engagements/new">+ New engagement</a>
     <a href="/docs">API</a>
-    <form method="post" action="/actor">
-      <input type="hidden" name="next" value="{{ path }}">
-      <input type="text" name="name" value="{{ actor or '' }}" placeholder="Your name" aria-label="Your name">
-      <button class="secondary" type="submit">{{ "Switch" if actor else "Set" }}</button>
+    {% if actor %}
+    <span class="tag">{{ actor }}</span>
+    <form method="post" action="/logout">
+      <input type="hidden" name="next" value="/login">
+      <button class="secondary" type="submit">Sign out</button>
     </form>
+    {% else %}
+    <a href="/login">Sign in</a>
+    {% endif %}
   </nav>
 </header>
 <main>
