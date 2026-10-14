@@ -46,6 +46,12 @@ DOCX/PDF, framework packs, SARIF, and OSCAL.
 - [[attestra/reports/packs.py#build_framework_pack]] — zip + MANIFEST.sha256
 - [[attestra/reports/sarif.py#findings_to_sarif]], [[attestra/reports/oscal.py#assessment_results]], [[attestra/reports/oscal.py#poam]]
 
+## Framework packs
+
+Zip binders with a sha256 manifest for PCI / ISO / SOC 2 evidence export.
+
+[[attestra/reports/packs.py#build_framework_pack]] builds a framework-indexed zip under `DATA_DIR/packs/` with `MANIFEST.sha256`.
+
 ## Verification
 
 Checking that a frozen report still matches its hash and signature.

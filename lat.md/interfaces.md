@@ -24,6 +24,8 @@ Notable routes:
 | POST | `/api/engagements/{eid}/reports` | Generate report |
 | POST | `/api/reports/{rid}/approve` | Four-eyes approve |
 | GET | `/api/audit/verify` | Audit chain check |
+| GET | `/api/audit/export` | Audit export JSON/CSV + chain proof |
+| GET | `/api/evidence/{eid}/download` | Download evidence (audited) |
 
 Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attestra/api.py#require]] for the route permission. Service errors map via [[attestra/api.py#_run]].
 
@@ -31,7 +33,7 @@ Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attes
 
 Command-line entrypoint sharing the same services layer.
 
-[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, key create, migrate-storage, serve, worker, import, enrich, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
+[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, key create, migrate-storage, serve, worker, import, enrich (`--refresh`), purge, backup, restore, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
 
 ## Web dashboard
 
@@ -45,5 +47,8 @@ Environment variables and on-disk data layout.
 
 [[attestra/config.py]]:
 
-- `ATTESTRA_DATA_DIR` — evidence/imports/reports/keys (default `./data`)
+- `ATTESTRA_DATA_DIR` — evidence/imports/reports/keys/feeds (default `./data`)
 - `ATTESTRA_DATABASE_URL` — SQLite by default; PostgreSQL via `postgresql+psycopg://…`
+- `ATTESTRA_STORAGE` — `local` (default) or `s3` ([[attestra/storage/__init__.py#get_storage]])
+- `ATTESTRA_S3_BUCKET` / `ATTESTRA_S3_ENDPOINT` / `ATTESTRA_S3_OBJECT_LOCK` — S3 backend
+- `ATTESTRA_KEV_URL` / `ATTESTRA_EPSS_URL` — feed URLs for `enrich --refresh`

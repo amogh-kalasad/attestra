@@ -48,3 +48,9 @@ Optional Keycloak OIDC sits behind `ATTESTRA_OIDC_ENABLED` ([[attestra/auth/oidc
 Queries and storage are scoped per tenant for non-admin principals.
 
 [[attestra/services.py#scoped]] and [[attestra/services.py#tenant_ids_for]] filter engagement access. Evidence/imports/reports land under `DATA_DIR/tenants/<id>/` via [[attestra/services.py#_store]]. Rate limits and security headers: [[attestra/api_security.py#RateLimitMiddleware]], [[attestra/api_security.py#SecurityHeadersMiddleware]].
+
+## Runner scope
+
+URL/path/image allow-list and SSRF checks used before scanner dispatch.
+
+See [[runner#Scope authorization]]. [[attestra/runner/authorization.py#authorize_target]] and [[attestra/runner/gate.py#check]] enforce engagement scope at enqueue and resume.

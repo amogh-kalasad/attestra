@@ -112,7 +112,17 @@ def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
         "today": date.today(),
         "version_str": __version__,
         "open_critical_high": sum(1 for f in open_f if f.severity in ("critical", "high")),
+        "feed_catalog": _feed_catalog(),
     }
+
+
+def _feed_catalog() -> dict:
+    try:
+        from attestra.ops.feeds import load_catalog_meta
+
+        return load_catalog_meta()
+    except Exception:
+        return {}
 
 
 def generate_report(

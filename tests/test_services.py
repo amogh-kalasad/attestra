@@ -310,13 +310,19 @@ def test_audit_verify_chain_intact(loaded):
 
 
 def test_audit_tamper_breaks_chain(engagement):
-    """Directly mutating an audit event hash breaks the chain verification."""
-    from sqlalchemy import select
+    """Directly mutating an audit event hash breaks the chain verification.
+
+    Append-only triggers are dropped only for this tamper probe; production
+    and normal tests keep UPDATE/DELETE blocked (see Phase 5 append-only tests).
+    """
+    from sqlalchemy import select, text
 
     from attestra import audit, db
     from attestra.models import AuditEvent
 
     with db.session() as s:
+        s.execute(text("DROP TRIGGER IF EXISTS audit_events_no_update"))
+        s.execute(text("DROP TRIGGER IF EXISTS audit_events_no_delete"))
         ev = s.scalars(select(AuditEvent).order_by(AuditEvent.id)).first()
         assert ev is not None, "need at least one audit event"
         # Tamper with the stored hash

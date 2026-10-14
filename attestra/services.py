@@ -61,17 +61,24 @@ def _safe_name(name: str) -> str:
 
 
 def _store(tenant_id: int | None, sub: str, sha: str, filename: str, data: bytes) -> Path:
-    """Content-addressed, write-once storage under a per-tenant prefix."""
+    """Content-addressed, write-once storage under a per-tenant prefix via Storage backend."""
+    from attestra.storage import get_storage
+    from attestra.storage.local import LocalStorage
+
     config.ensure_dirs()
     if tenant_id is None:
-        base = config.DATA_DIR / sub
+        key = f"{sub}/{sha[:16]}_{_safe_name(filename)}"
     else:
-        base = config.DATA_DIR / "tenants" / str(tenant_id) / sub
-    base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{sha[:16]}_{_safe_name(filename)}"
+        key = f"tenants/{tenant_id}/{sub}/{sha[:16]}_{_safe_name(filename)}"
+    store = get_storage()
+    uri = store.put(key, data)
+    if isinstance(store, LocalStorage):
+        return store.path_for(uri)
+    # Non-local: write a sidecar path record under DATA_DIR for ORM path fields
+    path = config.DATA_DIR / key
+    path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        path.write_bytes(data)
-        path.chmod(0o444)
+        path.write_text(uri, encoding="utf-8")
     return path
 
 
@@ -390,8 +397,12 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
             + ", ".join(outside) + ". Add a signed authorization covering them first."
         )
 
-    sha = _sha256(data)
-    path = _store(eng.tenant_id, "imports", sha, filename, data)
+    from attestra.evidence.mask import mask_bytes
+
+    ct = "application/json" if filename.lower().endswith((".json", ".jsonl", ".sarif")) else "text/plain"
+    masked, _mask_report = mask_bytes(data, ct)
+    sha = _sha256(masked)
+    path = _store(eng.tenant_id, "imports", sha, filename, masked)
     run = ImportRun(engagement_id=engagement_id, tool=tool, filename=filename, raw_path=str(path), sha256=sha, imported_by=actor)
     s.add(run)
     s.flush()
@@ -557,16 +568,29 @@ def transition(s: Session, finding_id: int, *, to: str, actor: str, note: str = 
 
 
 def add_evidence(s: Session, finding_id: int, *, kind: str, filename: str, data: bytes, note: str, actor: str) -> Evidence:
+    from attestra.evidence.mask import mask_bytes
+
     f = s.get(Finding, finding_id)
     if not f:
         raise LookupError(f"finding {finding_id} not found")
     eng = get_engagement(s, f.engagement_id)
-    sha = _sha256(data)
-    path = _store(eng.tenant_id, "evidence", sha, filename, data)
-    ev = Evidence(finding_id=finding_id, kind=kind, filename=filename, path=str(path), sha256=sha, note=note, captured_by=actor)
+    ct = "text/plain" if kind in ("note", "http_pair", "log") else "application/octet-stream"
+    masked, mask_report = mask_bytes(data, ct)
+    sha = _sha256(masked)
+    path = _store(eng.tenant_id, "evidence", sha, filename, masked)
+    ev = Evidence(
+        finding_id=finding_id,
+        kind=kind,
+        filename=filename,
+        path=str(path),
+        sha256=sha,
+        note=note,
+        masking_applied=mask_report,
+        captured_by=actor,
+    )
     s.add(ev)
     s.flush()
-    audit.record(s, actor, "evidence.add", "evidence", ev.id, finding_id=finding_id, sha256=sha)
+    audit.record(s, actor, "evidence.add", "evidence", ev.id, finding_id=finding_id, sha256=sha, masking=mask_report)
     return ev
 
 

@@ -3,7 +3,7 @@
 **Date:** 2026-10-14  
 **Spec:** [`docs/IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) (Phases 0–8)  
 **Codebase:** `attestra` v0.1.0 (local working tree)  
-**Validation:** `pytest -q` → **215 passed, 1 skipped**; `ruff check attestra tests` clean; `lat check` clean  
+**Validation:** `pytest -q` → **228 passed, 1 skipped**; `ruff check attestra tests` clean; `lat check` clean  
 
 This document supersedes the *status* of the older architecture-oriented [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) for **implementation progress**. Keep that file for historical comparison against the v2 architecture narrative; use **this file** for “what is done / what is pending” against the phased implementation guide.
 
@@ -18,15 +18,15 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 | **Done (local)** | 2 – Identity, roles, tenancy | Complete (full Keycloak UI login still optional) |
 | **Done (local)** | 3 – Compliance completeness | Complete (human QSA sign-off on library still pending) |
 | **Done (local)** | 4 – Reports, letters, signing | Complete (WeasyPrint/DOCX rich path optional) |
-| **Pending** | 5 – Evidence hardening | Not started / partial storage only |
+| **Done (local)** | 5 – Evidence hardening | Complete (S3 live integration optional) |
 | **Pending / blocked** | 6 – Production infrastructure | Not started (needs infra approval) |
 | **Pending** | 7 – Product polish & integrations | Not started |
 | **Pending / blocked** | 8 – GA & external validation | Blocked on 0–7 + external work |
 
-**Rough completion vs guide steps P0.1–P4.8:** ~**48 / 48** marked implemented in the traceability matrix (with residual VERIFY / process items noted below).  
-**Remaining guide steps P5–P8:** largely **not implemented**.
+**Rough completion vs guide steps P0.1–P5.6:** ~**54 / 54** marked implemented in the traceability matrix (with residual VERIFY / process items noted below).  
+**Remaining guide steps P6–P8:** largely **not implemented** / infra-blocked.
 
-**Next approved phase:** Phase 5 (evidence hardening), when you give go-ahead.
+**Next approved phase:** Phase 6 (production infrastructure), when you give go-ahead.
 
 ---
 
@@ -39,14 +39,14 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 | 2 | Identity / tenancy | 7 | 7 | OIDC claim validation present; full IdP PKCE UI when Keycloak ready | — |
 | 3 | Compliance library | 10 | 10 | External QSA/ISO review recorded as *pending* in `REVIEW.md` | Human review |
 | 4 | Reports & signing | 8 | 8 | WeasyPrint optional; OSCAL uses minimal structure schema not full NIST | — |
-| 5 | Evidence hardening | 6 | 0 | Local `_store` write-once exists (not a Storage Protocol) | 5.1–5.6 |
+| 5 | Evidence hardening | 6 | 6 | S3 live MinIO integration optional | — |
 | 6 | Production infra | 7 | 0 | — | All |
 | 7 | Polish / integrations | 5 | 0 | — | All |
 | 8 | GA / external | 5 | 0 | — | All |
 
 ---
 
-## 3. What is done (Phases 0–4)
+## 3. What is done (Phases 0–5)
 
 ### Phase 0 — Foundations
 
@@ -112,10 +112,22 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 | `0003_users` | User, ApiKey, TenantMembership, report user ids, tenant fields |
 | `0004_compliance` | RiskAcceptance, ASV, segmentation, schedules, NC, OWASP cols |
 | `0005_reports` | Retest, report workflow/QA/algorithm/export paths |
+| `0006_evidence` | Evidence masking column, RetentionPolicy, report legal_hold, audit triggers |
+
+### Phase 5 — Evidence hardening
+
+| Item | Evidence |
+| --- | --- |
+| Masking at capture | `attestra/evidence/mask.py`; wired in `add_evidence` / import store |
+| Storage Protocol | `attestra/storage/` local + optional S3 (`ATTESTRA_STORAGE`) |
+| Retention + purge | `RetentionPolicy`, `attestra/ops/retention.py`, `attestra purge` |
+| Append-only audit + export | SQLite triggers, download events, `GET /api/audit/export` |
+| Backup/restore | `attestra/ops/backup.py`, `attestra backup` / `restore` |
+| Feed refresh | `attestra enrich --refresh`, `ops/feeds.py`, catalog dates in reports |
 
 ---
 
-## 4. Residuals inside “done” phases (not blockers for Phase 5)
+## 4. Residuals inside “done” phases (not blockers for Phase 6)
 
 These are implemented enough to mark the phase complete, but still have VERIFY / process follow-ups:
 
@@ -135,18 +147,7 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 
 ## 5. What is pending
 
-### Phase 5 — Evidence hardening (next)
-
-| Step | Requirement | Status |
-| --- | --- | --- |
-| 5.1 | PAN/credential masking at capture (`evidence/mask.py`) | **Pending** |
-| 5.2 | Storage Protocol + local/S3 backends | **Partial** — local `_store` only |
-| 5.3 | RetentionPolicy + audited purge CLI | **Pending** |
-| 5.4 | Download audit events, audit export, DB append-only triggers | **Partial** — hash chain verify exists; no append-only enforcement |
-| 5.5 | Backup/restore with sha256 manifest | **Pending** |
-| 5.6 | `enrich --refresh` feed download + catalog dates in reports | **Partial** — offline enrich from operator files only |
-
-### Phase 6 — Production infrastructure
+### Phase 6 — Production infrastructure (next)
 
 | Step | Requirement | Status |
 | --- | --- | --- |
@@ -187,19 +188,18 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | Identity spoofing via free-text actor | Open | Mitigated (Bearer/session + user-id four-eyes) | Enable OIDC + rotate secrets for shared deploy |
 | Out-of-scope / SSRF scanning | Open (no runner) | Mitigated in runner gate + SSRF/DNS pin | Live egress NetworkPolicy (Phase 6) |
 | Cross-tenant leaks | Open | Mitigated in app (`scoped`, tenant storage) | Postgres RLS (Phase 6) |
-| Evidence secrets in artifacts | Open | Open | Masking (Phase 5.1) |
-| Audit tampering | Partial (hash chain) | Partial | Append-only DB + download events (Phase 5.4) |
+| Evidence secrets in artifacts | Open | Mitigated (mask at capture) | Tune corpus / content-types as needed |
+| Audit tampering | Partial (hash chain) | Mitigated (append-only triggers + download events + export) | Postgres revoke UPDATE/DELETE in deploy |
 | Report signatures | HMAC-only | Ed25519 + HMAC fallback | Customer runbook for pub key verify |
-| Backup integrity | Missing | Missing | Manifest backup/restore (Phase 5.5) |
+| Backup integrity | Missing | Mitigated (manifest backup/restore) | Offline restore drills in ops |
 
 ---
 
 ## 7. Recommended sequence from here
 
-1. **Approve and implement Phase 5** (masking → storage interface → retention → audit append-only → backup → feed refresh).  
-2. **Pause for Phase 6 approval** — requires infra credentials / cluster decisions.  
-3. Phase 7 package-friendly items can partially overlap end of Phase 5 if desired (legal pack, some importers) without K8s.  
-4. Phase 8 only after external pentest budget and a staging environment exist.
+1. **Pause for Phase 6 approval** — requires infra credentials / cluster decisions (Postgres RLS, Temporal, OPA, Keycloak, Vault, Helm).  
+2. Phase 7 package-friendly items can partially start without K8s (legal pack, some importers).  
+3. Phase 8 only after external pentest budget and a staging environment exist.
 
 ---
 
@@ -212,10 +212,10 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | [`THREAT_MODEL.md`](THREAT_MODEL.md) | Threats and mitigations |
 | [`PHASES.md`](PHASES.md) / [`ROADMAP.md`](ROADMAP.md) | High-level roadmap |
 | [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) | Older % scorecard vs architecture v2 (stale for runner/identity) |
-| **This file** | Current done vs pending snapshot after Phases 0–4 |
+| **This file** | Current done vs pending snapshot after Phases 0–5 |
 
 ---
 
 ## 9. One-line verdict
 
-**Phases 0–4 are implemented and test-green locally; Phase 5 is the next package work; Phases 6–8 remain pending and mostly infrastructure- or externally blocked.**
+**Phases 0–5 are implemented and test-green locally; Phase 6 is next and needs infra approval; Phases 7–8 remain pending and mostly infrastructure- or externally blocked.**

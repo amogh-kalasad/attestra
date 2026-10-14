@@ -13,7 +13,7 @@ Attestra v0.1 started as an **import-and-report** platform; Phases 0–2 add Ale
 | 2 | Identity, roles, tenancy | **NOT IMPLEMENTED** | Header identity only |
 | 3 | Compliance completeness | **PARTIALLY IMPLEMENTED** | Hub/spoke engine + partial control coverage |
 | 4 | Reports, letters, signing | **PARTIALLY IMPLEMENTED** | HTML + HMAC two-step approve |
-| 5 | Evidence hardening | **PARTIALLY IMPLEMENTED** | Hash + local write-once; no mask/S3/retention |
+| 5 | Evidence hardening | **IMPLEMENTED** (pending approval to proceed) | masking, Storage, retention, audit, backup, feeds |
 | 6 | Production infrastructure | **NOT IMPLEMENTED** | Needs external infra |
 | 7 | Product polish | **NOT IMPLEMENTED** | |
 | 8 | GA / optional | **NOT IMPLEMENTED** | External pentest / load test blockers |
@@ -93,23 +93,23 @@ Stack: Python ≥3.11, FastAPI, SQLAlchemy 2, Pydantic 2, Jinja2, PyYAML. Option
 | P4.6 | 4 | Framework packs | packs.py zip+manifest | IMPLEMENTED | — | P3 | pack contents |
 | P4.7 | 4 | Executive trend | prior engagement SVG | IMPLEMENTED | — | — | chart present |
 | P4.8 | 4 | SARIF/CSV/OSCAL out | sarif.py, oscal.py | IMPLEMENTED | full NIST schema optional | — | structure tests |
-| P5.1 | 5 | Masking at capture | — | NOT IMPLEMENTED | evidence/mask.py | — | corpus 0 leaks |
-| P5.2 | 5 | Storage interface | `_store` local | PARTIALLY IMPLEMENTED | Protocol + local/s3 | — | overwrite refuse |
-| P5.3 | 5 | Retention + purge | — | NOT IMPLEMENTED | RetentionPolicy + ops | P2.4 | audited purge |
-| P5.4 | 5 | Audit download + append-only | chain verify yes | PARTIALLY IMPLEMENTED | download events, export, triggers | — | UPDATE fails |
-| P5.5 | 5 | Backup/restore manifest | — | NOT IMPLEMENTED | ops/backup.py + CLI | — | tamper fails restore |
-| P5.6 | 5 | KEV/EPSS refresh | operator files only | PARTIALLY IMPLEMENTED | `--refresh` download | network | offline fixtures |
+| P5.1 | 5 | Masking at capture | `evidence/mask.py` + wired | IMPLEMENTED | — | — | corpus 0 leaks |
+| P5.2 | 5 | Storage interface | Protocol + local/s3 | IMPLEMENTED | S3 live vs MinIO optional | — | overwrite refuse |
+| P5.3 | 5 | Retention + purge | RetentionPolicy + ops/retention | IMPLEMENTED | — | P2.4 | audited purge |
+| P5.4 | 5 | Audit download + append-only | triggers + export + download | IMPLEMENTED | — | — | UPDATE fails |
+| P5.5 | 5 | Backup/restore manifest | ops/backup.py + CLI | IMPLEMENTED | — | — | tamper fails restore |
+| P5.6 | 5 | KEV/EPSS refresh | `enrich --refresh` + feeds | IMPLEMENTED | — | network | offline fixtures |
 | P6.* | 6 | Postgres RLS, Temporal, OPA, Vault, Helm, OTel, CI gates | SQLite/local only | NOT IMPLEMENTED / BLOCKED | Infra outside single package | P1–5 | CI service containers |
 | P7.* | 7 | Portal, tickets, scanners, tuning, legal | — | NOT IMPLEMENTED | integrations + docs | P6 preferred | suite + manual |
 | P8.* | 8 | Pentest, load, GA, packs, AI | — | BLOCKED / NOT IMPLEMENTED | External + release process | P0–7 | recorded evidence |
 
 ## 4–7. Done / pending snapshot
 
-See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full gap analysis after Phases 0–4.
+See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full gap analysis after Phases 0–5.
 
-- **Done locally:** Phases 0–4 (foundations, runner, identity/tenancy, compliance library, report workflow/signing/exports).
-- **Next:** Phase 5 (masking, storage interface, retention, append-only audit, backup, feed refresh).
-- **Later / blocked:** Phases 6–8 (Postgres RLS, Temporal, OPA, Helm, portal/integrations, external pentest/GA).
+- **Done locally:** Phases 0–5 (foundations through evidence hardening).
+- **Next:** Phase 6 (production infrastructure) — needs infra approval.
+- **Later / blocked:** Phases 7–8 (portal/integrations, external pentest/GA).
 
 ## 8. Ordered implementation roadmap
 
@@ -126,13 +126,13 @@ See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full g
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `pytest -q` | **215 passed, 1 skipped** | Phases 0–4 including report workflow/exports |
-| `ruff check attestra tests` | clean after Phase 4 | — |
+| `pytest -q` | **228 passed, 1 skipped** | Phases 0–5 including evidence hardening |
+| `ruff check attestra tests` | clean after Phase 5 | — |
 | Baseline | `.cache/baseline.txt` | Phase 0 snapshot; suite grown since |
 
 ## 10. Final completion summary
 
-**Phases 0–4 complete locally.** Awaiting approval before Phase 5 (evidence hardening).
+**Phases 0–5 complete locally.** Awaiting approval before Phase 6 (production infrastructure).
 
 ### Progress log
 
@@ -144,3 +144,4 @@ See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full g
 | 2026-10-14 | Phase 2 implemented: User/ApiKey, roles, Bearer/session, scoped tenancy, per-tenant storage, rate limits/headers, OIDC flag; migration 0003; 190 passed + 1 skipped |
 | 2026-10-14 | Phase 3 implemented: expanded control library + integrity, RiskAcceptance/ASV/segmentation/schedules/NC, OWASP refs, SoA/ageing reports, compliance-export; migration 0004; 203 passed + 1 skipped |
 | 2026-10-14 | Phase 4 implemented: report workflow, retests, letters, DOCX/PDF, Ed25519 signing, packs, trend SVG, SARIF/OSCAL; migration 0005; 215 passed + 1 skipped |
+| 2026-10-14 | Phase 5 implemented: masking, Storage local/s3, retention/purge, append-only audit + export, backup/restore, enrich --refresh; migration 0006; 228 passed + 1 skipped |

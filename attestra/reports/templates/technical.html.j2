@@ -22,6 +22,9 @@
 <p>Automated assessment results were imported from the tools below, normalized to a common schema, de-duplicated by fingerprint
 and ranked by risk (CVSS × (1 + EPSS) × KEV × asset criticality × exposure). Manual validation follows the OWASP Web Security
 Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named tester confirms it with evidence.</p>
+{% if feed_catalog and (feed_catalog.kev_date or feed_catalog.epss_date) %}
+<p class="meta">Threat intel catalogs: KEV {{ feed_catalog.kev_date or "n/a" }} · EPSS {{ feed_catalog.epss_date or "n/a" }}</p>
+{% endif %}
 <table>
   <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
   {% for i in imports %}

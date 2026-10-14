@@ -58,10 +58,10 @@ Open statuses for compliance roll-up: [[attestra/models.py#OPEN_STATUSES]].
 
 Offline KEV and EPSS application from operator-supplied files.
 
-[[attestra/services.py#enrich]] applies operator-supplied CISA KEV JSON and FIRST EPSS CSV (no auto-fetch in v0.1).
+[[attestra/services.py#enrich]] applies CISA KEV JSON and FIRST EPSS CSV. CLI `attestra enrich --refresh` downloads feeds via [[attestra/ops/feeds.py#refresh_feeds]] into `DATA_DIR/feeds/` (catalog dates stored for reports).
 
 ## Evidence
 
 Attaching hashed artifacts to a finding.
 
-[[attestra/services.py#add_evidence]] attaches hashed write-once files to a finding ([[attestra/models.py#Evidence]]).
+[[attestra/services.py#add_evidence]] masks secrets/PANs via [[attestra/evidence/mask.py#mask_bytes]] before hashing and write-once store ([[attestra/models.py#Evidence]] `masking_applied`). Imports mask raw bytes the same way after parse. Storage backends implement [[attestra/storage/__init__.py#Storage]] (`local` or `s3`).

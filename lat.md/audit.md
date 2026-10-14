@@ -23,3 +23,9 @@ Exposed at `GET /api/audit/verify` and CLI `verify-audit`.
 Where audit rows and related blobs live.
 
 Audit rows live in the same SQLAlchemy database as engagements and findings ([[attestra/db.py]]). Evidence blobs live on disk under [[attestra/config.py#DATA_DIR]] subdirs created by [[attestra/config.py#ensure_dirs]].
+
+## Append-only enforcement
+
+Database triggers refuse UPDATE/DELETE on audit events.
+
+SQLite triggers `audit_events_no_update` / `audit_events_no_delete` are installed by Alembic [[migrations/versions/0006_evidence_hardening.py]] and by [[attestra/db.py#_install_audit_triggers]] after `create_all`. Downloads of evidence and reports call [[attestra/audit.py#record]]. `GET /api/audit/export` returns events plus chain proof.

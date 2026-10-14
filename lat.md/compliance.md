@@ -68,6 +68,12 @@ Meaning of each status string used in proposals and confirmations.
 | `not_met` | Critical/high open, or required evidence missing |
 | `not_assessed` | Outside what this engagement tested |
 
+## OWASP references
+
+CWE-driven OWASP Top 10, ASVS, and WSTG labels on findings.
+
+[[attestra/compliance/owasp.py#map_finding_to_owasp]] reads [[attestra/compliance/data/owasp.yaml]] and populates finding OWASP columns at import/enrich time.
+
 ## Caveat
 
 Mapping texts are paraphrased and need standards review before production.

@@ -163,3 +163,43 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 ### tests/test_phase4_exports.py
 
 Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip, executive trend SVG, signature verify.
+
+## Phase 5 evidence hardening
+
+Masking corpus, storage immutability, retention purge, append-only audit, backup manifests, and offline feed refresh.
+
+### Masking corpus
+
+Generated corpus of 1,000 PAN/credential strings leaves zero unmasked; non-Luhn digit strings untouched ([[tests/evidence/test_mask_corpus.py]]).
+
+### Storage immutability
+
+[[attestra/storage/local.py#LocalStorage]] refuses overwrite of differing content; identical puts are idempotent.
+
+### Evidence masking wired
+
+[[attestra/services.py#add_evidence]] stores masked bytes and records `masking_applied`.
+
+### Retention purge
+
+[[attestra/ops/retention.py#purge_expired]] deletes only expired items, audits each deletion, and keeps reports under `legal_hold`.
+
+### Append-only audit
+
+SQLite triggers abort UPDATE on `audit_events`.
+
+### Download audit
+
+Evidence download creates an `evidence.download` audit event.
+
+### Audit export
+
+`GET /api/audit/export` returns JSON/CSV with chain proof fields.
+
+### Backup restore
+
+[[attestra/ops/backup.py#backup]] writes `manifest.json`; tampered restore raises [[attestra/ops/backup.py#BackupError]].
+
+### Feed refresh offline
+
+[[attestra/ops/feeds.py#refresh_feeds]] with fixture files (mocked download) populates catalog dates and enrich counts.

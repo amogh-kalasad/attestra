@@ -51,6 +51,7 @@ def init(url: str | None = None, *, use_migrations: bool = False) -> None:
     else:
         Base.metadata.create_all(_engine)
         _add_missing_columns(_engine)
+        _install_audit_triggers(_engine)
 
 
 def _add_missing_columns(engine) -> None:
@@ -73,6 +74,35 @@ def _add_missing_columns(engine) -> None:
                 elif isinstance(default, str):
                     ddl += " DEFAULT '" + default.replace("'", "''") + "'"
                 conn.execute(text(ddl))
+
+
+def _install_audit_triggers(engine) -> None:
+    """Enforce append-only audit_events for create_all (tests / quick local)."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS audit_events_no_update
+                BEFORE UPDATE ON audit_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_events is append-only');
+                END;
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS audit_events_no_delete
+                BEFORE DELETE ON audit_events
+                BEGIN
+                    SELECT RAISE(ABORT, 'audit_events is append-only');
+                END;
+                """
+            )
+        )
 
 
 @contextmanager

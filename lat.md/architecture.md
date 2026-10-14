@@ -55,9 +55,9 @@ PCI evaluation only counts findings on CDE assets (plus unmatched locations, con
 
 ## Evidence integrity
 
-Raw artifacts are hashed write-once; the audit log is hash-chained; reports are HMAC-signed.
+Raw artifacts are masked, hashed write-once; audit is append-only; backups use manifests.
 
-Raw imports, evidence, and reports are SHA-256 hashed and stored write-once ([[attestra/services.py#_store]]). The audit log is hash-chained ([[attestra/audit.py]]). Reports carry an HMAC signature ([[attestra/reports/signing.py]]).
+Raw imports and evidence are masked ([[attestra/evidence/mask.py#mask_bytes]]), SHA-256 hashed, and stored write-once via [[attestra/storage/__init__.py#get_storage]] ([[attestra/services.py#_store]]). Retention and purge live in [[attestra/ops/retention.py#purge_expired]]; backup/restore with sha256 manifests in [[attestra/ops/backup.py#backup]]. The audit log is hash-chained and append-only ([[attestra/audit.py]]). Reports carry Ed25519 or HMAC signatures ([[attestra/reports/signing.py]]).
 
 ## Schema migrations
 
@@ -87,7 +87,6 @@ See [[runner]]. Adapters write raw output under [[attestra/config.py#RAW_DIR]] t
 
 Capabilities intentionally left for later phases (see [[docs/GAP_ANALYSIS_CURRENT.md]]).
 
-- Phase 5: evidence masking, Storage Protocol/S3, retention, append-only audit, backup manifests
 - Temporal workflows, OPA policy engine, Postgres RLS, Helm (Phase 6)
 - Full Keycloak UI login flow (OIDC flag and claim validation exist; enable when IdP is provisioned)
 - Client portal polish, ticket sync, extra scanners (Phase 7)

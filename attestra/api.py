@@ -631,11 +631,88 @@ def download_report(rid: int, principal: Principal = Depends(require("report.rea
         return FileResponse(r.path, media_type="text/html")
 
 
+@app.get("/api/evidence/{eid}/download")
+def download_evidence(eid: int, principal: Principal = Depends(require("finding.read"))):
+    from attestra import config as cfg
+    from attestra.models import Evidence, Finding
+
+    with db.session() as s:
+        ev = s.get(Evidence, eid)
+        if not ev:
+            raise HTTPException(404, "evidence not found")
+        f = s.get(Finding, ev.finding_id)
+        if not f:
+            raise HTTPException(404, "evidence not found")
+        eng = services.get_engagement(s, f.engagement_id, principal)
+        path = Path(ev.path).resolve()
+        allowed_roots = [
+            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
+            cfg.DATA_DIR.resolve(),
+        ]
+        if not any(str(path).startswith(str(root)) for root in allowed_roots):
+            raise HTTPException(404, "evidence not found")
+        if not path.is_file():
+            raise HTTPException(404, "evidence not found")
+        audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
+        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
+
+
 @app.get("/api/audit/verify")
 def audit_verify(principal: Principal = Depends(require("audit.read"))):
     with db.session() as s:
         ok, bad = audit.verify(s)
     return {"ok": ok, "first_bad_event": bad}
+
+
+@app.get("/api/audit/export")
+def audit_export(
+    format: str = Query("json", pattern="^(json|csv)$"),
+    principal: Principal = Depends(require("audit.read")),
+):
+    """Export audit events with chain proof (prev_hash + hash per row)."""
+    import csv
+    import io
+
+    from fastapi.responses import PlainTextResponse, Response
+    from sqlalchemy import select
+
+    from attestra.models import AuditEvent
+
+    with db.session() as s:
+        events = list(s.scalars(select(AuditEvent).order_by(AuditEvent.id)))
+        ok, bad = audit.verify(s)
+        rows = [
+            {
+                "id": e.id,
+                "ts": e.ts.isoformat() if e.ts else "",
+                "actor": e.actor,
+                "action": e.action,
+                "entity": e.entity,
+                "entity_id": e.entity_id,
+                "details": e.details,
+                "prev_hash": e.prev_hash,
+                "hash": e.hash,
+            }
+            for e in events
+        ]
+    proof = {"chain_ok": ok, "first_bad_event": bad, "count": len(rows)}
+    if format == "csv":
+        buf = io.StringIO()
+        w = csv.DictWriter(
+            buf,
+            fieldnames=["id", "ts", "actor", "action", "entity", "entity_id", "prev_hash", "hash"],
+        )
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r[k] for k in w.fieldnames})
+        body = f"# chain_ok={ok} first_bad_event={bad} count={len(rows)}\n" + buf.getvalue()
+        return PlainTextResponse(body, media_type="text/csv")
+    import json
+
+    return Response(
+        json.dumps({"proof": proof, "events": rows}, indent=2, default=str),
+        media_type="application/json",
+    )
 
 
 class ScanIn(BaseModel):

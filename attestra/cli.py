@@ -149,10 +149,42 @@ def cmd_import(args) -> None:
 
 def cmd_enrich(args) -> None:
     actor, _ = _resolve_actor(args)
-    kev = Path(args.kev).read_bytes() if args.kev else None
-    epss = Path(args.epss).read_bytes() if args.epss else None
+    meta = {}
+    if getattr(args, "refresh", False):
+        from attestra.ops.feeds import load_cached_feeds, refresh_feeds
+
+        meta = refresh_feeds()
+        kev, epss = load_cached_feeds()
+    else:
+        kev = Path(args.kev).read_bytes() if args.kev else None
+        epss = Path(args.epss).read_bytes() if args.epss else None
     with db.session() as s:
-        _print(services.enrich(s, kev_json=kev, epss_csv=epss, actor=actor))
+        result = services.enrich(s, kev_json=kev, epss_csv=epss, actor=actor)
+        if meta:
+            result["catalog"] = {k: meta.get(k) for k in ("kev_date", "epss_date", "kev_fetched_at", "epss_fetched_at")}
+        _print(result)
+
+
+def cmd_purge(args) -> None:
+    from attestra.ops.retention import purge_expired
+
+    db.init(use_migrations=True)
+    actor, _ = _resolve_actor(args)
+    with db.session() as s:
+        _print(purge_expired(s, dry_run=not args.execute, actor=actor))
+
+
+def cmd_backup(args) -> None:
+    from attestra.ops.backup import backup
+
+    db.init(use_migrations=True)
+    _print(backup(args.dest))
+
+
+def cmd_restore(args) -> None:
+    from attestra.ops.backup import restore
+
+    _print(restore(args.source))
 
 
 def cmd_findings(args) -> None:
@@ -410,7 +442,20 @@ def main(argv: list[str] | None = None) -> None:
     sp = sub.add_parser("enrich", help="apply CISA KEV JSON and/or FIRST EPSS CSV feeds")
     sp.add_argument("--kev")
     sp.add_argument("--epss")
+    sp.add_argument("--refresh", action="store_true", help="download KEV/EPSS into DATA_DIR/feeds then apply")
     sp.set_defaults(fn=cmd_enrich)
+
+    sp = sub.add_parser("purge", help="purge artifacts past retention (default dry-run)")
+    sp.add_argument("--execute", action="store_true", help="actually delete (omit for dry-run)")
+    sp.set_defaults(fn=cmd_purge)
+
+    sp = sub.add_parser("backup", help="backup DB + evidence/reports with sha256 manifest")
+    sp.add_argument("dest", help="destination directory")
+    sp.set_defaults(fn=cmd_backup)
+
+    sp = sub.add_parser("restore", help="restore from backup dir (refuses on manifest mismatch)")
+    sp.add_argument("source", help="backup directory containing manifest.json")
+    sp.set_defaults(fn=cmd_restore)
 
     sp = sub.add_parser("findings", help="list findings by risk")
     sp.add_argument("engagement", type=int)

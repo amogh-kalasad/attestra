@@ -26,6 +26,21 @@ OIDC_ISSUER = os.environ.get("ATTESTRA_OIDC_ISSUER", "")
 OIDC_CLIENT_ID = os.environ.get("ATTESTRA_OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET = os.environ.get("ATTESTRA_OIDC_CLIENT_SECRET", "")
 
+STORAGE_BACKEND = os.environ.get("ATTESTRA_STORAGE", "local")
+S3_BUCKET = os.environ.get("ATTESTRA_S3_BUCKET", "")
+S3_ENDPOINT = os.environ.get("ATTESTRA_S3_ENDPOINT", "")
+S3_OBJECT_LOCK = os.environ.get("ATTESTRA_S3_OBJECT_LOCK", "").lower() in ("1", "true", "yes")
+
+# CISA KEV and FIRST EPSS feed URLs (VERIFY periodically)
+KEV_URL = os.environ.get(
+    "ATTESTRA_KEV_URL",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+)
+EPSS_URL = os.environ.get(
+    "ATTESTRA_EPSS_URL",
+    "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz",
+)
+
 # Digests must include @sha256:. Replace VERIFY placeholders after `docker inspect` when pinning real images.
 SCANNER_IMAGES = {
     "zap": os.environ.get(
@@ -48,7 +63,7 @@ SCANNER_IMAGES = {
 
 
 def ensure_dirs() -> None:
-    for sub in ("evidence", "imports", "reports", "keys", "raw", "tenants"):
+    for sub in ("evidence", "imports", "reports", "keys", "raw", "tenants", "feeds", "packs"):
         (DATA_DIR / sub).mkdir(parents=True, exist_ok=True)
 
 

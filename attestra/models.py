@@ -314,10 +314,23 @@ class Evidence(Base):
     path: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64))
     note: Mapped[str] = mapped_column(Text, default="")
+    masking_applied: Mapped[dict] = mapped_column(JSON, default=dict)
     captured_by: Mapped[str] = mapped_column(String(200))
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     finding: Mapped[Finding] = relationship(back_populates="evidence")
+
+
+class RetentionPolicy(Base):
+    """Per-tenant retention days (PCI default ≥ 365)."""
+
+    __tablename__ = "retention_policies"
+    __table_args__ = (UniqueConstraint("tenant_id", "framework"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    framework: Mapped[str] = mapped_column(String(30), default="")  # empty = default
+    days: Mapped[int] = mapped_column(Integer, default=365)
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ControlAssessment(Base):
@@ -462,6 +475,7 @@ class Report(Base):
     docx_sha256: Mapped[str] = mapped_column(String(64), default="")
     pdf_path: Mapped[str] = mapped_column(String(500), default="")
     pdf_sha256: Mapped[str] = mapped_column(String(64), default="")
+    legal_hold: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AuditEvent(Base):
