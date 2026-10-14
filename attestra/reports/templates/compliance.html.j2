@@ -1,0 +1,39 @@
+{% extends "_base.html.j2" %}
+{% block title %}Compliance evidence pack{% endblock %}
+{% block body %}
+{% for key, fw in frameworks.items() %}
+<h1>{{ fw.name }}: VAPT evidence pack</h1>
+<div class="meta">{{ eng.name }} · {{ eng.type|upper }} · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+
+<p class="note">This pack indexes the vulnerability-management and security-testing evidence produced in this engagement against
+{{ fw.name }}. Each status is proposed from findings and engagement records; a status marked <b>confirmed</b> was reviewed by the
+named assessor. It supports, and does not replace, the assessor's or auditor's own testing
+{%- if key == "pci_dss_4" %} (QSA, and the Approved Scanning Vendor for external scans under 11.3.2){% endif %}.</p>
+
+<div class="kpis">
+  {% for st in ["met", "no_exceptions", "partial", "not_met", "not_assessed"] %}<div class="kpi"><span class="st st-{{ st }}">{{ st|replace("_", " ") }}</span><b>{{ fw.counts.get(st, 0) }}</b>controls</div>{% endfor %}
+</div>
+
+<table>
+  <tr><th style="width:90px">Ref</th><th>Requirement</th><th style="width:110px">Status</th><th>Basis</th><th style="width:110px">Findings</th></tr>
+  {% for r in fw.results %}
+  <tr>
+    <td><b>{{ r.ref }}</b></td>
+    <td>{{ r.title }}</td>
+    <td><span class="st st-{{ r.status }}">{{ r.status|replace("_", " ") }}</span><br>
+        <span class="meta">{{ "confirmed by " ~ r.assessor if r.confirmed else "proposed" }}</span></td>
+    <td>{{ r.rationale if r.confirmed else r.reason }}</td>
+    <td>{% for fid in r.finding_ids %}F-{{ fid }}{{ ", " if not loop.last }}{% else %}-{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Evidence index</h2>
+<table>
+  <tr><th>Evidence</th><th>Detail</th><th>SHA-256</th></tr>
+  {% for a in authorizations %}<tr><td>Signed authorization</td><td>{{ a.document_name }} ({{ a.signer }}, {{ a.signed_on }} to {{ a.expires_on }})</td><td class="mono">{{ a.sha256 }}</td></tr>{% endfor %}
+  {% for i in imports %}<tr><td>Scan results #{{ i.id }}</td><td>{{ i.tool }} · {{ i.filename }} · {{ i.imported_at.strftime('%Y-%m-%d') }}</td><td class="mono">{{ i.sha256 }}</td></tr>{% endfor %}
+  {% for f in findings %}{% for e in f.evidence %}<tr><td>Finding F-{{ f.id }} evidence</td><td>{{ e.kind }} · {{ e.filename }}</td><td class="mono">{{ e.sha256 }}</td></tr>{% endfor %}{% endfor %}
+</table>
+{% endfor %}
+{% endblock %}

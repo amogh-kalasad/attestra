@@ -1,0 +1,65 @@
+{% extends "_base.html.j2" %}
+{% block title %}Technical VAPT report{% endblock %}
+{% block body %}
+<h1>Technical VAPT report: {{ eng.name }}</h1>
+<div class="meta">Type: {{ eng.type|upper }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }} · Frameworks: {{ eng.frameworks|join(", ") or "none" }}</div>
+
+<h2>1. Scope and authorization</h2>
+<table>
+  <tr><th>Asset</th><th>Kind</th><th>Criticality</th><th>Exposure</th><th>PCI CDE</th></tr>
+  {% for a in eng.assets %}
+  <tr><td class="mono">{{ a.identifier }}</td><td>{{ a.kind }}</td><td>{{ a.criticality }}/5</td><td>{{ a.exposure }}</td><td>{{ "Yes" if a.in_cde else "No" }}</td></tr>
+  {% else %}<tr><td colspan="5">No assets recorded.</td></tr>{% endfor %}
+</table>
+<table>
+  <tr><th>Authorization document</th><th>Signer</th><th>Valid</th><th>SHA-256</th></tr>
+  {% for a in authorizations %}
+  <tr><td>{{ a.document_name }}</td><td>{{ a.signer }}</td><td>{{ a.signed_on }} to {{ a.expires_on }}</td><td class="mono">{{ a.sha256 }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>2. Methodology and data sources</h2>
+<p>Automated assessment results were imported from the tools below, normalized to a common schema, de-duplicated by fingerprint
+and ranked by risk (CVSS × (1 + EPSS) × KEV × asset criticality × exposure). Manual validation follows the OWASP Web Security
+Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named tester confirms it with evidence.</p>
+<table>
+  <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
+  {% for i in imports %}
+  <tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.imported_at.strftime('%Y-%m-%d') }} by {{ i.imported_by }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }}</td><td class="mono">{{ i.sha256 }}</td></tr>
+  {% else %}<tr><td colspan="6">No results imported.</td></tr>{% endfor %}
+</table>
+
+<h2>3. Summary</h2>
+<div class="kpis">
+  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+  <div class="kpi">False positives<b>{{ false_positives }}</b>excluded</div>
+</div>
+
+<h2>4. Findings</h2>
+{% for f in findings %}
+<div class="finding">
+  <h3>F-{{ f.id }} · {{ f.title }}</h3>
+  <div><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+    &nbsp;Status: <b>{{ f.status|replace("_", " ") }}</b>
+    &nbsp;· Risk {{ "%.1f"|format(f.risk_score) }}
+    {% if f.cvss_score is not none %}&nbsp;· CVSS {{ f.cvss_score }}{% endif %}
+    {% if f.epss is not none %}&nbsp;· EPSS {{ "%.3f"|format(f.epss) }}{% endif %}
+    {% if f.kev %}&nbsp;· <b>CISA KEV</b>{% endif %}
+    {% if f.sla_due %}&nbsp;· Fix by {{ f.sla_due }}{% endif %}
+  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">{{ f.location }}</td></tr>
+    {% if f.cwe %}<tr><th>CWE</th><td>CWE-{{ f.cwe }}</td></tr>{% endif %}
+    {% if f.cves %}<tr><th>CVE</th><td>{{ f.cves|join(", ") }}</td></tr>{% endif %}
+    <tr><th>Detected by</th><td>{{ f.tools|join(", ") }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
+    {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
+    <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
+  </table>
+  {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
+  {% if f.recommendation %}<p><b>Recommendation.</b> {{ f.recommendation }}</p>{% endif %}
+  {% if f.evidence %}<p><b>Evidence.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% else %}
+<p>No findings.</p>
+{% endfor %}
+{% endblock %}

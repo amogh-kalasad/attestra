@@ -1,0 +1,27 @@
+{% extends "_layout.html" %}
+{% block main %}
+<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px">
+  <h1 style="margin:0">Engagements</h1>
+  <a class="btn" href="/engagements/new" style="margin-left:auto">+ New engagement</a>
+</div>
+<p class="meta">One engagement per client test or audit cycle: client details, signed authorization, targets in scope (with environment and planned tests), imported results, validated findings, compliance status and signed reports.</p>
+<div class="card">
+<table>
+  <tr><th>#</th><th>Engagement</th><th>Client</th><th>Type</th><th>Targets</th><th>Authorized environments</th><th>Open findings</th><th>Frameworks</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.e.id }}</td>
+    <td><a href="/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
+    <td>{{ r.e.tenant.name }}{% if r.e.tenant.contact_name %}<div class="meta">{{ r.e.tenant.contact_name }}</div>{% endif %}</td>
+    <td>{{ r.e.type|upper }}</td>
+    <td>{{ r.targets }}</td>
+    <td>{% for env in r.envs %}<span class="env env-{{ env }}">{{ env }}</span> {% else %}<span class="st-not_met">None yet</span>{% endfor %}</td>
+    <td>{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}</td>
+    <td class="meta">{{ r.e.frameworks|join(", ") }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8">No engagements yet. <a href="/engagements/new">Create one</a>, or run <span class="mono">attestra demo</span> to load a sample.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

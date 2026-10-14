@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Attestra{% endblock %}</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --quiet:#5b6170; --rule:#e3e5ea; --accent:#2457d6; --accent-ink:#fff;
+          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; --field:#fff;
+          --ok-bg:#e9f6ee; --ok-ink:#1f5f36; --err-bg:#fdecec; --err-ink:#8a1c1c; --warn-bg:#fff6e5; --warn-ink:#7a4b00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaf0; --quiet:#9aa1b2; --rule:#2a2f38; --accent:#6d93ff; --accent-ink:#0b1020;
+            --field:#13161b; --ok-bg:#12291b; --ok-ink:#9be0b4; --err-bg:#2e1416; --err-ink:#f3a6a6; --warn-bg:#2b2210; --warn-ink:#f1cf8a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.5 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--card); border-bottom: 1px solid var(--rule); padding: 10px 24px; display:flex; align-items:center; gap:16px; flex-wrap: wrap; }
+  header a.brand { font-weight: 800; letter-spacing: .04em; color: var(--accent); text-decoration: none; }
+  header .tag { color: var(--quiet); font-size: 13px; }
+  header nav { margin-left:auto; display:flex; gap: 14px; align-items:center; flex-wrap: wrap; }
+  header form { display:flex; gap:6px; align-items:center; }
+  header form input { width: 150px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px; } h3 { font-size: 14px; margin: 14px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; margin-bottom: 16px; overflow-x: auto; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--quiet); font-weight:600; font-size: 12px; text-transform: uppercase; letter-spacing:.03em; }
+  a { color: var(--accent); }
+  .meta { color: var(--quiet); font-size: 13px; }
+  .pill { display:inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight:600; color:#fff; text-transform: capitalize; }
+  .critical{background:var(--crit)} .high{background:var(--high)} .medium{background:var(--med)} .low{background:var(--low)} .info{background:var(--info)}
+  .chip { display:inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--rule); margin: 1px 2px 1px 0; white-space: nowrap; }
+  .chip.done { border-color: var(--low); color: var(--low); }
+  .env { display:inline-block; padding: 1px 8px; border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border:1px solid var(--rule); }
+  .env-production { color: var(--crit); border-color: var(--crit); }
+  .env-staging, .env-uat { color: var(--med); border-color: var(--med); }
+  .env-dev, .env-demo { color: var(--low); border-color: var(--low); }
+  .st-met{color:var(--low)} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .st { font-weight: 600; text-transform: capitalize; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .kpi b { display:block; font-size: 24px; }
+  .row { display:flex; gap: 12px; flex-wrap: wrap; }
+  .row .kpi { min-width: 90px; }
+  .flash { border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px; }
+  .flash.ok { background: var(--ok-bg); color: var(--ok-ink); } .flash.err { background: var(--err-bg); color: var(--err-ink); }
+  .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 8px 0; }
+  input, select, textarea { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; }
+  textarea { width: 100%; min-height: 60px; }
+  label { display:block; font-size: 12.5px; color: var(--quiet); font-weight: 600; margin-bottom: 4px; }
+  .fields { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
+  .fields input[type=text], .fields input[type=email], .fields input[type=url], .fields input[type=date], .fields select, .fields input[type=number], .fields input[type=file] { width: 100%; }
+  .checks { display:flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
+  .checks label { display:flex; gap: 6px; align-items: flex-start; font-weight: 400; color: var(--ink); font-size: 13px; margin: 0; }
+  .checks label small { color: var(--quiet); display:block; }
+  button, .btn { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; text-decoration: none; display:inline-block; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--rule); padding: 3px 10px; font-weight: 500; }
+  details summary { cursor: pointer; font-weight: 600; color: var(--accent); margin: 8px 0; }
+  .steps { display:flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; font-size: 13px; }
+  .steps span { border: 1px solid var(--rule); border-radius: 20px; padding: 3px 12px; background: var(--card); }
+  .steps span.done { border-color: var(--low); color: var(--low); }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">ATTESTRA</a><span class="tag">From findings to signed attestation · v{{ version }}</span>
+  <nav>
+    <a href="/">Engagements</a>
+    <a href="/engagements/new">+ New engagement</a>
+    <a href="/docs">API</a>
+    <form method="post" action="/actor">
+      <input type="hidden" name="next" value="{{ path }}">
+      <input type="text" name="name" value="{{ actor or '' }}" placeholder="Your name" aria-label="Your name">
+      <button class="secondary" type="submit">{{ "Switch" if actor else "Set" }}</button>
+    </form>
+  </nav>
+</header>
+<main>
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+{% if not actor %}<div class="warn">Enter your name in the top bar. Every change is recorded in the audit log against it (sign-in arrives with SSO).</div>{% endif %}
+{% block main %}{% endblock %}
+</main>
+</body>
+</html>

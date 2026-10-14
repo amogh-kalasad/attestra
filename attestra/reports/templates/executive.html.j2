@@ -1,0 +1,39 @@
+{% extends "_base.html.j2" %}
+{% block title %}Executive summary{% endblock %}
+{% block body %}
+<h1>Executive summary: {{ eng.name }}</h1>
+<div class="meta">{{ eng.type|upper }} engagement · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+
+{% set crit_high = by_sev.get("critical", 0) + by_sev.get("high", 0) %}
+<p class="note">
+{% if crit_high == 0 %}
+  No critical or high-severity issues remain open. {{ open_findings|length }} lower-severity item(s) are tracked for remediation.
+{% else %}
+  {{ crit_high }} critical/high-severity issue(s) remain open{% if kev_open %}, including {{ kev_open|length }} known to be exploited in the wild (CISA KEV){% endif %}.
+  These should be fixed before the next audit window.
+{% endif %}
+</p>
+
+<div class="kpis">
+  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+</div>
+
+<h2>Top risks</h2>
+<table>
+  <tr><th>Finding</th><th>Severity</th><th>Asset / location</th><th>Fix by</th></tr>
+  {% for f in top %}
+  <tr><td>F-{{ f.id }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td><td class="mono">{{ f.location[:90] }}</td><td>{{ f.sla_due or "" }}</td></tr>
+  {% else %}<tr><td colspan="4">No open findings.</td></tr>{% endfor %}
+</table>
+
+<h2>Compliance readiness</h2>
+<table>
+  <tr><th>Framework</th><th>Met</th><th>No exceptions</th><th>Partial</th><th>Not met</th><th>Not assessed</th></tr>
+  {% for key, fw in frameworks.items() %}
+  <tr><td>{{ fw.name }}</td><td>{{ fw.counts.get("met", 0) }}</td><td>{{ fw.counts.get("no_exceptions", 0) }}</td><td>{{ fw.counts.get("partial", 0) }}</td><td>{{ fw.counts.get("not_met", 0) }}</td><td>{{ fw.counts.get("not_assessed", 0) + fw.counts.get("not_applicable", 0) }}</td></tr>
+  {% else %}<tr><td colspan="6">No frameworks selected for this engagement.</td></tr>{% endfor %}
+</table>
+<p class="meta">Control statuses are proposed from test evidence and confirmed by a named assessor. They indicate readiness for the
+controls VAPT evidence supports, not certification against the full framework. <b>No exceptions</b> means testing found
+nothing against the control; it does not by itself show the control is in place.</p>
+{% endblock %}

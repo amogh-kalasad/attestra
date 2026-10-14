@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attestra"
+version = "0.1.0"
+description = "Attestra: VAPT evidence, OWASP-aligned findings and compliance reporting (PCI DSS, ISO 27001, SOC 2)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "sqlalchemy>=2.0",
+  "pydantic>=2.6",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+postgres = ["psycopg[binary]>=3.1"]
+
+[project.scripts]
+attestra = "attestra.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["attestra*"]
+
+[tool.setuptools.package-data]
+attestra = ["compliance/data/*.yaml", "reports/templates/*.j2", "web/templates/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

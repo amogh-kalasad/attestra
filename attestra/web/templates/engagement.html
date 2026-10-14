@@ -1,0 +1,240 @@
+{% extends "_layout.html" %}
+{% block title %}{{ e.name }} · Attestra{% endblock %}
+{% block main %}
+<h1>{{ e.name }}</h1>
+<p class="meta">{{ e.tenant.name }}{% if e.tenant.industry %} · {{ e.tenant.industry }}{% endif %} · {{ type_label }} · window {{ e.window_start or "-" }} to {{ e.window_end or "-" }}</p>
+
+{% set has_auth = authorized_envs|length > 0 %}
+<div class="steps">
+  <span class="{{ 'done' if has_auth }}">1. Signed authorization</span>
+  <span class="{{ 'done' if e.assets }}">2. Targets in scope ({{ e.assets|length }})</span>
+  <span class="{{ 'done' if imports }}">3. Results imported ({{ imports|length }})</span>
+  <span class="{{ 'done' if reports }}">4. Reports ({{ reports|length }})</span>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Open findings</h2>
+    <div class="row">
+      {% for s in ["critical","high","medium","low","info"] %}<div class="kpi"><span class="pill {{ s }}">{{ s }}</span><b>{{ sev.get(s, 0) }}</b></div>{% endfor %}
+    </div>
+  </div>
+  <div class="card">
+    <h2>{{ fw_names[fw] }}</h2>
+    <form method="get" style="margin-bottom:8px">
+      <select name="framework" onchange="this.form.submit()" aria-label="Framework">
+        {% for k, n in fw_names.items() %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ n }}</option>{% endfor %}
+      </select>
+    </form>
+    <div class="row">
+      {% for st in ["met","no_exceptions","partial","not_met","not_assessed"] %}<div class="kpi"><span class="st st-{{ st }}">{{ st|replace("_"," ") }}</span><b>{{ counts.get(st, 0) }}</b></div>{% endfor %}
+    </div>
+  </div>
+  <div class="card">
+    <h2>Client</h2>
+    <div><b>{{ e.tenant.name }}</b></div>
+    {% if e.tenant.contact_name or e.tenant.contact_email %}<div>{{ e.tenant.contact_name }}{% if e.tenant.contact_email %} · <a href="mailto:{{ e.tenant.contact_email }}">{{ e.tenant.contact_email }}</a>{% endif %}</div>{% endif %}
+    <div class="meta">Frameworks: {{ e.frameworks|join(", ") or "none" }}</div>
+  </div>
+</div>
+
+<!-- ============================================================ SCOPE -->
+<div class="card" id="scope">
+  <h2>1. Signed authorization</h2>
+  <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Results can only be imported for targets in an authorized environment.</p>
+  <table>
+    <tr><th>Document</th><th>Signed by</th><th>Valid</th><th>Environments approved</th><th>Rules of engagement</th><th>SHA-256</th></tr>
+    {% for a in e.authorizations %}
+    <tr>
+      <td>{{ a.document_name }}</td><td>{{ a.signer }}</td>
+      <td>{{ a.signed_on }} to {{ a.expires_on }}<div class="{{ 'st-met' if a.is_valid() else 'st-not_met' }}">{{ "Valid" if a.is_valid() else "Not valid today" }}</div></td>
+      <td>{% for env in (a.environments or environments) %}<span class="env env-{{ env }}">{{ env }}</span> {% endfor %}</td>
+      <td class="meta">{{ a.rules_of_engagement or "-" }}</td>
+      <td class="mono">{{ a.sha256[:16] }}…</td>
+    </tr>
+    {% else %}<tr><td colspan="6" class="st-not_met">No signed authorization yet. Imports are blocked until one is recorded.</td></tr>{% endfor %}
+  </table>
+  <details {{ "open" if not e.authorizations }}>
+    <summary>+ Record a signed authorization</summary>
+    <form method="post" action="/engagements/{{ e.id }}/authorizations" enctype="multipart/form-data">
+      <div class="fields">
+        <div><label for="document">Signed document (PDF, image or text) *</label><input type="file" id="document" name="document" required></div>
+        <div><label for="signer">Signed by (name, role) *</label><input type="text" id="signer" name="signer" required placeholder="Jane Doe, CISO"></div>
+        <div><label for="signed_on">Signed on *</label><input type="date" id="signed_on" name="signed_on" required value="{{ today }}"></div>
+        <div><label for="expires_on">Valid until *</label><input type="date" id="expires_on" name="expires_on" required value="{{ e.window_end or '' }}"></div>
+      </div>
+      <label>Environments the client authorizes for testing *</label>
+      <div class="checks">
+        {% for env in environments %}<label><input type="checkbox" name="environments" value="{{ env }}" {{ "checked" if env in ("staging", "uat") }}> <span class="env env-{{ env }}">{{ env }}</span></label>{% endfor %}
+      </div>
+      <label for="roe">Rules of engagement (testing hours, exclusions, contacts, intrusive tests allowed?)</label>
+      <textarea id="roe" name="rules_of_engagement" placeholder="Testing 10:00-18:00 IST only. No denial-of-service. Production: non-intrusive scans only. Emergency contact: ..."></textarea>
+      <div style="margin-top:10px"><button type="submit">Save authorization</button></div>
+    </form>
+  </details>
+</div>
+
+<div class="card">
+  <h2>2. Targets in scope</h2>
+  <p class="meta">Each website, API, host, repository, image, cloud account or app the client wants tested, its environment, and which tests are planned for it.</p>
+  <table>
+    <tr><th>Target</th><th>Environment</th><th>Kind</th><th>Planned tests</th><th>Risk profile</th><th>Owner / notes</th><th></th></tr>
+    {% for a in e.assets %}
+    <tr>
+      <td><span class="mono">{{ a.identifier }}</span>{% if a.name %}<div class="meta">{{ a.name }}</div>{% endif %}</td>
+      <td><span class="env env-{{ a.environment or 'production' }}">{{ a.environment or "production" }}</span>
+          {% if (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">not authorized</div>{% endif %}</td>
+      <td>{{ asset_kinds.get(a.kind, a.kind) }}</td>
+      <td>{% for t in (a.test_types or default_tests.get(a.kind, [])) %}<span class="chip">{{ test_types[t].label if t in test_types else t }}</span>{% endfor %}
+          <div class="meta">{{ "Intrusive tests allowed" if a.intrusive_allowed else "Non-intrusive only" }}</div></td>
+      <td>Criticality {{ a.criticality }}/5 · {{ a.exposure }}{% if a.in_cde %} · <b>PCI CDE</b>{% endif %}</td>
+      <td class="meta">{{ a.owner }}{% if a.owner and a.notes %} · {% endif %}{{ a.notes }}</td>
+      <td><form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/remove" onsubmit="return confirm('Remove {{ a.identifier }} from scope?')"><button class="secondary" type="submit">Remove</button></form></td>
+    </tr>
+    {% else %}<tr><td colspan="7">No targets yet. Add the URLs, APIs or systems the client wants tested.</td></tr>{% endfor %}
+  </table>
+
+  <details {{ "open" if not e.assets }}>
+    <summary>+ Add a target</summary>
+    <form method="post" action="/engagements/{{ e.id }}/targets">
+      <div class="fields">
+        <div><label for="kind">What is it? *</label>
+          <select id="kind" name="kind">{% for k, label in asset_kinds.items() %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></div>
+        <div style="grid-column: span 2"><label for="identifier">URL / address / identifier *</label>
+          <input type="text" id="identifier" name="identifier" required placeholder="https://staging.client.com"></div>
+        <div><label for="tname">Friendly name</label><input type="text" id="tname" name="name" placeholder="Customer portal (staging)"></div>
+        <div><label for="environment">Environment *</label>
+          <select id="environment" name="environment">{% for env in environments %}<option value="{{ env }}" {{ "selected" if env == "staging" }}>{{ env|capitalize }}</option>{% endfor %}</select></div>
+        <div><label for="criticality">Business criticality</label>
+          <select id="criticality" name="criticality">{% for c in [5,4,3,2,1] %}<option value="{{ c }}" {{ "selected" if c == 3 }}>{{ c }}{{ " (crown jewel)" if c == 5 else " (low)" if c == 1 else "" }}</option>{% endfor %}</select></div>
+        <div><label for="exposure">Exposure</label>
+          <select id="exposure" name="exposure"><option value="internet">Internet-facing</option><option value="internal">Internal only</option></select></div>
+        <div><label for="owner">Owner (client side)</label><input type="text" id="owner" name="owner" placeholder="Platform team"></div>
+      </div>
+      <label>Tests planned for this target (defaults follow the target type)</label>
+      <div class="checks" id="test-types">
+        {% for k, t in test_types.items() %}
+        <label><input type="checkbox" name="test_types" value="{{ k }}" {{ "checked" if k in default_tests["web_app"] }}>
+          <span>{{ t.label }}<small>{{ t.standard }}</small></span></label>
+        {% endfor %}
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" name="intrusive_allowed" value="true"> <span>Intrusive / state-changing tests allowed<small>Leave off for production unless the rules of engagement say otherwise</small></span></label>
+        <label><input type="checkbox" name="in_cde" value="true"> <span>In PCI cardholder data environment (CDE)<small>Counts toward PCI DSS results</small></span></label>
+      </div>
+      <label for="notes">Notes (test accounts, exclusions, allow-listed IPs)</label>
+      <textarea id="notes" name="notes" placeholder="Test user provisioned: qa-tester. Exclude /admin/payments/refund."></textarea>
+      <div style="margin-top:10px"><button type="submit">Add target</button></div>
+    </form>
+  </details>
+</div>
+
+<!-- ============================================================ TEST PLAN -->
+<div class="card" id="plan">
+  <h2>3. Test plan and coverage</h2>
+  <p class="meta">What is planned against each target, which tool results to import as evidence, and what has arrived so far.</p>
+  <table>
+    <tr><th>Target</th><th>Environment</th><th>Test</th><th>Standard</th><th>Import results from</th><th>Status</th></tr>
+    {% for p in plan %}
+      {% for t in p.tests %}
+      <tr>
+        {% if loop.first %}<td rowspan="{{ p.tests|length }}"><span class="mono">{{ p.a.identifier }}</span><div class="meta">{{ p.findings }} finding(s)</div></td>
+        <td rowspan="{{ p.tests|length }}"><span class="env env-{{ p.a.environment or 'production' }}">{{ p.a.environment or "production" }}</span></td>{% endif %}
+        <td>{{ t.label }}</td>
+        <td class="meta">{{ t.standard }}</td>
+        <td>{% for i in t.imports %}<span class="chip">{{ "manual evidence" if i == "evidence" else i }}</span>{% endfor %}</td>
+        <td><span class="chip {{ 'done' if t.done }}">{{ t.status }}</span></td>
+      </tr>
+      {% endfor %}
+    {% else %}<tr><td colspan="6">Add targets to build the test plan.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<!-- ============================================================ IMPORT -->
+<div class="card" id="import">
+  <h2>4. Import results</h2>
+  <p class="meta">Upload result files from the tools your testers ran under this authorization. Findings are matched to targets by URL, host or path, deduplicated and risk-ranked.</p>
+  {% if not has_auth %}<div class="warn">Record a valid signed authorization first; imports are blocked until then.</div>{% endif %}
+  <form method="post" action="/engagements/{{ e.id }}/imports" enctype="multipart/form-data">
+    <div class="fields">
+      <div><label for="tool">Result format *</label>
+        <select id="tool" name="tool">
+          <option value="zap">OWASP ZAP (JSON report)</option>
+          <option value="nuclei">Nuclei (JSONL)</option>
+          <option value="trivy">Trivy (JSON)</option>
+          <option value="sarif">SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks...)</option>
+        </select></div>
+      <div style="grid-column: span 2"><label for="rfile">Result file *</label><input type="file" id="rfile" name="file" required></div>
+    </div>
+    <button type="submit" {{ "disabled" if not has_auth }}>Import</button>
+  </form>
+</div>
+
+<!-- ============================================================ FINDINGS -->
+<div class="card" id="findings">
+  <h2>Findings (ranked by risk)</h2>
+  <table>
+    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Tools</th><th>Status</th><th>Fix by</th></tr>
+    {% for f in findings %}
+    <tr>
+      <td>F-{{ f.id }}</td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+      <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
+      <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">unmatched</span>{% endif %}</td>
+      <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}</td>
+      <td>{{ f.tools|join(", ") }}</td>
+      <td>{{ f.status|replace("_"," ") }}</td>
+      <td>{{ f.sla_due or "" }}</td>
+    </tr>
+    {% else %}<tr><td colspan="9">No findings imported.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>{{ fw_names[fw] }}: control status</h2>
+  <table>
+    <tr><th>Ref</th><th>Requirement</th><th>Status</th><th>Basis</th><th>Findings</th></tr>
+    {% for r in results %}
+    <tr>
+      <td><b>{{ r.ref }}</b></td><td>{{ r.title }}</td>
+      <td><span class="st st-{{ r.status }}">{{ r.status|replace("_"," ") }}</span><div class="meta">{{ "confirmed: " ~ r.assessor if r.confirmed else "proposed" }}</div></td>
+      <td>{{ r.rationale if r.confirmed else r.reason }}</td>
+      <td>{% for fid in r.finding_ids %}F-{{ fid }} {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Imported results</h2>
+    <table>
+      <tr><th>#</th><th>Tool</th><th>File</th><th>New / merged / unmatched</th><th>By</th></tr>
+      {% for i in imports %}<tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }} / {{ i.unmatched_findings or 0 }}</td><td>{{ i.imported_by }}</td></tr>{% else %}<tr><td colspan="5">None.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Reports</h2>
+    <table>
+      <tr><th>#</th><th>Report</th><th>Status</th><th>Approved by</th></tr>
+      {% for r in reports %}<tr><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank">{{ r.kind }}{{ " · " ~ r.framework if r.framework }} v{{ r.version }}</a></td><td>{{ r.status }}</td><td>{{ r.approved_by or "-" }}</td></tr>{% else %}<tr><td colspan="4">None.</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+
+<script>
+  // Pre-tick the usual tests for the chosen target type; the tester can still change them.
+  const defaults = {{ default_tests|tojson }};
+  const kind = document.getElementById('kind');
+  const ident = document.getElementById('identifier');
+  const hints = {web_app: 'https://staging.client.com', api: 'https://api.staging.client.com/v1', host: '10.0.4.0/24 or app01.client.internal',
+                 repo: 'github.com/client/payments-service', image: 'registry.client.com/shop/api', cloud_account: 'AWS 123456789012',
+                 mobile_app: 'com.client.app (Android) / id123456 (iOS)'};
+  if (kind) kind.addEventListener('change', () => {
+    const want = defaults[kind.value] || [];
+    document.querySelectorAll('#test-types input[name=test_types]').forEach(cb => { cb.checked = want.includes(cb.value); });
+    ident.placeholder = hints[kind.value] || '';
+  });
+</script>
+{% endblock %}

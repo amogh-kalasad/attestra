@@ -1,0 +1,36 @@
+{% extends "_layout.html" %}
+{% block title %}New engagement · Attestra{% endblock %}
+{% block main %}
+<h1>New engagement</h1>
+<p class="meta">Step 1 of 4: client and engagement. Next you record the signed authorization, add the targets (URLs, APIs, hosts...) with their environment and planned tests, then import results.</p>
+
+<form method="post" action="/engagements/new">
+  <div class="card">
+    <h2>Client</h2>
+    <div class="fields">
+      <div><label for="tenant">Client / company name *</label><input type="text" id="tenant" name="tenant" required placeholder="Example Retail Pvt Ltd"></div>
+      <div><label for="industry">Industry</label><input type="text" id="industry" name="industry" placeholder="Retail, BFSI, SaaS..."></div>
+      <div><label for="contact_name">Client contact</label><input type="text" id="contact_name" name="contact_name" placeholder="Name, role"></div>
+      <div><label for="contact_email">Contact email</label><input type="email" id="contact_email" name="contact_email" placeholder="security@client.com"></div>
+    </div>
+    <p class="meta">An existing client name reuses that client; filled-in contact details update it.</p>
+  </div>
+
+  <div class="card">
+    <h2>Engagement</h2>
+    <div class="fields">
+      <div><label for="name">Engagement name *</label><input type="text" id="name" name="name" required placeholder="FY27 Q3 VAPT: customer portal"></div>
+      <div><label for="type">Type of test *</label>
+        <select id="type" name="type">{% for k, label in types.items() %}<option value="{{ k }}" {{ "selected" if k == "vapt" }}>{{ label }}</option>{% endfor %}</select></div>
+      <div><label for="window_start">Test window start</label><input type="date" id="window_start" name="window_start" value="{{ today }}"></div>
+      <div><label for="window_end">Test window end</label><input type="date" id="window_end" name="window_end"></div>
+    </div>
+    <label>Compliance frameworks to report against</label>
+    <div class="checks">
+      {% for k, n in frameworks.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" checked> {{ n }}</label>{% endfor %}
+    </div>
+  </div>
+
+  <button type="submit">Create engagement</button>
+</form>
+{% endblock %}
