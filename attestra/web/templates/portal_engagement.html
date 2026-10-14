@@ -1,0 +1,41 @@
+{% extends "_layout.html" %}
+{% block main %}
+<p class="meta"><a href="/portal">&larr; All engagements</a>{% if role == "auditor" %} &middot; <a href="/auditor/engagements/{{ e.id }}">Audit trail</a>{% endif %}</p>
+<h1>{{ e.name }}</h1>
+<p class="meta">{{ e.tenant.name }} &middot; {{ e.type|upper }} &middot; read-only view</p>
+
+<div class="card" id="summary">
+  <h2>Open findings</h2>
+  {% for s in ["critical","high","medium","low","info"] %}<span class="pill {{ s }}">{{ sev.get(s, 0) }} {{ s }}</span> {% endfor %}
+</div>
+
+<div class="card" id="findings">
+  <h2>Findings</h2>
+  <table>
+    <tr><th>#</th><th>Severity</th><th>Title</th><th>Location</th><th>Status</th><th>SLA due</th><th>Ticket</th></tr>
+    {% for f in findings %}
+    <tr>
+      <td>{{ f.id }}</td><td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+      <td>{{ f.title }}</td><td class="mono">{{ f.location }}</td><td>{{ f.status }}</td>
+      <td>{{ f.sla_due or "" }}</td><td class="mono">{{ f.ticket_ref }}</td>
+    </tr>
+    {% else %}<tr><td colspan="7">No findings to show.</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card" id="compliance">
+  <h2>Compliance: {{ fw_names.get(fw, fw) }}</h2>
+  <p>{% for st, n in counts.items() %}<span class="st-{{ st }}">{{ n }} {{ st }}</span> {% endfor %}</p>
+  <form method="get"><select name="framework">{% for k in e.frameworks %}<option value="{{ k }}" {% if k == fw %}selected{% endif %}>{{ fw_names.get(k, k) }}</option>{% endfor %}</select> <button>Show</button></form>
+</div>
+
+<div class="card" id="reports">
+  <h2>Reports</h2>
+  <table>
+    <tr><th>#</th><th>Kind</th><th>Version</th><th>Status</th><th>SHA-256</th><th>Signed</th></tr>
+    {% for r in reports %}
+    <tr><td>{{ r.id }}</td><td>{{ r.kind }}</td><td>{{ r.version }}</td><td>{{ r.status }}</td><td class="mono">{{ r.sha256[:16] }}&hellip;</td><td>{{ r.signed_at or "" }}</td></tr>
+    {% else %}<tr><td colspan="6">No signed reports yet.</td></tr>{% endfor %}
+  </table>
+</div>
+{% endblock %}

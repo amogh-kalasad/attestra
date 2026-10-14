@@ -11,7 +11,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
@@ -31,7 +31,19 @@ from attestra.models import (
     Report,
 )
 
-router = APIRouter(include_in_schema=False)
+READ_ONLY_ROLES = frozenset({"client_viewer", "auditor"})
+
+
+def _block_read_only_writes(request: Request) -> None:
+    """Step 7.1: client_viewer and auditor sessions may never write through the UI."""
+    if request.method != "POST" or request.url.path in ("/login", "/logout"):
+        return
+    principal = _principal(request)
+    if principal and principal.role in READ_ONLY_ROLES:
+        raise HTTPException(403, "read-only role")
+
+
+router = APIRouter(include_in_schema=False, dependencies=[Depends(_block_read_only_writes)])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 ENGAGEMENT_TYPE_LABELS = {
@@ -147,6 +159,8 @@ def home(request: Request):
     principal, redirect = _require_login(request)
     if redirect:
         return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse("/portal", status_code=303)
     with db.session() as s:
         rows = []
         for e in s.scalars(services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())):
@@ -159,6 +173,21 @@ def home(request: Request):
                 "targets": len(e.assets),
             })
         return _render(request, "home.html", {"rows": rows})
+
+
+@router.get("/tuning/false-positives", response_class=HTMLResponse)
+def false_positive_rates(request: Request):
+    """Phase 7.4: share of each tool's findings marked false_positive, within the user's tenants."""
+    from attestra import tuning
+
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse("/portal", status_code=303)
+    with db.session() as s:
+        rows = tuning.fp_rate_by_tool(s, services.tenant_ids_for(s, principal))
+        return _render(request, "tuning_fp.html", {"rows": rows})
 
 
 @router.get("/engagements/new", response_class=HTMLResponse)
@@ -239,6 +268,8 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
     principal, redirect = _require_login(request)
     if redirect:
         return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
     with db.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)

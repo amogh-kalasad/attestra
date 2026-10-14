@@ -905,3 +905,9 @@ def ci_gate(
 from attestra.web.ui import router as ui_router  # noqa: E402
 
 app.include_router(ui_router)
+
+from attestra.integrations.routes import router as tickets_router  # noqa: E402
+from attestra.web.portal import router as portal_router  # noqa: E402
+
+app.include_router(portal_router)
+app.include_router(tickets_router)

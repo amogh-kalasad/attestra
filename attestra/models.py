@@ -38,11 +38,11 @@ TEST_TYPES = {
     "web_dast": {"label": "Web app scan (DAST)", "standard": "OWASP Top 10", "imports": ["zap", "nuclei"]},
     "api_dast": {"label": "API security scan", "standard": "OWASP API Security Top 10", "imports": ["zap", "nuclei"]},
     "manual_pt": {"label": "Manual penetration test", "standard": "OWASP WSTG / ASVS", "imports": ["evidence"]},
-    "tls": {"label": "TLS / SSL configuration", "standard": "PCI DSS 4.2.1", "imports": ["nuclei"]},
-    "network_va": {"label": "Network / host vulnerability assessment", "standard": "CVE / CIS", "imports": ["nuclei", "sarif"]},
+    "tls": {"label": "TLS / SSL configuration", "standard": "PCI DSS 4.2.1", "imports": ["nuclei", "testssl"]},
+    "network_va": {"label": "Network / host vulnerability assessment", "standard": "CVE / CIS", "imports": ["nuclei", "sarif", "naabu"]},
     "sca_container": {"label": "Dependencies and container images (SCA)", "standard": "OWASP A06", "imports": ["trivy"]},
-    "sast": {"label": "Source code and secrets (SAST)", "standard": "OWASP ASVS", "imports": ["sarif"]},
-    "iac_cloud": {"label": "Cloud / IaC configuration", "standard": "CIS Benchmarks", "imports": ["trivy", "sarif"]},
+    "sast": {"label": "Source code and secrets (SAST)", "standard": "OWASP ASVS", "imports": ["sarif", "gitleaks"]},
+    "iac_cloud": {"label": "Cloud / IaC configuration", "standard": "CIS Benchmarks", "imports": ["trivy", "sarif", "checkov", "prowler", "kube_bench"]},
     "mobile": {"label": "Mobile app assessment", "standard": "OWASP MASVS", "imports": ["sarif"]},
 }
 
@@ -491,3 +491,36 @@ class AuditEvent(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64))
+
+
+class TenantRiskWeights(Base):
+    """Per-tenant override of scoring.asset_weight / exposure_weight (Phase 7.4)."""
+
+    __tablename__ = "tenant_risk_weights"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), unique=True)
+    criticality_weights: Mapped[dict] = mapped_column(JSON, default=dict)  # {"1".."5": weight}
+    internet_weight: Mapped[float] = mapped_column(Float, default=1.3)
+    cde_weight: Mapped[float] = mapped_column(Float, default=1.3)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SuppressionRule(Base):
+    """Drop matching imported findings until the rule expires or is revoked (Phase 7.4)."""
+
+    __tablename__ = "suppression_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int | None] = mapped_column(ForeignKey("engagements.id"))  # None = whole tenant
+    tool: Mapped[str] = mapped_column(String(50), default="")
+    rule_id: Mapped[str] = mapped_column(String(300), default="")
+    location_contains: Mapped[str] = mapped_column(String(500), default="")
+    title_contains: Mapped[str] = mapped_column(String(300), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str] = mapped_column(String(200), default="")
+    hits: Mapped[int] = mapped_column(Integer, default=0)

@@ -135,6 +135,10 @@ class ScannerAdapter(ABC):
     @abstractmethod
     def build_argv(self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline") -> list[str]: ...
 
+    def resolve_output(self, out_file: Path) -> Path:
+        """Where the tool actually wrote its report (some tools add their own suffix)."""
+        return out_file
+
     def scan(
         self,
         pin: PinnedTarget | str,
@@ -155,6 +159,7 @@ class ScannerAdapter(ABC):
                 quarantine=False,
                 extra={"cancelled": result.cancelled, "timed_out": result.timed_out, "stderr": result.stderr[-2000:]},
             )
+        out_file = self.resolve_output(out_file)
         raw = out_file.read_bytes() if out_file.exists() else result.stdout
         if not out_file.exists():
             out_file.write_bytes(raw)

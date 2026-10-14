@@ -1,0 +1,23 @@
+{% extends "_layout.html" %}
+{% block main %}
+<h1>{% if role == "auditor" %}Auditor view{% else %}Client portal{% endif %}</h1>
+<p class="meta">Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.</p>
+<div class="card">
+<table>
+  <tr><th>#</th><th>Engagement</th><th>Client</th><th>Type</th><th>Open findings</th><th>Closed</th><th></th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.e.id }}</td>
+    <td><a href="/portal/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
+    <td>{{ r.e.tenant.name }}</td>
+    <td>{{ r.e.type|upper }}</td>
+    <td>{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}</td>
+    <td>{{ r.closed }}</td>
+    <td>{% if role == "auditor" %}<a href="/auditor/engagements/{{ r.e.id }}">Audit trail</a>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">No engagements shared with you yet.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

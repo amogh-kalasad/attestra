@@ -54,13 +54,22 @@ POLICIES: dict[str, str] = {
     "evidence": _via_finding(),
     "retests": _via_finding(),
 }
+# Tables created by migration 0007 itself; later migrations add their own.
+PHASE6_TABLES: tuple[str, ...] = tuple(POLICIES)
+# Phase 7.4 (migration 0008_tuning).
+TUNING_POLICIES: dict[str, str] = {
+    "tenant_risk_weights": _tenant("tenant_id"),
+    "suppression_rules": _tenant("tenant_id"),
+}
+POLICIES.update(TUNING_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 
 
-def rls_statements() -> list[str]:
+def rls_statements(tables=None) -> list[str]:
     out: list[str] = []
-    for table, expr in POLICIES.items():
+    for table in tables if tables is not None else POLICIES:
+        expr = POLICIES[table]
         out += [
             f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
             f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",
@@ -70,9 +79,9 @@ def rls_statements() -> list[str]:
     return out
 
 
-def rls_drop_statements() -> list[str]:
+def rls_drop_statements(tables=None) -> list[str]:
     out: list[str] = []
-    for table in POLICIES:
+    for table in tables if tables is not None else POLICIES:
         out += [
             f"DROP POLICY IF EXISTS {POLICY_NAME} ON {table}",
             f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY",

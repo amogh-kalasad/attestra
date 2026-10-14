@@ -1,0 +1,10 @@
+{"bomFormat":"CycloneDX","specVersion":"1.5","version":1,
+ "metadata":{"component":{"name":"registry.example.com/shop/api","type":"container"}},
+ "components":[{"bom-ref":"pkg:npm/lodash@4.17.20","name":"lodash","version":"4.17.20","purl":"pkg:npm/lodash@4.17.20"},
+   {"bom-ref":"pkg:pypi/requests@2.19.0","name":"requests","version":"2.19.0","purl":"pkg:pypi/requests@2.19.0"}],
+ "vulnerabilities":[
+  {"id":"CVE-2021-23337","ratings":[{"source":{"name":"NVD"},"score":7.2,"severity":"high","method":"CVSSv31","vector":"CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}],
+   "cwes":[94],"description":"Command injection in lodash template.","affects":[{"ref":"pkg:npm/lodash@4.17.20"}]},
+  {"id":"CVE-2018-18074","ratings":[{"severity":"medium"}],"description":"Auth header leak on redirect.","affects":[{"ref":"pkg:pypi/requests@2.19.0"}]},
+  {"id":"CVE-2099-0001","ratings":[{"severity":"critical","score":9.8}],"analysis":{"state":"not_affected"},"affects":[{"ref":"pkg:npm/lodash@4.17.20"}]}
+ ]}

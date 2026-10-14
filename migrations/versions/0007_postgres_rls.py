@@ -24,20 +24,20 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 # Shared with attestra.db so tests can assert coverage.
-from attestra.rls import POLICY_NAME, rls_drop_statements, rls_statements  # noqa: E402
+from attestra.rls import PHASE6_TABLES, POLICY_NAME, rls_drop_statements, rls_statements  # noqa: E402
 
 
 def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    for stmt in rls_statements():
+    for stmt in rls_statements(PHASE6_TABLES):
         op.execute(stmt)
 
 
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    for stmt in rls_drop_statements():
+    for stmt in rls_drop_statements(PHASE6_TABLES):
         op.execute(stmt)
 
 

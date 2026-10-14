@@ -1,0 +1,9 @@
+[
+  {"status_code": "FAIL", "severity": "High", "status_detail": "S3 bucket shop-logs is public.",
+   "finding_info": {"title": "Ensure S3 buckets are not publicly accessible", "uid": "prowler-aws-s3_bucket_public-1"},
+   "metadata": {"event_code": "s3_bucket_public_access"},
+   "resources": [{"uid": "arn:aws:s3:::shop-logs"}],
+   "remediation": {"desc": "Enable S3 Block Public Access."}},
+  {"status_code": "PASS", "severity": "Low", "finding_info": {"title": "MFA on root"},
+   "metadata": {"event_code": "iam_root_mfa_enabled"}, "resources": [{"uid": "arn:aws:iam::123456789012:root"}]}
+]

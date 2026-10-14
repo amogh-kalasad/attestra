@@ -163,11 +163,11 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 
 | Step | Requirement | Status |
 | --- | --- | --- |
-| 7.1 | Client portal / auditor read-only views | **Pending** |
-| 7.2 | Jira/GitHub ticket sync + CycloneDX/SBOM importers | **Pending** |
-| 7.3 | More scanner adapters (Prowler, kube-bench, etc.) | **Pending** |
-| 7.4 | Per-tenant risk weights, suppressions | **Pending** |
-| 7.5 | Legal pack + `docs/LICENSES.md` | **Pending** |
+| 7.1 | Client portal / auditor read-only views | **Done** - `/portal`, `/portal/engagements/{id}` (client_viewer: triaged findings + signed reports only), `/auditor/engagements/{id}` (audit trail, chain verify, report versions); UI POSTs refused for read-only roles (`attestra/web/portal.py`, `tests/test_phase7_portal_tickets.py`) |
+| 7.2 | Jira/GitHub ticket sync + CycloneDX/SBOM importers | **Done (off by default)** - `attestra/integrations/{tickets,jira,github,routes}.py`: `POST /api/findings/{id}/ticket`, HMAC-signed status webhook `POST /api/integrations/tickets/{jira,github}/webhook` (back-sync only along allowed transitions); enable with `ATTESTRA_TICKETS_BACKEND` + `ATTESTRA_TICKETS_WEBHOOK_SECRET`. Importers `cyclonedx`, `dependency_track` |
+| 7.3 | More scanner adapters (Prowler, kube-bench, etc.) | **Done** - adapters + importers for Prowler, kube-bench, testssl.sh, Gitleaks, Checkov, naabu; OpenVAS/MobSF only as opt-in HTTP services (off by default) |
+| 7.4 | Per-tenant risk weights, suppressions | **Done** - tenant weights, expiring audited suppression rules, false-positive rate per tool at `/tuning/false-positives` (linked from the dashboard) |
+| 7.5 | Legal pack + `docs/LICENSES.md` | **Done** - `docs/legal/` RoE + authorization templates, `docs/LICENSES.md` |
 
 ### Phase 8 — GA and external validation
 

@@ -71,7 +71,7 @@ def test_migration_is_noop_on_sqlite(tmp_path, monkeypatch):
 
     eng = create_engine(url)
     with eng.connect() as c:
-        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0007_postgres_rls"
+        assert c.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0008_tuning"
     eng.dispose()
 
 

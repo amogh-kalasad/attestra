@@ -409,8 +409,11 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
 
     existing = {f.fingerprint: f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id))}
     now = utcnow()
-    new = updated = 0
+    new = updated = suppressed = 0
     unmatched = sum(1 for _, a in matched if a is None)
+    from attestra import tuning
+
+    rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
     for nf, asset in matched:
         fp = fingerprint(
             location=nf.location,
@@ -422,6 +425,12 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
             asset_id=asset.id if asset else None,
         )
         f = existing.get(fp)
+        rule = tuning.first_match(rules, nf) if f is None and rules else None
+        if rule is not None:
+            # Suppressed (Phase 7.4): not stored; counted on the rule and in the audit event.
+            rule.hits += 1
+            suppressed += 1
+            continue
         if f is None:
             f = Finding(
                 engagement_id=engagement_id,
@@ -473,7 +482,7 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
     audit.record(
         s, actor, "import.create", "import_run", run.id,
         engagement_id=engagement_id, tool=tool, sha256=sha, parsed=len(parsed), new=new, updated=updated,
-        unmatched=unmatched,
+        unmatched=unmatched, suppressed=suppressed,
     )
     return run
 
@@ -491,11 +500,24 @@ def _apply_owasp(f: Finding) -> None:
     f.wstg_ref = refs["wstg_ref"]
 
 
+def _tenant_weights(f: Finding):
+    from sqlalchemy.orm import object_session
+
+    from attestra import tuning
+
+    s = object_session(f)
+    if s is None or f.engagement_id is None:
+        return None
+    eng = s.get(Engagement, f.engagement_id)
+    return tuning.get_weights(s, eng.tenant_id) if eng else None
+
+
 def rescore(f: Finding) -> None:
     a = f.asset
     f.risk_score = scoring.risk_score(
         f.cvss_score, f.severity, f.epss, f.kev,
         a.criticality if a else None, a.exposure if a else None, a.in_cde if a else False,
+        weights=_tenant_weights(f),
     )
     if f.sla_due is None:
         f.sla_due = scoring.sla_due(f.severity, (f.first_seen or utcnow()).date())

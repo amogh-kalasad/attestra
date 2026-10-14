@@ -1,0 +1,20 @@
+{% extends "_layout.html" %}
+{% block main %}
+<h1>False-positive rate by tool</h1>
+<p class="meta">Findings each tool reported in your engagements, and how many reviewers marked as false positive. Suppressed results are not stored, so they are not counted. <a href="/">Back to engagements</a></p>
+<div class="card">
+<table>
+  <tr><th>Tool</th><th>Findings</th><th>False positives</th><th>Rate</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="mono">{{ r.tool }}</td>
+    <td>{{ r.total }}</td>
+    <td>{{ r.false_positive }}</td>
+    <td>{{ "%.1f"|format(r.rate * 100) }}%</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">No findings imported yet.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,5 @@
+{"Controls": [{"id": "4", "node_type": "node", "tests": [{"section": "4.2", "results": [
+  {"test_number": "4.2.1", "test_desc": "Ensure that the --anonymous-auth argument is set to false", "status": "FAIL", "scored": true, "remediation": "Set authentication: anonymous: enabled: false"},
+  {"test_number": "4.2.2", "test_desc": "Ensure that the --authorization-mode argument is not set to AlwaysAllow", "status": "PASS", "scored": true},
+  {"test_number": "4.2.9", "test_desc": "Ensure that the --event-qps argument is set appropriately", "status": "WARN", "scored": false, "remediation": "Review event-qps."}
+]}]}]}

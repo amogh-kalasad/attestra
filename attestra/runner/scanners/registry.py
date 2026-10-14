@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from attestra.runner.scanners.base import ScannerAdapter
+from attestra.runner.scanners.checkov import CheckovAdapter
+from attestra.runner.scanners.gitleaks import GitleaksAdapter
+from attestra.runner.scanners.kube_bench import KubeBenchAdapter
+from attestra.runner.scanners.naabu import NaabuAdapter
 from attestra.runner.scanners.nuclei import NucleiAdapter
+from attestra.runner.scanners.prowler import ProwlerAdapter
 from attestra.runner.scanners.semgrep import SemgrepAdapter
+from attestra.runner.scanners.testssl import TlsTestsslAdapter
 from attestra.runner.scanners.trivy import TrivyAdapter
 from attestra.runner.scanners.zap import ZapAdapter
 
@@ -13,6 +19,12 @@ _ADAPTERS: dict[str, ScannerAdapter] = {
     "semgrep": SemgrepAdapter(),
     "nuclei": NucleiAdapter(),
     "zap": ZapAdapter(),
+    "prowler": ProwlerAdapter(),
+    "kube_bench": KubeBenchAdapter(),
+    "testssl": TlsTestsslAdapter(),
+    "gitleaks": GitleaksAdapter(),
+    "checkov": CheckovAdapter(),
+    "naabu": NaabuAdapter(),
 }
 
 

@@ -1,0 +1,2 @@
+[{"RuleID": "aws-access-token", "Description": "AWS Access Key", "File": "services/payments/config.py", "StartLine": 12,
+  "Secret": "AKIAIOSFODNN7EXAMPLE", "Match": "key = AKIAIOSFODNN7EXAMPLE", "Commit": "0123456789abcdef0123"}]

@@ -27,7 +27,10 @@ def _sign(payload: bytes) -> str:
 def _unsign(token: str, *, max_age_s: int = 86400 * 7) -> dict | None:
     try:
         raw = urlsafe_b64decode(token.encode("ascii"))
-        payload, sig = raw.rsplit(b".", 1)
+        # The HMAC digest is raw bytes and may itself contain b".", so split at its fixed length.
+        if len(raw) < 34 or raw[-33:-32] != b".":
+            return None
+        payload, sig = raw[:-33], raw[-32:]
         expected = hmac.new(_secret(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(sig, expected):
             return None
