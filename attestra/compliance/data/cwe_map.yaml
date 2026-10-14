@@ -1,0 +1,62 @@
+# CWE -> control objectives (keys in controls.yaml).
+# Every finding also maps to vuln_identification; findings with a CVE also map
+# to patching. Unknown CWEs fall back to `default`.
+default: [vuln_identification]
+
+cwe:
+  # Injection and input handling (OWASP A03)
+  20: [secure_coding, web_app_protection]
+  74: [secure_coding, web_app_protection]
+  77: [secure_coding, web_app_protection]
+  78: [secure_coding, web_app_protection]
+  79: [secure_coding, web_app_protection]
+  89: [secure_coding, web_app_protection]
+  94: [secure_coding, web_app_protection]
+  611: [secure_coding, web_app_protection]
+  917: [secure_coding, web_app_protection]
+  # Broken access control (OWASP A01)
+  22: [access_control, secure_coding]
+  284: [access_control]
+  285: [access_control]
+  352: [secure_coding, web_app_protection]
+  601: [secure_coding, web_app_protection]
+  639: [access_control]
+  862: [access_control]
+  863: [access_control]
+  918: [secure_coding, web_app_protection]
+  # Cryptographic failures (OWASP A02)
+  295: [crypto_in_transit]
+  311: [crypto_in_transit, data_protection]
+  319: [crypto_in_transit]
+  326: [crypto_in_transit]
+  327: [crypto_in_transit]
+  # Authentication failures (OWASP A07)
+  287: [authentication]
+  306: [authentication]
+  307: [authentication]
+  384: [authentication]
+  521: [authentication]
+  798: [secrets_management, authentication]
+  259: [secrets_management]
+  321: [secrets_management, crypto_in_transit]
+  # Security misconfiguration (OWASP A05)
+  16: [secure_config]
+  693: [secure_config, web_app_protection]
+  1004: [secure_config]
+  1021: [secure_config, web_app_protection]
+  614: [secure_config]
+  525: [secure_config]
+  # Sensitive data exposure
+  200: [data_protection]
+  209: [data_protection, secure_config]
+  497: [data_protection, secure_config]
+  532: [data_protection, logging]
+  # Logging and monitoring failures (OWASP A09)
+  778: [logging]
+  # Vulnerable and outdated components (OWASP A06)
+  937: [supply_chain, patching]
+  1035: [supply_chain, patching]
+  1104: [supply_chain, patching]
+  # Insecure deserialization / integrity (OWASP A08)
+  502: [secure_coding]
+  829: [supply_chain]

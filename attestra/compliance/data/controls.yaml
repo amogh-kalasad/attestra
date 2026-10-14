@@ -1,0 +1,191 @@
+# Attestra control library: control objectives (hub) -> framework requirements.
+#
+# The hub-and-spoke design means a finding is mapped once (CWE -> objective) and
+# reaches every framework. Requirement references follow PCI DSS v4.0.1,
+# ISO/IEC 27001:2022 Annex A and AICPA TSC 2017 (revised points of focus 2022).
+# VERIFY every reference and title against the licensed source texts and have a
+# QSA / ISO lead auditor review this file before relying on it in an audit.
+#
+# kind: finding  -> status derived from open findings mapped to the objective
+# kind: process  -> status derived from engagement records (scans, PT, authorization)
+
+frameworks:
+  pci_dss_4:
+    name: PCI DSS v4.0.1
+  iso_27001_2022:
+    name: ISO/IEC 27001:2022 Annex A
+  soc2:
+    name: SOC 2 Trust Services Criteria (Security)
+
+objectives:
+  vuln_identification:
+    name: Identify and risk-rank security vulnerabilities
+    kind: finding
+    controls:
+      pci_dss_4: ["6.3.1"]
+      iso_27001_2022: ["A.8.8"]
+      soc2: ["CC7.1"]
+
+  patching:
+    name: Apply security patches within defined timeframes
+    kind: finding
+    controls:
+      pci_dss_4: ["6.3.3"]
+      iso_27001_2022: ["A.8.8"]
+      soc2: ["CC7.1", "CC8.1"]
+
+  secure_coding:
+    name: Develop software to prevent common attacks
+    kind: finding
+    controls:
+      pci_dss_4: ["6.2.4"]
+      iso_27001_2022: ["A.8.28"]
+      soc2: ["CC8.1"]
+
+  web_app_protection:
+    name: Protect public-facing web applications against attacks
+    kind: finding
+    controls:
+      pci_dss_4: ["6.4.1"]
+      iso_27001_2022: ["A.8.26"]
+      soc2: ["CC6.6"]
+
+  secure_config:
+    name: Maintain secure configuration baselines
+    kind: finding
+    controls:
+      pci_dss_4: ["2.2.1"]
+      iso_27001_2022: ["A.8.9"]
+      soc2: ["CC7.1"]
+
+  crypto_in_transit:
+    name: Use strong cryptography for data in transit
+    kind: finding
+    controls:
+      pci_dss_4: ["4.2.1"]
+      iso_27001_2022: ["A.8.24"]
+      soc2: ["CC6.7"]
+
+  authentication:
+    name: Authenticate users and protect credentials
+    kind: finding
+    controls:
+      pci_dss_4: ["8.3.1"]
+      iso_27001_2022: ["A.8.5"]
+      soc2: ["CC6.1"]
+
+  access_control:
+    name: Restrict access by business need to know
+    kind: finding
+    controls:
+      pci_dss_4: ["7.2.1"]
+      iso_27001_2022: ["A.8.3"]
+      soc2: ["CC6.1"]
+
+  data_protection:
+    name: Prevent leakage of sensitive data
+    kind: finding
+    controls:
+      iso_27001_2022: ["A.8.12"]
+      soc2: ["CC6.7"]
+
+  secrets_management:
+    name: Keep credentials out of source code and configuration
+    kind: finding
+    controls:
+      pci_dss_4: ["8.6.2"]
+      iso_27001_2022: ["A.5.17"]
+      soc2: ["CC6.1"]
+
+  logging:
+    name: Log and monitor security events
+    kind: finding
+    controls:
+      pci_dss_4: ["10.2.1"]
+      iso_27001_2022: ["A.8.15"]
+      soc2: ["CC7.2"]
+
+  supply_chain:
+    name: Manage third-party and open-source component risk
+    kind: finding
+    controls:
+      pci_dss_4: ["6.3.2"]
+      iso_27001_2022: ["A.5.21"]
+      soc2: ["CC9.2"]
+
+  internal_scanning:
+    name: Perform regular vulnerability scans
+    kind: process
+    rule: has_imports
+    controls:
+      pci_dss_4: ["11.3.1"]
+      iso_27001_2022: ["A.8.8"]
+      soc2: ["CC7.1"]
+
+  penetration_testing:
+    name: Perform penetration testing to a defined methodology
+    kind: process
+    rule: has_validated_pt
+    controls:
+      pci_dss_4: ["11.4.1"]
+      iso_27001_2022: ["A.8.29"]
+      soc2: ["CC4.1"]
+
+  remediation_retest:
+    name: Correct exploitable findings and retest
+    kind: process
+    rule: no_open_high_after_retest
+    controls:
+      pci_dss_4: ["11.4.4"]
+      iso_27001_2022: ["Clause 10.2"]
+      soc2: ["CC4.2"]
+
+  testing_authorization:
+    name: Plan and authorize testing to protect systems
+    kind: process
+    rule: has_valid_authorization
+    controls:
+      iso_27001_2022: ["A.8.34"]
+      soc2: ["CC6.1"]
+
+control_titles:
+  pci_dss_4:
+    "2.2.1": Configuration standards are developed, implemented and maintained
+    "4.2.1": Strong cryptography protects PAN during transmission over open, public networks
+    "6.2.4": Software engineering techniques prevent or mitigate common software attacks
+    "6.3.1": Security vulnerabilities are identified and managed
+    "6.3.2": An inventory of bespoke and custom software and third-party components is maintained
+    "6.3.3": Components are protected from known vulnerabilities by installing patches
+    "6.4.1": Public-facing web applications are protected against attacks
+    "7.2.1": An access control model is defined
+    "8.3.1": User access is authenticated
+    "8.6.2": Passwords for application and system accounts are not hard coded in scripts, files or source code
+    "10.2.1": Audit logs are enabled and active
+    "11.3.1": Internal vulnerability scans are performed
+    "11.4.1": A penetration testing methodology is defined and implemented
+    "11.4.4": Exploitable vulnerabilities found in penetration testing are corrected and retested
+  iso_27001_2022:
+    "A.5.17": Authentication information
+    "A.5.21": Managing information security in the ICT supply chain
+    "A.8.3": Information access restriction
+    "A.8.5": Secure authentication
+    "A.8.8": Management of technical vulnerabilities
+    "A.8.9": Configuration management
+    "A.8.12": Data leakage prevention
+    "A.8.15": Logging
+    "A.8.24": Use of cryptography
+    "A.8.26": Application security requirements
+    "A.8.28": Secure coding
+    "A.8.29": Security testing in development and acceptance
+    "A.8.34": Protection of information systems during audit testing
+    "Clause 10.2": Nonconformity and corrective action
+  soc2:
+    "CC4.1": The entity selects, develops and performs ongoing and/or separate evaluations
+    "CC4.2": The entity evaluates and communicates internal control deficiencies
+    "CC6.1": Logical access security software, infrastructure and architectures
+    "CC6.6": Logical access security measures against threats from outside system boundaries
+    "CC6.7": Restricts the transmission, movement and removal of information
+    "CC7.1": Detection and monitoring procedures identify configuration changes and vulnerabilities
+    "CC7.2": Monitors system components for anomalies
+    "CC8.1": Authorizes, designs, develops, tests and implements changes
+    "CC9.2": Assesses and manages risks associated with vendors and business partners
