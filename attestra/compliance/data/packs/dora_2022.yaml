@@ -1,0 +1,33 @@
+# EU Digital Operational Resilience Act, Regulation (EU) 2022/2554.
+# Public source: https://eur-lex.europa.eu/eli/reg/2022/2554/oj
+# Titles are our own summaries of article subjects. VERIFY with legal review.
+framework: dora_2022
+name: DORA (EU 2022/2554)
+pack: DORA ICT risk and testing register
+controls:
+  vuln_identification: ["Art.8"]
+  patching: ["Art.9"]
+  secure_coding: ["Art.9"]
+  web_app_protection: ["Art.9"]
+  secure_config: ["Art.9"]
+  crypto_in_transit: ["Art.9"]
+  authentication: ["Art.9"]
+  access_control: ["Art.9"]
+  data_protection: ["Art.9"]
+  secrets_management: ["Art.9"]
+  logging: ["Art.10"]
+  supply_chain: ["Art.28"]
+  network_segmentation: ["Art.9"]
+  change_management: ["Art.9"]
+  internal_scanning: ["Art.25"]
+  penetration_testing: ["Art.24", "Art.25"]
+  remediation_retest: ["Art.24"]
+  risk_assessment_process: ["Art.6"]
+titles:
+  "Art.6": Maintain an ICT risk management framework
+  "Art.8": Identify ICT assets, risks and vulnerabilities
+  "Art.9": Protect and prevent (access, encryption, patching, change control)
+  "Art.10": Detect anomalous activity
+  "Art.24": Run a risk-based digital operational resilience testing programme
+  "Art.25": Test ICT tools and systems (scans, assessments, penetration tests)
+  "Art.28": Manage ICT third-party risk

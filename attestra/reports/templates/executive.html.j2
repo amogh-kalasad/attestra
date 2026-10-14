@@ -13,6 +13,10 @@
   These should be fixed before the next audit window.
 {% endif %}
 </p>
+{% if ai_summary %}
+<p>{{ ai_summary.text }}</p>
+<div class="meta">AI-assisted narrative, reviewed and approved by {{ ai_summary.approved_by }}.</div>
+{% endif %}
 
 <div class="kpis">
   {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}

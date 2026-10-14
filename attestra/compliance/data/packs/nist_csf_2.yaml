@@ -1,0 +1,41 @@
+# NIST Cybersecurity Framework 2.0 (NIST CSWP 29, February 2024). Public domain.
+# Source: https://www.nist.gov/cyberframework. Titles are our own summaries.
+framework: nist_csf_2
+name: NIST CSF 2.0
+pack: NIST CSF 2.0 profile register
+controls:
+  vuln_identification: ["ID.RA-01"]
+  patching: ["ID.RA-01", "PR.PS-02"]
+  secure_coding: ["PR.PS-06"]
+  web_app_protection: ["PR.PS-06", "PR.IR-01"]
+  secure_config: ["PR.PS-01"]
+  crypto_in_transit: ["PR.DS-02"]
+  authentication: ["PR.AA-03"]
+  access_control: ["PR.AA-05"]
+  data_protection: ["PR.DS-01", "PR.DS-02"]
+  secrets_management: ["PR.AA-01"]
+  logging: ["PR.PS-04", "DE.CM-01"]
+  supply_chain: ["GV.SC-07"]
+  network_segmentation: ["PR.IR-01"]
+  change_management: ["PR.PS-01"]
+  internal_scanning: ["ID.RA-01"]
+  penetration_testing: ["ID.IM-02"]
+  remediation_retest: ["ID.IM-02", "RS.MI-02"]
+  risk_assessment_process: ["ID.RA-05"]
+titles:
+  "GV.SC-07": Supplier risks are identified, assessed and monitored
+  "ID.RA-01": Asset vulnerabilities are identified and recorded
+  "ID.RA-05": Threats, vulnerabilities, likelihood and impact are used to prioritise risk
+  "ID.IM-02": Improvements are identified from security tests and exercises
+  "PR.AA-01": Identities and credentials are managed
+  "PR.AA-03": Users, services and hardware are authenticated
+  "PR.AA-05": Access permissions follow least privilege
+  "PR.DS-01": Data at rest is protected
+  "PR.DS-02": Data in transit is protected
+  "PR.PS-01": Configuration management practices are applied
+  "PR.PS-02": Software is maintained, replaced and removed by risk
+  "PR.PS-04": Log records are generated for continuous monitoring
+  "PR.PS-06": Secure software development practices are used
+  "PR.IR-01": Networks and environments are protected from unauthorised access
+  "DE.CM-01": Networks and network services are monitored
+  "RS.MI-02": Incidents are eradicated

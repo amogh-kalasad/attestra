@@ -1,0 +1,40 @@
+# RBI Cyber Security Framework in Banks (circular DBS.CO/CSITE/BC.11/33.01.001/2015-16,
+# 2 June 2016), Annex 1 baseline controls. Public source: https://www.rbi.org.in
+# Titles are our own short summaries. VERIFY against the circular before audit use.
+framework: rbi_csf_2016
+name: RBI Cyber Security Framework for Banks (2016)
+pack: RBI baseline controls register (Annex 1)
+controls:
+  vuln_identification: ["A1.17"]
+  patching: ["A1.7"]
+  secure_coding: ["A1.6"]
+  web_app_protection: ["A1.6", "A1.12"]
+  secure_config: ["A1.5"]
+  crypto_in_transit: ["A1.4"]
+  authentication: ["A1.8", "A1.9"]
+  access_control: ["A1.8"]
+  data_protection: ["A1.14"]
+  secrets_management: ["A1.8"]
+  logging: ["A1.15", "A1.16"]
+  supply_chain: ["A1.1", "A1.2"]
+  network_segmentation: ["A1.4"]
+  change_management: ["A1.7"]
+  internal_scanning: ["A1.17"]
+  penetration_testing: ["A1.17"]
+  remediation_retest: ["A1.7", "A1.17"]
+  risk_assessment_process: ["A1.20"]
+titles:
+  "A1.1": Keep an inventory of IT and business assets
+  "A1.2": Stop unauthorised software from running
+  "A1.4": Manage and secure the network, including segmentation and secure transport
+  "A1.5": Apply and maintain secure configurations
+  "A1.6": Build security into the application life cycle
+  "A1.7": Manage patches, vulnerabilities and changes
+  "A1.8": Control and review user access, including privileged access
+  "A1.9": Use a strong authentication framework for customers
+  "A1.12": Defend against advanced real-time threats
+  "A1.14": Prevent data leaks
+  "A1.15": Maintain, monitor and analyse audit logs
+  "A1.16": Configure audit logging adequately
+  "A1.17": Run vulnerability assessments, penetration tests and red team exercises
+  "A1.20": Track security metrics and risk

@@ -483,7 +483,9 @@ def main(argv: list[str] | None = None) -> None:
 
     sp = sub.add_parser("compliance", help="show control status for a framework")
     sp.add_argument("engagement", type=int)
-    sp.add_argument("framework", choices=["pci_dss_4", "iso_27001_2022", "soc2"])
+    from attestra.compliance import load_library
+
+    sp.add_argument("framework", choices=sorted(load_library().frameworks))
     sp.set_defaults(fn=cmd_compliance)
 
     sp = sub.add_parser("report", help="generate a draft report")

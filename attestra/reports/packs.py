@@ -68,7 +68,7 @@ def build_framework_pack(s: Session, engagement_id: int, framework: str) -> Path
                 "pci_dss_4": "PCI binder indexed by requirement",
                 "iso_27001_2022": "ISO Annex A evidence register",
                 "soc2": "SOC 2 period population sample",
-            }.get(framework, "framework pack"),
+            }.get(framework, lib.frameworks[framework].get("pack", "framework pack")),
         }
         add("meta.json", json.dumps(meta, indent=2).encode("utf-8"))
         add("MANIFEST.sha256", ("\n".join(f"{h}  {n}" for n, h in sorted(manifest.items())) + "\n").encode())

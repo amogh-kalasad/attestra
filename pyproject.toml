@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "attestra"
-version = "0.1.0"
+version = "1.0.0"
 description = "Attestra: VAPT evidence, OWASP-aligned findings and compliance reporting (PCI DSS, ISO 27001, SOC 2)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,7 +42,7 @@ attestra = "attestra.cli:main"
 include = ["attestra*"]
 
 [tool.setuptools.package-data]
-attestra = ["compliance/data/*.yaml", "compliance/data/*.md", "reports/templates/*.j2", "reports/templates/docx/*", "web/templates/*.html"]
+attestra = ["compliance/data/*.yaml", "compliance/data/packs/*.yaml", "compliance/data/*.md", "reports/templates/*.j2", "reports/templates/docx/*", "web/templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

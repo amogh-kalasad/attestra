@@ -911,3 +911,9 @@ from attestra.web.portal import router as portal_router  # noqa: E402
 
 app.include_router(portal_router)
 app.include_router(tickets_router)
+
+from attestra.web.ai_routes import api_router as ai_api_router  # noqa: E402
+from attestra.web.ai_routes import ui_router as ai_ui_router  # noqa: E402
+
+app.include_router(ai_api_router)
+app.include_router(ai_ui_router)

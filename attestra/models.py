@@ -17,6 +17,7 @@ def utcnow() -> datetime:
 
 
 ENGAGEMENT_TYPES = ("va", "pt", "vapt", "retest", "continuous")
+# Core frameworks; v2.1 packs in compliance/data/packs add more at load time.
 FRAMEWORKS = ("pci_dss_4", "iso_27001_2022", "soc2")
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 ENVIRONMENTS = ("production", "staging", "uat", "dev", "demo")

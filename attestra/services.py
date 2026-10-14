@@ -195,9 +195,12 @@ def create_engagement(
         raise ServiceError("engagement name is required")
     if type not in ENGAGEMENT_TYPES:
         raise ServiceError(f"type must be one of {ENGAGEMENT_TYPES}")
-    bad = [f for f in frameworks if f not in FRAMEWORKS]
+    from attestra.compliance import load_library
+
+    known = tuple(load_library().frameworks) or FRAMEWORKS
+    bad = [f for f in frameworks if f not in known]
     if bad:
-        raise ServiceError(f"unknown frameworks {bad}; choose from {FRAMEWORKS}")
+        raise ServiceError(f"unknown frameworks {bad}; choose from {known}")
     if window_start and window_end and window_end < window_start:
         raise ServiceError("window_end is before window_start")
     t = get_or_create_tenant(s, tenant, actor, industry=industry, contact_name=contact_name, contact_email=contact_email)

@@ -1,0 +1,23 @@
+# CERT-In Directions under section 70B(6) of the IT Act, 2000 (28 April 2022).
+# Public source: https://www.cert-in.org.in (Directions No. 20(3)/2022-CERT-In).
+# Titles below are short summaries in our own words, not the official text.
+# The Directions are mostly operational duties (reporting, logs, clocks); scan
+# findings only give partial evidence. VERIFY against the published Directions.
+framework: cert_in_2022
+name: CERT-In Directions 2022 (IT Act s.70B)
+pack: CERT-In directions compliance register
+controls:
+  logging: ["Dir.(i)", "Dir.(v)"]
+  vuln_identification: ["Dir.(ii)"]
+  web_app_protection: ["Annex I"]
+  access_control: ["Annex I"]
+  data_protection: ["Annex I"]
+  authentication: ["Annex I"]
+  remediation_retest: ["Dir.(ii)"]
+  testing_authorization: ["Dir.(iv)"]
+titles:
+  "Dir.(i)": Synchronise system clocks to NIC or NPL NTP sources (or traceable sources)
+  "Dir.(ii)": Report listed cyber incidents to CERT-In within 6 hours of noticing them
+  "Dir.(iv)": Name a point of contact for liaison with CERT-In
+  "Dir.(v)": Keep ICT system logs securely for a rolling 180 days, stored in India
+  "Annex I": Reportable incident types such as unauthorised access, data leaks and attacks on applications

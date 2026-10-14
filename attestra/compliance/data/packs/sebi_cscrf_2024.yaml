@@ -1,0 +1,38 @@
+# SEBI Cybersecurity and Cyber Resilience Framework for SEBI Regulated Entities
+# (circular SEBI/HO/ITD-1/ITD_CSC_EXT/P/CIR/2024/113, 20 August 2024).
+# CSCRF follows the NIST CSF functions; refs here are function-level groupings.
+# Titles are our own summaries. VERIFY standard numbers against the circular.
+framework: sebi_cscrf_2024
+name: SEBI CSCRF (2024)
+pack: SEBI CSCRF function register
+controls:
+  vuln_identification: ["ID.RA"]
+  patching: ["PR.MA"]
+  secure_coding: ["PR.IP"]
+  web_app_protection: ["PR.IP", "PR.PT"]
+  secure_config: ["PR.IP"]
+  crypto_in_transit: ["PR.DS"]
+  authentication: ["PR.AA"]
+  access_control: ["PR.AA"]
+  data_protection: ["PR.DS"]
+  secrets_management: ["PR.AA"]
+  logging: ["DE.CM"]
+  supply_chain: ["GV.SC"]
+  network_segmentation: ["PR.PT"]
+  change_management: ["PR.IP"]
+  internal_scanning: ["DE.CM"]
+  penetration_testing: ["ID.RA"]
+  remediation_retest: ["RS.MI"]
+  testing_authorization: ["GV.OV"]
+  risk_assessment_process: ["ID.RA"]
+titles:
+  "GV.OV": Board and management oversight of cyber risk
+  "GV.SC": Manage third-party and supply chain cyber risk
+  "ID.RA": Assess risk, including periodic VAPT
+  "PR.AA": Identity, authentication and access management
+  "PR.DS": Protect data at rest and in transit
+  "PR.IP": Secure baselines, secure development and change control
+  "PR.MA": Timely patching and maintenance
+  "PR.PT": Protective technology, including network segmentation
+  "DE.CM": Continuous monitoring and log collection
+  "RS.MI": Contain and remediate incidents and weaknesses

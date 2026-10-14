@@ -8,6 +8,7 @@ status always wins over the proposal.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from functools import lru_cache
@@ -48,14 +49,39 @@ def _parse_cwe_entry(value) -> CweMapping:
     )
 
 
+def _merge_pack(pack: dict, frameworks: dict, objectives: dict, titles: dict) -> None:
+    """Add one YAML framework pack (compliance/data/packs/*.yaml) to the hub.
+
+    A pack only adds refs to existing objectives, so every CWE mapping reaches it
+    with no code changes."""
+    fw = str(pack.get("framework") or "")
+    if not fw or fw in frameworks:
+        raise ValueError(f"framework pack {fw!r} is missing or already defined")
+    pack_titles = dict(pack.get("titles") or {})
+    for obj, refs in (pack.get("controls") or {}).items():
+        if obj not in objectives:
+            raise ValueError(f"pack {fw}: unknown objective {obj!r}")
+        for ref in refs:
+            if ref not in pack_titles:
+                raise ValueError(f"pack {fw}: ref {ref!r} has no title")
+        objectives[obj].setdefault("controls", {})[fw] = list(refs)
+    frameworks[fw] = {"name": pack["name"], "pack": pack.get("pack", "framework pack"), "source": "pack"}
+    titles[fw] = pack_titles
+
+
 @lru_cache(maxsize=1)
 def load_library() -> Library:
     controls = yaml.safe_load((DATA / "controls.yaml").read_text(encoding="utf-8"))
     cwe = yaml.safe_load((DATA / "cwe_map.yaml").read_text(encoding="utf-8"))
+    frameworks = dict(controls["frameworks"])
+    objectives = controls["objectives"]
+    titles = dict(controls.get("control_titles", {}))
+    for path in sorted((DATA / "packs").glob("*.yaml")):
+        _merge_pack(yaml.safe_load(path.read_text(encoding="utf-8")), frameworks, objectives, titles)
     return Library(
-        frameworks=controls["frameworks"],
-        objectives=controls["objectives"],
-        titles=controls.get("control_titles", {}),
+        frameworks=frameworks,
+        objectives=objectives,
+        titles=titles,
         cwe_map={int(k): _parse_cwe_entry(v) for k, v in (cwe.get("cwe") or {}).items()},
         default_objectives=tuple(cwe.get("default", ["vuln_identification"])),
     )
@@ -267,6 +293,8 @@ def evaluate(
 
 def _ref_sort_key(r: ControlResult):
     parts = []
-    for p in r.ref.replace("Clause ", "Z.").replace("CC", "").replace("A.", "").split("."):
-        parts.append(int(p) if p.isdigit() else 999)
+    ref = r.ref.replace("Clause ", "Z.").replace("CC", "").replace("A.", "")
+    for p in re.split(r"[.\-()]+", ref):
+        if p:
+            parts.append((0, int(p), "") if p.isdigit() else (1, 0, p))
     return parts

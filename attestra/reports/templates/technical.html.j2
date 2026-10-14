@@ -60,6 +60,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   </table>
   {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
   {% if f.recommendation %}<p><b>Recommendation.</b> {{ f.recommendation }}</p>{% endif %}
+  {% if ai_narratives and ai_narratives.get(f.id) %}<p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>{% endif %}
   {% if f.evidence %}<p><b>Evidence.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 </div>
 {% else %}

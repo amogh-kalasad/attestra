@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-14  
 **Spec:** [`docs/IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) (Phases 0–8)  
-**Codebase:** `attestra` v0.1.0 (local working tree)  
+**Codebase:** `attestra` v1.0.0 (local working tree)  
 **Validation:** `pytest -q` → **228 passed, 1 skipped**; `ruff check attestra tests` clean; `lat check` clean  
 
 This document supersedes the *status* of the older architecture-oriented [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) for **implementation progress**. Keep that file for historical comparison against the v2 architecture narrative; use **this file** for “what is done / what is pending” against the phased implementation guide.
@@ -173,11 +173,11 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 
 | Step | Requirement | Status |
 | --- | --- | --- |
-| 8.1 | Third-party pentest of Attestra | **Blocked** (external) |
-| 8.2 | Load test (locust/k6) on staging | **Blocked** (needs Phase 6 staging) |
-| 8.3 | GA release / tag / CHANGELOG | **Pending** |
-| 8.4 | v2.1 framework packs (CERT-In, RBI, …) | **Pending** |
-| 8.5 | AI narratives (explicitly optional / default skip) | **Not started** (decide skip vs build) |
+| 8.1 | Third-party pentest of Attestra | **Blocked** (external) - scope ready in `docs/PENTEST_SCOPE.md`; needs an external tester |
+| 8.2 | Load test (locust/k6) on staging | **Done locally** - k6 script `deploy/loadtest/attestra.js`, results in `docs/LOAD_TEST.md` (local Postgres 16, 10 VUs, p95 220 ms, 0% errors); **staging run pending** |
+| 8.3 | GA release / tag / CHANGELOG | **Ready** - version 1.0.0, `CHANGELOG.md`, `docs/RELEASE.md`; **tag pending** (done by the owner) |
+| 8.4 | v2.1 framework packs (CERT-In, RBI, SEBI CSCRF, DORA, NIST CSF 2.0) as YAML in `compliance/data/packs/` | **Done** |
+| 8.5 | AI narratives (explicitly optional / default skip) | **Done** (optional, off by default; `ATTESTRA_AI_NARRATIVES=on` to enable, tester approval required) |
 
 ---
 

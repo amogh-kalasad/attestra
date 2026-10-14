@@ -113,7 +113,15 @@ def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
         "version_str": __version__,
         "open_critical_high": sum(1 for f in open_f if f.severity in ("critical", "high")),
         "feed_catalog": _feed_catalog(),
+        **_ai_context(engagement_id, eng.tenant_id),
     }
+
+
+def _ai_context(engagement_id: int, tenant_id: int | None) -> dict:
+    """Step 8.5: only tester-approved AI drafts; empty when the feature is off."""
+    from attestra.ai_narratives import approved_for_report
+
+    return approved_for_report(engagement_id, tenant_id)
 
 
 def _feed_catalog() -> dict:
