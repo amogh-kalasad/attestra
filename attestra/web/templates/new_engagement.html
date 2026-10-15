@@ -1,8 +1,8 @@
 {% extends "_layout.html" %}
-{% block title %}New engagement · Attestra{% endblock %}
+{% block title %}New engagement &middot; Attestra{% endblock %}
 {% block main %}
 <h1>New engagement</h1>
-<p class="meta">Step 1 of 4: client and engagement. Next you record the signed authorization, add the targets (URLs, APIs, hosts...) with their environment and planned tests, then import results.</p>
+<p class="meta">Step 1 of 6: client and engagement. Next you record the signed authorization, add the targets (URLs, APIs, hosts...) with their environment and planned tests, then scan or import results and generate reports.</p>
 
 <form method="post" action="/engagements/new">
   <div class="card">
@@ -19,18 +19,27 @@
   <div class="card">
     <h2>Engagement</h2>
     <div class="fields">
-      <div><label for="name">Engagement name *</label><input type="text" id="name" name="name" required placeholder="FY27 Q3 VAPT: customer portal"></div>
+      <div><label for="name">Engagement name *</label><input type="text" id="name" name="name" required placeholder="FY27 Q3 pentest: customer portal"></div>
       <div><label for="type">Type of test *</label>
-        <select id="type" name="type">{% for k, label in types.items() %}<option value="{{ k }}" {{ "selected" if k == "vapt" }}>{{ label }}</option>{% endfor %}</select></div>
+        <select id="type" name="type">{% for k, label in types.items() %}<option value="{{ k }}" {{ "selected" if loop.index == 3 }}>{{ label }}</option>{% endfor %}</select></div>
       <div><label for="window_start">Test window start</label><input type="date" id="window_start" name="window_start" value="{{ today }}"></div>
-      <div><label for="window_end">Test window end</label><input type="date" id="window_end" name="window_end"></div>
+      <div><label for="window_end">Test window end</label><input type="date" id="window_end" name="window_end" min="{{ today }}">
+        <div class="hint">Must be on or after the start date.</div></div>
     </div>
-    <label>Compliance frameworks to report against</label>
-    <div class="checks">
-      {% for k, n in frameworks.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" checked> {{ n }}</label>{% endfor %}
+    <label id="fw_label">Compliance frameworks to report against</label>
+    <div class="checks" role="group" aria-labelledby="fw_label">
+      <label><input type="checkbox" id="fw_all"> <b>Select all</b></label>
+      {% for k, n in frameworks.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" class="fw"> {{ n }}</label>{% endfor %}
     </div>
+    <p class="hint">Tick only the frameworks this client asked for; each one adds a compliance report.</p>
   </div>
 
   <button type="submit">Create engagement</button>
 </form>
+<script>
+  const all = document.getElementById('fw_all');
+  all.addEventListener('change', () => document.querySelectorAll('input.fw').forEach(cb => { cb.checked = all.checked; }));
+  const ws = document.getElementById('window_start'), we = document.getElementById('window_end');
+  ws.addEventListener('change', () => { we.min = ws.value; });
+</script>
 {% endblock %}

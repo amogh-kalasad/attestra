@@ -1,0 +1,13 @@
+<div class="fields" style="grid-template-columns:1fr">
+  <div><label for="lf_title">Title *</label><input type="text" id="lf_title" name="title" required maxlength="300" value="{{ e.title if e else '' }}" placeholder="Reflected cross-site scripting"></div>
+  <div><label for="lf_desc">Description</label><textarea id="lf_desc" name="description" rows="4">{{ e.description if e else '' }}</textarea></div>
+  <div><label for="lf_impact">Impact</label><textarea id="lf_impact" name="impact" rows="3">{{ e.impact if e else '' }}</textarea></div>
+  <div><label for="lf_rem">Remediation</label><textarea id="lf_rem" name="remediation" rows="4">{{ e.remediation if e else '' }}</textarea></div>
+  <div><label for="lf_refs">References (one per line)</label><textarea id="lf_refs" name="references" rows="3">{{ (e.references if e else [])|join('\n') }}</textarea></div>
+</div>
+<div class="fields">
+  <div><label for="lf_cwe">CWE</label><input type="text" id="lf_cwe" name="cwe" value="{{ e.cwe if e and e.cwe else '' }}" placeholder="79"></div>
+  <div><label for="lf_sev">Default severity</label><select id="lf_sev" name="default_severity">{% for s in severities %}<option value="{{ s }}" {% if (e.default_severity if e else 'medium') == s %}selected{% endif %}>{{ s|capitalize }}</option>{% endfor %}</select></div>
+  <div><label for="lf_tags">Tags (comma separated)</label><input type="text" id="lf_tags" name="tags" value="{{ (e.tags if e else [])|join(', ') }}" placeholder="web, injection"></div>
+  <div><label for="lf_rules">Tool rule ids for auto-suggest</label><input type="text" id="lf_rules" name="rule_ids" value="{{ (e.rule_ids if e else [])|join(', ') }}" placeholder="zap:40018, a nuclei template id"></div>
+</div>

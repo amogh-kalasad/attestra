@@ -1,0 +1,28 @@
+{% extends "_layout.html" %}
+{% block title %}{{ e.title }} &middot; Findings library &middot; Attestra{% endblock %}
+{% block main %}
+<h1>{{ e.title }}</h1>
+<p class="meta">Last changed by {{ e.updated_by or "unknown" }}. <a href="/library?tenant_id={{ e.tenant_id }}">Back to library</a></p>
+<div class="card">
+<form method="post" action="/library/{{ e.id }}">
+  {% include "library_fields.html" %}
+  <div class="actions-split">
+    <button type="submit" name="action" value="save">Save</button>
+    <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Delete this writeup? Findings that already used it keep their text.')">Delete writeup</button>
+  </div>
+</form>
+</div>
+<div class="card">
+<h2>Apply to a finding</h2>
+<p class="meta">Fills the finding's description, recommendation and CWE only where they are empty. Text a tester already wrote is kept.</p>
+<form method="post" action="/library/{{ e.id }}/apply" class="row">
+  <label for="apply_fid" class="meta" style="margin:0">Finding *</label>
+  {% if recent_findings %}
+  <select id="apply_fid" name="finding_id" required>{% for f in recent_findings %}<option value="{{ f.id }}">F-{{ f.id }} &middot; {{ f.severity|capitalize }} &middot; {{ f.title[:70] }} ({{ f.engagement.name }})</option>{% endfor %}</select>
+  {% else %}
+  <input id="apply_fid" name="finding_id" type="number" min="1" required placeholder="Finding id, e.g. 12">
+  {% endif %}
+  <button type="submit">Apply writeup</button>
+</form>
+</div>
+{% endblock %}

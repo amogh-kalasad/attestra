@@ -1,14 +1,17 @@
 {% extends "_layout.html" %}
+{% block title %}PCI DSS &middot; {{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
-<h1>PCI scan calendar &mdash; {{ e.name }}</h1>
-<p class="meta">Quarterly external (ASV) scans, PCI DSS 11.3.2. Overall status: <strong>{{ cal.status }}</strong>. <a href="/engagements/{{ e.id }}">Back to engagement</a></p>
+<h1>PCI scan calendar &middot; {{ e.name }}</h1>
+<p class="meta">Quarterly external (ASV) scans, PCI DSS 11.3.2. Overall status: <strong class="st">{{ cal.status|label }}</strong>. <a href="/engagements/{{ e.id }}">Back to engagement</a></p>
+{% if not has_pci %}<div class="warn">This engagement doesn't include PCI DSS in its frameworks. Add it under Edit engagement if the client needs PCI reporting.</div>{% endif %}
 <div class="card" id="calendar">
   <h2>Quarters</h2>
   <table>
     <tr><th>Quarter</th><th>Due by</th><th>ASV scans</th><th>Passing</th><th>Status</th></tr>
     {% for q in cal.quarters %}
     <tr><td>{{ q.quarter }}</td><td>{{ q.due }}</td><td>{{ q.external_scans }}</td><td>{{ q.external_passing }}</td>
-      <td>{{ q.status }}{% if q.days_left is not none %} ({{ q.days_left }} days left){% endif %}</td></tr>
+      <td class="st">{{ q.status|label }}{% if q.days_left is not none %} ({{ q.days_left }} days left){% endif %}</td></tr>
+    {% else %}<tr><td colspan="5">No quarters to show yet.</td></tr>
     {% endfor %}
   </table>
   {% if cal.internal_overdue %}<p>Internal scan schedules overdue: {% for i in cal.internal_overdue %}{{ i.tool }} (due {{ i.next_due }}){% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
@@ -18,12 +21,13 @@
   <table>
     <tr><th>Vendor</th><th>Date</th><th>Passing</th><th>Source</th><th>Components</th><th>Failing</th><th>SHA-256</th></tr>
     {% for a in asv_scans %}
-    <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "yes" if a.passing else "no" }}</td><td>{{ a.source }}</td><td>{{ a.item_count }}</td><td>{{ a.failing_count }}</td><td class="mono">{{ a.sha256[:16] }}</td></tr>
-    {% else %}<tr><td colspan="7">None recorded.</td></tr>{% endfor %}
+    <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "Yes" if a.passing else "No" }}</td><td>{{ a.source|label }}</td><td>{{ a.item_count }}</td><td>{{ a.failing_count }}</td><td class="mono">{{ a.sha256[:16] }}&hellip;</td></tr>
+    {% else %}<tr><td colspan="7">No ASV scans yet. Import the vendor's results below.</td></tr>{% endfor %}
   </table>
   <form method="post" action="/engagements/{{ e.id }}/asv/import" enctype="multipart/form-data" style="margin-top:12px">
     <div class="fields">
-      <div><label>ASV results (generic CSV or JSON)</label><input type="file" name="file" required></div>
+      <div><label for="asv_file">ASV results (generic CSV or JSON) *</label><input type="file" id="asv_file" name="file" required>
+        <div class="hint">Vendor, scan date and pass/fail are read from the file.</div></div>
     </div>
     <button type="submit">Import ASV results</button>
   </form>
@@ -33,19 +37,19 @@
   <table>
     <tr><th>Boundary</th><th>From</th><th>To</th><th>Method</th><th>Result</th><th>Tested on</th><th>Tester</th></tr>
     {% for t in segmentation_tests %}
-    <tr><td>{{ t.boundary }}</td><td>{{ t.source_zone }}</td><td>{{ t.target_zone }}</td><td>{{ t.method }}</td><td>{{ t.result }}</td><td>{{ t.tested_on }}</td><td>{{ t.tester }}</td></tr>
-    {% else %}<tr><td colspan="7">None recorded.</td></tr>{% endfor %}
+    <tr><td>{{ t.boundary }}</td><td>{{ t.source_zone }}</td><td>{{ t.target_zone }}</td><td>{{ t.method }}</td><td class="st">{{ t.result|label }}</td><td>{{ t.tested_on }}</td><td>{{ t.tester }}</td></tr>
+    {% else %}<tr><td colspan="7">No segmentation tests yet. Record one below.</td></tr>{% endfor %}
   </table>
   <form method="post" action="/engagements/{{ e.id }}/pci/segmentation" style="margin-top:12px">
     <div class="fields">
-      <div><label>Boundary</label><input name="boundary" required></div>
-      <div><label>From zone</label><input name="source_zone"></div>
-      <div><label>To zone</label><input name="target_zone"></div>
-      <div><label>Method</label><input name="method"></div>
-      <div><label>Result</label><select name="result"><option value="pass">pass</option><option value="fail">fail</option><option value="inconclusive">inconclusive</option></select></div>
-      <div><label>Tested on</label><input type="date" name="tested_on" value="{{ today }}" required></div>
-      <div><label>Tester</label><input name="tester"></div>
-      <div><label>Notes</label><input name="notes"></div>
+      <div><label for="seg_boundary">Boundary *</label><input id="seg_boundary" name="boundary" required placeholder="CDE &middot; corporate LAN"></div>
+      <div><label for="seg_from">From zone</label><input id="seg_from" name="source_zone" placeholder="corporate LAN"></div>
+      <div><label for="seg_to">To zone</label><input id="seg_to" name="target_zone" placeholder="cde"></div>
+      <div><label for="seg_method">Method</label><input id="seg_method" name="method" placeholder="nmap from jump host"></div>
+      <div><label for="seg_result">Result *</label><select id="seg_result" name="result"><option value="pass">Pass</option><option value="fail">Fail</option><option value="inconclusive">Inconclusive</option></select></div>
+      <div><label for="seg_date">Tested on *</label><input type="date" id="seg_date" name="tested_on" value="{{ today }}" required></div>
+      <div><label for="seg_tester">Tester</label><input id="seg_tester" name="tester" placeholder="Name of the tester"></div>
+      <div><label for="seg_notes">Notes</label><input id="seg_notes" name="notes" placeholder="Ports tried, exceptions"></div>
     </div>
     <button type="submit">Record segmentation test</button>
   </form>

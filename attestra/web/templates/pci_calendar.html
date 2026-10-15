@@ -1,15 +1,17 @@
 {% extends "_layout.html" %}
+{% block title %}PCI calendar &middot; Attestra{% endblock %}
 {% block main %}
 <h1>PCI quarterly scan calendar</h1>
 <p class="meta">Every PCI engagement you can see, with its external scan status for the current and past quarters. <a href="/">Back to engagements</a></p>
 <div class="card">
+{% set qs = rows[0].quarters if rows else [] %}
 <table>
-  <tr><th>Engagement</th><th>Status</th>{% for q in (rows[0].quarters if rows else []) %}<th>{{ q.quarter }}</th>{% endfor %}</tr>
+  <tr><th>Engagement</th><th>Status</th>{% for q in qs %}<th>{{ q.quarter }}</th>{% endfor %}</tr>
   {% for r in rows %}
-  <tr><td><a href="/engagements/{{ r.engagement_id }}/pci">{{ r.engagement }}</a></td><td><strong>{{ r.status }}</strong></td>
-    {% for q in r.quarters %}<td>{{ q.status }}</td>{% endfor %}</tr>
+  <tr><td><a href="/engagements/{{ r.engagement_id }}/pci">{{ r.engagement }}</a></td><td><strong class="st">{{ r.status|label }}</strong></td>
+    {% for q in r.quarters %}<td class="st">{{ q.status|label }}</td>{% endfor %}</tr>
   {% else %}
-  <tr><td colspan="2">No PCI engagements.</td></tr>
+  <tr><td colspan="{{ 2 + qs|length }}">No PCI engagements yet. Tick PCI DSS on an engagement to track its quarterly scans here.</td></tr>
   {% endfor %}
 </table>
 </div>

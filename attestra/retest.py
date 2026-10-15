@@ -117,6 +117,9 @@ def finalize_retest(
         s, actor, "retest.finalize", "retest", row.id,
         result=result, asset_reached=row.asset_reached, finding_id=f.id,
     )
+    from attestra.webhooks.service import safe_emit_finding
+
+    safe_emit_finding(s, f, "retest.completed", actor=actor, retest_id=row.id, result=result)
     return row
 
 

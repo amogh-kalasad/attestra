@@ -6,8 +6,9 @@ Every write is attributed to the authenticated username in the audit log.
 
 from __future__ import annotations
 
+import os
 from collections import Counter
-from datetime import date
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -16,7 +17,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, db, services
+from attestra import __version__, ai_narratives, db, services
+from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
 from attestra.importers import PARSERS
@@ -54,14 +56,86 @@ ENGAGEMENT_TYPE_LABELS = {
     "continuous": "Continuous scanning",
 }
 
+# Tools the scan runner and the scheduler accept (one list for both forms).
+SCAN_TOOLS = ("trivy", "semgrep", "nuclei", "zap")
+IMPORT_FORMAT_LABELS = {
+    "zap": "OWASP ZAP (JSON report)",
+    "nuclei": "Nuclei (JSONL)",
+    "trivy": "Trivy (JSON)",
+    "sarif": "SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks...)",
+}
+ROLE_LABELS = {
+    "admin": "Admin",
+    "lead": "Lead",
+    "tester": "Tester",
+    "reviewer": "Reviewer (QA)",
+    "client_viewer": "Client viewer",
+    "auditor": "Auditor",
+}
+SMALL_SAMPLE = 20
+
+
+def _display_tz():
+    name = os.environ.get("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 - no tz database on this host
+        if name == "Asia/Kolkata":
+            return timezone(timedelta(hours=5, minutes=30), "IST")
+        return UTC
+
+
+DISPLAY_TZ = _display_tz()
+TZ_LABEL = datetime.now(DISPLAY_TZ).strftime("%Z") or "UTC"
+
+
+def format_dt(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """One formatter for every timestamp shown in the UI: display zone plus its label."""
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        local = value.astimezone(DISPLAY_TZ)
+        return f"{local.strftime(fmt)} {local.strftime('%Z') or TZ_LABEL}"
+    return str(value)
+
+
+def label(value) -> str:
+    """snake_case value -> 'Sentence case' for display."""
+    if value is None:
+        return ""
+    text = str(value).replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def fw_name(key) -> str:
+    try:
+        fw = load_library().frameworks.get(key)
+    except Exception:  # noqa: BLE001
+        fw = None
+    return fw["name"] if fw else str(key)
+
+
+templates.env.filters["dt"] = format_dt
+templates.env.filters["label"] = label
+templates.env.filters["fw_name"] = fw_name
+templates.env.globals.update(
+    type_labels=ENGAGEMENT_TYPE_LABELS, role_labels=ROLE_LABELS, can=has_permission, tz_label=TZ_LABEL,
+)
+
 
 def _actor(request: Request) -> str | None:
-    from attestra.auth.session import read_session
-
-    data = read_session(request.cookies.get(COOKIE))
-    if data and data.get("u"):
-        return str(data["u"])
-    return None
+    # Resolve through _principal so sessions of disabled or deleted users are rejected.
+    principal = _principal(request)
+    return principal.username if principal else None
 
 
 def _principal(request: Request):
@@ -85,15 +159,29 @@ def _principal(request: Request):
         )
 
 
-def _render(request: Request, template: str, ctx: dict) -> HTMLResponse:
+def _render(request: Request, template: str, ctx: dict, status_code: int = 200) -> HTMLResponse:
+    principal = _principal(request)
     base = {
         "version": __version__,
-        "actor": _actor(request),
+        "actor": principal.username if principal else None,
+        "principal": principal,
         "msg": request.query_params.get("msg"),
         "error": request.query_params.get("error"),
         "path": request.url.path,
     }
-    return templates.TemplateResponse(request, template, {**base, **ctx})
+    return templates.TemplateResponse(request, template, {**base, **ctx}, status_code=status_code)
+
+
+def _safe_next(target: str | None) -> str:
+    target = target or "/"
+    return target if target.startswith("/") and not target.startswith("//") and "\\" not in target else "/"
+
+
+def _login_redirect(next_url: str = "/", error: str = "Sign in to continue.") -> RedirectResponse:
+    nxt = _safe_next(next_url)
+    q = f"?next={quote(nxt, safe='/')}" if nxt not in ("/", "/login") else "?"
+    sep = "&" if q != "?" else ""
+    return RedirectResponse(f"/login{q}{sep}error={quote(error)}", status_code=303)
 
 
 def _back(url: str, *, msg: str | None = None, error: str | None = None, anchor: str = "") -> RedirectResponse:
@@ -101,17 +189,19 @@ def _back(url: str, *, msg: str | None = None, error: str | None = None, anchor:
     return RedirectResponse(f"{url}{q}{anchor}", status_code=303)
 
 
-def _require_login(request: Request, next_url: str = "/"):
+def _require_login(request: Request, next_url: str | None = None):
     principal = _principal(request)
     if not principal:
-        return None, _back("/login", error="Sign in to continue.")
+        if next_url is None:
+            next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return None, _login_redirect(next_url)
     return principal, None
 
 
 def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwargs) -> RedirectResponse:
     who = _actor(request)
     if not who:
-        return _back("/login", error="Sign in to continue.", anchor=anchor)
+        return _login_redirect(url)
     try:
         with db.session() as s:
             fn(s, *args, **kwargs, actor=who)
@@ -124,8 +214,8 @@ def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwarg
 
 
 @router.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
-    return _render(request, "login.html", {})
+def login_form(request: Request, next: str = "/"):
+    return _render(request, "login.html", {"next_url": _safe_next(next)})
 
 
 @router.post("/login")
@@ -133,11 +223,11 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     from attestra.auth.keys import authenticate_password
     from attestra.auth.session import issue_session
 
-    target = next if next.startswith("/") and not next.startswith("//") else "/"
+    target = _safe_next(next)
     with db.session() as s:
         principal = authenticate_password(s, username, password)
     if not principal:
-        return _back("/login", error="Invalid username or password.")
+        return _login_redirect(target, "Invalid username or password.")
     resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(COOKIE, issue_session(principal.user_id, principal.username), httponly=True, samesite="lax")
     return resp
@@ -187,7 +277,7 @@ def false_positive_rates(request: Request):
         return RedirectResponse("/portal", status_code=303)
     with db.session() as s:
         rows = tuning.fp_rate_by_tool(s, services.tenant_ids_for(s, principal))
-        return _render(request, "tuning_fp.html", {"rows": rows})
+        return _render(request, "tuning_fp.html", {"rows": rows, "small_sample": SMALL_SAMPLE})
 
 
 @router.get("/engagements/new", response_class=HTMLResponse)
@@ -195,6 +285,10 @@ def new_engagement_form(request: Request):
     principal, redirect = _require_login(request)
     if redirect:
         return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return _back("/portal", error="Your role is read-only, so you can't create engagements.")
+    if not has_permission(principal.role, "engagement.create"):
+        return _back("/", error="Only leads and admins can create engagements. Ask your lead to set one up.")
     lib = load_library()
     return _render(request, "new_engagement.html", {
         "types": ENGAGEMENT_TYPE_LABELS,
@@ -222,6 +316,11 @@ def create_engagement(
     try:
         ws = date.fromisoformat(window_start) if window_start else None
         we = date.fromisoformat(window_end) if window_end else None
+    except ValueError:
+        return _back("/engagements/new", error="The test window dates aren't valid. Pick them with the date picker.")
+    if ws and we and we < ws:
+        return _back("/engagements/new", error="The test window end must be on or after the start date.")
+    try:
         with db.session() as s:
             e = services.create_engagement(
                 s, tenant=tenant, name=name, type=type, frameworks=frameworks, window_start=ws, window_end=we,
@@ -235,6 +334,20 @@ def create_engagement(
 
 
 # ---------------------------------------------------------------- engagement page
+
+
+def _has_pci(frameworks) -> bool:
+    return any(str(f).startswith("pci") for f in frameworks or [])
+
+
+def _has_iso(frameworks) -> bool:
+    return any(str(f).startswith("iso27001") or str(f).startswith("iso_27001") for f in frameworks or [])
+
+
+def _report_kinds() -> tuple[str, ...]:
+    from attestra.reports.render import KINDS
+
+    return tuple(KINDS)
 
 
 def _test_plan(e: Engagement) -> list[dict]:
@@ -287,7 +400,22 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         segmentation_tests = list(e.segmentation_tests)
         nonconformities = list(e.nonconformities)
         schedules = services.list_scan_schedules(s, eid)
+        today = date.today()
+        asset_findings = Counter(f.asset_id for f in e.findings if f.asset_id)
+        asset_schedules = Counter(sch.asset_id for sch in schedules)
+        frameworks = e.frameworks or []
         return _render(request, "engagement.html", {
+            "scan_tools": SCAN_TOOLS,
+            "import_labels": IMPORT_FORMAT_LABELS,
+            "asset_findings": asset_findings,
+            "asset_schedules": asset_schedules,
+            "due_schedules": sum(1 for sch in schedules if sch.next_due and sch.next_due <= today),
+            "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
+            "report_kinds": _report_kinds(),
+            "auth_default_expiry": e.window_end or (today + timedelta(days=90)),
+            "has_pci": _has_pci(frameworks),
+            "has_iso": _has_iso(frameworks),
+            "ai_enabled": ai_narratives.is_enabled(tenant_id=e.tenant_id),
             "e": e,
             "type_label": ENGAGEMENT_TYPE_LABELS.get(e.type, e.type),
             "findings": findings,
@@ -325,6 +453,9 @@ async def add_authorization(
     environments: list[str] = Form([]),
     rules_of_engagement: str = Form(""),
 ):
+    if not [env for env in environments if env.strip()]:
+        return _back(f"/engagements/{eid}", error="Tick at least one environment the client authorizes for testing.",
+                     anchor="#scope")
     data = await document.read()
     return _do(
         request, f"/engagements/{eid}", "#scope", "Signed authorization recorded.",
@@ -368,7 +499,7 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
     who = _actor(request)
     url = f"/engagements/{eid}"
     if not who:
-        return _back("/login", error="Sign in to continue.", anchor="#import")
+        return _login_redirect(url)
     try:
         with db.session() as s:
             run = services.import_results(s, eid, tool=tool, filename=file.filename or f"{tool}.json", data=data, actor=who)
@@ -384,17 +515,21 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
 def queue_scan(
     request: Request,
     eid: int,
-    asset_id: int = Form(...),
+    asset_id: str = Form(""),
     tool: str = Form(...),
     profile: str = Form("baseline"),
 ):
     who = _actor(request)
     url = f"/engagements/{eid}"
     if not who:
-        return _back("/login", error="Sign in to continue.", anchor="#scans")
+        return _login_redirect(url)
+    if not asset_id.strip().isdigit():
+        return _back(url, error="Add a target in 2. Targets in scope first, then choose it here.", anchor="#scans")
+    if tool not in SCAN_TOOLS:
+        return _back(url, error=f"Choose a tool from the list ({', '.join(SCAN_TOOLS)}).", anchor="#scans")
     try:
         with db.session() as s:
-            run = services.request_scan(s, eid, asset_id=asset_id, tool=tool, profile=profile, actor=who)
+            run = services.request_scan(s, eid, asset_id=int(asset_id), tool=tool, profile=profile, actor=who)
             if run.status == "refused":
                 return _back(url, error=run.refuse_reason or "scan refused", anchor="#scans")
     except (services.ServiceError, LookupError) as e:
@@ -414,7 +549,7 @@ async def ui_add_asv(
     data = await file.read()
     who = _actor(request)
     if not who:
-        return _back("/login", error="Sign in to continue.")
+        return _login_redirect(f"/engagements/{eid}")
     try:
         with db.session() as s:
             services.add_asv_scan(
@@ -463,6 +598,9 @@ def ui_add_schedule(
     cadence: str = Form("quarterly"),
     next_due: date = Form(...),
 ):
+    if tool not in SCAN_TOOLS:
+        return _back(f"/engagements/{eid}", error=f"Choose a tool from the list ({', '.join(SCAN_TOOLS)}).",
+                     anchor="#schedules")
     return _do(
         request, f"/engagements/{eid}", "#schedules", f"Scheduled {tool} ({cadence}).",
         services.add_scan_schedule, eid, asset_id=asset_id, tool=tool, cadence=cadence, next_due=next_due,
@@ -495,7 +633,7 @@ def ui_remove_schedule(request: Request, eid: int, sid: int):
 def ui_run_due(request: Request, eid: int):
     who = _actor(request)
     if not who:
-        return _back("/login", error="Sign in to continue.", anchor="#schedules")
+        return _login_redirect(f"/engagements/{eid}")
     try:
         with db.session() as s:
             runs = services.enqueue_due_schedules(s, engagement_id=eid, actor=who)
@@ -512,7 +650,7 @@ def _staff_page(request: Request):
     if redirect:
         return None, redirect
     if principal.role in READ_ONLY_ROLES:
-        return None, RedirectResponse("/portal", status_code=303)
+        return None, _back("/portal", error="That page is for the test team. Here is your read-only portal instead.")
     return principal, None
 
 
@@ -541,6 +679,7 @@ def ui_pci_page(request: Request, eid: int):
             "asv_scans": services.list_asv_scans(s, eid),
             "segmentation_tests": services.list_segmentation_tests(s, eid),
             "today": date.today(),
+            "has_pci": _has_pci(e.frameworks),
         })
 
 
@@ -591,6 +730,7 @@ def ui_iso_page(request: Request, eid: int):
             "soa_impl": services.SOA_IMPLEMENTATION,
             "nc_statuses": services.NC_STATUSES,
             "nc_grades": services.NC_GRADES,
+            "has_iso": _has_iso(e.frameworks),
         })
 
 
@@ -629,7 +769,7 @@ def ui_nc_add(
     try:
         due_d = date.fromisoformat(due) if due else None
     except ValueError:
-        return _back(f"/engagements/{eid}/iso", error="Due date must be YYYY-MM-DD.", anchor="#nc")
+        return _back(f"/engagements/{eid}/iso", error="The due date isn't valid. Pick it with the date picker (YYYY-MM-DD).", anchor="#nc")
     return _do(
         request, f"/engagements/{eid}/iso", "#nc", "Nonconformity raised.",
         services.add_nonconformity, eid, control_ref=control_ref, description=description, grade=grade,
@@ -661,8 +801,88 @@ def ui_iso_sample(
     sample_size: str = Form(""),
     seed: str = Form(""),
 ):
-    size = int(sample_size) if sample_size.strip().isdigit() else None
+    raw = sample_size.strip()
+    if raw and not (raw.isdigit() and int(raw) > 0):
+        return _back(f"/engagements/{eid}/iso", error="Sample size must be a whole number above 0, or blank for the default.",
+                     anchor="#sampling")
+    size = int(raw) if raw else None
     return _do(
         request, f"/engagements/{eid}/iso", "#sampling", "Audit sample drawn.",
         services.draw_audit_sample, eid, population=population, sample_size=size, seed=seed,
     )
+
+
+# ---------------------------------------------------------------- UI audit fixes: edit, finding status, reports
+
+
+@router.post("/engagements/{eid}/edit")
+def edit_engagement(
+    request: Request,
+    eid: int,
+    name: str = Form(...),
+    window_start: str = Form(""),
+    window_end: str = Form(""),
+    frameworks: list[str] = Form([]),
+):
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "engagement.write"):
+        return _back(url, error="Your role can't edit engagements.", anchor="#edit")
+    try:
+        ws = date.fromisoformat(window_start) if window_start else None
+        we = date.fromisoformat(window_end) if window_end else None
+    except ValueError:
+        return _back(url, error="The test window dates aren't valid. Pick them with the date picker.", anchor="#edit")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            services.update_engagement(
+                s, eid, name=name, window_start=ws, window_end=we, frameworks=frameworks, actor=principal.actor,
+            )
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#edit")
+    return _back(url, msg="Engagement updated.")
+
+
+@router.post("/engagements/{eid}/findings/{fid}/status")
+def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(...), note: str = Form("")):
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.write"):
+        return _back(url, error="Your role can't change finding status.", anchor="#findings")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            from attestra.models import Finding
+
+            f = s.get(Finding, fid)
+            if not f or f.engagement_id != eid:
+                raise LookupError(f"finding F-{fid} is not in this engagement")
+            services.transition(s, fid, to=to, note=note, actor=principal.actor)
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor=f"#f-{fid}")
+    return _back(url, msg=f"F-{fid} moved to {label(to).lower()}.", anchor=f"#f-{fid}")
+
+
+@router.post("/engagements/{eid}/reports/generate")
+def ui_generate_report(request: Request, eid: int, kind: str = Form(...), framework: str = Form("")):
+    from attestra.reports import generate_report
+
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "report.generate"):
+        return _back(url, error="Your role can't generate reports.", anchor="#reports")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            r = generate_report(s, eid, kind=kind, framework=framework, actor=principal.actor, user_id=principal.user_id)
+            rid = r.id
+    except (services.ServiceError, LookupError, ValueError) as e:
+        return _back(url, error=str(e), anchor="#reports")
+    return _back(url, msg=f"Report #{rid} generated ({label(kind).lower()}). Submit it for QA before signing.", anchor="#reports")

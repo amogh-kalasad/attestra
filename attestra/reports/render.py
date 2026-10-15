@@ -174,7 +174,10 @@ def generate_report(
     if kind == "ageing":
         ctx["sla_breaches"] = services.sla_breaches(s, engagement_id)
     ctx.update(kind=kind, version=version, generated_by=actor, generated_at=utcnow())
-    html = _env.get_template(f"{kind}.html.j2").render(**ctx).encode("utf-8")
+    from attestra.library.templates import render_custom  # tenant template, else built-in
+
+    custom = render_custom(s, eng.tenant_id, kind, ctx)
+    html = (custom if custom is not None else _env.get_template(f"{kind}.html.j2").render(**ctx)).encode("utf-8")
     sha = hashlib.sha256(html).hexdigest()
 
     config.ensure_dirs()
@@ -283,6 +286,9 @@ def sign_report(
     r.algorithm = signing.algorithm_of(r.signature)
     r.approved_by, r.approved_by_user_id, r.status, r.signed_at = actor, user_id, "signed", utcnow()
     audit.record(s, actor, "report.sign", "report", r.id, sha256=r.sha256, signature=r.signature, algorithm=r.algorithm)
+    from attestra.webhooks.service import safe_emit_report
+
+    safe_emit_report(s, r, actor=actor)
     return r
 
 
@@ -314,6 +320,9 @@ def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | Non
     r.algorithm = signing.algorithm_of(r.signature)
     r.approved_by, r.approved_by_user_id, r.status, r.signed_at = actor, user_id, "signed", utcnow()
     audit.record(s, actor, "report.sign", "report", r.id, sha256=r.sha256, signature=r.signature, algorithm=r.algorithm)
+    from attestra.webhooks.service import safe_emit_report
+
+    safe_emit_report(s, r, actor=actor)
     return r
 
 

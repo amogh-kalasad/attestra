@@ -194,3 +194,50 @@ cwe:
     objectives: ['supply_chain', 'patching']
     strength: full
     rationale: 'Vulnerable components map to supply-chain and patching controls.'
+
+  # ---- AI / LLM weaknesses (OWASP Top 10 for LLM Applications 2025), used by the
+  # ISO/IEC 42001 pack. CWE-1426 is not mapped: MITRE marks it DISCOURAGED.
+  116:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Improper output encoding (OWASP LLM05 when model output reaches a browser, shell or query) maps to secure development controls.'
+  117:
+    objectives: ['logging']
+    strength: full
+    rationale: 'Unneutralised log output undermines log integrity and maps to logging and monitoring controls.'
+  250:
+    objectives: ['ai_excessive_agency', 'access_control']
+    strength: partial
+    rationale: 'Running with unnecessary privileges (OWASP LLM06 excessive agency) partly evidences least-privilege and responsible-use controls.'
+  269:
+    objectives: ['ai_excessive_agency', 'access_control']
+    strength: partial
+    rationale: 'Improper privilege management (OWASP LLM06 excessive agency) partly evidences least-privilege and responsible-use controls.'
+  345:
+    objectives: ['ai_data_integrity']
+    strength: partial
+    rationale: 'Insufficient verification of data authenticity (OWASP LLM04 poisoning) partly evidences data provenance and quality controls; lineage records need an assessor.'
+  359:
+    objectives: ['data_protection']
+    strength: full
+    rationale: 'Exposure of private personal information (OWASP LLM02) maps to leakage prevention controls.'
+  400:
+    objectives: ['ai_resource_limits']
+    strength: full
+    rationale: 'Uncontrolled resource consumption (OWASP LLM10 unbounded consumption) maps to rate, size and cost limit controls.'
+  494:
+    objectives: ['supply_chain', 'ai_data_integrity']
+    strength: partial
+    rationale: 'Code or model downloaded without an integrity check (OWASP LLM03/LLM04) partly evidences supply-chain and model integrity controls.'
+  770:
+    objectives: ['ai_resource_limits']
+    strength: full
+    rationale: 'Allocation without limits or throttling (OWASP LLM10 unbounded consumption) maps to rate, size and cost limit controls.'
+  1395:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Dependency on a vulnerable third-party component (OWASP LLM03) maps to supply-chain and patching controls.'
+  1427:
+    objectives: ['ai_prompt_injection', 'secure_coding']
+    strength: full
+    rationale: 'Improper neutralisation of input used for LLM prompting (prompt injection, OWASP LLM01/LLM07) maps to AI verification and secure development controls.'

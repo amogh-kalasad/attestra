@@ -1,44 +1,50 @@
 {% extends "_layout.html" %}
+{% block title %}ISO 27001 &middot; {{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
-<h1>ISO 27001 &mdash; {{ e.name }}</h1>
+<h1>ISO 27001 &middot; {{ e.name }}</h1>
 <p class="meta">Statement of Applicability, nonconformities and corrective actions, and clause 9.2 audit samples. <a href="/engagements/{{ e.id }}">Back to engagement</a></p>
+{% if not has_iso %}<div class="warn">This engagement doesn't include ISO 27001 in its frameworks. Add it under Edit engagement if the client wants an ISO report; until then the SoA starts empty.</div>{% endif %}
 <div class="card" id="soa">
   <h2>Statement of Applicability</h2>
   <form method="post" action="/engagements/{{ e.id }}/iso/soa/generate"><button type="submit">Add missing controls from the library</button></form>
   <table>
     <tr><th>Control</th><th>Title</th><th>Applicable</th><th>Implementation</th><th>Justification</th><th>Update</th></tr>
     {% for r in soa %}
-    <tr><td class="mono">{{ r.control_ref }}</td><td>{{ r.title }}</td><td>{{ "yes" if r.applicable else "no" }}</td><td>{{ r.implementation }}</td><td>{{ r.justification }}</td>
-      <td><form method="post" action="/engagements/{{ e.id }}/iso/soa/{{ r.id }}">
-        <select name="applicable"><option value="yes" {% if r.applicable %}selected{% endif %}>applicable</option><option value="" {% if not r.applicable %}selected{% endif %}>excluded</option></select>
-        <select name="implementation">{% for i in soa_impl %}<option value="{{ i }}" {% if i == r.implementation %}selected{% endif %}>{{ i }}</option>{% endfor %}</select>
-        <input name="justification" value="{{ r.justification }}" placeholder="justification">
-        <button type="submit">Save</button></form></td></tr>
-    {% else %}<tr><td colspan="6">No SoA yet. Use the button above.</td></tr>{% endfor %}
+    <tr><td class="mono">{{ r.control_ref }}</td><td>{{ r.title }}</td><td>{{ "Applicable" if r.applicable else "Excluded" }}</td><td class="st">{{ r.implementation|label }}</td><td>{{ r.justification }}</td>
+      <td><form method="post" action="/engagements/{{ e.id }}/iso/soa/{{ r.id }}" class="row" style="gap:4px">
+        <select name="applicable" aria-label="Applicable"><option value="yes" {% if r.applicable %}selected{% endif %}>Applicable</option><option value="" {% if not r.applicable %}selected{% endif %}>Excluded</option></select>
+        <select name="implementation" aria-label="Implementation">{% for i in soa_impl %}<option value="{{ i }}" {% if i == r.implementation %}selected{% endif %}>{{ i|label }}</option>{% endfor %}</select>
+        <input name="justification" aria-label="Justification" value="{{ r.justification }}" placeholder="Why it applies or is excluded">
+        <button type="submit" class="secondary">Save</button></form></td></tr>
+    {% else %}<tr><td colspan="6">No SoA yet. Use "Add missing controls from the library" above.</td></tr>{% endfor %}
   </table>
 </div>
 <div class="card" id="nc">
   <h2>Nonconformities and corrective actions</h2>
+  <p class="hint">To close a nonconformity, set the status to Closed and fill in "Verified by" with the person who checked the fix. Closing without it is refused.</p>
   <table>
     <tr><th>#</th><th>Control</th><th>Grade</th><th>Description</th><th>Corrective action</th><th>Owner</th><th>Due</th><th>Status</th><th>Update</th></tr>
     {% for n in ncs %}
-    <tr><td>{{ n.id }}</td><td class="mono">{{ n.control_ref }}</td><td>{{ n.grade }}</td><td>{{ n.description }}</td><td>{{ n.corrective_action }}</td><td>{{ n.owner }}</td><td>{{ n.due or "" }}</td>
-      <td>{{ n.status }}{% if n.verified_by %} (verified by {{ n.verified_by }}){% endif %}</td>
-      <td>{% if n.status != "closed" %}<form method="post" action="/engagements/{{ e.id }}/iso/nc/{{ n.id }}">
-        <select name="status">{% for st in nc_statuses %}<option value="{{ st }}" {% if st == n.status %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
-        <input name="root_cause" value="{{ n.root_cause }}" placeholder="root cause">
-        <input name="verified_by" placeholder="verified by (to close)">
-        <button type="submit">Save</button></form>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="9">None raised.</td></tr>{% endfor %}
+    <tr><td>{{ n.id }}</td><td class="mono">{{ n.control_ref }}</td><td class="st">{{ n.grade|label }}</td><td>{{ n.description }}</td><td>{{ n.corrective_action }}</td><td>{{ n.owner }}</td><td>{{ n.due or "-" }}</td>
+      <td><span class="st">{{ n.status|label }}</span>{% if n.verified_by %} (verified by {{ n.verified_by }}){% endif %}</td>
+      <td>{% if n.status != "closed" %}<form method="post" action="/engagements/{{ e.id }}/iso/nc/{{ n.id }}" class="row" style="gap:4px">
+        <label for="ncst-{{ n.id }}" class="meta" style="margin:0">Status</label>
+        <select id="ncst-{{ n.id }}" name="status">{% for st in nc_statuses %}<option value="{{ st }}" {% if st == n.status %}selected{% endif %}>{{ st|label }}</option>{% endfor %}</select>
+        <label for="ncrc-{{ n.id }}" class="meta" style="margin:0">Root cause</label>
+        <input id="ncrc-{{ n.id }}" name="root_cause" value="{{ n.root_cause }}" placeholder="e.g. no patch SLA for agents">
+        <label for="ncvb-{{ n.id }}" class="meta" style="margin:0">Verified by (needed to close)</label>
+        <input id="ncvb-{{ n.id }}" name="verified_by" placeholder="Name of the verifier">
+        <button type="submit" class="secondary">Save</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="9">No nonconformities yet. Raise one below when an audit finds a gap.</td></tr>{% endfor %}
   </table>
   <form method="post" action="/engagements/{{ e.id }}/iso/nc" style="margin-top:12px">
     <div class="fields">
-      <div><label>Control</label><input name="control_ref" required placeholder="A.8.8"></div>
-      <div><label>Grade</label><select name="grade">{% for g in nc_grades %}<option value="{{ g }}" {% if g == "minor" %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></div>
-      <div><label>Description</label><input name="description" required></div>
-      <div><label>Corrective action</label><input name="corrective_action"></div>
-      <div><label>Owner</label><input name="owner"></div>
-      <div><label>Due</label><input type="date" name="due"></div>
+      <div><label for="nc_control">Control *</label><input id="nc_control" name="control_ref" required placeholder="A.8.8"></div>
+      <div><label for="nc_grade">Grade *</label><select id="nc_grade" name="grade">{% for g in nc_grades %}<option value="{{ g }}" {% if g == "minor" %}selected{% endif %}>{{ g|label }}</option>{% endfor %}</select></div>
+      <div><label for="nc_desc">Description *</label><input id="nc_desc" name="description" required placeholder="Critical patches applied after 60 days"></div>
+      <div><label for="nc_action">Corrective action</label><input id="nc_action" name="corrective_action" placeholder="Monthly patch window with tracking"></div>
+      <div><label for="nc_owner">Owner</label><input id="nc_owner" name="owner" placeholder="IT operations lead"></div>
+      <div><label for="nc_due">Due</label><input type="date" id="nc_due" name="due"></div>
     </div>
     <button type="submit">Raise nonconformity</button>
   </form>
@@ -48,14 +54,14 @@
   <table>
     <tr><th>#</th><th>Population</th><th>Size</th><th>Sample</th><th>Seed</th><th>Items</th><th>By</th></tr>
     {% for a in samples %}
-    <tr><td>{{ a.id }}</td><td>{{ a.population }}</td><td>{{ a.population_size }}</td><td>{{ a.sample_size }}</td><td class="mono">{{ a.seed }}</td><td>{{ a.items|join(", ") }}</td><td>{{ a.created_by }}</td></tr>
-    {% else %}<tr><td colspan="7">No samples drawn.</td></tr>{% endfor %}
+    <tr><td>{{ a.id }}</td><td>{{ a.population|label }}</td><td>{{ a.population_size }}</td><td>{{ a.sample_size }}</td><td class="mono">{{ a.seed }}</td><td>{{ a.items|join(", ") }}</td><td>{{ a.created_by }}</td></tr>
+    {% else %}<tr><td colspan="7">No samples yet. Draw one below.</td></tr>{% endfor %}
   </table>
   <form method="post" action="/engagements/{{ e.id }}/iso/sample" style="margin-top:12px">
     <div class="fields">
-      <div><label>Population</label><select name="population"><option value="soa_applicable">applicable SoA controls</option><option value="findings">findings</option><option value="nonconformities">nonconformities</option></select></div>
-      <div><label>Sample size (blank = default)</label><input name="sample_size" type="number" min="1"></div>
-      <div><label>Seed (blank = random)</label><input name="seed"></div>
+      <div><label for="s_pop">Population *</label><select id="s_pop" name="population"><option value="soa_applicable">Applicable SoA controls</option><option value="findings">Findings</option><option value="nonconformities">Nonconformities</option></select></div>
+      <div><label for="s_size">Sample size (blank = default)</label><input id="s_size" name="sample_size" type="number" min="1" placeholder="e.g. 25"></div>
+      <div><label for="s_seed">Seed (blank = random)</label><input id="s_seed" name="seed" placeholder="e.g. 2026-Q3"></div>
     </div>
     <button type="submit">Draw sample</button>
   </form>

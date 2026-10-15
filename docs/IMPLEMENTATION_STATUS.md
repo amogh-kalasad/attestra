@@ -1,6 +1,6 @@
 # Attestra — Implementation Status & Traceability Matrix
 
-Date: 2026-10-14. Spec: `docs/IMPLEMENTATION_GUIDE.md` (Phase 0 → 8). Code: `D:\VAPT attestra\attestra` v0.1.0 on `main` @ `7b8cd62`. Working tree was clean at audit start.
+Date: 2026-10-14, updated 2026-10-15. Spec: `docs/IMPLEMENTATION_GUIDE.md` (Phases 0-8). Code: `E:\GitHub\attestra` (pushed `main` @ `d835682`) plus the uncommitted new features, synced to `E:\attestra`.
 
 ## 1. Executive summary
 
@@ -10,13 +10,13 @@ Attestra v0.1 started as an **import-and-report** platform; Phases 0–2 add Ale
 | --- | --- | --- | --- |
 | 0 | Foundations and safe baseline | **IMPLEMENTED** (pending your approval to proceed) | tests restored (89), Alembic 0001, ruff+CI, SECURITY docs |
 | 1 | Runner plane | **IMPLEMENTED** (pending approval to proceed) | runner/, jobs/, ScanRun, gate, API/UI; 170 passed + 1 skipped integration |
-| 2 | Identity, roles, tenancy | **NOT IMPLEMENTED** | Header identity only |
-| 3 | Compliance completeness | **PARTIALLY IMPLEMENTED** | Hub/spoke engine + partial control coverage |
-| 4 | Reports, letters, signing | **PARTIALLY IMPLEMENTED** | HTML + HMAC two-step approve |
+| 2 | Identity, roles, tenancy | **IMPLEMENTED** | users, API keys, six roles, sessions, tenant scoping, OIDC flag |
+| 3 | Compliance completeness | **IMPLEMENTED** | full PCI/ISO/SOC 2 libraries, strength + rationale, ASV/segmentation/calendar, SoA/NC, C4-C11 improvements (0009, 0010); QSA review pending (human) |
+| 4 | Reports, letters, signing | **IMPLEMENTED** | draft/QA/sign workflow, retests, letters, DOCX/PDF, Ed25519, packs, SARIF/OSCAL |
 | 5 | Evidence hardening | **IMPLEMENTED** (pending approval to proceed) | masking, Storage, retention, audit, backup, feeds |
-| 6 | Production infrastructure | **NOT IMPLEMENTED** | Needs external infra |
-| 7 | Product polish | **NOT IMPLEMENTED** | |
-| 8 | GA / optional | **NOT IMPLEMENTED** | External pentest / load test blockers |
+| 6 | Production infrastructure | **IMPLEMENTED** (not deployed live) | Postgres RLS, Temporal (optional), OPA, Keycloak/Vault, Helm, OTel, CI gate |
+| 7 | Product polish | **IMPLEMENTED** | portal/auditor views, ticket sync, new scanners, tuning, legal pack |
+| 8 | GA / optional | **PARTIALLY IMPLEMENTED** | packs (CERT-In, RBI, SEBI, DORA, NIST CSF 2.0), k6 load test, v1.0.0 changelog, AI narratives, pentest scope; external pentest + tag pending |
 
 **Blockers discovered**
 
@@ -99,17 +99,26 @@ Stack: Python ≥3.11, FastAPI, SQLAlchemy 2, Pydantic 2, Jinja2, PyYAML. Option
 | P5.4 | 5 | Audit download + append-only | triggers + export + download | IMPLEMENTED | — | — | UPDATE fails |
 | P5.5 | 5 | Backup/restore manifest | ops/backup.py + CLI | IMPLEMENTED | — | — | tamper fails restore |
 | P5.6 | 5 | KEV/EPSS refresh | `enrich --refresh` + feeds | IMPLEMENTED | — | network | offline fixtures |
-| P6.* | 6 | Postgres RLS, Temporal, OPA, Vault, Helm, OTel, CI gates | SQLite/local only | NOT IMPLEMENTED / BLOCKED | Infra outside single package | P1–5 | CI service containers |
-| P7.* | 7 | Portal, tickets, scanners, tuning, legal | — | NOT IMPLEMENTED | integrations + docs | P6 preferred | suite + manual |
-| P8.* | 8 | Pentest, load, GA, packs, AI | — | BLOCKED / NOT IMPLEMENTED | External + release process | P0–7 | recorded evidence |
+| P6.* | 6 | Postgres RLS, Temporal, OPA, Vault, Helm, OTel, CI gates | `rls.py` + 0007, `orchestration/`, `policy/`, `secret_store.py`, `deploy/`, `observability.py`, `integrations/ci/` | IMPLEMENTED | Live cluster deploy | P1-5 | `test_postgres_rls` (live PG16: 7 passed), `test_opa_policy`, `test_observability`, `test_phase6_ci_schedules` |
+| P7.* | 7 | Portal, tickets, scanners, tuning, legal | `web/portal.py`, `integrations/`, scanners + importers, `tuning.py` + 0008, `docs/legal/` | IMPLEMENTED | - | P6 | `test_phase7_*` |
+| P8.1 | 8 | Third-party pentest | `docs/PENTEST_SCOPE.md` | BLOCKED (external) | External tester | P0-7 | - |
+| P8.2 | 8 | Load test | `deploy/loadtest/attestra.js`, `docs/LOAD_TEST.md` | IMPLEMENTED (local) | Staging run | P6 | k6 local results |
+| P8.3 | 8 | GA release | `CHANGELOG.md`, `docs/RELEASE.md`, version 1.0.0 | IMPLEMENTED | Tag by owner | P0-7 | - |
+| P8.4 | 8 | Framework packs | `compliance/data/packs/` | IMPLEMENTED | - | P3 | `test_phase8_framework_packs` |
+| P8.5 | 8 | AI narratives (optional) | `web/ai_routes.py`, `docs/AI_NARRATIVES.md` | IMPLEMENTED (off by default) | - | - | `test_ai_narratives`, `test_ai_routes` |
+| C4-C11 | 3 | Crosswalk refs, mapping strength, OSCAL/SCF import, PCI ASV calendar, ISO SoA, SOC 2 sampling | `controls.yaml`, `compliance/libraries/`, 0009, 0010, `reports/soc2_sampling.py` | IMPLEMENTED | - | P3 | `test_control_libraries`, `test_c7_c11_mapping_soc2`, `test_c9_c10_pci_iso` |
+| N1 | new | Trust center | `attestra/trust/`, migration 0011 | IMPLEMENTED (uncommitted) | Staff UI page | P4 | `test_trust_center` |
+| N2 | new | Findings library + report templates | `attestra/library/`, migration 0012 | IMPLEMENTED (uncommitted) | - | P4 | `test_findings_library` |
+| N3 | new | Proof/replay + webhooks/workflow rules | `attestra/proof/`, `attestra/webhooks/`, migration 0013 | IMPLEMENTED (uncommitted) | Scheduled dispatch; UI screens | P4 | `test_proof_replay`, `test_webhooks` |
+| N4 | new | User management + invites | `attestra/users/`, migration 0014 | IMPLEMENTED (uncommitted) | Per-engagement scoping for invites | P2 | `test_user_management` |
 
 ## 4–7. Done / pending snapshot
 
-See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full gap analysis after Phases 0–5.
+See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full gap analysis (Phases 0-8, improvements, new features).
 
-- **Done locally:** Phases 0–5 (foundations through evidence hardening).
-- **Next:** Phase 6 (production infrastructure) — needs infra approval.
-- **Later / blocked:** Phases 7–8 (portal/integrations, external pentest/GA).
+- **Done locally:** Phases 0-7, Phase 8 steps 8.2-8.5, improvements C4-C11, four new features (N1-N4).
+- **Next:** UI fixes from the screen audit; ISO 42001 framework pack.
+- **Later / blocked:** 8.1 external pentest, staging load test, release tag, live cluster deploy.
 
 ## 8. Ordered implementation roadmap
 
@@ -126,13 +135,14 @@ See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full g
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `pytest -q` | **228 passed, 1 skipped** | Phases 0–5 including evidence hardening |
-| `ruff check attestra tests` | clean after Phase 5 | — |
+| `pytest -q` | **478 passed, 26 skipped, 0 failed** (15 Oct 2026) | Phases 0-8, C4-C11, new features N1-N4 |
+| `pytest tests/test_postgres_rls.py` with local Postgres 16 | **7 passed** | live cross-tenant RLS test incl. migrations to `0014_user_invites` |
+| `ruff check attestra tests migrations integrations` | clean | - |
 | Baseline | `.cache/baseline.txt` | Phase 0 snapshot; suite grown since |
 
 ## 10. Final completion summary
 
-**Phases 0–5 complete locally.** Awaiting approval before Phase 6 (production infrastructure).
+**Phases 0-7 complete locally; Phase 8 done except the external pentest and release tag; new features N1-N4 implemented and tested (not yet committed).**
 
 ### Progress log
 
@@ -145,3 +155,9 @@ See **[`docs/GAP_ANALYSIS_CURRENT.md`](GAP_ANALYSIS_CURRENT.md)** for the full g
 | 2026-10-14 | Phase 3 implemented: expanded control library + integrity, RiskAcceptance/ASV/segmentation/schedules/NC, OWASP refs, SoA/ageing reports, compliance-export; migration 0004; 203 passed + 1 skipped |
 | 2026-10-14 | Phase 4 implemented: report workflow, retests, letters, DOCX/PDF, Ed25519 signing, packs, trend SVG, SARIF/OSCAL; migration 0005; 215 passed + 1 skipped |
 | 2026-10-14 | Phase 5 implemented: masking, Storage local/s3, retention/purge, append-only audit + export, backup/restore, enrich --refresh; migration 0006; 228 passed + 1 skipped |
+| 2026-10-14 | Phase 6 implemented: Postgres RLS (0007), Temporal (optional), OPA, Keycloak/Vault, Docker/Helm, OTel, CI gate |
+| 2026-10-14 | Phase 7 implemented: portal/auditor views, ticket sync, new scanners, tuning (0008), legal pack |
+| 2026-10-14 | Phase 8 implemented: framework packs, k6 load test, v1.0.0 changelog, AI narratives, pentest scope |
+| 2026-10-14 | Improvements C4-C11: crosswalk refs, mapping strength, OSCAL/SCF import, PCI ASV calendar (0009), ISO SoA (0010), SOC 2 sampling |
+| 2026-10-14 | New features N1-N4: trust center (0011), findings library (0012), proof/replay + webhooks (0013), user invites (0014) |
+| 2026-10-15 | Folders synced; full suite 478 passed, 26 skipped; Postgres RLS live test 7 passed |

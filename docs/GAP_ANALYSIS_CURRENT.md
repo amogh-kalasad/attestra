@@ -1,9 +1,9 @@
 # Attestra — Gap analysis (implementation guide)
 
-**Date:** 2026-10-14  
+**Date:** 2026-10-15  
 **Spec:** [`docs/IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) (Phases 0–8)  
 **Codebase:** `attestra` v1.0.0 (local working tree)  
-**Validation:** `pytest -q` → **228 passed, 1 skipped**; `ruff check attestra tests` clean; `lat check` clean  
+**Validation (15 Oct 2026, E:\attestra):** `pytest -q` -> **478 passed, 26 skipped, 0 failed**; Postgres 16 RLS test (`tests/test_postgres_rls.py` with `ATTESTRA_TEST_POSTGRES_URL`) **7 passed**; `ruff check` clean  
 
 This document supersedes the *status* of the older architecture-oriented [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) for **implementation progress**. Keep that file for historical comparison against the v2 architecture narrative; use **this file** for “what is done / what is pending” against the phased implementation guide.
 
@@ -19,14 +19,14 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 | **Done (local)** | 3 – Compliance completeness | Complete (human QSA sign-off on library still pending) |
 | **Done (local)** | 4 – Reports, letters, signing | Complete (WeasyPrint/DOCX rich path optional) |
 | **Done (local)** | 5 – Evidence hardening | Complete (S3 live integration optional) |
-| **Pending / blocked** | 6 – Production infrastructure | Not started (needs infra approval) |
-| **Pending** | 7 – Product polish & integrations | Not started |
-| **Pending / blocked** | 8 – GA & external validation | Blocked on 0–7 + external work |
+| **Done (local)** | 6 – Production infrastructure | Complete in repo (Postgres 16 + RLS, Temporal optional, OPA, Keycloak/Vault, Docker/Helm, OTel/Prometheus, CI gate); live cluster deploy pending |
+| **Done (local)** | 7 – Product polish & integrations | Complete (tickets off by default) |
+| **Partial** | 8 – GA & external validation | 8.2-8.5 done locally; 8.1 external pentest and the release tag pending |
 
 **Rough completion vs guide steps P0.1–P5.6:** ~**54 / 54** marked implemented in the traceability matrix (with residual VERIFY / process items noted below).  
-**Remaining guide steps P6–P8:** largely **not implemented** / infra-blocked.
+**Guide steps P6–P8:** implemented locally except 8.1 (external pentest), the staging load-test run and the release tag. Improvements C4–C11 and four new features (trust center, findings library, proof/replay + webhooks, user management) are also done; see `CHANGELOG.md`.
 
-**Next approved phase:** Phase 6 (production infrastructure), when you give go-ahead.
+**Next:** UI fixes from the screen audit, ISO 42001 framework pack, external pentest (8.1).
 
 ---
 
@@ -40,13 +40,13 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 | 3 | Compliance library | 10 | 10 | External QSA/ISO review recorded as *pending* in `REVIEW.md` | Human review |
 | 4 | Reports & signing | 8 | 8 | WeasyPrint optional; OSCAL uses minimal structure schema not full NIST | — |
 | 5 | Evidence hardening | 6 | 6 | S3 live MinIO integration optional | — |
-| 6 | Production infra | 7 | 0 | — | All |
-| 7 | Polish / integrations | 5 | 0 | — | All |
-| 8 | GA / external | 5 | 0 | — | All |
+| 6 | Production infra | 7 | 7 | Not yet deployed to a live cluster | — |
+| 7 | Polish / integrations | 5 | 5 | Ticket sync off by default | — |
+| 8 | GA / external | 5 | 4 | Staging load test, release tag | 8.1 external pentest |
 
 ---
 
-## 3. What is done (Phases 0–5)
+## 3. What is done (Phases 0–5; Phases 6–8 are in section 5)
 
 ### Phase 0 — Foundations
 
@@ -127,7 +127,7 @@ This document supersedes the *status* of the older architecture-oriented [`GAP_A
 
 ---
 
-## 4. Residuals inside “done” phases (not blockers for Phase 6)
+## 4. Residuals inside “done” phases
 
 These are implemented enough to mark the phase complete, but still have VERIFY / process follow-ups:
 
@@ -141,23 +141,23 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | QSA / ISO library sign-off | 3 | `REVIEW.md` reviewer fields still *pending* |
 | WeasyPrint on Windows | 4 | Falls back to minimal PDF without GTK |
 | Full NIST OSCAL JSON Schema | 4 | Minimal structural schema under `tests/schemas/` |
-| Postgres RLS | — | Deferred to Phase 6 (app-layer `scoped()` is in place) |
+| Postgres RLS | 6 | Done (`rls.py`, migration `0007_postgres_rls`; policies for all tenant tables incl. 0011-0014); live test passes on local Postgres 16 |
 
 ---
 
-## 5. What is pending
+## 5. Phases 6–8 status
 
-### Phase 6 — Production infrastructure (next)
+### Phase 6 — Production infrastructure (done locally)
 
 | Step | Requirement | Status |
 | --- | --- | --- |
-| 6.1 | PostgreSQL 16 default + RLS | **Pending / infra** |
+| 6.1 | PostgreSQL 16 default + RLS | **Done** - `attestra/rls.py`, migration `0007_postgres_rls`, `tests/test_postgres_rls.py` (live test passes on Postgres 16) |
 | 6.2 | Temporal workflows | **Done locally (optional, ATTESTRA_ORCHESTRATOR=temporal; scan step only) - see docs/TEMPORAL.md** |
-| 6.3 | OPA/Rego scope policy | **Pending / infra** |
-| 6.4 | Keycloak MFA default + Vault/OpenBao keys | **Pending / infra** |
-| 6.5 | Dockerfile + Helm + NetworkPolicy | **Pending / infra** |
-| 6.6 | OpenTelemetry / Prometheus / Grafana | **Pending / infra** |
-| 6.7 | CI/CD import gates + scheduler UI polish | **Pending** |
+| 6.3 | OPA/Rego scope policy | **Done** - `policy/scope.rego` + `scope_test.rego`, `tests/runner/test_opa_policy.py` |
+| 6.4 | Keycloak MFA default + Vault/OpenBao keys | **Done** - `deploy/keycloak/attestra-realm.example.json`, `attestra/secret_store.py`, `docs/IDENTITY_AND_SECRETS.md` |
+| 6.5 | Dockerfile + Helm + NetworkPolicy | **Done** - `Dockerfile`, `deploy/helm/attestra/`, `deploy/k8s/` (default deny + scanner egress) |
+| 6.6 | OpenTelemetry / Prometheus / Grafana | **Done** - `attestra/observability.py`, `deploy/observability/`, `tests/test_observability.py` |
+| 6.7 | CI/CD import gates + scheduler UI polish | **Done** - `integrations/ci/` (GitHub/GitLab gate), `tests/test_phase6_ci_schedules.py` |
 
 ### Phase 7 — Product polish and integrations
 
@@ -186,8 +186,8 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | Concern | Then (pre Phase 2) | Now | Still open |
 | --- | --- | --- | --- |
 | Identity spoofing via free-text actor | Open | Mitigated (Bearer/session + user-id four-eyes) | Enable OIDC + rotate secrets for shared deploy |
-| Out-of-scope / SSRF scanning | Open (no runner) | Mitigated in runner gate + SSRF/DNS pin | Live egress NetworkPolicy (Phase 6) |
-| Cross-tenant leaks | Open | Mitigated in app (`scoped`, tenant storage) | Postgres RLS (Phase 6) |
+| Out-of-scope / SSRF scanning | Open (no runner) | Mitigated in runner gate + SSRF/DNS pin; egress NetworkPolicy shipped in `deploy/k8s/` | Apply in a live cluster |
+| Cross-tenant leaks | Open | Mitigated in app (`scoped`, tenant storage) + Postgres RLS | Run on Postgres in production (SQLite has no RLS) |
 | Evidence secrets in artifacts | Open | Mitigated (mask at capture) | Tune corpus / content-types as needed |
 | Audit tampering | Partial (hash chain) | Mitigated (append-only triggers + download events + export) | Postgres revoke UPDATE/DELETE in deploy |
 | Report signatures | HMAC-only | Ed25519 + HMAC fallback | Customer runbook for pub key verify |
@@ -197,9 +197,10 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 
 ## 7. Recommended sequence from here
 
-1. **Pause for Phase 6 approval** — requires infra credentials / cluster decisions (Postgres RLS, Temporal, OPA, Keycloak, Vault, Helm).  
-2. Phase 7 package-friendly items can partially start without K8s (legal pack, some importers).  
-3. Phase 8 only after external pentest budget and a staging environment exist.
+1. Fix the issues from the UI screen audit.  
+2. Add the ISO 42001 framework pack and its verification steps.  
+3. Deploy to a staging cluster; run the k6 load test there.  
+4. External pentest (8.1), then tag the release.
 
 ---
 
@@ -212,10 +213,10 @@ These are implemented enough to mark the phase complete, but still have VERIFY /
 | [`THREAT_MODEL.md`](THREAT_MODEL.md) | Threats and mitigations |
 | [`PHASES.md`](PHASES.md) / [`ROADMAP.md`](ROADMAP.md) | High-level roadmap |
 | [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) | Older % scorecard vs architecture v2 (stale for runner/identity) |
-| **This file** | Current done vs pending snapshot after Phases 0–5 |
+| **This file** | Current done vs pending snapshot (Phases 0–8, improvements, new features) |
 
 ---
 
 ## 9. One-line verdict
 
-**Phases 0–5 are implemented and test-green locally; Phase 6 is next and needs infra approval; Phases 7–8 remain pending and mostly infrastructure- or externally blocked.**
+**Phases 0–7 are implemented and test-green locally, Phase 8 is done except the external pentest and release tag, and the four new features (trust center, findings library, proof/replay + webhooks, user management) are in place and tested.**

@@ -256,6 +256,9 @@ def _process_status(rule: str, eng: Engagement, findings: list[Finding], import_
         if assessments:
             return "partial", "Control assessments present; document targeted risk analysis for full credit."
         return "not_assessed", "No risk acceptance or control assessment records yet."
+    if rule == "assessor_evidence":
+        # Management-system and policy controls (e.g. ISO/IEC 42001): a scan cannot show them.
+        return "not_assessed", "Needs documented evidence and assessor confirmation; a scan alone cannot show this."
     return "not_assessed", f"Unknown rule '{rule}'."
 
 

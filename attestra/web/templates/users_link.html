@@ -1,0 +1,20 @@
+{% extends "_layout.html" %}
+{% block title %}One-time link &middot; Attestra{% endblock %}
+{% block main %}
+<div class="card" style="max-width:720px">
+  <h1>{% if inv.purpose == "reset" %}Password reset link{% else %}Invite link{% endif %}</h1>
+  <p class="meta">Single use. Expires {{ inv.expires_at|dt }}. It is shown only once, so copy it now.
+  {% if inv.emailed %}An email was also sent to {{ inv.email }}.{% endif %}</p>
+  <label for="link">Link</label>
+  <div class="row"><input id="link" class="mono" style="flex:1;min-width:240px" readonly value="{{ inv.link }}" onfocus="this.select()">
+    <button type="button" id="copy">Copy link</button><span id="copied" class="meta" role="status"></span></div>
+  <p><a class="btn secondary" href="/users">Back to users</a></p>
+</div>
+<script>
+  document.getElementById('copy').addEventListener('click', async () => {
+    const el = document.getElementById('link'), out = document.getElementById('copied');
+    try { await navigator.clipboard.writeText(el.value); out.textContent = 'Copied.'; }
+    catch (e) { el.select(); document.execCommand('copy'); out.textContent = 'Copied.'; }
+  });
+</script>
+{% endblock %}

@@ -1,20 +1,23 @@
 {% extends "_layout.html" %}
+{% block title %}False-positive rates &middot; Attestra{% endblock %}
 {% block main %}
 <h1>False-positive rate by tool</h1>
-<p class="meta">Findings each tool reported in your engagements, and how many reviewers marked as false positive. Suppressed results are not stored, so they are not counted. <a href="/">Back to engagements</a></p>
+<p class="meta">Findings each tool reported in your engagements, and how many reviewers marked as false positive. Suppressed results are not stored, so they are not counted. A rate based on fewer than {{ small_sample }} findings is marked as a small sample. <a href="/">Back to engagements</a></p>
 <div class="card">
 <table>
-  <tr><th>Tool</th><th>Findings</th><th>False positives</th><th>Rate</th></tr>
+  <tr><th>Tool</th><th>Findings (n)</th><th>False positives</th><th>Rate</th></tr>
   {% for r in rows %}
   <tr>
     <td class="mono">{{ r.tool }}</td>
     <td>{{ r.total }}</td>
     <td>{{ r.false_positive }}</td>
-    <td>{{ "%.1f"|format(r.rate * 100) }}%</td>
+    <td>{{ "%.1f"|format(r.rate * 100) }}%{% if r.total < small_sample %} <span class="meta">(small sample, n={{ r.total }})</span>{% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="4">No findings imported yet.</td></tr>
+  <tr><td colspan="4">No findings imported yet. Rates appear after results are imported and triaged.</td></tr>
   {% endfor %}
 </table>
+<p class="hint">There is no per-tool findings list yet. Each engagement's findings table shows which tools reported each finding.</p>
 </div>
 {% endblock %}
+

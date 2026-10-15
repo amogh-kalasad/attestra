@@ -146,8 +146,8 @@ Status counts: Done 19, Done-untested 3, Partial 19, Stub 3, Not done 44
 | # | Requirement | Doc section | Status | Evidence (file:func/line, tests) |
 |---|---|---|---|---|
 | C1 | Hub CWE->objective->framework mapping | How mapping works | **Done** | engine.py:44-51; test_library_integrity |
-| C2 | Status roll-up + process controls | Mapping step 4-5 | **Done** | engine.py:80-118; test_pci_status_rollup |
-| C3 | Assessor confirmation with rationale | Mapping step 5 | **Done** | services.confirm_control; test_assessor_confirmation |
+| C2 | Status roll-up + process controls | Mapping step 4-5 | **Done** | engine.py:80-118; test_compliance_reports.py::test_pci_rollup_status_values, test_pci_open_critical_findings_lead_to_not_met |
+| C3 | Assessor confirmation with rationale | Mapping step 5 | **Done** | services.confirm_control; test_compliance_reports.py::test_assessor_confirm_override, test_confirm_requires_rationale |
 | C4 | PCI DSS 4.0.1 refs coverage (19/19; 29 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_pci_crosswalk_coverage |
 | C5 | ISO 27001:2022 refs coverage (12/12; 20 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_iso_crosswalk_coverage |
 | C6 | SOC 2 refs coverage (11/11; 14 refs) | Crosswalk | **Done** | controls.yaml; test_control_libraries.py::test_soc2_crosswalk_coverage |

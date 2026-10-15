@@ -1,0 +1,89 @@
+{% extends "_layout.html" %}
+{% block title %}AI drafts &middot; {{ e.name }} &middot; Attestra{% endblock %}
+{% block main %}
+<style>
+  .crumbs { margin: 0 0 6px; }
+  .ai-st { display:inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .ai-st-draft { background: var(--warn-bg); color: var(--warn-ink); }
+  .ai-st-approved { background: var(--ok-bg); color: var(--ok-ink); }
+  .ai-st-rejected { background: var(--err-bg); color: var(--err-ink); }
+  .draft-head { display:flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .draft-head h2 { margin: 0; }
+  .draft textarea { width: 100%; min-height: 220px; line-height: 1.55; resize: vertical; }
+  .draft .text { white-space: pre-wrap; border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
+  .empty { text-align: center; padding: 28px 16px; }
+</style>
+<p class="meta crumbs"><a href="/">Engagements</a> &rsaquo; <a href="/engagements/{{ e.id }}">{{ e.name }}</a> &rsaquo; AI drafts</p>
+<h1>AI drafts: {{ e.name }}</h1>
+<p class="meta">{{ e.tenant.name }} &middot; Drafts written by AI never appear in a report until a tester approves them.</p>
+
+<div class="warn" role="note" id="redaction_note"><b>Redacted before sending.</b> Only redacted finding details were sent to the AI service: the title (with URLs, hosts, IPs, emails, paths and secrets replaced), severity, CWE, CVE ids and scores. Evidence, descriptions, locations and client names never leave Attestra.</div>
+
+<div class="card" id="create">
+  <h2>Create a draft</h2>
+  <form method="post" action="/engagements/{{ e.id }}/ai-drafts" id="ai_create">
+    <div class="fields">
+      <div><label for="ai_kind">What to draft *</label>
+        <select id="ai_kind" name="kind">
+          <option value="executive_summary">Executive summary</option>
+          <option value="finding" {{ "disabled" if not findings }}>Finding narrative{{ " (no findings yet)" if not findings }}</option>
+        </select>
+        <div class="hint">The executive summary covers all findings except false positives. A finding narrative explains one finding's impact and fix.</div>
+        {% if not findings %}<div class="hint" id="no_findings_hint">Finding narratives need a finding. Import results or run a scan first.</div>{% endif %}</div>
+      <div id="ai_finding_wrap" hidden><label for="ai_finding">Finding *</label>
+        <select id="ai_finding" name="finding_id" disabled>
+          {% for f in findings %}<option value="{{ f.id }}">F-{{ f.id }} &middot; {{ f.severity|capitalize }} &middot; {{ f.title[:80] }}</option>{% endfor %}
+        </select>
+        <div class="hint">Findings marked false positive are not listed.</div></div>
+    </div>
+    <div class="row">
+      <button type="submit" id="ai_create_btn">Create draft</button>
+      <span class="hint" style="margin:0">Takes a few seconds. The draft waits below for review.</span>
+    </div>
+  </form>
+</div>
+
+<h2>Drafts ({{ drafts|length }})</h2>
+{% for d in drafts %}
+<div class="card draft" id="d-{{ d.id }}">
+  <div class="draft-head">
+    <h2>{% if d.kind == "executive_summary" %}Executive summary{% else %}Finding narrative &middot; <a href="/engagements/{{ e.id }}#f-{{ d.finding_id }}">F-{{ d.finding_id }}</a>{% if finding_titles.get(d.finding_id) %} <span class="meta">{{ finding_titles[d.finding_id][:80] }}</span>{% endif %}{% endif %}</h2>
+    <span class="ai-st ai-st-{{ d.status }}">{{ d.status|label }}</span>
+  </div>
+  <p class="meta">{{ d.label }} &middot; created {{ d.created_at|dt }}{% if d.provider %} &middot; written by {{ d.provider }}{% endif %}
+    {% if d.status == "approved" and d.approved_by %} &middot; approved by {{ d.approved_by }}{% if d.approved_at %} on {{ d.approved_at|dt }}{% endif %}{% endif %}
+    {% if d.status == "rejected" and d.approved_by %} &middot; rejected by {{ d.approved_by }}{% endif %}</p>
+  {% if d.status == "draft" and can_decide %}
+  <form method="post" action="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/approve">
+    <label for="t-{{ d.id }}">Draft text (edit before approving)</label>
+    <textarea id="t-{{ d.id }}" name="text" rows="12">{{ d.text }}</textarea>
+    <div class="hint">Approving puts this text in the next report. Check every statement against the findings first.</div>
+    <div class="actions-split" style="margin-top:10px">
+      <button type="submit">Approve (with edits)</button>
+      <button type="submit" class="danger" formaction="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/reject" formnovalidate onclick="return confirm('Reject this AI draft? It will not be used in any report.')">Reject</button>
+    </div>
+  </form>
+  {% else %}
+  <div class="text">{{ d.text }}</div>
+  {% if d.status == "draft" %}<div class="hint">Waiting for a tester, lead or admin to approve or reject it.</div>{% endif %}
+  {% endif %}
+</div>
+{% else %}
+<div class="card empty" id="no_drafts">
+  <p style="margin:0 0 4px"><b>No drafts yet</b></p>
+  <p class="hint" style="margin:0">Create an executive summary or a finding narrative above. Each draft stays here until a tester approves or rejects it.</p>
+</div>
+{% endfor %}
+
+<script>
+  // Show the finding picker only for a finding narrative.
+  const kindSel = document.getElementById('ai_kind'), wrap = document.getElementById('ai_finding_wrap'),
+        fsel = document.getElementById('ai_finding');
+  function kindCheck() { const on = kindSel.value === 'finding'; wrap.hidden = !on; fsel.disabled = !on; fsel.required = on; }
+  kindSel.addEventListener('change', kindCheck); kindCheck();
+  // One click per draft: the AI call takes a few seconds.
+  document.getElementById('ai_create').addEventListener('submit', () => {
+    const b = document.getElementById('ai_create_btn'); setTimeout(() => { b.disabled = true; b.textContent = 'Drafting...'; }, 0);
+  });
+</script>
+{% endblock %}

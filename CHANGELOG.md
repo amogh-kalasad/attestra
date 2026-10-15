@@ -2,6 +2,15 @@
 
 All notable changes to Attestra. Format based on Keep a Changelog; versions follow SemVer.
 
+## [Unreleased]
+
+### Added
+- Trust center (migration `0011_trust_center`): per-tenant public page, off by default; signed reports only (signature re-checked on download), findings as headlines only; NDA access requests approved by a lead or admin with a hashed one-time token; all requests, decisions and downloads audited. See `docs/TRUST_CENTER.md`.
+- Findings library and report templates (migration `0012_findings_library`): reusable writeups (32 starter web entries) with search, suggestions on import by tool rule id or CWE, apply-to-finding that fills empty fields only; sandboxed per-tenant report templates (cover title, logo, section order) with the built-in template as fallback. See `docs/FINDINGS_LIBRARY.md`.
+- Proof of exploit and replay (migration `0013_proof_webhooks`): HTTP request/response pairs and screenshots as hashed, redacted evidence, auto-captured from ZAP and Nuclei imports; replay on retest limited to authorized scope with a pinned IP and safe methods by default; the result is a suggestion a tester confirms. See `docs/PROOF_AND_REPLAY.md`.
+- Webhooks and workflow rules (migration `0013_proof_webhooks`): per-tenant endpoints (JSON, Slack, Teams) for `finding.created`, `finding.status_changed`, `retest.completed`, `report.signed`; HMAC-SHA256 signatures, SSRF guard, retries with backoff; rules to notify, assign or open a ticket. See `docs/WEBHOOKS.md`.
+- User management (migration `0014_user_invites`): admin invites with expiring one-time links, password reset links, disable/enable users (sessions of disabled users are rejected), last-login time, password policy (at least 12 characters). See `docs/USER_MANAGEMENT.md`.
+
 ## [1.0.0] - unreleased (GA candidate)
 
 First general-availability release, covering Phases 0 to 7 of the implementation guide.

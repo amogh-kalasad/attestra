@@ -1,0 +1,25 @@
+{% extends "_layout.html" %}
+{% block title %}AI drafts are switched off &middot; {{ e.name }} &middot; Attestra{% endblock %}
+{% block main %}
+<p class="meta" style="margin:0 0 6px"><a href="/">Engagements</a> &rsaquo; <a href="/engagements/{{ e.id }}">{{ e.name }}</a> &rsaquo; AI drafts</p>
+<div class="card" id="ai_off" style="max-width:680px;margin:24px auto">
+  <h1>AI drafts are switched off</h1>
+  {% if globally_on %}
+  <p>AI drafts are on for Attestra but switched off for this client ({{ e.tenant.name }}) by <span class="mono">ATTESTRA_AI_TENANTS_OFF</span>. Remove this client's id ({{ e.tenant_id }}) from that list and restart Attestra to use them here.</p>
+  {% else %}
+  <p>AI drafts are optional and off by default. While they are off, nothing is sent to any AI service and reports use their normal template text.</p>
+  <h2>To switch them on</h2>
+  <ol>
+    <li>Set <span class="mono">ATTESTRA_AI_NARRATIVES=on</span>.</li>
+    <li>Choose a provider:
+      <ul>
+        <li><span class="mono">ATTESTRA_AI_PROVIDER=ollama</span> for a local model, no API key needed (set <span class="mono">ATTESTRA_AI_MODEL</span>, for example llama3.1).</li>
+        <li><span class="mono">ATTESTRA_AI_PROVIDER=openai</span> for any OpenAI-compatible service, with <span class="mono">ATTESTRA_AI_BASE_URL</span>, <span class="mono">ATTESTRA_AI_MODEL</span> and <span class="mono">ATTESTRA_AI_API_KEY</span>.</li>
+      </ul></li>
+    <li>Restart Attestra and reload this page.</li>
+  </ol>
+  {% endif %}
+  <p class="meta">Full setup and data-protection details: <span class="mono">docs/AI_NARRATIVES.md</span> in the Attestra folder.</p>
+  <p class="row"><a class="btn" href="/engagements/{{ e.id }}">Back to engagement</a></p>
+</div>
+{% endblock %}

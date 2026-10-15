@@ -29,6 +29,11 @@ def get_top10() -> dict[str, str]:
     return dict(_catalog().get("top10_2021") or {})
 
 
+def get_llm_top10() -> dict[str, str]:
+    """OWASP Top 10 for LLM Applications 2025: id -> name."""
+    return dict(_catalog().get("llm_top10_2025") or {})
+
+
 def map_finding_to_owasp(finding) -> dict[str, str]:
     """Return owasp_top10, asvs_ref, wstg_ref for a finding (by CWE)."""
     cwe = getattr(finding, "cwe", None)

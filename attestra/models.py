@@ -92,6 +92,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(30), default="tester")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     tenant: Mapped[Tenant | None] = relationship()
 
@@ -119,6 +120,25 @@ class TenantMembership(Base):
 
     user: Mapped[User] = relationship()
     tenant: Mapped[Tenant] = relationship()
+
+
+class UserInvite(Base):
+    """Single-use invite or password-reset token (only the SHA-256 hash is stored)."""
+
+    __tablename__ = "user_invites"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(10), default="invite")  # invite | reset
+    email: Mapped[str] = mapped_column(String(254), default="")
+    role: Mapped[str] = mapped_column(String(30), default="tester")
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int | None] = mapped_column(ForeignKey("engagements.id"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Engagement(Base):
@@ -590,3 +610,128 @@ class SuppressionRule(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_by: Mapped[str] = mapped_column(String(200), default="")
     hits: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# Trust center tables (migration 0011_trust_center) live in attestra/trust/models.py.
+from attestra.trust import models as _trust_models  # noqa: E402, F401
+
+
+class LibraryEntry(Base):
+    """Reusable per-tenant finding writeup (findings library)."""
+
+    __tablename__ = "library_entries"
+    __table_args__ = (UniqueConstraint("tenant_id", "title"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    title: Mapped[str] = mapped_column(String(300))
+    description: Mapped[str] = mapped_column(Text, default="")
+    impact: Mapped[str] = mapped_column(Text, default="")
+    remediation: Mapped[str] = mapped_column(Text, default="")
+    references: Mapped[list] = mapped_column(JSON, default=list)
+    cwe: Mapped[int | None] = mapped_column(Integer)
+    default_severity: Mapped[str] = mapped_column(String(10), default="medium")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    rule_ids: Mapped[list] = mapped_column(JSON, default=list)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ReportTemplate(Base):
+    """Tenant-authored report template (sandboxed Jinja), cover, logo and section order."""
+
+    __tablename__ = "report_templates"
+    __table_args__ = (UniqueConstraint("tenant_id", "kind"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    kind: Mapped[str] = mapped_column(String(30))  # report kind, or "*" for technical + executive
+    source: Mapped[str] = mapped_column(Text, default="")  # empty = built-in library layout
+    cover_title: Mapped[str] = mapped_column(String(300), default="")
+    logo: Mapped[str] = mapped_column(Text, default="")  # data: URI
+    sections: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- proof/replay + webhooks (migration 0013)
+
+
+class ProofReplay(Base):
+    """One replay of a saved HTTP proof during retest. The verdict is only a suggestion."""
+
+    __tablename__ = "proof_replays"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    evidence_id: Mapped[int] = mapped_column(ForeignKey("evidence.id"))
+    response_evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"))
+    retest_id: Mapped[int | None] = mapped_column(ForeignKey("retests.id"))
+    method: Mapped[str] = mapped_column(String(10))
+    url: Mapped[str] = mapped_column(String(2000))
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str] = mapped_column(Text, default="")
+    suggested: Mapped[str] = mapped_column(String(20), default="")  # fixed | still_open | inconclusive
+    reason: Mapped[str] = mapped_column(Text, default="")
+    confirmed_result: Mapped[str] = mapped_column(String(20), default="")
+    confirmed_by: Mapped[str] = mapped_column(String(200), default="")
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unsafe_allowed_by: Mapped[str] = mapped_column(String(200), default="")
+    replayed_by: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    name: Mapped[str] = mapped_column(String(200), default="")
+    url: Mapped[str] = mapped_column(String(2000))
+    secret: Mapped[str] = mapped_column(String(128))
+    format: Mapped[str] = mapped_column(String(20), default="json")  # json | slack | teams
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    endpoint_id: Mapped[int] = mapped_column(ForeignKey("webhook_endpoints.id"))
+    event: Mapped[str] = mapped_column(String(50))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | delivered | failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_status_code: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkflowRule(Base):
+    """If severity >= min_severity and status == status (blank = any), run action."""
+
+    __tablename__ = "workflow_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    name: Mapped[str] = mapped_column(String(200), default="")
+    event: Mapped[str] = mapped_column(String(50), default="")  # blank = any finding event
+    min_severity: Mapped[str] = mapped_column(String(10), default="info")
+    status: Mapped[str] = mapped_column(String(20), default="")
+    action: Mapped[str] = mapped_column(String(20))  # notify | assign | ticket
+    endpoint_id: Mapped[int | None] = mapped_column(ForeignKey("webhook_endpoints.id"))
+    assignee: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FindingAssignment(Base):
+    __tablename__ = "finding_assignments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    assignee: Mapped[str] = mapped_column(String(200))
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_rules.id"))
+    assigned_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

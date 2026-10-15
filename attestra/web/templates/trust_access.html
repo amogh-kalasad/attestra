@@ -1,0 +1,9 @@
+{% if r.item.access == "public" %}<a href="/trust/{{ slug }}/items/{{ r.item.id }}/download">Download</a>
+{% else %}<details><summary>Request access (NDA)</summary>
+<form method="post" action="/trust/{{ slug }}/items/{{ r.item.id }}/request">
+<label for="ta-name-{{ r.item.id }}">Your name *</label><input id="ta-name-{{ r.item.id }}" name="name" required autocomplete="name">
+<label for="ta-email-{{ r.item.id }}">Work email *</label><input id="ta-email-{{ r.item.id }}" name="email" type="email" required autocomplete="email">
+<label for="ta-company-{{ r.item.id }}">Company</label><input id="ta-company-{{ r.item.id }}" name="company" autocomplete="organization">
+<label for="ta-reason-{{ r.item.id }}">Reason for the request</label><textarea id="ta-reason-{{ r.item.id }}" name="reason" placeholder="Vendor security review for ..."></textarea>
+<p><label style="display:flex;gap:6px;font-weight:400;color:inherit"><input type="checkbox" name="nda_accepted" value="true" required> I accept the <a href="#nda" onclick="document.getElementById('nda').open = true">NDA terms</a> *</label></p>
+<button type="submit">Request access</button></form></details>{% endif %}

@@ -1,0 +1,224 @@
+"""Reusable findings library (per-tenant writeups): CRUD, search, apply, suggest, seed.
+
+Applying a writeup only fills empty fields on a finding; a tester's own text is
+never overwritten. Every change is written to the audit log.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from attestra import audit, services
+from attestra.models import SEVERITIES, Engagement, Finding, LibraryEntry, utcnow
+
+FIELDS = ("title", "description", "impact", "remediation", "references", "cwe", "default_severity", "tags", "rule_ids")
+MAX_TEXT = 20000
+
+
+class LibraryError(services.ServiceError):
+    pass
+
+
+def _clean_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = value.replace("\n", ",").split(",")
+    out: list[str] = []
+    for v in value:
+        v = str(v).strip()
+        if v and v not in out:
+            out.append(v[:200])
+    return out
+
+
+def _validate(data: dict) -> dict:
+    out: dict = {}
+    for k in FIELDS:
+        if k not in data:
+            continue
+        v = data[k]
+        if k in ("tags", "rule_ids", "references"):
+            out[k] = _clean_list(v)
+        elif k == "cwe":
+            if v in (None, ""):
+                out[k] = None
+            else:
+                try:
+                    out[k] = int(str(v).upper().removeprefix("CWE-"))
+                except ValueError:
+                    raise LibraryError("cwe must be a number like 79 or CWE-79") from None
+                if out[k] <= 0:
+                    raise LibraryError("cwe must be positive")
+        elif k == "default_severity":
+            v = (v or "medium").strip().lower()
+            if v not in SEVERITIES:
+                raise LibraryError(f"default_severity must be one of {SEVERITIES}")
+            out[k] = v
+        else:
+            v = (v or "").strip()
+            if len(v) > MAX_TEXT:
+                raise LibraryError(f"{k} is too long")
+            out[k] = v
+    if "title" in out and not out["title"]:
+        raise LibraryError("title is required")
+    if "title" in out and len(out["title"]) > 300:
+        raise LibraryError("title is too long")
+    return out
+
+
+def entry_dict(e: LibraryEntry) -> dict:
+    return {
+        "id": e.id, "tenant_id": e.tenant_id, "title": e.title, "description": e.description,
+        "impact": e.impact, "remediation": e.remediation, "references": list(e.references or []),
+        "cwe": e.cwe, "default_severity": e.default_severity, "tags": list(e.tags or []),
+        "rule_ids": list(e.rule_ids or []), "updated_by": e.updated_by, "updated_at": e.updated_at,
+    }
+
+
+def list_entries(s: Session, tenant_id: int, q: str = "") -> list[LibraryEntry]:
+    rows = list(s.scalars(select(LibraryEntry).where(LibraryEntry.tenant_id == tenant_id).order_by(LibraryEntry.title)))
+    q = (q or "").strip().lower()
+    if not q:
+        return rows
+    terms = q.split()
+
+    def hay(e: LibraryEntry) -> str:
+        return " ".join([
+            e.title, e.description, e.impact, e.remediation, " ".join(e.tags or []),
+            " ".join(e.rule_ids or []), f"cwe-{e.cwe}" if e.cwe else "",
+        ]).lower()
+
+    hits = [e for e in rows if all(t in hay(e) for t in terms)]
+    return sorted(hits, key=lambda e: (not all(t in e.title.lower() for t in terms), e.title))
+
+
+def get_entry(s: Session, entry_id: int, tenant_ids: set[int] | None = None) -> LibraryEntry:
+    e = s.get(LibraryEntry, entry_id)
+    if e is None or (tenant_ids is not None and e.tenant_id not in tenant_ids):
+        raise LookupError(f"library entry {entry_id} not found")
+    return e
+
+
+def create_entry(s: Session, tenant_id: int, data: dict, *, actor: str) -> LibraryEntry:
+    clean = _validate({"default_severity": "medium", **data})
+    if "title" not in clean:
+        raise LibraryError("title is required")
+    dup = s.scalars(select(LibraryEntry).where(LibraryEntry.tenant_id == tenant_id, LibraryEntry.title == clean["title"])).first()
+    if dup:
+        raise LibraryError(f"a writeup titled '{clean['title']}' already exists")
+    e = LibraryEntry(tenant_id=tenant_id, updated_by=actor, updated_at=utcnow(), **clean)
+    s.add(e)
+    s.flush()
+    audit.record(s, actor, "library.create", "library_entry", e.id, title=e.title)
+    return e
+
+
+def update_entry(s: Session, entry: LibraryEntry, data: dict, *, actor: str) -> LibraryEntry:
+    clean = _validate(data)
+    if "title" in clean and clean["title"] != entry.title:
+        dup = s.scalars(select(LibraryEntry).where(
+            LibraryEntry.tenant_id == entry.tenant_id, LibraryEntry.title == clean["title"])).first()
+        if dup:
+            raise LibraryError(f"a writeup titled '{clean['title']}' already exists")
+    for k, v in clean.items():
+        setattr(entry, k, v)
+    entry.updated_by, entry.updated_at = actor, utcnow()
+    audit.record(s, actor, "library.update", "library_entry", entry.id, fields=sorted(clean))
+    return entry
+
+
+def delete_entry(s: Session, entry: LibraryEntry, *, actor: str) -> None:
+    audit.record(s, actor, "library.delete", "library_entry", entry.id, title=entry.title)
+    s.delete(entry)
+
+
+def seed_defaults(s: Session, tenant_id: int, *, actor: str) -> int:
+    """Add the built-in writeups the tenant does not have yet (matched by title)."""
+    from attestra.library.seed import SEED
+
+    have = set(s.scalars(select(LibraryEntry.title).where(LibraryEntry.tenant_id == tenant_id)))
+    added = 0
+    for item in SEED:
+        if item["title"] in have:
+            continue
+        s.add(LibraryEntry(tenant_id=tenant_id, updated_by=actor, updated_at=utcnow(), **_validate(item)))
+        added += 1
+    s.flush()
+    if added:
+        audit.record(s, actor, "library.seed", "tenant", tenant_id, added=added)
+    return added
+
+
+# ---------------------------------------------------------------- findings
+
+
+def _tenant_of(s: Session, f: Finding) -> int:
+    return s.get(Engagement, f.engagement_id).tenant_id
+
+
+def suggest(s: Session, f: Finding, limit: int = 3) -> list[LibraryEntry]:
+    """Writeups matching a finding's tool rule ids first, then its CWE."""
+    rows = list(s.scalars(select(LibraryEntry).where(LibraryEntry.tenant_id == _tenant_of(s, f))))
+    rules = {str(r).lower() for r in (f.rule_ids or [])}
+    tools = {str(t).lower() for t in (f.tools or [])}
+    keys = rules | {f"{t}:{r}" for t in tools for r in rules}
+    scored = []
+    for e in rows:
+        score = 0
+        if keys and keys & {r.lower() for r in (e.rule_ids or [])}:
+            score += 2
+        if f.cwe and e.cwe == f.cwe:
+            score += 1
+        if score:
+            scored.append((-score, e.title, e))
+    return [e for *_, e in sorted(scored, key=lambda t: (t[0], t[1]))[:limit]]
+
+
+def suggestions_for_engagement(s: Session, engagement_id: int) -> dict[int, list[LibraryEntry]]:
+    out = {}
+    for f in services.list_findings(s, engagement_id):
+        hits = suggest(s, f)
+        if hits:
+            out[f.id] = hits
+    return out
+
+
+def _compose_description(e: LibraryEntry) -> str:
+    parts = [e.description.strip()]
+    if e.impact.strip():
+        parts.append("Impact: " + e.impact.strip())
+    return "\n\n".join(p for p in parts if p)
+
+
+def _compose_recommendation(e: LibraryEntry) -> str:
+    parts = [e.remediation.strip()]
+    if e.references:
+        parts.append("References:\n" + "\n".join(f"- {r}" for r in e.references))
+    return "\n\n".join(p for p in parts if p)
+
+
+def apply_to_finding(s: Session, f: Finding, entry: LibraryEntry, *, actor: str) -> list[str]:
+    """Fill only the empty fields of ``f`` from ``entry``. Returns the fields that changed."""
+    if entry.tenant_id != _tenant_of(s, f):
+        raise LibraryError("writeup belongs to another tenant")
+    changed: list[str] = []
+    if not (f.description or "").strip():
+        text = _compose_description(entry)
+        if text:
+            f.description = text
+            changed.append("description")
+    if not (f.recommendation or "").strip():
+        text = _compose_recommendation(entry)
+        if text:
+            f.recommendation = text
+            changed.append("recommendation")
+    if f.cwe is None and entry.cwe:
+        f.cwe = entry.cwe
+        changed.append("cwe")
+    if not (f.severity or "").strip():
+        f.severity = entry.default_severity
+        changed.append("severity")
+    audit.record(s, actor, "library.apply", "finding", f.id, entry_id=entry.id, fields=changed)
+    return changed

@@ -1,15 +1,27 @@
 {% extends "_layout.html" %}
-{% block title %}{{ e.name }} · Attestra{% endblock %}
+{% block title %}{{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
+{% set prole = principal.role if principal else "" %}
 <h1>{{ e.name }}</h1>
-<p class="meta">{{ e.tenant.name }}{% if e.tenant.industry %} · {{ e.tenant.industry }}{% endif %} · {{ type_label }} · window {{ e.window_start or "-" }} to {{ e.window_end or "-" }}</p>
+<p class="meta">{{ e.tenant.name }}{% if e.tenant.industry %} &middot; {{ e.tenant.industry }}{% endif %} &middot; {{ type_label }} &middot;
+  {% if e.window_start or e.window_end %}test window {{ e.window_start or "not set" }} to {{ e.window_end or "not set" }}{% else %}No test window set (<a href="#edit">edit</a>){% endif %}
+  &middot; status <span class="st st-{{ e.status }}">{{ e.status|label }}</span></p>
+
+<nav class="tabs" aria-label="Engagement sections">
+  <a href="/engagements/{{ e.id }}" aria-current="page">Overview</a>
+  {% if has_pci %}<a href="/engagements/{{ e.id }}/pci">PCI DSS</a>{% endif %}
+  {% if has_iso %}<a href="/engagements/{{ e.id }}/iso">ISO 27001</a>{% endif %}
+  {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} class="meta" title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} (off){% endif %}</a>{% endif %}
+</nav>
 
 {% set has_auth = authorized_envs|length > 0 %}
-<div class="steps">
-  <span class="{{ 'done' if has_auth }}">1. Signed authorization</span>
-  <span class="{{ 'done' if e.assets }}">2. Targets in scope ({{ e.assets|length }})</span>
-  <span class="{{ 'done' if imports }}">3. Results imported ({{ imports|length }})</span>
-  <span class="{{ 'done' if reports }}">4. Reports ({{ reports|length }})</span>
+<div class="steps" aria-label="Progress">
+  <a href="#scope" class="{{ 'done' if has_auth }}">1. Signed authorization</a>
+  <a href="#targets" class="{{ 'done' if e.assets }}">2. Targets in scope ({{ e.assets|length }})</a>
+  <a href="#plan" class="{{ 'done' if plan and plan|selectattr('findings')|list }}">3. Test plan</a>
+  <a href="#scans" class="{{ 'done' if scans }}">4. Automated scans ({{ scans|length }})</a>
+  <a href="#import" class="{{ 'done' if imports }}">5. Results imported ({{ imports|length }})</a>
+  <a href="#reports" class="{{ 'done' if reports }}">6. Reports ({{ reports|length }})</a>
 </div>
 
 <div class="grid">
@@ -21,52 +33,71 @@
   </div>
   <div class="card">
     <h2>{{ fw_names[fw] }}</h2>
-    <form method="get" style="margin-bottom:8px">
-      <select name="framework" onchange="this.form.submit()" aria-label="Framework">
+    <form method="get" class="row" style="margin-bottom:8px">
+      <label for="fw_select" class="meta" style="margin:0">Framework</label>
+      <select id="fw_select" name="framework">
         {% for k, n in fw_names.items() %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ n }}</option>{% endfor %}
       </select>
+      <button type="submit" class="secondary">Show</button>
     </form>
     <div class="row">
-      {% for st in ["met","no_exceptions","partial","not_met","not_assessed"] %}<div class="kpi"><span class="st st-{{ st }}">{{ st|replace("_"," ") }}</span><b>{{ counts.get(st, 0) }}</b></div>{% endfor %}
+      {% for st in ["met","no_exceptions","partial","not_met","not_assessed"] %}<div class="kpi"><span class="st st-{{ st }}">{{ st|label }}</span><b>{{ counts.get(st, 0) }}</b></div>{% endfor %}
     </div>
   </div>
   <div class="card">
     <h2>Client</h2>
     <div><b>{{ e.tenant.name }}</b></div>
-    {% if e.tenant.contact_name or e.tenant.contact_email %}<div>{{ e.tenant.contact_name }}{% if e.tenant.contact_email %} · <a href="mailto:{{ e.tenant.contact_email }}">{{ e.tenant.contact_email }}</a>{% endif %}</div>{% endif %}
-    <div class="meta">Frameworks: {{ e.frameworks|join(", ") or "none" }}</div>
+    {% if e.tenant.contact_name or e.tenant.contact_email %}<div>{{ e.tenant.contact_name }}{% if e.tenant.contact_email %} &middot; <a href="mailto:{{ e.tenant.contact_email }}">{{ e.tenant.contact_email }}</a>{% endif %}</div>{% endif %}
+    <div class="meta">Frameworks: {% for k in e.frameworks %}{{ k|fw_name }}{{ ", " if not loop.last }}{% else %}None selected{% endfor %}</div>
+    {% if can(prole, "engagement.write") %}
+    <details id="edit">
+      <summary>Edit engagement</summary>
+      <form method="post" action="/engagements/{{ e.id }}/edit">
+        <div class="fields">
+          <div><label for="edit_name">Engagement name *</label><input type="text" id="edit_name" name="name" required value="{{ e.name }}"></div>
+          <div><label for="edit_ws">Test window start</label><input type="date" id="edit_ws" name="window_start" value="{{ e.window_start or '' }}"></div>
+          <div><label for="edit_we">Test window end</label><input type="date" id="edit_we" name="window_end" value="{{ e.window_end or '' }}" min="{{ e.window_start or '' }}"></div>
+        </div>
+        <label>Compliance frameworks</label>
+        <div class="checks">{% for k, n in fw_names.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" {{ "checked" if k in e.frameworks }}> {{ n }}</label>{% endfor %}</div>
+        <button type="submit">Save changes</button>
+      </form>
+    </details>
+    {% endif %}
   </div>
 </div>
 
 <!-- ============================================================ SCOPE -->
 <div class="card" id="scope">
   <h2>1. Signed authorization</h2>
-  <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Results can only be imported for targets in an authorized environment.</p>
+  <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Scans and imports are only allowed for targets in an authorized environment.</p>
   <table>
     <tr><th>Document</th><th>Signed by</th><th>Valid</th><th>Environments approved</th><th>Rules of engagement</th><th>SHA-256</th></tr>
     {% for a in e.authorizations %}
     <tr>
       <td>{{ a.document_name }}</td><td>{{ a.signer }}</td>
       <td>{{ a.signed_on }} to {{ a.expires_on }}<div class="{{ 'st-met' if a.is_valid() else 'st-not_met' }}">{{ "Valid" if a.is_valid() else "Not valid today" }}</div></td>
-      <td>{% for env in (a.environments or environments) %}<span class="env env-{{ env }}">{{ env }}</span> {% endfor %}</td>
+      <td>{% for env in a.environments %}<span class="env env-{{ env }}">{{ env }}</span> {% else %}<span class="st-not_met">None</span>{% endfor %}</td>
       <td class="meta">{{ a.rules_of_engagement or "-" }}</td>
-      <td class="mono">{{ a.sha256[:16] }}…</td>
+      <td class="mono">{{ a.sha256[:16] }}&hellip;</td>
     </tr>
-    {% else %}<tr><td colspan="6" class="st-not_met">No signed authorization yet. Imports are blocked until one is recorded.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6" class="st-not_met">No signed authorization yet. Record one below; scans and imports are blocked until then.</td></tr>{% endfor %}
   </table>
   <details {{ "open" if not e.authorizations }}>
     <summary>+ Record a signed authorization</summary>
-    <form method="post" action="/engagements/{{ e.id }}/authorizations" enctype="multipart/form-data">
+    <form method="post" action="/engagements/{{ e.id }}/authorizations" enctype="multipart/form-data" id="auth_form">
       <div class="fields">
         <div><label for="document">Signed document (PDF, image or text) *</label><input type="file" id="document" name="document" required></div>
         <div><label for="signer">Signed by (name, role) *</label><input type="text" id="signer" name="signer" required placeholder="Jane Doe, CISO"></div>
         <div><label for="signed_on">Signed on *</label><input type="date" id="signed_on" name="signed_on" required value="{{ today }}"></div>
-        <div><label for="expires_on">Valid until *</label><input type="date" id="expires_on" name="expires_on" required value="{{ e.window_end or '' }}"></div>
+        <div><label for="expires_on">Valid until *</label><input type="date" id="expires_on" name="expires_on" required value="{{ auth_default_expiry }}" min="{{ today }}">
+          <div class="hint">Defaults to the test window end{% if not e.window_end %} (none set, so 90 days from today){% endif %}.</div></div>
       </div>
-      <label>Environments the client authorizes for testing *</label>
-      <div class="checks">
+      <label id="env_label">Environments the client authorizes for testing * <span class="hint">(tick at least one)</span></label>
+      <div class="checks" role="group" aria-labelledby="env_label">
         {% for env in environments %}<label><input type="checkbox" name="environments" value="{{ env }}" {{ "checked" if env in ("staging", "uat") }}> <span class="env env-{{ env }}">{{ env }}</span></label>{% endfor %}
       </div>
+      <div class="flash err" id="env_error" hidden>Tick at least one environment.</div>
       <label for="roe">Rules of engagement (testing hours, exclusions, contacts, intrusive tests allowed?)</label>
       <textarea id="roe" name="rules_of_engagement" placeholder="Testing 10:00-18:00 IST only. No denial-of-service. Production: non-intrusive scans only. Emergency contact: ..."></textarea>
       <div style="margin-top:10px"><button type="submit">Save authorization</button></div>
@@ -74,63 +105,26 @@
   </details>
 </div>
 
-<div class="card" id="scans">
-  <h2>Scans (runner)</h2>
-  <p class="meta">Dispatch a scoped scanner run. Requires valid authorization, window, ownership verification, and (for active profiles) intrusive permission. Halt stops all jobs for this engagement.</p>
-  <div class="row" style="margin-bottom:10px">
-    <form method="post" action="/engagements/{{ e.id }}/halt" style="display:inline">{% if e.status != 'halted' %}<button type="submit" class="secondary">Halt engagement</button>{% endif %}</form>
-    <form method="post" action="/engagements/{{ e.id }}/resume" style="display:inline">{% if e.status == 'halted' %}<button type="submit">Resume engagement</button>{% endif %}</form>
-    <span class="meta">Status: <b>{{ e.status }}</b></span>
-  </div>
-  <table>
-    <tr><th>ID</th><th>Tool</th><th>Asset</th><th>Profile</th><th>Status</th><th>SHA-256</th></tr>
-    {% for r in scans %}
-    <tr>
-      <td>{{ r.id }}</td><td>{{ r.tool }}</td><td class="mono">{{ r.asset_id }}</td>
-      <td>{{ r.profile }}</td><td>{{ r.status }}{% if r.refuse_reason %}<div class="meta st-not_met">{{ r.refuse_reason }}</div>{% endif %}</td>
-      <td class="mono">{{ r.raw_sha256[:16] + "…" if r.raw_sha256 else "-" }}</td>
-    </tr>
-    {% else %}<tr><td colspan="6">No scan runs yet.</td></tr>{% endfor %}
-  </table>
-  <details>
-    <summary>+ Queue a scan</summary>
-    <form method="post" action="/engagements/{{ e.id }}/scans">
-      <div class="fields">
-        <div><label for="scan_asset">Target *</label>
-          <select id="scan_asset" name="asset_id" required>
-            {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>{% endfor %}
-          </select>
-        </div>
-        <div><label for="scan_tool">Tool *</label>
-          <select id="scan_tool" name="tool"><option value="trivy">trivy</option><option value="semgrep">semgrep</option><option value="nuclei">nuclei</option><option value="zap">zap</option></select>
-        </div>
-        <div><label for="scan_profile">Profile</label>
-          <select id="scan_profile" name="profile"><option value="baseline">baseline</option><option value="active">active</option></select>
-        </div>
-      </div>
-      <div style="margin-top:10px"><button type="submit">Queue scan</button></div>
-    </form>
-  </details>
-</div>
-
-<div class="card">
+<div class="card" id="targets">
   <h2>2. Targets in scope</h2>
   <p class="meta">Each website, API, host, repository, image, cloud account or app the client wants tested, its environment, and which tests are planned for it.</p>
   <table>
-    <tr><th>Target</th><th>Environment</th><th>Kind</th><th>Planned tests</th><th>Risk profile</th><th>Owner / notes</th><th></th></tr>
+    <tr><th>Target</th><th>Environment</th><th>Kind</th><th>Planned tests</th><th>Risk profile</th><th>Ownership</th><th>Owner / notes</th><th></th></tr>
     {% for a in e.assets %}
+    {% set nf = asset_findings.get(a.id, 0) %}{% set ns = asset_schedules.get(a.id, 0) %}
     <tr>
       <td><span class="mono">{{ a.identifier }}</span>{% if a.name %}<div class="meta">{{ a.name }}</div>{% endif %}</td>
       <td><span class="env env-{{ a.environment or 'production' }}">{{ a.environment or "production" }}</span>
-          {% if (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">not authorized</div>{% endif %}</td>
+          {% if (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">Not authorized</div>{% endif %}</td>
       <td>{{ asset_kinds.get(a.kind, a.kind) }}</td>
       <td>{% for t in (a.test_types or default_tests.get(a.kind, [])) %}<span class="chip">{{ test_types[t].label if t in test_types else t }}</span>{% endfor %}
           <div class="meta">{{ "Intrusive tests allowed" if a.intrusive_allowed else "Non-intrusive only" }}</div></td>
-      <td>Criticality {{ a.criticality }}/5 · {{ a.exposure }}{% if a.in_cde %} · <b>PCI CDE</b>{% endif %}</td>
-      <td class="meta">{{ a.owner }}{% if a.owner and a.notes %} · {% endif %}{{ a.notes }}</td>
-      <td><form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/remove" onsubmit="return confirm('Remove {{ a.identifier }} from scope?')"><button class="secondary" type="submit">Remove</button></form></td>
+      <td>Criticality {{ a.criticality }}/5 &middot; {{ "Internet-facing" if a.exposure == "internet" else "Internal only" if a.exposure == "internal" else a.exposure|label }}{% if a.in_cde %} &middot; <b>PCI CDE</b>{% endif %}</td>
+      <td>{% if a.ownership_verified_at %}<span class="st-met">Verified</span><div class="meta">{{ a.ownership_verified_at|dt }}</div>{% else %}<span class="st-not_met">Not verified</span>{% endif %}</td>
+      <td class="meta">{{ a.owner }}{% if a.owner and a.notes %} &middot; {% endif %}{{ a.notes }}</td>
+      <td><form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/remove" onsubmit="return confirm({{ ('Remove ' ~ a.identifier ~ ' from scope? It has ' ~ nf ~ ' finding(s) and ' ~ ns ~ ' schedule(s). Findings stay on the engagement but lose their target; schedules for it stop.')|tojson|forceescape }})"><button class="danger" type="submit">Remove</button></form></td>
     </tr>
-    {% else %}<tr><td colspan="7">No targets yet. Add the URLs, APIs or systems the client wants tested.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="8">No targets yet. Add the URLs, APIs or systems the client wants tested.</td></tr>{% endfor %}
   </table>
 
   <details {{ "open" if not e.assets }}>
@@ -143,9 +137,10 @@
           <input type="text" id="identifier" name="identifier" required placeholder="https://staging.client.com"></div>
         <div><label for="tname">Friendly name</label><input type="text" id="tname" name="name" placeholder="Customer portal (staging)"></div>
         <div><label for="environment">Environment *</label>
-          <select id="environment" name="environment">{% for env in environments %}<option value="{{ env }}" {{ "selected" if env == "staging" }}>{{ env|capitalize }}</option>{% endfor %}</select></div>
+          <select id="environment" name="environment">{% for env in environments %}<option value="{{ env }}" {{ "selected" if env == "staging" }}>{{ env|capitalize }}{{ "" if env in authorized_envs else " (not authorized)" }}</option>{% endfor %}</select>
+          <div class="hint" id="env_hint" hidden>This environment is not in a valid signed authorization. You can add the target, but scans and imports for it will be refused.</div></div>
         <div><label for="criticality">Business criticality</label>
-          <select id="criticality" name="criticality">{% for c in [5,4,3,2,1] %}<option value="{{ c }}" {{ "selected" if c == 3 }}>{{ c }}{{ " (crown jewel)" if c == 5 else " (low)" if c == 1 else "" }}</option>{% endfor %}</select></div>
+          <select id="criticality" name="criticality">{% for c, lbl in [(5, "crown jewel"), (4, "high"), (3, "medium"), (2, "low-medium"), (1, "low")] %}<option value="{{ c }}" {{ "selected" if c == 3 }}>{{ c }} ({{ lbl }})</option>{% endfor %}</select></div>
         <div><label for="exposure">Exposure</label>
           <select id="exposure" name="exposure"><option value="internet">Internet-facing</option><option value="internal">Internal only</option></select></div>
         <div><label for="owner">Owner (client side)</label><input type="text" id="owner" name="owner" placeholder="Platform team"></div>
@@ -182,51 +177,109 @@
         <td>{{ t.label }}</td>
         <td class="meta">{{ t.standard }}</td>
         <td>{% for i in t.imports %}<span class="chip">{{ "manual evidence" if i == "evidence" else i }}</span>{% endfor %}</td>
-        <td><span class="chip {{ 'done' if t.done }}">{{ t.status }}</span></td>
+        <td><span class="chip {{ 'done' if t.done }}">{{ t.status|capitalize }}</span></td>
       </tr>
       {% endfor %}
-    {% else %}<tr><td colspan="6">Add targets to build the test plan.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="6">No test plan yet. <a href="#targets">Add a target in scope</a> to build it.</td></tr>{% endfor %}
   </table>
+</div>
+
+<!-- ============================================================ SCANS -->
+<div class="card" id="scans">
+  <h2>4. Automated scans</h2>
+  <p class="meta">Run a scanner against one target in scope. A scan needs a valid signed authorization for the target's environment, the test window, verified ownership and, for the active profile, intrusive tests allowed on the target.</p>
+  <div class="row" style="margin-bottom:10px">
+    {% if e.status != 'halted' %}<form method="post" action="/engagements/{{ e.id }}/halt" onsubmit="return confirm('Halt all jobs for this engagement? Running and queued scans stop until you resume.')"><button type="submit" class="danger">Halt engagement</button></form>{% endif %}
+    {% if e.status == 'halted' %}<form method="post" action="/engagements/{{ e.id }}/resume"><button type="submit">Resume engagement</button></form>{% endif %}
+    <span class="meta">Status: <b class="st st-{{ e.status }}">{{ e.status|label }}</b></span>
+  </div>
+  <table>
+    <tr><th>ID</th><th>Tool</th><th>Target</th><th>Profile</th><th>Status</th><th>SHA-256</th></tr>
+    {% for r in scans %}
+    <tr>
+      <td>{{ r.id }}</td><td>{{ r.tool }}</td><td class="mono">{{ r.asset.identifier if r.asset else r.asset_id }}</td>
+      <td>{{ r.profile|capitalize }}</td><td><span class="st st-{{ r.status }}">{{ r.status|label }}</span>{% if r.refuse_reason %}<div class="meta st-not_met">{{ r.refuse_reason }}</div>{% endif %}</td>
+      <td class="mono">{% if r.raw_sha256 %}{{ r.raw_sha256[:16] }}&hellip;{% else %}-{% endif %}</td>
+    </tr>
+    {% else %}<tr><td colspan="6">No scans yet. Queue one below once a target is in scope.</td></tr>{% endfor %}
+  </table>
+  <details {{ "open" if not e.assets or not has_auth }}>
+    <summary>+ Queue a scan</summary>
+    {% if not e.assets %}
+    <div class="warn" id="scan_no_targets">No targets in scope yet. Add a target in <a href="#targets">2. Targets in scope</a> first, then queue a scan here.</div>
+    {% endif %}
+    {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">1. Signed authorization</a> first; scans are blocked until then.</div>{% endif %}
+    {% set scan_ready = e.assets and has_auth %}
+    <form method="post" action="/engagements/{{ e.id }}/scans">
+      <fieldset {{ "disabled" if not scan_ready }}>
+      <div class="fields">
+        <div><label for="scan_asset">Target *</label>
+          <select id="scan_asset" name="asset_id" required>
+            {% for a in e.assets %}<option value="{{ a.id }}" data-intrusive="{{ 1 if a.intrusive_allowed else 0 }}">{{ a.identifier }} ({{ a.kind }}) &middot; {{ "verified" if a.ownership_verified_at else "not verified" }} &middot; {{ "intrusive allowed" if a.intrusive_allowed else "non-intrusive only" }}{% if (a.environment or "production") not in authorized_envs %} &middot; environment not authorized{% endif %}</option>
+            {% else %}<option value="">No targets in scope</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="scan_tool">Tool *</label>
+          <select id="scan_tool" name="tool" required>{% for t in scan_tools %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+        </div>
+        <div><label for="scan_profile">Profile</label>
+          <select id="scan_profile" name="profile"><option value="baseline">Baseline (non-intrusive)</option><option value="active">Active (intrusive)</option></select>
+          <div class="hint" id="profile_hint" hidden>Active needs "Intrusive tests allowed" on the chosen target.</div>
+        </div>
+      </div>
+      <div style="margin-top:10px"><button type="submit" id="scan_submit" {{ "disabled" if not scan_ready }}>Queue scan</button></div>
+      </fieldset>
+    </form>
+  </details>
 </div>
 
 <!-- ============================================================ IMPORT -->
 <div class="card" id="import">
-  <h2>4. Import results</h2>
+  <h2>5. Import results</h2>
   <p class="meta">Upload result files from the tools your testers ran under this authorization. Findings are matched to targets by URL, host or path, deduplicated and risk-ranked.</p>
-  {% if not has_auth %}<div class="warn">Record a valid signed authorization first; imports are blocked until then.</div>{% endif %}
+  {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">1. Signed authorization</a> first; imports are blocked until then.</div>{% endif %}
   <form method="post" action="/engagements/{{ e.id }}/imports" enctype="multipart/form-data">
+    <fieldset {{ "disabled" if not has_auth }}>
     <div class="fields">
       <div><label for="tool">Result format *</label>
         <select id="tool" name="tool">
-          <option value="zap">OWASP ZAP (JSON report)</option>
-          <option value="nuclei">Nuclei (JSONL)</option>
-          <option value="trivy">Trivy (JSON)</option>
-          <option value="sarif">SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks...)</option>
+          {% for f in import_formats %}<option value="{{ f }}">{{ import_labels.get(f, f) }}</option>{% endfor %}
         </select></div>
       <div style="grid-column: span 2"><label for="rfile">Result file *</label><input type="file" id="rfile" name="file" required></div>
     </div>
     <button type="submit" {{ "disabled" if not has_auth }}>Import</button>
+    </fieldset>
   </form>
 </div>
 
 <!-- ============================================================ FINDINGS -->
 <div class="card" id="findings">
   <h2>Findings (ranked by risk)</h2>
+  {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
   <table>
     <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Tools</th><th>Status</th><th>Fix by</th></tr>
     {% for f in findings %}
-    <tr>
-      <td>F-{{ f.id }}</td>
+    <tr id="f-{{ f.id }}">
+      <td><a href="#f-{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
-      <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">unmatched</span>{% endif %}</td>
+      <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
       <td>{{ f.tools|join(", ") }}</td>
-      <td>{{ f.status|replace("_"," ") }}</td>
-      <td>{{ f.sla_due or "" }}</td>
+      <td><span class="st">{{ f.status|label }}</span>
+        {% set nexts = transitions.get(f.status, []) %}
+        {% if nexts and can(prole, "finding.write") %}
+        <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="row" style="gap:4px;margin-top:4px">
+          <label for="to-{{ f.id }}" class="meta" style="margin:0">Move to</label>
+          <select id="to-{{ f.id }}" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
+          <input name="note" aria-label="Reason" placeholder="Reason (needed for false positive / risk accepted)" style="width:150px">
+          <button type="submit" class="secondary">Save</button>
+        </form>
+        {% endif %}</td>
+      <td>{{ f.sla_due or "-" }}</td>
     </tr>
-    {% else %}<tr><td colspan="9">No findings imported.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="9">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
   </table>
 </div>
 
@@ -237,127 +290,133 @@
     {% for r in results %}
     <tr>
       <td><b>{{ r.ref }}</b></td><td>{{ r.title }}</td>
-      <td><span class="st st-{{ r.status }}">{{ r.status|replace("_"," ") }}</span><div class="meta">{{ "confirmed: " ~ r.assessor if r.confirmed else "proposed" }}</div></td>
+      <td><span class="st st-{{ r.status }}">{{ r.status|label }}</span><div class="meta">{{ "Confirmed: " ~ r.assessor if r.confirmed else "Proposed" }}</div></td>
       <td>{{ r.rationale if r.confirmed else r.reason }}</td>
-      <td>{% for fid in r.finding_ids %}F-{{ fid }} {% endfor %}</td>
+      <td>{% for fid in r.finding_ids %}<a href="#f-{{ fid }}">F-{{ fid }}</a> {% endfor %}</td>
     </tr>
+    {% else %}<tr><td colspan="5">No controls for this framework yet. Pick another framework above, or import results to map findings.</td></tr>
     {% endfor %}
   </table>
 </div>
 
 <div class="card" id="schedules">
   <h2>Scheduled scans</h2>
-  <p>Recurring scans (PCI 11.3.1 quarterly internal / monthly). Due scans are queued through the same scope and authorization gate as manual scans. A quarter stays open until a run leaves no open high/critical findings on that target.</p>
+  <p class="meta">Recurring scans (PCI 11.3.1 quarterly internal / monthly). Due scans are queued through the same scope and authorization gate as manual scans. A quarter stays open until a run leaves no open high/critical findings on that target.</p>
   <table>
-    <tr><th>#</th><th>Target</th><th>Tool</th><th>Cadence</th><th>Next due</th><th>Last queued</th><th>Quarter clean</th><th></th></tr>
+    <tr><th>#</th><th>Target</th><th>Tool</th><th>Cadence and next due</th><th>Last queued</th><th>Quarter clean</th><th></th></tr>
     {% for sch in schedules %}
     <tr>
       <td>{{ sch.id }}</td>
-      <td>{{ sch.asset.identifier if sch.asset else sch.asset_id }}</td>
+      <td class="mono">{{ sch.asset.identifier if sch.asset else sch.asset_id }}</td>
       <td>{{ sch.tool }}</td>
-      <td colspan="2">
-        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/update" style="display:flex;gap:6px;align-items:center">
-          <select name="cadence">
-            <option value="quarterly" {{ "selected" if sch.cadence == "quarterly" }}>quarterly</option>
-            <option value="monthly" {{ "selected" if sch.cadence == "monthly" }}>monthly</option>
+      <td>
+        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/update" class="row" style="gap:6px">
+          <label for="cad-{{ sch.id }}" class="meta" style="margin:0">Cadence</label>
+          <select id="cad-{{ sch.id }}" name="cadence">
+            <option value="quarterly" {{ "selected" if sch.cadence == "quarterly" }}>Quarterly</option>
+            <option value="monthly" {{ "selected" if sch.cadence == "monthly" }}>Monthly</option>
           </select>
-          <input type="date" name="next_due" value="{{ sch.next_due }}" required>
-          <button type="submit">Save</button>
-          {% if sch.next_due <= today %}<span class="badge">due</span>{% endif %}
+          <label for="due-{{ sch.id }}" class="meta" style="margin:0">Next due *</label>
+          <input type="date" id="due-{{ sch.id }}" name="next_due" value="{{ sch.next_due }}" required>
+          <button type="submit" class="secondary">Save</button>
+          {% if sch.next_due <= today %}<span class="badge">Due</span>{% endif %}
         </form>
       </td>
-      <td>{{ sch.last_enqueued_at.strftime("%Y-%m-%d %H:%M") if sch.last_enqueued_at else "-" }}</td>
-      <td>{{ "yes" if sch.quarter_clean else "no" }}</td>
+      <td>{{ sch.last_enqueued_at|dt if sch.last_enqueued_at else "-" }}</td>
+      <td>{{ "Yes" if sch.quarter_clean else "No" }}</td>
       <td>
-        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/remove" onsubmit="return confirm('Remove this schedule?')">
-          <button type="submit">Remove</button>
+        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/remove" onsubmit="return confirm('Remove this schedule? No more scans will be queued from it.')">
+          <button type="submit" class="danger">Remove</button>
         </form>
       </td>
     </tr>
-    {% else %}<tr><td colspan="8">No schedules yet.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7">No schedules yet.{% if e.assets %} Add one below.{% endif %}</td></tr>{% endfor %}
   </table>
   {% if e.assets %}
   <form method="post" action="/engagements/{{ e.id }}/schedules" style="margin-top:12px">
     <div class="fields">
-      <div><label>Target</label><select name="asset_id" required>
+      <div><label for="sch_asset">Target *</label><select id="sch_asset" name="asset_id" required>
         {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>{% endfor %}
       </select></div>
-      <div><label>Tool</label><input name="tool" value="nuclei" required></div>
-      <div><label>Cadence</label><select name="cadence"><option value="quarterly">quarterly</option><option value="monthly">monthly</option></select></div>
-      <div><label>First due</label><input type="date" name="next_due" value="{{ today }}" required></div>
+      <div><label for="sch_tool">Tool *</label><select id="sch_tool" name="tool" required>{% for t in scan_tools %}<option value="{{ t }}" {{ "selected" if t == "nuclei" }}>{{ t }}</option>{% endfor %}</select></div>
+      <div><label for="sch_cadence">Cadence *</label><select id="sch_cadence" name="cadence"><option value="quarterly">Quarterly</option><option value="monthly">Monthly</option></select></div>
+      <div><label for="sch_due">First due *</label><input type="date" id="sch_due" name="next_due" value="{{ today }}" required></div>
     </div>
     <button type="submit">Add schedule</button>
   </form>
+  {% else %}
+  <div class="warn">Add a target in <a href="#targets">2. Targets in scope</a> first, then schedule recurring scans for it.</div>
   {% endif %}
-  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" style="margin-top:8px">
-    <button type="submit">Queue due scans now</button>
+  {% if due_schedules %}
+  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" style="margin-top:8px" onsubmit="return confirm('Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.')">
+    <button type="submit" class="secondary">Queue {{ due_schedules }} due scan(s) now</button>
   </form>
+  {% endif %}
 </div>
 
+{% if has_pci or asv_scans or segmentation_tests %}
 <div class="card" id="pci-records">
-  <h2>PCI records (ASV &amp; segmentation)</h2>
-  <p class="meta"><a href="/engagements/{{ e.id }}/pci">PCI scan calendar, ASV import and segmentation</a> &middot; <a href="/engagements/{{ e.id }}/iso">ISO SoA, nonconformities and 9.2 sampling</a></p>
+  <h2>PCI records (ASV and segmentation)</h2>
+  <p class="meta">Summary only. Add ASV results and segmentation tests on the <a href="/engagements/{{ e.id }}/pci">PCI DSS page</a>.</p>
   <div class="grid">
     <div>
       <h3>ASV scans</h3>
       <table>
         <tr><th>Vendor</th><th>Date</th><th>Passing</th><th>SHA-256</th></tr>
         {% for a in asv_scans %}
-        <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "yes" if a.passing else "no" }}</td><td class="mono">{{ a.sha256[:16] }}…</td></tr>
-        {% else %}<tr><td colspan="4">None recorded.</td></tr>{% endfor %}
+        <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "Yes" if a.passing else "No" }}</td><td class="mono">{{ a.sha256[:16] }}&hellip;</td></tr>
+        {% else %}<tr><td colspan="4">No ASV scans yet. <a href="/engagements/{{ e.id }}/pci#asv">Import ASV results</a>.</td></tr>{% endfor %}
       </table>
-      <form method="post" action="/engagements/{{ e.id }}/asv" enctype="multipart/form-data" style="margin-top:12px">
-        <div class="fields">
-          <div><label>Vendor</label><input name="vendor" required></div>
-          <div><label>Scan date</label><input type="date" name="scan_date" value="{{ today }}" required></div>
-          <div><label><input type="checkbox" name="passing" value="true"> Passing</label></div>
-          <div><label>Attestation file</label><input type="file" name="file" required></div>
-        </div>
-        <button type="submit">Add ASV record</button>
-      </form>
     </div>
     <div>
       <h3>Segmentation tests</h3>
       <table>
         <tr><th>Boundary</th><th>Result</th><th>Date</th></tr>
         {% for t in segmentation_tests %}
-        <tr><td>{{ t.boundary }}</td><td>{{ t.result }}</td><td>{{ t.tested_on }}</td></tr>
-        {% else %}<tr><td colspan="3">None recorded.</td></tr>{% endfor %}
+        <tr><td>{{ t.boundary }}</td><td>{{ t.result|capitalize }}</td><td>{{ t.tested_on }}</td></tr>
+        {% else %}<tr><td colspan="3">No segmentation tests yet. <a href="/engagements/{{ e.id }}/pci#segmentation">Record one</a>.</td></tr>{% endfor %}
       </table>
-      <form method="post" action="/engagements/{{ e.id }}/segmentation" style="margin-top:12px">
-        <div class="fields">
-          <div><label>Boundary</label><input name="boundary" required></div>
-          <div><label>Method</label><input name="method"></div>
-          <div><label>Result</label><select name="result"><option value="pass">pass</option><option value="fail">fail</option></select></div>
-          <div><label>Tested on</label><input type="date" name="tested_on" value="{{ today }}" required></div>
-        </div>
-        <button type="submit">Add segmentation test</button>
-      </form>
     </div>
   </div>
-  <h3 style="margin-top:16px">ISO nonconformities</h3>
+</div>
+{% endif %}
+
+{% if has_iso or nonconformities %}
+<div class="card" id="iso-nc">
+  <h2>ISO nonconformities</h2>
+  <p class="meta">Raise and close nonconformities on the <a href="/engagements/{{ e.id }}/iso#nc">ISO 27001 page</a>.</p>
   <table>
     <tr><th>Control</th><th>Action</th><th>Owner</th><th>Due</th></tr>
     {% for n in nonconformities %}
-    <tr><td>{{ n.control_ref }}</td><td>{{ n.corrective_action }}</td><td>{{ n.owner }}</td><td>{{ n.due or "" }}</td></tr>
-    {% else %}<tr><td colspan="4">None.</td></tr>{% endfor %}
+    <tr><td>{{ n.control_ref }}</td><td>{{ n.corrective_action }}</td><td>{{ n.owner }}</td><td>{{ n.due or "-" }}</td></tr>
+    {% else %}<tr><td colspan="4">No nonconformities yet.</td></tr>{% endfor %}
   </table>
 </div>
+{% endif %}
 
 <div class="grid">
   <div class="card">
     <h2>Imported results</h2>
     <table>
       <tr><th>#</th><th>Tool</th><th>File</th><th>New / merged / unmatched</th><th>By</th></tr>
-      {% for i in imports %}<tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }} / {{ i.unmatched_findings or 0 }}</td><td>{{ i.imported_by }}</td></tr>{% else %}<tr><td colspan="5">None.</td></tr>{% endfor %}
+      {% for i in imports %}<tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }} / {{ i.unmatched_findings or 0 }}</td><td>{{ i.imported_by }}</td></tr>{% else %}<tr><td colspan="5">No imports yet. <a href="#import">Import a result file</a>.</td></tr>{% endfor %}
     </table>
   </div>
-  <div class="card">
-    <h2>Reports</h2>
+  <div class="card" id="reports">
+    <h2>6. Reports</h2>
     <table>
       <tr><th>#</th><th>Report</th><th>Status</th><th>Approved by</th></tr>
-      {% for r in reports %}<tr><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank">{{ r.kind }}{{ " · " ~ r.framework if r.framework }} v{{ r.version }}</a></td><td>{{ r.status }}</td><td>{{ r.approved_by or "-" }}</td></tr>{% else %}<tr><td colspan="4">None.</td></tr>{% endfor %}
+      {% for r in reports %}<tr><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a></td><td><span class="st">{{ r.status|label }}</span></td><td>{{ r.approved_by or "-" }}</td></tr>{% else %}<tr><td colspan="4">No reports yet. Generate one after QA has reviewed the findings.</td></tr>{% endfor %}
     </table>
+    {% if can(prole, "report.generate") %}
+    <form method="post" action="/engagements/{{ e.id }}/reports/generate" style="margin-top:12px">
+      <div class="fields">
+        <div><label for="rep_kind">Report type *</label><select id="rep_kind" name="kind">{% for k in report_kinds %}<option value="{{ k }}">{{ k|label }}</option>{% endfor %}</select></div>
+        <div><label for="rep_fw">Framework (compliance reports)</label><select id="rep_fw" name="framework"><option value="">Not needed</option>{% for k in e.frameworks %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ k|fw_name }}</option>{% endfor %}</select></div>
+      </div>
+      <button type="submit">Generate report</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 
@@ -374,5 +433,29 @@
     document.querySelectorAll('#test-types input[name=test_types]').forEach(cb => { cb.checked = want.includes(cb.value); });
     ident.placeholder = hints[kind.value] || '';
   });
+  // Warn before adding a target in an environment that is not authorized.
+  const authorized = {{ authorized_envs|list|tojson }};
+  const envSel = document.getElementById('environment'), envHint = document.getElementById('env_hint');
+  function envCheck() { if (envSel) envHint.hidden = authorized.includes(envSel.value); }
+  if (envSel) { envSel.addEventListener('change', envCheck); envCheck(); }
+  // At least one environment on the authorization form.
+  const authForm = document.getElementById('auth_form');
+  if (authForm) authForm.addEventListener('submit', ev => {
+    const any = authForm.querySelectorAll('input[name=environments]:checked').length > 0;
+    document.getElementById('env_error').hidden = any;
+    if (!any) ev.preventDefault();
+  });
+  // Active profile only for targets that allow intrusive tests.
+  const scanAsset = document.getElementById('scan_asset'), scanProfile = document.getElementById('scan_profile');
+  function profileCheck() {
+    if (!scanAsset || !scanProfile) return;
+    const opt = scanAsset.options[scanAsset.selectedIndex];
+    const intrusive = opt && opt.dataset.intrusive === '1';
+    const active = scanProfile.querySelector('option[value=active]');
+    active.disabled = !intrusive;
+    if (!intrusive && scanProfile.value === 'active') scanProfile.value = 'baseline';
+    document.getElementById('profile_hint').hidden = intrusive;
+  }
+  if (scanAsset) { scanAsset.addEventListener('change', profileCheck); profileCheck(); }
 </script>
 {% endblock %}

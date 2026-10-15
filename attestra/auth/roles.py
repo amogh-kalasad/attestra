@@ -28,6 +28,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "retest.manage": frozenset({"admin", "lead", "tester"}),
     "audit.read": frozenset({"admin", "lead", "auditor"}),
     "user.manage": frozenset({"admin"}),
+    "webhook.manage": frozenset({"admin", "lead"}),
 }
 
 

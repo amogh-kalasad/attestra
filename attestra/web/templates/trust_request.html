@@ -1,0 +1,9 @@
+{% extends "_public.html" %}
+{% block title %}Request received &middot; Trust Center{% endblock %}
+{% block main %}
+<h1>Request received</h1>
+<div class="card">
+<p>Your access request was recorded. A lead will review it and send you a download link if approved.</p>
+<p><a href="/trust/{{ slug }}">Back to the trust center</a></p>
+</div>
+{% endblock %}

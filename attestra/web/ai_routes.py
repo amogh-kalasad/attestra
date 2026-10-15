@@ -1,12 +1,13 @@
 """API and dashboard routes for optional AI-drafted narratives (Step 8.5).
 
-All routes return 404 when ``ATTESTRA_AI_NARRATIVES`` is off (or off for the tenant).
+API routes return 404 when ``ATTESTRA_AI_NARRATIVES`` is off (or off for the tenant); the dashboard
+page shows a friendly "AI drafts are switched off" page instead.
 Drafts are internal: client_viewer, auditor and reviewer cannot see or change them.
 """
 
 from __future__ import annotations
 
-from html import escape
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -160,69 +161,84 @@ def _ui_principal(request: Request, permission: str) -> Principal:
     return principal
 
 
-def _page(eid: int, drafts: list[ai.Draft], msg: str = "") -> str:
-    rows = []
-    for d in drafts:
-        target = "Executive summary" if d.kind == "executive_summary" else f"Finding F-{d.finding_id}"
-        actions = ""
-        if d.status == "draft":
-            actions = (
-                f'<form method="post" action="/engagements/{eid}/ai-drafts/{escape(d.id)}/approve">'
-                f'<textarea name="text" rows="5" cols="90">{escape(d.text)}</textarea><br>'
-                '<button type="submit">Approve (with edits)</button></form>'
-                f'<form method="post" action="/engagements/{eid}/ai-drafts/{escape(d.id)}/reject">'
-                '<button type="submit">Reject</button></form>'
-            )
-        else:
-            actions = f"<p>{escape(d.text)}</p>"
-        who = f" by {escape(d.approved_by)}" if d.approved_by else ""
-        rows.append(
-            f'<div class="draft"><h3>{target} <span class="pill">{escape(d.label)}</span> '
-            f"<small>{escape(d.status)}{who}</small></h3>{actions}</div>"
-        )
-    body = "".join(rows) or "<p>No drafts yet.</p>"
-    note = f'<p class="note">{escape(msg)}</p>' if msg else ""
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'><title>AI drafts</title></head><body>"
-        f'<p><a href="/engagements/{eid}">Back to engagement</a></p>'
-        f"<h1>AI drafts: engagement {eid}</h1>{note}"
-        "<p>Drafts never appear in a report until a tester approves them.</p>"
-        f'<form method="post" action="/engagements/{eid}/ai-drafts">'
-        '<select name="kind"><option value="executive_summary">Executive summary</option>'
-        '<option value="finding">Finding narrative</option></select> '
-        'Finding id <input name="finding_id" size="6"> <button type="submit">Create draft</button></form>'
-        f"{body}</body></html>"
-    )
+def _ui_enabled(eid: int, principal: Principal) -> bool:
+    def fn(s):
+        eng = services.get_engagement(s, eid, principal)
+        return ai.is_enabled(tenant_id=eng.tenant_id)
+
+    return _with_session(fn)
+
+
+def _finding_ok(s, eid: int, fid: int) -> bool:
+    return any(f.id == fid and f.status != "false_positive" for f in services.list_findings(s, eid))
+
+
+def _ui_back(eid: int, *, msg: str = "", error: str = "") -> RedirectResponse:
+    q = f"?msg={quote(msg)}" if msg else f"?error={quote(error)}" if error else ""
+    return RedirectResponse(f"/engagements/{eid}/ai-drafts{q}", status_code=303)
 
 
 @ui_router.get("/engagements/{eid}/ai-drafts", response_class=HTMLResponse)
 def ui_drafts(request: Request, eid: int):
+    from attestra.web.ui import _login_redirect, _principal, _render
+
+    if _principal(request) is None:
+        return _login_redirect(f"/engagements/{eid}/ai-drafts")
     principal = _ui_principal(request, PERM_DRAFT)
 
     def fn(s):
-        _check_enabled(s, eid, principal)
-        return _page(eid, ai.DraftStore().list(eid), request.query_params.get("msg", ""))
+        eng = services.get_engagement(s, eid, principal)
+        enabled = ai.is_enabled(tenant_id=eng.tenant_id)
+        if not enabled:
+            # A friendly page (200), not "Page not found": the feature exists but is switched off.
+            return _render(request, "ai_drafts_off.html", {"e": eng, "globally_on": ai.is_enabled()})
+        findings = [f for f in services.list_findings(s, eid) if f.status != "false_positive"]
+        return _render(
+            request,
+            "ai_drafts.html",
+            {
+                "e": eng,
+                "drafts": list(reversed(ai.DraftStore().list(eid))),
+                "findings": findings,
+                "finding_titles": {f.id: f.title for f in findings},
+                "can_decide": principal.role in ai.APPROVER_ROLES and has_permission(principal.role, PERM_APPROVE),
+            },
+        )
 
-    return HTMLResponse(_with_session(fn))
+    return _with_session(fn)
 
 
 @ui_router.post("/engagements/{eid}/ai-drafts")
 def ui_create(request: Request, eid: int, kind: str = Form(...), finding_id: str = Form("")):
     principal = _ui_principal(request, PERM_DRAFT)
+    if not _ui_enabled(eid, principal):
+        return _ui_back(eid)
     fid = int(finding_id) if finding_id.strip().isdigit() else None
-    _with_session(lambda s: _create(s, eid, principal, kind, fid))
-    return RedirectResponse(f"/engagements/{eid}/ai-drafts?msg=Draft+created", status_code=303)
+    if kind == "finding" and (fid is None or not _with_session(lambda s: _finding_ok(s, eid, fid))):
+        # A missing or wrong id goes back to the page with an inline error, not a 404 page.
+        return _ui_back(eid, error="Pick a finding from the list.")
+    try:
+        _with_session(lambda s: _create(s, eid, principal, kind, fid))
+    except (ai.AINarrativesError, OSError, ValueError) as e:
+        why = type(e).__name__
+        error = f"The AI service could not write a draft ({why}). Check the AI settings and try again."
+        return _ui_back(eid, error=error)
+    return _ui_back(eid, msg="Draft created. Review it below before approving.")
 
 
 @ui_router.post("/engagements/{eid}/ai-drafts/{did}/approve")
 def ui_approve(request: Request, eid: int, did: str, text: str = Form("")):
     principal = _ui_principal(request, PERM_APPROVE)
+    if not _ui_enabled(eid, principal):
+        return _ui_back(eid)
     _with_session(lambda s: _decide(s, eid, did, principal, approve=True, text=text or None))
-    return RedirectResponse(f"/engagements/{eid}/ai-drafts?msg=Approved", status_code=303)
+    return _ui_back(eid, msg="Draft approved. It will be used in the next report you generate.")
 
 
 @ui_router.post("/engagements/{eid}/ai-drafts/{did}/reject")
 def ui_reject(request: Request, eid: int, did: str):
     principal = _ui_principal(request, PERM_APPROVE)
+    if not _ui_enabled(eid, principal):
+        return _ui_back(eid)
     _with_session(lambda s: _decide(s, eid, did, principal, approve=False, text=None))
-    return RedirectResponse(f"/engagements/{eid}/ai-drafts?msg=Rejected", status_code=303)
+    return _ui_back(eid, msg="Draft rejected. It will not be used in any report.")

@@ -6,10 +6,12 @@
 <title>{% block title %}Attestra{% endblock %}</title>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --quiet:#5b6170; --rule:#e3e5ea; --accent:#2457d6; --accent-ink:#fff;
-          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; --field:#fff;
+          --crit:#a1161b; --high:#c2410c; --med:#8a5a10; --low:#2f6b42; --info:#4b5563; --field:#fff; --danger:#a1161b;
+          --p-crit:#a1161b; --p-high:#b93c12; --p-med:#8a5a10; --p-low:#2f6b42; --p-info:#4b5563;
           --ok-bg:#e9f6ee; --ok-ink:#1f5f36; --err-bg:#fdecec; --err-ink:#8a1c1c; --warn-bg:#fff6e5; --warn-ink:#7a4b00; }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaf0; --quiet:#9aa1b2; --rule:#2a2f38; --accent:#6d93ff; --accent-ink:#0b1020;
+            --crit:#ff8a8a; --high:#ffab7a; --med:#f1cf8a; --low:#8fdcaa; --info:#c0c6d4; --danger:#ff8a8a;
             --field:#13161b; --ok-bg:#12291b; --ok-ink:#9be0b4; --err-bg:#2e1416; --err-ink:#f3a6a6; --warn-bg:#2b2210; --warn-ink:#f1cf8a; }
   }
   * { box-sizing: border-box; }
@@ -18,8 +20,17 @@
   header a.brand { font-weight: 800; letter-spacing: .04em; color: var(--accent); text-decoration: none; }
   header .tag { color: var(--quiet); font-size: 13px; }
   header nav { margin-left:auto; display:flex; gap: 14px; align-items:center; flex-wrap: wrap; }
+  header nav a[aria-current=page] { font-weight: 700; text-decoration: none; }
   header form { display:flex; gap:6px; align-items:center; }
-  header form input { width: 150px; }
+  #navtoggle { display:none; }
+  .navbtn { display:none; margin-left:auto; cursor:pointer; border:1px solid var(--rule); border-radius:6px; padding:4px 10px; color: var(--accent); font-weight:600; }
+  @media (max-width: 600px) {
+    header { padding: 10px 16px; }
+    header .tag.tagline { display:none; }
+    .navbtn { display:inline-block; }
+    header nav { display:none; width:100%; flex-direction:column; align-items:flex-start; gap:8px; margin-left:0; }
+    #navtoggle:checked ~ nav { display:flex; }
+  }
   main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
   h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 16px; margin: 0 0 10px; } h3 { font-size: 14px; margin: 14px 0 8px; }
   .card { background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 16px; margin-bottom: 16px; overflow-x: auto; }
@@ -28,62 +39,86 @@
   th, td { text-align:left; padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
   th { color: var(--quiet); font-weight:600; font-size: 12px; text-transform: uppercase; letter-spacing:.03em; }
   a { color: var(--accent); }
-  .meta { color: var(--quiet); font-size: 13px; }
+  .meta, .hint { color: var(--quiet); font-size: 13px; }
+  .hint { font-size: 12px; margin-top: 3px; }
   .pill { display:inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight:600; color:#fff; text-transform: capitalize; }
-  .critical{background:var(--crit)} .high{background:var(--high)} .medium{background:var(--med)} .low{background:var(--low)} .info{background:var(--info)}
+  .critical{background:var(--p-crit)} .high{background:var(--p-high)} .medium{background:var(--p-med)} .low{background:var(--p-low)} .info{background:var(--p-info)}
   .chip { display:inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; border: 1px solid var(--rule); margin: 1px 2px 1px 0; white-space: nowrap; }
   .chip.done { border-color: var(--low); color: var(--low); }
+  .badge { display:inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--warn-bg); color: var(--warn-ink); }
   .env { display:inline-block; padding: 1px 8px; border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border:1px solid var(--rule); }
   .env-production { color: var(--crit); border-color: var(--crit); }
   .env-staging, .env-uat { color: var(--med); border-color: var(--med); }
   .env-dev, .env-demo { color: var(--low); border-color: var(--low); }
   .st-met{color:var(--low)} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .st-queued,.st-running{color:var(--med)} .st-succeeded,.st-completed,.st-done{color:var(--low)} .st-failed,.st-refused,.st-error,.st-halted{color:var(--crit)}
   .st { font-weight: 600; text-transform: capitalize; }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
   .kpi b { display:block; font-size: 24px; }
-  .row { display:flex; gap: 12px; flex-wrap: wrap; }
+  .row { display:flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .row .kpi { min-width: 90px; }
-  .flash { border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px; }
+  .flash { border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13.5px; position: sticky; top: 8px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
   .flash.ok { background: var(--ok-bg); color: var(--ok-ink); } .flash.err { background: var(--err-bg); color: var(--err-ink); }
   .warn { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 10px 14px; font-size: 13px; margin: 8px 0; }
   input, select, textarea { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; }
   textarea { width: 100%; min-height: 60px; }
   label { display:block; font-size: 12.5px; color: var(--quiet); font-weight: 600; margin-bottom: 4px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .fields { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 16px; margin-bottom: 12px; }
-  .fields input[type=text], .fields input[type=email], .fields input[type=url], .fields input[type=date], .fields select, .fields input[type=number], .fields input[type=file] { width: 100%; }
+  .fields input[type=text], .fields input[type=email], .fields input[type=url], .fields input[type=date], .fields select, .fields input[type=number], .fields input[type=file], .fields input[type=password], .fields input:not([type]), .fields textarea { width: 100%; }
   .checks { display:flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 12px; }
   .checks label { display:flex; gap: 6px; align-items: flex-start; font-weight: 400; color: var(--ink); font-size: 13px; margin: 0; }
   .checks label small { color: var(--quiet); display:block; }
   button, .btn { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 7px 14px; cursor: pointer; text-decoration: none; display:inline-block; }
-  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--rule); padding: 3px 10px; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.secondary, .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--rule); padding: 3px 10px; font-weight: 500; }
+  button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 3px 10px; font-weight: 600; }
+  .actions-split { display:flex; gap: 8px; align-items: center; }
+  .actions-split .danger { margin-left: auto; }
   details summary { cursor: pointer; font-weight: 600; color: var(--accent); margin: 8px 0; }
   .steps { display:flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; font-size: 13px; }
-  .steps span { border: 1px solid var(--rule); border-radius: 20px; padding: 3px 12px; background: var(--card); }
-  .steps span.done { border-color: var(--low); color: var(--low); }
+  .steps a { border: 1px solid var(--rule); border-radius: 20px; padding: 3px 12px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .steps a.done { border-color: var(--low); color: var(--low); }
+  .tabs { display:flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--rule); margin: 10px 0 12px; }
+  .tabs a { padding: 6px 12px; text-decoration: none; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; }
+  .tabs a[aria-current=page] { background: var(--card); border-color: var(--rule); color: var(--ink); font-weight: 600; }
 </style>
 </head>
 <body>
+{% set role = principal.role if principal else None %}
+{% set staff = role and role not in ("client_viewer", "auditor") %}
 <header>
-  <a class="brand" href="/">ATTESTRA</a><span class="tag">From findings to signed attestation · v{{ version }}</span>
-  <nav>
-    <a href="/">Engagements</a>
-    <a href="/engagements/new">+ New engagement</a>
+  <a class="brand" href="/">ATTESTRA</a><span class="tag tagline">From findings to signed attestation &middot; v{{ version }}</span>
+  <input type="checkbox" id="navtoggle" aria-hidden="true"><label for="navtoggle" class="navbtn">Menu</label>
+  <nav aria-label="Main">
+    {% if staff %}
+    <a href="/" {{ 'aria-current=page' if path == '/' }}>Engagements</a>
+    {% if can(role, "engagement.create") and path != "/" %}<a href="/engagements/new">+ New engagement</a>{% endif %}
+    <a href="/compliance/pci-calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}>PCI calendar</a>
+    {% if can(role, "finding.write") %}
+    <a href="/library" {{ 'aria-current=page' if path == '/library' }}>Findings library</a>
+    <a href="/library/templates" {{ 'aria-current=page' if path == '/library/templates' }}>Report templates</a>
+    {% endif %}
+    <a href="/tuning/false-positives" {{ 'aria-current=page' if path == '/tuning/false-positives' }}>False-positive rates</a>
+    {% if role in ("admin", "lead") %}<a href="/users" {{ 'aria-current=page' if path == '/users' }}>Users</a>{% endif %}
     <a href="/docs">API</a>
+    {% elif role %}
+    <a href="/portal">{{ "Auditor view" if role == "auditor" else "Client portal" }}</a>
+    {% endif %}
     {% if actor %}
-    <span class="tag">{{ actor }}</span>
+    <span class="tag">{{ actor }}{% if role %} ({{ role_labels.get(role, role) }}){% endif %}</span>
     <form method="post" action="/logout">
       <input type="hidden" name="next" value="/login">
       <button class="secondary" type="submit">Sign out</button>
     </form>
-    {% else %}
+    {% elif path != "/login" %}
     <a href="/login">Sign in</a>
     {% endif %}
   </nav>
 </header>
 <main>
-{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
-{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
-{% if not actor %}<div class="warn">Enter your name in the top bar. Every change is recorded in the audit log against it (sign-in arrives with SSO).</div>{% endif %}
+{% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err" role="alert">{{ error }}</div>{% endif %}
 {% block main %}{% endblock %}
 </main>
 </body>

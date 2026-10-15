@@ -1,0 +1,37 @@
+{% extends "_public.html" %}
+{% block title %}{{ v.center.title }} &middot; Trust Center{% endblock %}
+{% block main %}
+<h1>{{ v.center.title }}</h1>
+{% if v.center.description %}<p>{{ v.center.description }}</p>{% endif %}
+
+{% if not (v.badges or v.frameworks or v.reports or v.documents or v.findings or v.evidence) %}
+<div class="card"><p>Nothing published yet. Check back later, or contact the security team for documents.</p></div>
+{% endif %}
+
+{% if v.badges %}<section><h2>Badges</h2>{% for b in v.badges %}<span class="badge" title="{{ b.item.summary }}">{{ b.item.title }}</span>{% endfor %}</section>{% endif %}
+
+{% if v.frameworks %}<section><h2>Frameworks covered</h2><ul>
+{% for f in v.frameworks %}<li><strong>{{ f.item.title }}</strong>{% if f.item.summary %} &middot; {{ f.item.summary }}{% endif %}</li>{% endfor %}
+</ul></section>{% endif %}
+
+{% if v.reports %}<section><h2>Signed reports</h2>
+{% for r in v.reports %}<div class="card"><strong>{{ r.item.title }}</strong>
+<p>{{ r.item.summary }}</p>
+<p>{% if r.status.verified %}<span class="ok">&#10003; Signature verified</span> ({{ r.status.algorithm }}){% else %}<span class="bad">&#10007; Not verified</span> {{ r.status.reason }}{% endif %}
+{% if r.status.signed_at %} &middot; signed {{ r.status.signed_at.strftime('%Y-%m-%d') }}{% endif %}</p>
+<p class="meta">SHA-256 <code>{{ r.status.sha256 }}</code></p>
+{% include "trust_access.html" with context %}
+</div>{% endfor %}</section>{% endif %}
+
+{% if v.documents %}<section><h2>Documents</h2>
+{% for r in v.documents %}<div class="card"><strong>{{ r.item.title }}</strong><p>{{ r.item.summary }}</p>
+{% include "trust_access.html" with context %}</div>{% endfor %}</section>{% endif %}
+
+{% if v.findings %}<section><h2>Published findings</h2><ul>
+{% for f in v.findings %}<li>{{ f.item.title }} &middot; {{ f.severity|capitalize }} ({{ f.status|replace("_", " ") }}){% if f.item.summary %}: {{ f.item.summary }}{% endif %}</li>{% endfor %}
+</ul></section>{% endif %}
+
+{% if v.evidence %}<section><h2>Published evidence</h2><ul>
+{% for e in v.evidence %}<li>{{ e.item.title }} <code>{{ e.item.sha256 }}</code>{% if e.item.summary %} &middot; {{ e.item.summary }}{% endif %}</li>{% endfor %}
+</ul></section>{% endif %}
+{% endblock %}

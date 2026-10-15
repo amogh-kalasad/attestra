@@ -78,6 +78,31 @@ ISO_POLICIES: dict[str, str] = {
     "audit_samples": _via_engagement(),
 }
 POLICIES.update(ISO_POLICIES)
+# Proof replay + webhooks (migration 0013_proof_webhooks).
+PROOF_WEBHOOK_POLICIES: dict[str, str] = {
+    "proof_replays": _via_finding(),
+    "finding_assignments": _via_finding(),
+    "webhook_endpoints": _tenant("tenant_id"),
+    "webhook_deliveries": _tenant("tenant_id"),
+    "workflow_rules": _tenant("tenant_id"),
+}
+POLICIES.update(PROOF_WEBHOOK_POLICIES)
+# Trust center (migration 0011_trust_center).
+TRUST_POLICIES: dict[str, str] = {
+    "trust_centers": _tenant("tenant_id"),
+    "trust_items": _tenant("tenant_id"),
+    "trust_access_requests": _tenant("tenant_id"),
+}
+POLICIES.update(TRUST_POLICIES)
+# Findings library + report templates (migration 0012_findings_library).
+LIBRARY_POLICIES: dict[str, str] = {
+    "library_entries": _tenant("tenant_id"),
+    "report_templates": _tenant("tenant_id"),
+}
+POLICIES.update(LIBRARY_POLICIES)
+# User management (migration 0014_user_invites).
+USER_POLICIES: dict[str, str] = {"user_invites": _tenant("tenant_id")}
+POLICIES.update(USER_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

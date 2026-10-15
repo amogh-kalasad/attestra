@@ -1,9 +1,9 @@
 {% extends "_layout.html" %}
+{% block title %}Engagements &middot; Attestra{% endblock %}
 {% block main %}
 <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px">
   <h1 style="margin:0">Engagements</h1>
-  <a href="/tuning/false-positives" style="margin-left:auto">False-positive rate by tool</a>
-  <a class="btn" href="/engagements/new">+ New engagement</a>
+  {% if principal and can(principal.role, "engagement.create") %}<a class="btn" href="/engagements/new" style="margin-left:auto">+ New engagement</a>{% endif %}
 </div>
 <p class="meta">One engagement per client test or audit cycle: client details, signed authorization, targets in scope (with environment and planned tests), imported results, validated findings, compliance status and signed reports.</p>
 <div class="card">
@@ -14,11 +14,11 @@
     <td>{{ r.e.id }}</td>
     <td><a href="/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
     <td>{{ r.e.tenant.name }}{% if r.e.tenant.contact_name %}<div class="meta">{{ r.e.tenant.contact_name }}</div>{% endif %}</td>
-    <td>{{ r.e.type|upper }}</td>
+    <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
     <td>{{ r.targets }}</td>
     <td>{% for env in r.envs %}<span class="env env-{{ env }}">{{ env }}</span> {% else %}<span class="st-not_met">None yet</span>{% endfor %}</td>
-    <td>{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}</td>
-    <td class="meta">{{ r.e.frameworks|join(", ") }}</td>
+    <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low","info"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
+    <td class="meta">{% for k in r.e.frameworks %}{{ k|fw_name }}{{ ", " if not loop.last }}{% else %}None{% endfor %}</td>
   </tr>
   {% else %}
   <tr><td colspan="8">No engagements yet. <a href="/engagements/new">Create one</a>, or run <span class="mono">attestra demo</span> to load a sample.</td></tr>

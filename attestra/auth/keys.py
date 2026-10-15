@@ -136,6 +136,7 @@ def authenticate_password(s: Session, username: str, password: str) -> Principal
         return None
     if not verify_password(password, user.password_hash):
         return None
+    user.last_login_at = utcnow()
     return Principal(
         user_id=user.id,
         username=user.username,

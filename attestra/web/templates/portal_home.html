@@ -1,6 +1,8 @@
 {% extends "_layout.html" %}
+{% block title %}{% if role == "auditor" %}Auditor view{% else %}Client portal{% endif %} &middot; Attestra{% endblock %}
 {% block main %}
-<h1>{% if role == "auditor" %}Auditor view{% else %}Client portal{% endif %}</h1>
+{% if role not in ("client_viewer", "auditor") %}<div class="warn">Preview of the client portal: this is what client viewers see for these engagements. <a href="/">Back to engagements</a></div>{% endif %}
+<h1>{% if role == "auditor" %}Auditor view{% elif role not in ("client_viewer",) %}Preview of client portal{% else %}Client portal{% endif %}</h1>
 <p class="meta">Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.</p>
 <div class="card">
 <table>
@@ -10,13 +12,13 @@
     <td>{{ r.e.id }}</td>
     <td><a href="/portal/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
     <td>{{ r.e.tenant.name }}</td>
-    <td>{{ r.e.type|upper }}</td>
-    <td>{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}</td>
+    <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
+    <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
     <td>{{ r.closed }}</td>
     <td>{% if role == "auditor" %}<a href="/auditor/engagements/{{ r.e.id }}">Audit trail</a>{% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7">No engagements shared with you yet.</td></tr>
+  <tr><td colspan="7">No engagements shared with you yet. Ask your test lead to add you to one.</td></tr>
   {% endfor %}
 </table>
 </div>

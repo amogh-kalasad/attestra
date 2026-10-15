@@ -362,7 +362,16 @@ async def import_results(
         "new_findings": run.new_findings,
         "updated_findings": run.updated_findings,
         "unmatched_findings": run.unmatched_findings,
+        "library_suggestions": _library_suggestion_count(eid),
     }
+
+
+def _library_suggestion_count(eid: int) -> int:
+    """Findings in the engagement that have a matching library writeup (by rule id or CWE)."""
+    from attestra.library.service import suggestions_for_engagement
+
+    with db.session() as s:
+        return len(suggestions_for_engagement(s, eid))
 
 
 @app.get("/api/engagements/{eid}/findings")
@@ -953,6 +962,18 @@ from attestra.web.ai_routes import ui_router as ai_ui_router  # noqa: E402
 app.include_router(ai_api_router)
 app.include_router(ai_ui_router)
 
+from attestra.proof.routes import router as proof_router  # noqa: E402
+from attestra.webhooks.routes import router as webhooks_router  # noqa: E402
+
+app.include_router(proof_router)
+app.include_router(webhooks_router)
+
+from attestra.users.routes import api_router as users_api_router  # noqa: E402
+from attestra.users.routes import ui_router as users_ui_router  # noqa: E402
+
+app.include_router(users_api_router)
+app.include_router(users_ui_router)
+
 
 # ---------------------------------------------------------------- C9 / C10: PCI calendar, ASV import, ISO records
 
@@ -1018,3 +1039,21 @@ def iso_sample(eid: int, body: AuditSampleIn, principal: Principal = Depends(req
                 "seed": row.seed, "items": row.items}
 
     return _run(fn)
+
+
+from attestra.trust.routes import api_router as trust_api_router  # noqa: E402
+from attestra.trust.routes import public_router as trust_public_router  # noqa: E402
+
+app.include_router(trust_api_router)
+app.include_router(trust_public_router)
+
+
+from attestra.library.routes import api_router as library_api_router  # noqa: E402
+from attestra.library.routes import ui_router as library_ui_router  # noqa: E402
+
+app.include_router(library_api_router)
+app.include_router(library_ui_router)
+
+from attestra.web.errors import install as install_ui_errors  # noqa: E402
+
+install_ui_errors(app)

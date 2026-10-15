@@ -214,6 +214,40 @@ def create_engagement(
     return e
 
 
+def update_engagement(
+    s: Session,
+    engagement_id: int,
+    *,
+    name: str,
+    window_start: date | None,
+    window_end: date | None,
+    frameworks: list[str],
+    actor: str,
+) -> Engagement:
+    """Edit an engagement's name, test window and frameworks (UI audit #47). Audited."""
+    e = get_engagement(s, engagement_id)
+    if not name.strip():
+        raise ServiceError("engagement name is required")
+    from attestra.compliance import load_library
+
+    known = tuple(load_library().frameworks) or FRAMEWORKS
+    bad = [f for f in frameworks if f not in known]
+    if bad:
+        raise ServiceError(f"unknown frameworks {bad}; choose from {known}")
+    if window_start and window_end and window_end < window_start:
+        raise ServiceError("the test window end must be on or after the start date")
+    before = {"name": e.name, "window_start": str(e.window_start or ""), "window_end": str(e.window_end or ""),
+              "frameworks": list(e.frameworks or [])}
+    e.name = name.strip()
+    e.window_start = window_start
+    e.window_end = window_end
+    e.frameworks = list(frameworks)
+    audit.record(s, actor, "engagement.update", "engagement", e.id, before=before,
+                 after={"name": e.name, "window_start": str(window_start or ""), "window_end": str(window_end or ""),
+                        "frameworks": list(frameworks)})
+    return e
+
+
 def get_engagement(s: Session, engagement_id: int, principal=None) -> Engagement:
     if principal is not None:
         return assert_engagement_access(s, engagement_id, principal)
@@ -417,6 +451,7 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
     from attestra import tuning
 
     rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
+    known_fps = set(existing)
     for nf, asset in matched:
         fp = fingerprint(
             location=nf.location,
@@ -482,6 +517,9 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
 
     run.new_findings, run.updated_findings, run.unmatched_findings = new, updated, unmatched
     s.flush()
+    from attestra.proof.hooks import after_import
+
+    after_import(s, engagement_id, tool, data, [existing[fp] for fp in existing if fp not in known_fps], actor=actor)
     audit.record(
         s, actor, "import.create", "import_run", run.id,
         engagement_id=engagement_id, tool=tool, sha256=sha, parsed=len(parsed), new=new, updated=updated,
@@ -589,6 +627,9 @@ def transition(s: Session, finding_id: int, *, to: str, actor: str, note: str = 
     prev = f.status
     f.status = to
     audit.record(s, actor, "finding.transition", "finding", f.id, frm=prev, to=to, note=note)
+    from attestra.webhooks.service import safe_emit_finding
+
+    safe_emit_finding(s, f, "finding.status_changed", actor=actor, **{"from": prev})
     return f
 
 

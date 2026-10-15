@@ -236,6 +236,159 @@ objectives:
       iso_27001_2022: ["Clause 6.1.2", "Clause 8.2"]
       soc2: ["CC3.2"]
 
+  # ---- ISO/IEC 42001:2023 (AI management system). The 42001 refs live in
+  # packs/iso_42001_2023.yaml. These finding objectives also reach PCI DSS, ISO 27001
+  # and SOC 2 (secure development, least privilege, availability) so AI findings show
+  # in every framework. The process objectives use rule assessor_evidence: they stay
+  # not_assessed until an assessor confirms them with evidence.
+  ai_prompt_injection:
+    name: Neutralise untrusted input before it reaches an LLM prompt
+    kind: finding
+    evidence: ["llm_probe_results", "threat_model"]
+    controls:
+      pci_dss_4: ["6.2.4"]
+      iso_27001_2022: ["A.8.28"]
+      soc2: ["CC8.1"]
+
+  ai_data_integrity:
+    name: Verify the integrity and provenance of AI data and models
+    kind: finding
+    evidence: ["data_lineage", "model_hashes"]
+    controls:
+      pci_dss_4: ["6.2.4"]
+      iso_27001_2022: ["A.8.28"]
+      soc2: ["CC6.8"]
+
+  ai_excessive_agency:
+    name: Limit the permissions and autonomy of AI agents and tools
+    kind: finding
+    evidence: ["tool_permission_matrix", "approval_steps"]
+    controls:
+      pci_dss_4: ["7.2.1"]
+      iso_27001_2022: ["A.5.15", "A.8.3"]
+      soc2: ["CC6.3"]
+
+  ai_resource_limits:
+    name: Limit AI resource use (request rate, size and cost)
+    kind: finding
+    evidence: ["rate_limit_config", "cost_alerts"]
+    controls:
+      pci_dss_4: ["6.2.4"]
+      iso_27001_2022: ["A.8.26"]
+      soc2: ["CC6.6"]
+
+  aims_context:
+    name: Context and scope of the AI management system are defined
+    kind: process
+    rule: assessor_evidence
+    evidence: ["context_analysis", "aims_scope"]
+    controls: {}
+
+  aims_leadership:
+    name: Leadership commitment, AI policy and AIMS roles are in place
+    kind: process
+    rule: assessor_evidence
+    evidence: ["management_approvals", "ai_policy", "role_assignments"]
+    controls: {}
+
+  aims_planning:
+    name: AI risks, impacts, objectives and changes are planned
+    kind: process
+    rule: assessor_evidence
+    evidence: ["ai_risk_method", "risk_treatment_plan", "statement_of_applicability"]
+    controls: {}
+
+  aims_support:
+    name: Resources, competence, awareness, communication and documents support the AIMS
+    kind: process
+    rule: assessor_evidence
+    evidence: ["training_records", "document_control"]
+    controls: {}
+
+  aims_operation:
+    name: AI risk and impact assessments and treatments are carried out
+    kind: process
+    rule: assessor_evidence
+    evidence: ["risk_assessment_records", "impact_assessment_records"]
+    controls: {}
+
+  aims_performance:
+    name: The AIMS is monitored, audited and reviewed
+    kind: process
+    rule: assessor_evidence
+    evidence: ["monitoring_results", "internal_audit_reports", "management_review_minutes"]
+    controls: {}
+
+  aims_improvement:
+    name: Nonconformities are corrected and the AIMS improves
+    kind: process
+    rule: assessor_evidence
+    evidence: ["nonconformity_log", "corrective_actions"]
+    controls: {}
+
+  ai_policy:
+    name: An AI policy is set, aligned with other policies and reviewed
+    kind: process
+    rule: assessor_evidence
+    evidence: ["ai_policy", "policy_review_records"]
+    controls: {}
+
+  ai_internal_org:
+    name: AI roles and a route for raising AI concerns are defined
+    kind: process
+    rule: assessor_evidence
+    evidence: ["raci", "concern_reporting_procedure"]
+    controls: {}
+
+  ai_resources:
+    name: Resources used by AI systems are documented
+    kind: process
+    rule: assessor_evidence
+    evidence: ["ai_system_inventory", "data_sheets", "ai_bom"]
+    controls: {}
+
+  ai_impact_assessment:
+    name: Impacts of AI systems on people and society are assessed
+    kind: process
+    rule: assessor_evidence
+    evidence: ["impact_assessment_method", "impact_assessment_records"]
+    controls: {}
+
+  ai_lifecycle:
+    name: AI systems are specified, verified, deployed and operated responsibly
+    kind: process
+    rule: assessor_evidence
+    evidence: ["ai_requirements", "design_records", "test_plan", "deployment_plan", "monitoring_runbook"]
+    controls: {}
+
+  ai_data_governance:
+    name: Data for AI systems is managed, sourced, quality-checked and traced
+    kind: process
+    rule: assessor_evidence
+    evidence: ["data_management_process", "data_lineage", "quality_results"]
+    controls: {}
+
+  ai_stakeholder_info:
+    name: Interested parties get the information they need about AI systems
+    kind: process
+    rule: assessor_evidence
+    evidence: ["user_documentation", "incident_communication_plan"]
+    controls: {}
+
+  ai_responsible_use:
+    name: AI systems are used responsibly and only as intended
+    kind: process
+    rule: assessor_evidence
+    evidence: ["acceptable_use_procedure", "intended_use_statement"]
+    controls: {}
+
+  ai_third_party:
+    name: Responsibilities with AI suppliers, partners and customers are managed
+    kind: process
+    rule: assessor_evidence
+    evidence: ["responsibility_matrix", "supplier_reviews"]
+    controls: {}
+
 control_titles:
   pci_dss_4:
     "1.2.1": Network security control configuration standards are defined and maintained
