@@ -57,7 +57,17 @@ ENGAGEMENT_TYPE_LABELS = {
 }
 
 # Tools the scan runner and the scheduler accept (one list for both forms).
-SCAN_TOOLS = ("trivy", "semgrep", "nuclei", "zap")
+SCAN_TOOLS = ("zap", "nuclei", "testssl", "naabu", "trivy", "semgrep", "gitleaks", "checkov")
+SCAN_TOOL_LABELS = {
+    "zap": "zap: web app scan (DAST), web targets",
+    "nuclei": "nuclei: known issues and misconfigurations, web targets",
+    "testssl": "testssl: TLS / SSL configuration, https targets",
+    "naabu": "naabu: open ports, web or host targets",
+    "trivy": "trivy: vulnerable packages, repo or image targets",
+    "semgrep": "semgrep: code scan (SAST), repo targets",
+    "gitleaks": "gitleaks: hard-coded secrets, repo targets",
+    "checkov": "checkov: infrastructure-as-code checks, repo targets",
+}
 IMPORT_FORMAT_LABELS = {
     "zap": "OWASP ZAP (JSON report)",
     "nuclei": "Nuclei (JSONL)",
@@ -404,8 +414,19 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         asset_findings = Counter(f.asset_id for f in e.findings if f.asset_id)
         asset_schedules = Counter(sch.asset_id for sch in schedules)
         frameworks = e.frameworks or []
+        from attestra.runner import ownership
+        from attestra.runner.policy import OWNERSHIP_KINDS
+
+        services.ensure_ownership_tokens(e)
+        ov = request.query_params.get("ov", "")
         return _render(request, "engagement.html", {
+            "ownership_kinds": OWNERSHIP_KINDS,
+            "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
+            "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
+            "ov_open": int(ov) if ov.isdigit() else None,
+            "ov_message": request.query_params.get("ovmsg", ""),
             "scan_tools": SCAN_TOOLS,
+            "scan_tool_labels": SCAN_TOOL_LABELS,
             "import_labels": IMPORT_FORMAT_LABELS,
             "asset_findings": asset_findings,
             "asset_schedules": asset_schedules,
@@ -491,6 +512,63 @@ def add_target(
 @router.post("/engagements/{eid}/targets/{aid}/remove")
 def remove_target(request: Request, eid: int, aid: int):
     return _do(request, f"/engagements/{eid}", "#scope", "Target removed from scope.", services.remove_asset, aid)
+
+
+@router.post("/engagements/{eid}/targets/{aid}/verify-ownership")
+def verify_target_ownership(request: Request, eid: int, aid: int):
+    """Check now: one DNS TXT lookup and at most one GET of the well-known file. No scanning."""
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can check target ownership.", anchor="#targets")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
+            from attestra.models import Asset
+
+            ident = s.get(Asset, aid).identifier
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#targets")
+    except Exception:  # noqa: BLE001 - the check must never end in a 500 page
+        msg = "The ownership check could not run just now. Try again in a minute."
+        return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
+    if result.ok:
+        how = {"dns": "the DNS TXT record", "file": "the verification file",
+               "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
+        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
+                     anchor="#targets")
+    msg = "Not verified yet. " + result.message
+    return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
+
+
+@router.post("/engagements/{eid}/targets/{aid}/confirm-ownership")
+def confirm_target_ownership(
+    request: Request, eid: int, aid: int, confirm: str = Form(""), confirmed_by: str = Form(""),
+):
+    """Option C: the owner confirms control of a private-network target. No network call, no scan."""
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can confirm target ownership.", anchor="#targets")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            a = services.confirm_private_ownership(
+                s, eid, aid, actor=principal.actor, confirmed=confirm == "yes", confirmed_by=confirmed_by,
+            )
+            ident = a.identifier
+    except LookupError as e:
+        return _back(url, error=str(e), anchor="#targets")
+    except services.ServiceError as e:
+        msg = "Not verified yet. " + str(e)
+        return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
+    return _back(url, msg=f"Ownership of {ident} confirmed by the owner. Scans can now be queued for it.",
+                 anchor="#targets")
 
 
 @router.post("/engagements/{eid}/imports")

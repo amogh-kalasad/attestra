@@ -21,6 +21,27 @@ from attestra.runner.authorization import AuthorizationError, authorize_target, 
 from attestra.runner.dns_pin import PinnedTarget, pin_url
 from attestra.runner.ownership import is_verified
 
+URL_TOOLS = ("zap", "nuclei", "testssl", "naabu")
+PATH_TOOLS = ("semgrep", "gitleaks", "checkov")
+# Which target kinds each scanner can test. Tools not listed keep their own argument checks.
+TOOL_ASSET_KINDS: dict[str, tuple[str, ...]] = {
+    **{t: ("web_app", "api", "host") for t in URL_TOOLS},
+    **{t: ("repo",) for t in PATH_TOOLS},
+    "trivy": ("repo", "image"),
+}
+_KIND_LABELS = {"web_app": "web application", "api": "API", "host": "host", "repo": "code repository", "image": "container image"}
+
+
+def tool_kind_problem(tool: str, kind: str) -> str | None:
+    """Explain why ``tool`` cannot scan a target of ``kind``, or None when it can."""
+    kinds = TOOL_ASSET_KINDS.get(tool)
+    if kinds is None or kind in kinds:
+        return None
+    suited = sorted(t for t, ks in TOOL_ASSET_KINDS.items() if kind in ks)
+    wanted = " or ".join(_KIND_LABELS.get(k, k) for k in kinds)
+    hint = f"; for this target use {', '.join(suited)}" if suited else ""
+    return f"{tool} scans a {wanted} target, not a {_KIND_LABELS.get(kind, kind)}{hint}"
+
 
 class GateError(Exception):
     """Scan refused by the dispatch gate."""
@@ -97,6 +118,11 @@ def check(
 
     asset = s.get(Asset, asset_id)
 
+    # 5b the chosen tool must be able to scan this kind of target
+    problem = tool_kind_problem(tool, asset.kind)
+    if problem:
+        return _refuse(s, actor, asset_id, problem)
+
     # 6 authorize target + pin
     try:
         scope = scope_for_engagement(s, engagement_id, today)
@@ -108,7 +134,10 @@ def check(
     try:
         if kind in ("web_app", "api"):
             authorize_target(scope, target, "url")
-            return pin_url(target, scope)
+            pin = pin_url(target, scope)
+            if tool == "testssl" and pin.scheme != "https":
+                return _refuse(s, actor, asset_id, "testssl checks TLS, but this target uses http:// (no TLS to test)")
+            return pin
         if kind == "repo":
             authorize_target(scope, target, "path")
             return target

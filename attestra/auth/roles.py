@@ -11,6 +11,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "engagement.write": frozenset({"admin", "lead", "tester"}),
     "authorization.add": frozenset({"admin", "lead"}),
     "asset.write": frozenset({"admin", "lead", "tester"}),
+    "asset.verify_ownership": frozenset({"admin", "lead"}),
     "import.create": frozenset({"admin", "lead", "tester"}),
     "finding.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
     "finding.write": frozenset({"admin", "lead", "tester"}),

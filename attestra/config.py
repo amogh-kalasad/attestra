@@ -61,24 +61,28 @@ EPSS_URL = os.environ.get(
 )
 
 # Digests must include @sha256:. Replace VERIFY placeholders after `docker inspect` when pinning real images.
-SCANNER_IMAGES = {
-    "zap": os.environ.get(
-        "ATTESTRA_IMAGE_ZAP",
-        "ghcr.io/zaproxy/zaproxy@sha256:0000000000000000000000000000000000000000000000000000000000000001",
-    ),
-    "trivy": os.environ.get(
-        "ATTESTRA_IMAGE_TRIVY",
-        "ghcr.io/aquasecurity/trivy@sha256:0000000000000000000000000000000000000000000000000000000000000002",
-    ),
-    "nuclei": os.environ.get(
-        "ATTESTRA_IMAGE_NUCLEI",
-        "docker.io/projectdiscovery/nuclei@sha256:0000000000000000000000000000000000000000000000000000000000000003",
-    ),
-    "semgrep": os.environ.get(
-        "ATTESTRA_IMAGE_SEMGREP",
-        "docker.io/returntocorp/semgrep@sha256:0000000000000000000000000000000000000000000000000000000000000004",
-    ),
+# Each image can be set with ATTESTRA_IMAGE_<TOOL> (for example ATTESTRA_IMAGE_TESTSSL).
+_PLACEHOLDER_IMAGES = {
+    "zap": "ghcr.io/zaproxy/zaproxy@sha256:0000000000000000000000000000000000000000000000000000000000000001",
+    "trivy": "ghcr.io/aquasecurity/trivy@sha256:0000000000000000000000000000000000000000000000000000000000000002",
+    "nuclei": "docker.io/projectdiscovery/nuclei@sha256:0000000000000000000000000000000000000000000000000000000000000003",
+    "semgrep": "docker.io/returntocorp/semgrep@sha256:0000000000000000000000000000000000000000000000000000000000000004",
+    "testssl": "docker.io/drwetter/testssl.sh@sha256:0000000000000000000000000000000000000000000000000000000000000005",
+    "naabu": "docker.io/projectdiscovery/naabu@sha256:0000000000000000000000000000000000000000000000000000000000000006",
+    "gitleaks": "docker.io/zricethezav/gitleaks@sha256:0000000000000000000000000000000000000000000000000000000000000007",
+    "checkov": "docker.io/bridgecrew/checkov@sha256:0000000000000000000000000000000000000000000000000000000000000008",
 }
+SCANNER_IMAGES = {
+    tool: os.environ.get(f"ATTESTRA_IMAGE_{tool.upper()}", default) for tool, default in _PLACEHOLDER_IMAGES.items()
+}
+# Persistent scanner caches (nuclei templates, trivy DB) so each run does not download them again.
+SCANNER_CACHE_DIR = Path(os.environ.get("ATTESTRA_SCANNER_CACHE_DIR", DATA_DIR / "scanner-cache")).resolve()
+
+
+def image_is_placeholder(image: str) -> bool:
+    """True for the built-in all-zero digests, which point at no real image."""
+    digest = image.split("@sha256:", 1)[-1] if "@sha256:" in image else ""
+    return bool(digest) and digest[:-1].strip("0") == ""
 
 
 def ensure_dirs() -> None:

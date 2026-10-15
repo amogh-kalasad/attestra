@@ -33,6 +33,21 @@ BLOCKED_CIDRS: tuple[ipaddress._BaseNetwork, ...] = tuple(
     )
 )
 
+# Home / office network ranges where a lead may confirm ownership by hand ("owner confirmed").
+# These addresses have no DNS name, and the well-known file check refuses non-global IPs.
+OWNER_CONFIRM_CIDRS: tuple[ipaddress._BaseNetwork, ...] = tuple(
+    ipaddress.ip_network(c)
+    for c in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "::1/128",
+        "fc00::/7",
+    )
+)
+OWNER_CONFIRMED = "owner_confirmed"
+
 
 class AuthorizationError(Exception):
     """Target or engagement is outside the authorized scope."""
@@ -68,8 +83,17 @@ def scope_for_engagement(s: Session, engagement_id: int, on: date | None = None)
     images: list[str] = []
     private_ok: set[str] = set()
 
+    confirmed = {
+        aid for aid, method in services.ownership_methods(s, [a.id for a in assets]).items()
+        if method == OWNER_CONFIRMED
+    }
     for a in assets:
         _classify_asset(a, hosts, urls, paths, images, private_ok)
+        # A private address the owner confirmed may be reached (BLOCKED_CIDRS stay refused at pin time).
+        if a.id in confirmed and a.ownership_verified_at is not None:
+            host = owner_confirm_host(a.kind, a.identifier)
+            if host:
+                private_ok.add(host)
 
     deny_hosts, deny_urls, deny_paths, deny_images, deny_cidrs = _load_deny_rules(s, engagement_id)
 
@@ -87,6 +111,35 @@ def scope_for_engagement(s: Session, engagement_id: int, on: date | None = None)
         deny_cidrs=deny_cidrs,
         private_ok_hosts=frozenset(private_ok),
     )
+
+
+def owner_confirm_host(kind: str, identifier: str) -> str:
+    """Host of a target whose owner may confirm control by hand, or '' when that is not allowed.
+
+    Only a literal private or loopback IP address (OWNER_CONFIRM_CIDRS) or ``localhost`` qualifies.
+    Public IPs, domain names and BLOCKED_CIDRS never do; they must prove control with DNS or the file.
+    """
+    ident = (identifier or "").strip()
+    if kind in ("web_app", "api"):
+        parts = urlsplit(ident)
+        if parts.scheme not in ("http", "https"):
+            return ""
+        host = (parts.hostname or "").lower()
+    elif kind == "host":
+        if "/" in ident:
+            return ""  # a range, not one address
+        host = ident.lower().strip("[]")
+    else:
+        return ""
+    if host == "localhost":
+        return host
+    try:
+        ip = unwrap_ip(ipaddress.ip_address(host))
+    except ValueError:
+        return ""
+    if any(ip in net for net in BLOCKED_CIDRS):
+        return ""
+    return host if any(ip in net for net in OWNER_CONFIRM_CIDRS) else ""
 
 
 def _classify_asset(

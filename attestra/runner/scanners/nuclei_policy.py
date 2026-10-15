@@ -16,8 +16,20 @@ def templates_allowed(*, profile: str, intrusive_allowed: bool) -> list[str]:
     if is_active_profile(profile):
         if not intrusive_allowed:
             raise PermissionError("active nuclei templates require intrusive_allowed on the asset")
-        return ["cves,vulnerabilities,misconfiguration,intrusive"]
-    return ["cves,vulnerabilities,misconfiguration"]
+        return [ACTIVE_SELECTION]
+    return [BASELINE_SELECTION]
+
+
+# Real nuclei template tags (the old "cves,vulnerabilities,misconfiguration" names matched no tags).
+BASELINE_SELECTION = "cve,misconfig,exposure"
+ACTIVE_SELECTION = "cve,misconfig,exposure,vuln,intrusive"
+# Never run these on the baseline profile, even when a template also carries an allowed tag.
+BASELINE_EXCLUDED_TAGS = "intrusive,dos,fuzz,bruteforce,brute-force,takeover"
+ALWAYS_EXCLUDED_TAGS = "dos"
+
+
+def excluded_tags(*, profile: str) -> str:
+    return ALWAYS_EXCLUDED_TAGS if is_active_profile(profile) else BASELINE_EXCLUDED_TAGS
 
 
 def template_is_active(template_id: str, tags: list[str] | None = None) -> bool:

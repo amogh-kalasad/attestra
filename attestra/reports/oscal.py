@@ -28,7 +28,7 @@ def assessment_results(s: Session, engagement_id: int, framework: str) -> dict[s
             "results": [
                 {
                     "uuid": f"result-{eng.id}",
-                    "title": "Attestra VAPT control roll-up",
+                    "title": "Attestra security testing control roll-up",
                     "start": (eng.window_start or date.today()).isoformat(),
                     "findings": [
                         {

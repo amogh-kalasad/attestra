@@ -147,6 +147,10 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
 
     run.status = "running"
     run.started_at = utcnow()
+    job.heartbeat_at = utcnow()
+    # Commit before the scanner starts: the page shows "Running", and the database is not
+    # held write-locked (SQLite) for the minutes a scan takes.
+    s.commit()
     adapter = get_adapter(run.tool)
     out_dir = config.DATA_DIR / "raw" / f"scan-{run.id}"
     cancel = cancel or cancel_event_for(run.engagement_id)
@@ -155,18 +159,26 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
 
     asset = run.asset
     kwargs = {"out_dir": out_dir, "cancel": cancel, "profile": run.profile}
-    if run.tool == "nuclei":
-        result = adapter.scan(target, intrusive_allowed=bool(asset.intrusive_allowed), **kwargs)  # type: ignore[call-arg]
-    elif run.tool == "zap":
-        scope = scope_for_engagement(s, run.engagement_id)
-        result = adapter.scan(target, scope=scope, **kwargs)  # type: ignore[call-arg]
-    else:
-        result = adapter.scan(target, **kwargs)
+    try:
+        if run.tool == "nuclei":
+            result = adapter.scan(target, intrusive_allowed=bool(asset.intrusive_allowed), **kwargs)  # type: ignore[call-arg]
+        elif run.tool == "zap":
+            scope = scope_for_engagement(s, run.engagement_id)
+            result = adapter.scan(target, scope=scope, **kwargs)  # type: ignore[call-arg]
+        else:
+            result = adapter.scan(target, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a broken scanner run must not stop the worker
+        _fail_run(s, run, job, f"{run.tool} could not run: {exc}")
+        return
 
     if result.extra.get("cancelled") or job.cancel_requested:
         run.status = "cancelled"
         job.status = "cancelled"
         run.ended_at = utcnow()
+        return
+
+    if result.error:
+        _fail_run(s, run, job, result.error)
         return
 
     if result.quarantine:
@@ -197,6 +209,7 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
             filename=result.raw_path.name,
             data=data,
             actor=run.requested_by,
+            default_asset_id=run.asset_id,
         )
         run.import_run_id = imp.id
         run.status = "done"
@@ -205,7 +218,17 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     except Exception as exc:
         run.status = "failed"
         run.ended_at = utcnow()
+        run.refuse_reason = f"import failed: {exc}"[:500]
         fail_job(s, job, str(exc))
+
+
+def _fail_run(s: Session, run: ScanRun, job: Job, error: str) -> None:
+    """Scanner did not produce a usable report: fail the run (no retry) and show why."""
+    run.status = "failed"
+    run.ended_at = utcnow()
+    run.refuse_reason = error[:500]
+    audit.record(s, run.requested_by, "scan.failed", "scan_run", run.id, error=error[:500])
+    fail_job(s, job, error, retry=False)
 
 
 def _hash_file(path: Path, chunk: int = 1024 * 1024) -> str:

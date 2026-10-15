@@ -1,7 +1,7 @@
 {% extends "_base.html.j2" %}
-{% block title %}Technical VAPT report{% endblock %}
+{% block title %}Technical security testing report{% endblock %}
 {% block body %}
-<h1>Technical VAPT report: {{ eng.name }}</h1>
+<h1>Technical security testing report: {{ eng.name }}</h1>
 <div class="meta">Type: {{ eng.type|upper }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }} · Frameworks: {{ eng.frameworks|join(", ") or "none" }}</div>
 
 <h2>1. Scope and authorization</h2>

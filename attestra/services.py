@@ -374,6 +374,129 @@ def add_asset(
     return a
 
 
+def ensure_ownership_tokens(eng: Engagement) -> None:
+    """Give every target that needs ownership proof a token, so the UI can show it."""
+    from attestra.runner import ownership
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    for a in eng.assets:
+        if a.kind in OWNERSHIP_KINDS and not a.ownership_token:
+            ownership.ensure_token(a)
+
+
+def ownership_methods(s: Session, asset_ids: list[int]) -> dict[int, str]:
+    """Method ('dns' | 'file' | 'owner_confirmed') of the latest successful ownership proof per target.
+
+    Read from the audit log: ``asset.ownership_verified`` (DNS / file) and ``asset.ownership_confirmed``.
+    """
+    from attestra.models import AuditEvent
+
+    if not asset_ids:
+        return {}
+    out: dict[int, str] = {}
+    rows = s.scalars(
+        select(AuditEvent).where(
+            AuditEvent.action.in_(["asset.ownership_verified", "asset.ownership_confirmed"]),
+            AuditEvent.entity == "asset",
+            AuditEvent.entity_id.in_(asset_ids),
+        ).order_by(AuditEvent.id)
+    )
+    for ev in rows:
+        out[ev.entity_id] = (ev.details or {}).get("method", "")
+    return out
+
+
+def verify_asset_ownership(s: Session, engagement_id: int, asset_id: int, *, actor: str):
+    """Run the ownership check (one DNS TXT lookup, at most one GET of the well-known file).
+
+    Returns an ``OwnershipCheck``; never scans. Success and failure are both audited.
+    """
+    from attestra.runner import ownership
+    from attestra.runner.authorization import AuthorizationError, authorize_target, scope_for_engagement
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    get_engagement(s, engagement_id)
+    a = s.get(Asset, asset_id)
+    if not a or a.engagement_id != engagement_id:
+        raise LookupError(f"target {asset_id} is not in this engagement")
+    if a.kind not in OWNERSHIP_KINDS:
+        raise ServiceError(f"{ASSET_KINDS.get(a.kind, a.kind)} targets do not need ownership proof")
+    if a.ownership_verified_at is not None:
+        result = ownership.OwnershipCheck(ok=True, method=ownership_methods(s, [a.id]).get(a.id, ""))
+        result.notes.append("This target is already verified.")
+        return result
+
+    scope, scope_error = None, ""
+    try:
+        scope = scope_for_engagement(s, engagement_id)
+        if a.environment not in authorized_environments(a.engagement):
+            raise AuthorizationError(f"the {a.environment} environment is not authorized")
+        authorize_target(scope, ownership.well_known_url(a), "url")
+    except AuthorizationError as exc:
+        scope, scope_error = None, str(exc)
+
+    result = ownership.check(a, scope=scope, scope_error=scope_error)
+    if result.ok:
+        audit.record(
+            s, actor, "asset.ownership_verified", "asset", a.id, engagement_id=engagement_id,
+            identifier=a.identifier, method=result.method, verified_at=a.ownership_verified_at.isoformat(),
+        )
+    else:
+        audit.record(
+            s, actor, "asset.ownership_check_failed", "asset", a.id, engagement_id=engagement_id,
+            identifier=a.identifier, reason=result.message[:500],
+        )
+    return result
+
+
+def confirm_private_ownership(
+    s: Session, engagement_id: int, asset_id: int, *, actor: str, confirmed: bool, confirmed_by: str
+) -> Asset:
+    """Option C: the owner confirms control of a target on a private network address.
+
+    Private addresses have no DNS name, and the well-known file check refuses non-global IPs on purpose,
+    so a lead or admin records the owner's confirmation instead. Only literal private / loopback IPs or
+    ``localhost`` qualify (never public IPs, domain names or blocked ranges), and the target's
+    environment must be in a valid signed authorization. Audited as ``asset.ownership_confirmed``.
+    """
+    from attestra.runner import authorization
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    eng = get_engagement(s, engagement_id)
+    a = s.get(Asset, asset_id)
+    if not a or a.engagement_id != engagement_id:
+        raise LookupError(f"target {asset_id} is not in this engagement")
+    if a.kind not in OWNERSHIP_KINDS:
+        raise ServiceError(f"{ASSET_KINDS.get(a.kind, a.kind)} targets do not need ownership proof")
+    if a.ownership_verified_at is not None:
+        raise ServiceError("This target is already verified.")
+    host = authorization.owner_confirm_host(a.kind, a.identifier)
+    if not host:
+        raise ServiceError(
+            "Owner confirmation is only for private network addresses such as 192.168.x.x or 10.x.x.x. "
+            "For this target, use the DNS record or the file."
+        )
+    if a.environment not in authorized_environments(eng):
+        raise ServiceError(
+            f"The {a.environment} environment is not covered by a valid signed authorization. "
+            "Add or renew the signed authorization first."
+        )
+    if not confirmed:
+        raise ServiceError("Tick the box to confirm you own or control this private address.")
+    who = " ".join((confirmed_by or "").split())
+    if not who:
+        raise ServiceError("Type who is confirming, as name and role.")
+    if len(who) > 200:
+        raise ServiceError("Confirmed by is too long (200 characters at most).")
+    a.ownership_verified_at = utcnow()
+    audit.record(
+        s, actor, "asset.ownership_confirmed", "asset", a.id, engagement_id=engagement_id,
+        identifier=a.identifier, host=host, method=authorization.OWNER_CONFIRMED, confirmed_by=who,
+        verified_at=a.ownership_verified_at.isoformat(),
+    )
+    return a
+
+
 def remove_asset(s: Session, asset_id: int, *, actor: str) -> None:
     a = s.get(Asset, asset_id)
     if not a:
@@ -411,8 +534,21 @@ def match_asset(assets: list[Asset], location: str) -> Asset | None:
     return best
 
 
-def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, data: bytes, actor: str) -> ImportRun:
-    """Import a scanner result file. Requires a currently valid signed authorization."""
+def import_results(
+    s: Session,
+    engagement_id: int,
+    *,
+    tool: str,
+    filename: str,
+    data: bytes,
+    actor: str,
+    default_asset_id: int | None = None,
+) -> ImportRun:
+    """Import a scanner result file. Requires a currently valid signed authorization.
+
+    ``default_asset_id`` is the scanned target of a queued scan: findings whose location names no
+    target (for example a repo-relative file path) are linked to it.
+    """
     # @lat: [[authorization#Import gate]]
     # @lat: [[import-pipeline#Import run]]
     eng = get_engagement(s, engagement_id)
@@ -426,7 +562,8 @@ def import_results(s: Session, engagement_id: int, *, tool: str, filename: str, 
     # Every finding that lands on a target must be in an environment the client authorized.
     allowed_envs = authorized_environments(eng)
     assets = list(eng.assets)
-    matched = [(nf, match_asset(assets, nf.location)) for nf in parsed]
+    fallback = next((a for a in assets if default_asset_id is not None and a.id == default_asset_id), None)
+    matched = [(nf, match_asset(assets, nf.location) or fallback) for nf in parsed]
     outside = sorted({f"{a.identifier} ({a.environment})" for _, a in matched if a and a.environment not in allowed_envs})
     if outside:
         raise ServiceError(

@@ -1,48 +1,68 @@
-"""ZAP adapter — pinned host via --add-host; quarantine if report sites leave scope."""
+"""ZAP adapter: runs the ZAP Docker image against the pinned target and quarantines out-of-scope reports.
+
+The report folder is mounted at /zap/wrk, the only place zap-baseline.py / zap-full-scan.py
+write their -J report. Exit codes 1 (WARN) and 2 (FAIL) still come with a valid report.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from attestra import config
 from attestra.runner.authorization import AuthorizedScope, authorize_target
 from attestra.runner.dns_pin import PinnedTarget
-from attestra.runner.scanners.base import ScannerAdapter, ScannerResult, require_digest_image, run_process, which
+from attestra.runner.scanners.base import (
+    ScannerAdapter,
+    ScannerResult,
+    docker_available,
+    docker_run_argv,
+    new_container_name,
+)
+from attestra.runner.scanners.nuclei_policy import is_active_profile
+
+ZAP_WRK = "/zap/wrk"
+REPORT_NAME = "zap-report.json"
+# Baseline spiders for at most 1 minute and only runs passive rules; full adds the active scan.
+SCRIPTS = {"baseline": "zap-baseline.py", "active": "zap-full-scan.py"}
+
+
+def zap_script(profile: str) -> str:
+    return SCRIPTS["active"] if is_active_profile(profile) else SCRIPTS["baseline"]
 
 
 class ZapAdapter(ScannerAdapter):
     name = "zap"
     import_tool = "zap"
+    image_key = "zap"
+    out_name = REPORT_NAME
+    default_timeout_s = 1800  # the active (full) scan takes much longer than the baseline
 
     def available(self) -> bool:
-        return which("docker") is not None or which("zap-baseline.py") is not None
+        # ZAP only runs in Docker, from a configured digest-pinned image.
+        return docker_available() and self.image_configured()
 
     def version(self) -> str:
         return "zap"
 
-    def image_ref(self) -> str:
-        return require_digest_image(config.SCANNER_IMAGES["zap"])
-
-    def build_argv(self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline") -> list[str]:
+    def build_argv(
+        self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline", name: str = ""
+    ) -> list[str]:
         if not isinstance(target, PinnedTarget):
             raise ValueError("ZAP requires a PinnedTarget")
         image = self.image_ref()
         target_url = f"{target.scheme}://{target.host_header}/"
-        # Always pin host → IP so ZAP cannot resolve elsewhere.
-        return [
-            "docker",
-            "run",
-            "--rm",
-            "--add-host",
-            f"{target.host}:{target.ip}",
+        args = [zap_script(profile), "-t", target_url, "-J", out_file.name, "-m", "1", "-T", "10"]
+        # The host name is always pinned to the gate's IP (--add-host) so ZAP cannot resolve elsewhere.
+        return docker_run_argv(
             image,
-            "zap-baseline.py",
-            "-t",
-            target_url,
-            "-J",
-            str(out_file.name),
-        ]
+            name=name or new_container_name(self.name),
+            mounts=[(out_file.parent, ZAP_WRK, "rw")],
+            add_hosts=[(target.host, target.ip)],
+            args=args,
+        )
+
+    def build_docker_argv(self, target, *, out_file: Path, profile: str = "baseline", name: str = "", **opts):
+        return self.build_argv(target, out_file=out_file, profile=profile, name=name)
 
     def quarantine_if_out_of_scope(self, report: bytes, scope: AuthorizedScope) -> str | None:
         """Return reason string if any site URL is out of scope."""
@@ -78,30 +98,9 @@ class ZapAdapter(ScannerAdapter):
         profile: str = "baseline",
         scope: AuthorizedScope | None = None,
     ) -> ScannerResult:
-        config.ensure_dirs()
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / "zap-report.json"
-        argv = self.build_argv(pin, out_file=out_file, profile=profile)
-        # Prefer writing into a mounted path; for argv tests we only care about flags.
-        result = run_process(argv, cancel=cancel)
-        raw = out_file.read_bytes() if out_file.exists() else result.stdout
-        if not out_file.exists() and raw:
-            out_file.write_bytes(raw)
-        digest = ""
-        try:
-            digest = self.image_ref().split("@", 1)[-1]
-        except ValueError:
-            digest = ""
-        sr = ScannerResult(
-            tool=self.name,
-            tool_version=self.version(),
-            image_digest=digest,
-            raw_path=out_file if out_file.exists() else None,
-            import_tool=self.import_tool,
-            extra={"returncode": result.returncode, "argv": argv},
-        )
-        if scope is not None and out_file.exists():
-            reason = self.quarantine_if_out_of_scope(out_file.read_bytes(), scope)
+        sr = super().scan(pin, out_dir=out_dir, cancel=cancel, profile=profile)
+        if scope is not None and sr.raw_path is not None and sr.raw_path.exists():
+            reason = self.quarantine_if_out_of_scope(sr.raw_path.read_bytes(), scope)
             if reason:
                 sr.quarantine = True
                 sr.quarantine_reason = reason
