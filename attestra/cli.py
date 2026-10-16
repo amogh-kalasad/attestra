@@ -79,6 +79,34 @@ def cmd_user_add(args) -> None:
         print(f"user #{user.id} {user.username} role={user.role}")
 
 
+def cmd_user_set_password(args) -> None:
+    import getpass
+
+    from attestra.users.service import set_password
+
+    password = args.password
+    if password is None:
+        password = getpass.getpass(f"New password for {args.username}: ")
+        if getpass.getpass("Type it again: ") != password:
+            print("error: the two passwords do not match", file=sys.stderr)
+            sys.exit(2)
+    try:
+        actor = f"cli:{getpass.getuser()}"
+    except Exception:  # noqa: BLE001 - no login name on this host
+        actor = "cli"
+    db.init(use_migrations=True)
+    try:
+        with db.session() as s:
+            user = set_password(s, args.username, password, actor=actor)
+            name, active = user.username, user.active
+    except (services.ServiceError, LookupError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+    print(f"Password updated for {name}.")
+    if not active:
+        print("Note: this account is disabled, so it can't sign in until an admin enables it.")
+
+
 def cmd_key_create(args) -> None:
     from sqlalchemy import select
 
@@ -472,6 +500,10 @@ def main(argv: list[str] | None = None) -> None:
     spu.add_argument("--display-name", default="")
     spu.add_argument("--tenant-id", type=int, default=None)
     spu.set_defaults(fn=cmd_user_add)
+    spu = user_sub.add_parser("set-password", help="set a user's password (asks for it if --password is not given)")
+    spu.add_argument("username")
+    spu.add_argument("--password", default=None, help="new password; leave out to type it at a hidden prompt")
+    spu.set_defaults(fn=cmd_user_set_password)
 
     sp = sub.add_parser("key", help="API key management")
     key_sub = sp.add_subparsers(dest="key_cmd", required=True)

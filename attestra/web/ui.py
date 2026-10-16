@@ -965,4 +965,92 @@ def ui_generate_report(request: Request, eid: int, kind: str = Form(...), framew
             rid = r.id
     except (services.ServiceError, LookupError, ValueError) as e:
         return _back(url, error=str(e), anchor="#reports")
-    return _back(url, msg=f"Report #{rid} generated ({label(kind).lower()}). Submit it for QA before signing.", anchor="#reports")
+    return _back(
+        url,
+        msg=f"Report #{rid} generated ({label(kind).lower()}). It is a draft: click Submit for QA in the table, "
+        "then a different person must QA it before a lead can sign it.",
+        anchor="#reports",
+    )
+
+
+# ---------------------------------------------------------------- report lifecycle: submit, QA, sign
+
+_REPORT_STEP_ERRORS = {
+    "four-eyes rule: QA must be a different person from the author": (
+        "Someone else must QA this report. You made it, so a different person (a reviewer or another lead) "
+        "has to sign in and do the QA."
+    ),
+    "four-eyes rule: signer must differ from author and QA": (
+        "Someone else must sign this report. The signer can't be the person who made it or the person who QA'd it."
+    ),
+    "only lead or admin may sign a report": "Only a lead or admin can sign a report.",
+    "a rejection note is required": "Type a reason before rejecting the report, so the author knows what to fix.",
+    "report file changed after generation; regenerate it": (
+        "The report file changed after it was made, so it can't go further. Generate a new report."
+    ),
+}
+
+
+def _report_step(request: Request, eid: int, rid: int, permission: str, denied: str, ok_msg: str, fn) -> RedirectResponse:
+    """Run one report lifecycle step through the reports service; the service enforces status and four-eyes rules."""
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, permission):
+        return _back(url, error=denied, anchor="#reports")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            r = s.get(Report, rid)
+            if not r or r.engagement_id != eid:
+                raise LookupError(f"report #{rid} is not in this engagement")
+            fn(s, principal)
+    except (services.ServiceError, LookupError, ValueError) as e:
+        text = str(e)
+        return _back(url, error=_REPORT_STEP_ERRORS.get(text, text), anchor="#reports")
+    return _back(url, msg=ok_msg, anchor="#reports")
+
+
+@router.post("/engagements/{eid}/reports/{rid}/submit")
+def ui_submit_report(request: Request, eid: int, rid: int):
+    from attestra.reports.render import submit_report
+
+    return _report_step(
+        request, eid, rid, "report.submit", "Your role can't submit reports for QA.",
+        f"Report #{rid} submitted for QA. A different person must now QA it.",
+        lambda s, p: submit_report(s, rid, actor=p.actor, user_id=p.user_id),
+    )
+
+
+@router.post("/engagements/{eid}/reports/{rid}/qa-approve")
+def ui_qa_approve_report(request: Request, eid: int, rid: int):
+    from attestra.reports.render import qa_approve
+
+    return _report_step(
+        request, eid, rid, "report.approve", "Your role can't QA reports.",
+        f"Report #{rid} passed QA. A lead who didn't make or QA it can now approve and sign it.",
+        lambda s, p: qa_approve(s, rid, actor=p.actor, user_id=p.user_id),
+    )
+
+
+@router.post("/engagements/{eid}/reports/{rid}/qa-reject")
+def ui_qa_reject_report(request: Request, eid: int, rid: int, note: str = Form("")):
+    from attestra.reports.render import qa_reject
+
+    return _report_step(
+        request, eid, rid, "report.approve", "Your role can't QA reports.",
+        f"Report #{rid} sent back to the author with your note.",
+        lambda s, p: qa_reject(s, rid, actor=p.actor, note=note, user_id=p.user_id),
+    )
+
+
+@router.post("/engagements/{eid}/reports/{rid}/sign")
+def ui_sign_report(request: Request, eid: int, rid: int):
+    from attestra.reports.render import sign_report
+
+    return _report_step(
+        request, eid, rid, "report.sign", "Only a lead or admin can sign a report.",
+        f"Report #{rid} approved and signed. Its fingerprint is now sealed with a signature.",
+        lambda s, p: sign_report(s, rid, actor=p.actor, user_id=p.user_id, role=p.role),
+    )

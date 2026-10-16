@@ -640,24 +640,46 @@ def framework_pack(eid: int, framework: str, principal: Principal = Depends(requ
     return FileResponse(path, filename=path.name, media_type="application/zip")
 
 
-@app.get("/reports/{rid}")
-def download_report(rid: int, principal: Principal = Depends(require("report.read"))):
+def _report_file(s, rid: int, principal: Principal) -> tuple[Report, Path]:
+    """The report row and its sealed file path, after the tenant scope and data-folder checks."""
     from attestra import config as cfg
 
+    r = s.scalar(services.scoped(s, Report, principal).where(Report.id == rid))
+    if not r:
+        raise HTTPException(404, "report not found")
+    eng = services.get_engagement(s, r.engagement_id, principal)
+    path = Path(r.path).resolve()
+    allowed_roots = [
+        (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
+        cfg.DATA_DIR.resolve(),  # legacy pre-tenant paths
+    ]
+    if not any(str(path).startswith(str(root)) for root in allowed_roots):
+        raise HTTPException(404, "report not found")
+    return r, path
+
+
+@app.get("/reports/{rid}")
+def download_report(rid: int, principal: Principal = Depends(require("report.read"))):
+    """View a report: the sealed HTML with a sign-off record added on top. The file itself is not changed."""
+    from fastapi.responses import HTMLResponse
+
+    from attestra.reports.signoff import banner_html, inject
+
     with db.session() as s:
-        r = s.scalar(services.scoped(s, Report, principal).where(Report.id == rid))
-        if not r:
-            raise HTTPException(404, "report not found")
-        eng = services.get_engagement(s, r.engagement_id, principal)
-        path = Path(r.path).resolve()
-        allowed_roots = [
-            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
-            cfg.DATA_DIR.resolve(),  # legacy pre-tenant paths
-        ]
-        if not any(str(path).startswith(str(root)) for root in allowed_roots):
-            raise HTTPException(404, "report not found")
+        r, path = _report_file(s, rid, principal)
+        sealed = path.read_bytes()
+        banner = banner_html(r, verify_report(s, rid), sealed_url=f"/reports/{rid}/sealed")
         audit.record(s, principal.actor, "report.download", "report", r.id)
-        return FileResponse(r.path, media_type="text/html")
+    return HTMLResponse(inject(sealed, banner), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/reports/{rid}/sealed")
+def download_sealed_report(rid: int, principal: Principal = Depends(require("report.read"))):
+    """The sealed report file, byte for byte, exactly as it was hashed and signed."""
+    with db.session() as s:
+        r, path = _report_file(s, rid, principal)
+        audit.record(s, principal.actor, "report.download", "report", r.id, sealed=True)
+    return FileResponse(path, media_type="text/html", filename=path.name)
 
 
 @app.get("/api/evidence/{eid}/download")

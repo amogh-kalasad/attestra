@@ -69,3 +69,7 @@ Pure-Python adapter for security headers, HSTS, security.txt, and DNS posture.
 ### testssl baseline flags
 
 [[attestra/runner/scanners/testssl.py#_flags]] for `profile=baseline` runs config checks only (`-p -S -P -f -H`) and never passes `-U` / `--vulnerable`. Non-baseline keeps the default full run (includes vulnerability checks).
+<<<<<<< HEAD
+=======
+>>>>>>> detection-gaps
+>>>>>>> 46f288904f89e0ffa8cea06d1200b523768c0218

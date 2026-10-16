@@ -292,6 +292,26 @@ def complete_reset(s: Session, raw: str, *, password: str) -> User:
     return user
 
 
+def set_password(s: Session, username: str, password: str, *, actor: str) -> User:
+    """Operator path (CLI): set a local user's password directly. Same policy as resets; audited."""
+    name = (username or "").strip()
+    user = s.scalar(select(User).where(User.username == name)) or s.scalar(
+        select(User).where(func.lower(User.username) == name.lower())
+    )
+    if user is None:
+        raise LookupError(f"user {name!r} not found")
+    if user.password_hash == "oidc":
+        raise UserAdminError("SSO users reset their password in the identity provider")
+    validate_password(password, user.username)
+    user.password_hash = hash_password(password)
+    now = utcnow()
+    for old in s.scalars(select(UserInvite).where(UserInvite.user_id == user.id, UserInvite.purpose == "reset",
+                                                  UserInvite.used_at.is_(None), UserInvite.revoked_at.is_(None))):
+        old.revoked_at = now
+    audit.record(s, actor, "user.password_set", "user", user.id, via="cli")
+    return user
+
+
 # ---------------------------------------------------------------- role and status
 
 

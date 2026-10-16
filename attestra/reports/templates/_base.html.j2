@@ -36,8 +36,9 @@
 {% block body %}{% endblock %}
 <footer>
   Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }} by {{ generated_by }} with Attestra {{ version_str }}.
-  This document is a draft until approved by a second reviewer; the signed SHA-256 and signature are recorded in Attestra
-  (verify with <span class="mono">attestra verify-report</span>). Confidential.
+  QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
+  shown when you open this report in Attestra; check the SHA-256 and signature with
+  <span class="mono">attestra verify-report</span>. Confidential.
 </footer>
 </body>
 </html>
