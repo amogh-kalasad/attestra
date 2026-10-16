@@ -1,25 +1,27 @@
 {% extends "_layout.html" %}
 {% block title %}Accept invite &middot; Attestra{% endblock %}
 {% block main %}
-<div class="card" style="max-width:460px;margin:40px auto">
-  <h1>Create your account</h1>
-  {% if invalid %}
-  <div class="flash err">This invite {{ invalid.replace("link ", "") }}. Ask an admin for a new one.</div>
-  {% else %}
-  <p class="meta">Invited as <b>{{ role_labels.get(info.role, info.role) }}</b> ({{ info.email }}). Passwords need at least 12 characters.</p>
-  {% if form_error %}<div class="flash err">{{ form_error }}</div>{% endif %}
-  <form method="post" action="/invite/{{ token }}" id="pwform">
-    <div class="fields" style="grid-template-columns:1fr">
-      <div><label for="username">Username *</label><input id="username" name="username" required autocomplete="username"></div>
-      <div><label for="display_name">Display name</label><input id="display_name" name="display_name" autocomplete="name"></div>
-      <div><label for="password">Password *</label><input id="password" name="password" type="password" required minlength="12" autocomplete="new-password">
-        <div class="hint" id="pw_strength" aria-live="polite">At least 12 characters.</div></div>
-      <div><label for="confirm">Confirm password *</label><input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password">
-        <div class="hint" id="pw_match" aria-live="polite"></div></div>
-    </div>
-    <button type="submit">Create account</button>
-  </form>
-  {% include "_password_check.html" %}
-  {% endif %}
+<div class="auth-shell" style="max-width:460px">
+  <div class="card auth-card">
+    <h1>Create your account</h1>
+    {% if invalid %}
+    <div class="flash err">This invite {{ invalid.replace("link ", "") }}. Ask an admin for a new one.</div>
+    {% else %}
+    <p class="lede">Invited as <b>{{ role_labels.get(info.role, info.role) }}</b> ({{ info.email }}). Passwords need at least 12 characters.</p>
+    {% if form_error %}<div class="flash err">{{ form_error }}</div>{% endif %}
+    <form method="post" action="/invite/{{ token }}" id="pwform" style="margin-top:16px">
+      <div class="fields" style="grid-template-columns:1fr">
+        <div><label for="username">Username *</label><input id="username" name="username" required autocomplete="username"></div>
+        <div><label for="display_name">Display name</label><input id="display_name" name="display_name" autocomplete="name"></div>
+        <div><label for="password">Password *</label><input id="password" name="password" type="password" required minlength="12" autocomplete="new-password">
+          <div class="hint" id="pw_strength" aria-live="polite">At least 12 characters.</div></div>
+        <div><label for="confirm">Confirm password *</label><input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password">
+          <div class="hint" id="pw_match" aria-live="polite"></div></div>
+      </div>
+      <button type="submit" style="width:100%">Create account</button>
+    </form>
+    {% include "_password_check.html" %}
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

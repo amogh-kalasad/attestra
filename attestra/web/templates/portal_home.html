@@ -2,24 +2,63 @@
 {% block title %}{% if role == "auditor" %}Auditor view{% else %}Client portal{% endif %} &middot; Attestra{% endblock %}
 {% block main %}
 {% if role not in ("client_viewer", "auditor") %}<div class="warn">Preview of the client portal: this is what client viewers see for these engagements. <a href="/">Back to engagements</a></div>{% endif %}
-<h1>{% if role == "auditor" %}Auditor view{% elif role not in ("client_viewer",) %}Preview of client portal{% else %}Client portal{% endif %}</h1>
-<p class="meta">Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.</p>
+
+{% set ns = namespace(crit=0, high=0, closed=0) %}
+{% for r in rows %}
+  {% set ns.crit = ns.crit + (r.open.get("critical") or 0) %}
+  {% set ns.high = ns.high + (r.open.get("high") or 0) %}
+  {% set ns.closed = ns.closed + (r.closed or 0) %}
+{% endfor %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">From findings to signed attestation</p>
+    <h1>{% if role == "auditor" %}Auditor view{% elif role not in ("client_viewer",) %}Preview of client portal{% else %}Client portal{% endif %}</h1>
+    <p class="lede">Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.</p>
+  </div>
+</div>
+
+{% if rows %}
+<div class="stat-strip" aria-label="Portal summary">
+  <div class="stat-card">
+    <div class="label">Shared engagements</div>
+    <div class="value">{{ rows|length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Open critical / high</div>
+    <div class="value">{{ ns.crit + ns.high }}</div>
+    <div class="note">{{ ns.crit }} critical &middot; {{ ns.high }} high</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Closed findings</div>
+    <div class="value">{{ ns.closed }}</div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
-<table>
-  <tr><th>#</th><th>Engagement</th><th>Client</th><th>Type</th><th>Open findings</th><th>Closed</th><th></th></tr>
-  {% for r in rows %}
-  <tr>
-    <td>{{ r.e.id }}</td>
-    <td><a href="/portal/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
-    <td>{{ r.e.tenant.name }}</td>
-    <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
-    <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
-    <td>{{ r.closed }}</td>
-    <td>{% if role == "auditor" %}<a href="/auditor/engagements/{{ r.e.id }}">Audit trail</a>{% endif %}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="7">No engagements shared with you yet. Ask your test lead to add you to one.</td></tr>
-  {% endfor %}
-</table>
+  <h2>Engagements shared with you</h2>
+  <div class="table-wrap">
+  <table>
+    <thead>
+    <tr><th>#</th><th>Engagement</th><th>Client</th><th>Type</th><th>Open findings</th><th>Closed</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="meta">{{ r.e.id }}</td>
+      <td><a href="/portal/engagements/{{ r.e.id }}"><strong>{{ r.e.name }}</strong></a></td>
+      <td>{{ r.e.tenant.name }}</td>
+      <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
+      <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
+      <td>{{ r.closed }}</td>
+      <td>{% if role == "auditor" %}<a href="/auditor/engagements/{{ r.e.id }}">Audit trail</a>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7"><div class="empty">No engagements shared with you yet. Ask your test lead to add you to one.</div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
 </div>
 {% endblock %}

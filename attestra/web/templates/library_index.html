@@ -1,18 +1,26 @@
 {% extends "_layout.html" %}
 {% block title %}Findings library &middot; Attestra{% endblock %}
 {% block main %}
-<h1>Findings library</h1>
-<p class="meta">Reusable writeups for this tenant. Applying one to a finding only fills empty fields. <a href="/library/templates{% if tenant_id %}?tenant_id={{ tenant_id }}{% endif %}">Report templates</a> &middot; <a href="/">Back to engagements</a></p>
+<div class="page-head">
+  <div>
+    <h1>Findings library</h1>
+    <p class="lede">Reusable writeups for this tenant. Applying one to a finding only fills empty fields. <a href="/library/templates{% if tenant_id %}?tenant_id={{ tenant_id }}{% endif %}">Report templates</a> &middot; <a href="/">Back to engagements</a></p>
+  </div>
+</div>
 <div class="card">
-<form method="get" action="/library" class="row">
-  <label for="lib_tenant" class="meta" style="margin:0">Tenant</label>
-  <select id="lib_tenant" name="tenant_id">{% for t in tenants %}<option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
-  <label for="lib_q" class="meta" style="margin:0">Search</label>
-  <input id="lib_q" name="q" value="{{ q }}" placeholder="Title, text, tag, CWE-79, rule id" style="min-width:240px">
+<form method="get" action="/library" class="filter-bar">
+  <div>
+    <label for="lib_tenant">Tenant</label>
+    <select id="lib_tenant" name="tenant_id">{% for t in tenants %}<option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
+  </div>
+  <div class="search-field">
+    <label for="lib_q">Search</label>
+    <input id="lib_q" name="q" type="search" value="{{ q }}" placeholder="Title, text, tag, CWE-79, rule id" autocomplete="off">
+  </div>
   <button type="submit">Search</button>
 </form>
 {% if tenant_id %}
-<form method="post" action="/library/seed" style="margin-top:8px"><input type="hidden" name="tenant_id" value="{{ tenant_id }}"><button type="submit" class="secondary">Add starter writeups</button></form>
+<form method="post" action="/library/seed" style="margin-top:12px"><input type="hidden" name="tenant_id" value="{{ tenant_id }}"><button type="submit" class="secondary">Add starter writeups</button></form>
 {% endif %}
 </div>
 <div class="card">

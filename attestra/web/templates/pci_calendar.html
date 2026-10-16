@@ -1,18 +1,68 @@
 {% extends "_layout.html" %}
 {% block title %}PCI calendar &middot; Attestra{% endblock %}
 {% block main %}
-<h1>PCI quarterly scan calendar</h1>
-<p class="meta">Every PCI engagement you can see, with its external scan status for the current and past quarters. <a href="/">Back to engagements</a></p>
+{% set ns = namespace(overdue=0, due=0) %}
+{% for r in rows %}
+  {% if r.status == "overdue" %}{% set ns.overdue = ns.overdue + 1 %}
+  {% elif r.status == "due" %}{% set ns.due = ns.due + 1 %}{% endif %}
+{% endfor %}
+
+<div class="page-head">
+  <div>
+    <h1>PCI quarterly scan calendar</h1>
+    <p class="lede">Every PCI engagement you can see, with its external scan status for the current and past quarters. <a href="/">Back to engagements</a></p>
+  </div>
+</div>
+
+{% if rows %}
+<div class="stat-strip" aria-label="PCI calendar summary">
+  <div class="stat-card">
+    <div class="label">PCI engagements</div>
+    <div class="value">{{ rows|length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="dot crit" aria-hidden="true"></span> Overdue</div>
+    <div class="value is-crit">{{ ns.overdue }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="dot high" aria-hidden="true" style="background:var(--dot-med)"></span> Due this quarter</div>
+    <div class="value" style="color:var(--med)">{{ ns.due }}</div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
+  <div class="card-head">
+    <h2 style="margin:0;padding:0;border:0">Scan status by quarter</h2>
+    <div class="legend-row">
+      <span><span class="swatch" style="background:#FEE4E2;border:1px solid #912018"></span>Overdue</span>
+      <span><span class="swatch" style="background:#FEF0C7;border:1px solid #7A4A00"></span>Due</span>
+      <span><span class="swatch" style="background:#DCFAE6;border:1px solid #085D3A"></span>Passed</span>
+    </div>
+  </div>
 {% set qs = rows[0].quarters if rows else [] %}
+<div class="table-wrap" style="margin:0 -24px -24px">
 <table>
+  <thead>
   <tr><th>Engagement</th><th>Status</th>{% for q in qs %}<th>{{ q.quarter }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
   {% for r in rows %}
-  <tr><td><a href="/engagements/{{ r.engagement_id }}/pci">{{ r.engagement }}</a></td><td><strong class="st">{{ r.status|label }}</strong></td>
-    {% for q in r.quarters %}<td class="st">{{ q.status|label }}</td>{% endfor %}</tr>
+  <tr>
+    <td>
+      <a class="row-title" href="/engagements/{{ r.engagement_id }}/pci">{{ r.engagement }}</a>
+      <span class="mono">ENG-{{ r.engagement_id }}</span>
+    </td>
+    <td><span class="status-pill {{ r.status }}">{{ r.status|label }}</span></td>
+    {% for q in r.quarters %}
+    <td><span class="status-pill {{ q.status }}{% if q.status == 'done' %} passed{% endif %}">{{ "Passed" if q.status == "done" else q.status|label }}</span></td>
+    {% endfor %}
+  </tr>
   {% else %}
-  <tr><td colspan="{{ 2 + qs|length }}">No PCI engagements yet. Tick PCI DSS on an engagement to track its quarterly scans here.</td></tr>
+  <tr><td colspan="{{ 2 + qs|length }}"><div class="empty">No PCI engagements yet. Tick PCI DSS on an engagement to track its quarterly scans here.</div></td></tr>
   {% endfor %}
+  </tbody>
 </table>
+</div>
 </div>
 {% endblock %}

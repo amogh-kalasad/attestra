@@ -1,28 +1,100 @@
 {% extends "_layout.html" %}
 {% block title %}Engagements &middot; Attestra{% endblock %}
 {% block main %}
-<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px">
-  <h1 style="margin:0">Engagements</h1>
-  {% if principal and can(principal.role, "engagement.create") %}<a class="btn" href="/engagements/new" style="margin-left:auto">+ New engagement</a>{% endif %}
+{% set ns = namespace(crit=0, high=0, med=0, targets=0, no_auth=0) %}
+{% for r in rows %}
+  {% set ns.crit = ns.crit + (r.open.get("critical") or 0) %}
+  {% set ns.high = ns.high + (r.open.get("high") or 0) %}
+  {% set ns.med = ns.med + (r.open.get("medium") or 0) %}
+  {% set ns.targets = ns.targets + (r.targets or 0) %}
+  {% if not r.envs %}{% set ns.no_auth = ns.no_auth + 1 %}{% endif %}
+{% endfor %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">From findings to signed attestation</p>
+    <h1>Engagements</h1>
+    <p class="lede">One engagement per client test or audit cycle: client details, signed authorization, targets in scope, imported results, validated findings, compliance status and signed reports.</p>
+  </div>
 </div>
-<p class="meta">One engagement per client test or audit cycle: client details, signed authorization, targets in scope (with environment and planned tests), imported results, validated findings, compliance status and signed reports.</p>
+
+{% if rows %}
+<div class="stat-strip" aria-label="Engagement summary">
+  <div class="stat-card">
+    <div class="label">Engagements</div>
+    <div class="value">{{ rows|length }}</div>
+    <div class="note">Active in your view</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="dot crit" aria-hidden="true"></span> Open critical</div>
+    <div class="value is-crit">{{ ns.crit }}</div>
+    <div class="note">Across all engagements</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="dot high" aria-hidden="true"></span> Open high</div>
+    <div class="value is-high">{{ ns.high }}</div>
+    <div class="note">{{ ns.med }} medium also open</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Targets in scope</div>
+    <div class="value">{{ ns.targets }}</div>
+    <div class="note">{% if ns.no_auth %}{{ ns.no_auth }} without authorization{% else %}All have authorized envs{% endif %}</div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
-<table>
-  <tr><th>#</th><th>Engagement</th><th>Client</th><th>Type</th><th>Targets</th><th>Authorized environments</th><th>Open findings</th><th>Frameworks</th></tr>
-  {% for r in rows %}
-  <tr>
-    <td>{{ r.e.id }}</td>
-    <td><a href="/engagements/{{ r.e.id }}">{{ r.e.name }}</a></td>
-    <td>{{ r.e.tenant.name }}{% if r.e.tenant.contact_name %}<div class="meta">{{ r.e.tenant.contact_name }}</div>{% endif %}</td>
-    <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
-    <td>{{ r.targets }}</td>
-    <td>{% for env in r.envs %}<span class="env env-{{ env }}">{{ env }}</span> {% else %}<span class="st-not_met">None yet</span>{% endfor %}</td>
-    <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low","info"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
-    <td class="meta">{% for k in r.e.frameworks %}{{ k|fw_name }}{{ ", " if not loop.last }}{% else %}None{% endfor %}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="8">No engagements yet. <a href="/engagements/new">Create one</a>, or run <span class="mono">attestra demo</span> to load a sample.</td></tr>
-  {% endfor %}
-</table>
+  <div class="card-head">
+    <h2 style="margin:0;padding:0;border:0">All engagements</h2>
+  </div>
+  <div class="table-wrap" style="margin: 0 -24px -24px">
+  <table>
+    <thead>
+    <tr><th>Engagement</th><th>Client</th><th>Type</th><th>Targets</th><th>Environments</th><th>Open findings</th><th>Frameworks</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>
+        <a class="row-title" href="/engagements/{{ r.e.id }}">{{ r.e.name }}</a>
+        <span class="mono">ENG-{{ r.e.id }}</span>
+      </td>
+      <td>
+        <span style="display:block;font-weight:500">{{ r.e.tenant.name }}</span>
+        {% if r.e.tenant.contact_name %}<span class="meta">{{ r.e.tenant.contact_name }}</span>{% endif %}
+      </td>
+      <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
+      <td style="font-weight:600">{{ r.targets }}</td>
+      <td>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          {% for env in r.envs %}<span class="env env-{{ env }}">{{ env|capitalize }}</span>
+          {% else %}<span class="st-not_met">None yet</span>{% endfor %}
+        </div>
+      </td>
+      <td>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:240px">
+          {% set any_open = namespace(v=false) %}
+          {% for s in ["critical","high","medium","low","info"] %}
+            {% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s|capitalize }}</span>{% endif %}
+          {% endfor %}
+          {% if not any_open.v %}<span class="meta">None</span>{% endif %}
+        </div>
+      </td>
+      <td>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          {% for k in r.e.frameworks %}<span class="chip">{{ k|fw_name }}</span>
+          {% else %}<span class="meta">None</span>{% endfor %}
+        </div>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7"><div class="empty">No engagements yet.<br><br>
+      {% if principal and can(principal.role, "engagement.create") %}<a class="btn" href="/engagements/new">Create your first engagement</a><br><br>{% endif %}
+      Or run <span class="mono">attestra demo</span> to load a sample.
+    </div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
 </div>
 {% endblock %}

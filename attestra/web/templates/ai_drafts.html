@@ -13,9 +13,17 @@
   .draft .text { white-space: pre-wrap; border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
   .empty { text-align: center; padding: 28px 16px; }
 </style>
-<p class="meta crumbs"><a href="/">Engagements</a> &rsaquo; <a href="/engagements/{{ e.id }}">{{ e.name }}</a> &rsaquo; AI drafts</p>
-<h1>AI drafts: {{ e.name }}</h1>
-<p class="meta">{{ e.tenant.name }} &middot; Drafts written by AI never appear in a report until a tester approves them.</p>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a><span aria-hidden="true">/</span>
+  <a href="/engagements/{{ e.id }}">ENG-{{ e.id }}</a><span aria-hidden="true">/</span>
+  <span class="current">AI drafts</span>
+</nav>
+<div class="page-head">
+  <div>
+    <h1>AI drafts</h1>
+    <p class="lede">{{ e.name }} &middot; {{ e.tenant.name }}. Drafts written by AI never appear in a report until a tester approves them.</p>
+  </div>
+</div>
 
 <div class="warn" role="note" id="redaction_note"><b>Redacted before sending.</b> Only redacted finding details were sent to the AI service: the title (with URLs, hosts, IPs, emails, paths and secrets replaced), severity, CWE, CVE ids and scores. Evidence, descriptions, locations and client names never leave Attestra.</div>
 

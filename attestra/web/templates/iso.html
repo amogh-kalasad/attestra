@@ -1,8 +1,17 @@
 {% extends "_layout.html" %}
 {% block title %}ISO 27001 &middot; {{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
-<h1>ISO 27001 &middot; {{ e.name }}</h1>
-<p class="meta">Statement of Applicability, nonconformities and corrective actions, and clause 9.2 audit samples. <a href="/engagements/{{ e.id }}">Back to engagement</a></p>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a><span aria-hidden="true">/</span>
+  <a href="/engagements/{{ e.id }}">ENG-{{ e.id }}</a><span aria-hidden="true">/</span>
+  <span class="current">ISO 27001</span>
+</nav>
+<div class="page-head">
+  <div>
+    <h1>ISO 27001</h1>
+    <p class="lede">{{ e.name }} &middot; Statement of Applicability, nonconformities and corrective actions, and clause 9.2 audit samples.</p>
+  </div>
+</div>
 {% if not has_iso %}<div class="warn">This engagement doesn't include ISO 27001 in its frameworks. Add it under Edit engagement if the client wants an ISO report; until then the SoA starts empty.</div>{% endif %}
 <div class="card" id="soa">
   <h2>Statement of Applicability</h2>

@@ -1,8 +1,17 @@
 {% extends "_layout.html" %}
 {% block title %}PCI DSS &middot; {{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
-<h1>PCI scan calendar &middot; {{ e.name }}</h1>
-<p class="meta">Quarterly external (ASV) scans, PCI DSS 11.3.2. Overall status: <strong class="st">{{ cal.status|label }}</strong>. <a href="/engagements/{{ e.id }}">Back to engagement</a></p>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a><span aria-hidden="true">/</span>
+  <a href="/engagements/{{ e.id }}">ENG-{{ e.id }}</a><span aria-hidden="true">/</span>
+  <span class="current">PCI DSS</span>
+</nav>
+<div class="page-head">
+  <div>
+    <h1>PCI scan calendar</h1>
+    <p class="lede">{{ e.name }} &middot; Quarterly external (ASV) scans, PCI DSS 11.3.2. Overall status: <span class="status-pill {{ cal.status }}">{{ cal.status|label }}</span></p>
+  </div>
+</div>
 {% if not has_pci %}<div class="warn">This engagement doesn't include PCI DSS in its frameworks. Add it under Edit engagement if the client needs PCI reporting.</div>{% endif %}
 <div class="card" id="calendar">
   <h2>Quarters</h2>
@@ -10,7 +19,7 @@
     <tr><th>Quarter</th><th>Due by</th><th>ASV scans</th><th>Passing</th><th>Status</th></tr>
     {% for q in cal.quarters %}
     <tr><td>{{ q.quarter }}</td><td>{{ q.due }}</td><td>{{ q.external_scans }}</td><td>{{ q.external_passing }}</td>
-      <td class="st">{{ q.status|label }}{% if q.days_left is not none %} ({{ q.days_left }} days left){% endif %}</td></tr>
+      <td><span class="status-pill {{ q.status }}{% if q.status == 'done' %} passed{% endif %}">{{ "Passed" if q.status == "done" else q.status|label }}</span>{% if q.days_left is not none %} <span class="meta">({{ q.days_left }} days left)</span>{% endif %}</td></tr>
     {% else %}<tr><td colspan="5">No quarters to show yet.</td></tr>
     {% endfor %}
   </table>

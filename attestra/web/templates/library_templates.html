@@ -1,38 +1,63 @@
 {% extends "_layout.html" %}
 {% block title %}Report templates &middot; Attestra{% endblock %}
 {% block main %}
-<h1>Report templates</h1>
-<p class="meta">Each tenant can use its own Jinja template, cover title, logo and section order. Templates run in a sandbox with plain data only. If a template is missing, disabled or fails, the built-in report is used. <a href="/library{% if tenant_id %}?tenant_id={{ tenant_id }}{% endif %}">Findings library</a></p>
-<div class="card">
-<form method="get" action="/library/templates" class="row">
-  <label for="rt_tenant" class="meta" style="margin:0">Tenant</label>
-  <select id="rt_tenant" name="tenant_id">{% for t in tenants %}<option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
-  <label for="rt_kind" class="meta" style="margin:0">Report type</label>
-  <select id="rt_kind" name="kind">{% for k in kinds %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ "Technical + executive (*)" if k == "*" else k|label }}</option>{% endfor %}</select>
-  <button type="submit">Open</button>
-</form>
-<p class="meta">Saved: {% for t in templates %}<a class="chip" href="/library/templates?tenant_id={{ tenant_id }}&kind={{ t.kind|urlencode }}">{{ t.kind }}{% if not t.enabled %} (off){% endif %}</a>{% else %}None yet.{% endfor %}</p>
+<div class="page-head">
+  <div>
+    <h1>Report templates</h1>
+    <p class="lede">Each tenant can use its own Jinja template, cover title, logo and section order. Templates run in a sandbox with plain data only. If a template is missing, disabled or fails, the built-in report is used. <a href="/library{% if tenant_id %}?tenant_id={{ tenant_id }}{% endif %}">Findings library</a></p>
+  </div>
 </div>
+
+<div class="card">
+<form method="get" action="/library/templates" class="filter-bar">
+  <div>
+    <label for="rt_tenant">Tenant</label>
+    <select id="rt_tenant" name="tenant_id">{% for t in tenants %}<option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
+  </div>
+  <div>
+    <label for="rt_kind">Report type</label>
+    <select id="rt_kind" name="kind">{% for k in kinds %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ "Technical + executive (*)" if k == "*" else k|label }}</option>{% endfor %}</select>
+  </div>
+  <button type="submit" class="secondary">Open</button>
+</form>
+<p class="hint" style="margin-top:12px;margin-bottom:0">Saved: {% for t in templates %}<a class="chip" href="/library/templates?tenant_id={{ tenant_id }}&kind={{ t.kind|urlencode }}">{{ t.kind }}{% if not t.enabled %} (off){% endif %}</a>{% else %}none yet{% endfor %}</p>
+</div>
+
 {% if tenant_id %}
 <div class="card">
 <form method="post" action="/library/templates" enctype="multipart/form-data">
   <input type="hidden" name="tenant_id" value="{{ tenant_id }}"><input type="hidden" name="kind" value="{{ kind }}">
-  <div class="checks"><label><input type="checkbox" name="enabled" value="1" {% if not t or t.enabled %}checked{% endif %}> Use this template</label></div>
+  <div class="card-head" style="margin-top:-20px">
+    <h2 style="margin:0;padding:0;border:0">Template settings</h2>
+    <label style="display:inline-flex;align-items:center;gap:10px;font-size:14px;font-weight:500;min-height:44px;cursor:pointer;margin:0;color:var(--ink)">
+      <input type="checkbox" name="enabled" value="1" {% if not t or t.enabled %}checked{% endif %} style="width:18px;height:18px">
+      Use this template
+    </label>
+  </div>
   <div class="fields" style="grid-template-columns:1fr">
     <div><label for="rt_cover">Cover title</label><input type="text" id="rt_cover" name="cover_title" value="{{ t.cover_title if t else '' }}" placeholder="Security assessment report"></div>
-    <div><label for="rt_sections">Section order (comma separated; {{ sections|join(', ') }})</label><input type="text" id="rt_sections" name="sections" value="{{ (t.sections if t else sections)|join(', ') }}"></div>
-    <div><label for="rt_logo">Logo (PNG, JPEG or GIF, up to 500 KB)</label><input type="file" id="rt_logo" name="logo" accept="image/png,image/jpeg,image/gif">
-      {% if t and t.logo %}<div class="row" style="margin-top:6px"><img src="{{ t.logo }}" alt="current logo" style="max-height:40px"><label style="margin:0"><input type="checkbox" name="clear_logo" value="1"> Remove logo</label></div>{% endif %}</div>
-    <div><label for="rt_source">Template source (leave empty for the built-in library layout)</label><textarea id="rt_source" name="source" rows="18" style="font-family:monospace">{{ t.source if t else '' }}</textarea></div>
+    <div><label for="rt_sections">Section order</label><input type="text" id="rt_sections" name="sections" value="{{ (t.sections if t else sections)|join(', ') }}">
+      <div class="hint">Comma separated: {{ sections|join(', ') }}</div></div>
+    <div>
+      <label for="rt_logo">Logo</label>
+      <div class="logo-drop">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+        <input type="file" id="rt_logo" name="logo" accept="image/png,image/jpeg,image/gif" style="max-width:280px">
+        <span class="hint">PNG, JPEG or GIF, up to 500 KB</span>
+      </div>
+      {% if t and t.logo %}<div class="row" style="margin-top:10px"><img src="{{ t.logo }}" alt="current logo" style="max-height:40px"><label style="margin:0"><input type="checkbox" name="clear_logo" value="1"> Remove logo</label></div>{% endif %}
+    </div>
+    <div><label for="rt_source">Template source</label><textarea id="rt_source" name="source" rows="12" class="mono" style="font-family:var(--mono);font-size:13px">{{ t.source if t else '' }}</textarea>
+      <div class="hint">Leave empty for the built-in library layout</div></div>
     <div><label for="rt_upload">Or upload a template file</label><input type="file" id="rt_upload" name="upload" accept=".html,.j2,.jinja,.txt"></div>
   </div>
   <div class="actions-split">
-    <button type="submit" name="action" value="save">Save</button>
+    <button type="submit" name="action" value="save">Save template</button>
     {% if t %}<button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Remove this template and use the built-in one?')">Remove template</button>{% endif %}
   </div>
 </form>
 </div>
 <div class="card"><h2>Built-in library layout</h2><p class="meta">Copy and change it. Variables: eng, tenant, findings, by_sev, severities, frameworks, imports, cover_title, logo, sections, kind, version, generated_by, generated_at.</p>
-<pre style="white-space:pre-wrap;font-size:12px">{{ default_source }}</pre></div>
+<pre class="mono" style="white-space:pre-wrap;font-size:12px;margin:0">{{ default_source }}</pre></div>
 {% endif %}
 {% endblock %}

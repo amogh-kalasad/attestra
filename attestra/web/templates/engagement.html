@@ -2,38 +2,55 @@
 {% block title %}{{ e.name }} &middot; Attestra{% endblock %}
 {% block main %}
 {% set prole = principal.role if principal else "" %}
-<h1>{{ e.name }}</h1>
-<p class="meta">{{ e.tenant.name }}{% if e.tenant.industry %} &middot; {{ e.tenant.industry }}{% endif %} &middot; {{ type_label }} &middot;
-  {% if e.window_start or e.window_end %}test window {{ e.window_start or "not set" }} to {{ e.window_end or "not set" }}{% else %}No test window set (<a href="#edit">edit</a>){% endif %}
-  &middot; status <span class="st st-{{ e.status }}">{{ e.status|label }}</span></p>
+{% set has_auth = authorized_envs|length > 0 %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a>
+  <span aria-hidden="true">/</span>
+  <span class="current">ENG-{{ e.id }}</span>
+</nav>
+
+<div class="page-head">
+  <div>
+    <h1>{{ e.name }}</h1>
+    <p class="lede">{{ e.tenant.name }}{% if e.tenant.industry %} &middot; {{ e.tenant.industry }}{% endif %} &middot; {{ type_label }} &middot;
+      {% if e.window_start or e.window_end %}test window {{ e.window_start or "not set" }} to {{ e.window_end or "not set" }}{% else %}No test window set (<a href="#edit">edit</a>){% endif %}
+      &middot; status <span class="st st-{{ e.status }}">{{ e.status|label }}</span></p>
+  </div>
+  <div class="actions">
+    {% if can(prole, "engagement.write") %}<a class="btn secondary" href="#edit">Edit engagement</a>{% endif %}
+    {% if can(prole, "report.generate") %}<a class="btn" href="#reports">Generate report</a>{% endif %}
+  </div>
+</div>
 
 <nav class="tabs" aria-label="Engagement sections">
   <a href="/engagements/{{ e.id }}" aria-current="page">Overview</a>
   {% if has_pci %}<a href="/engagements/{{ e.id }}/pci">PCI DSS</a>{% endif %}
   {% if has_iso %}<a href="/engagements/{{ e.id }}/iso">ISO 27001</a>{% endif %}
-  {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} class="meta" title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} (off){% endif %}</a>{% endif %}
+  {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} <span class="chip">off</span>{% endif %}</a>{% endif %}
 </nav>
 
-{% set has_auth = authorized_envs|length > 0 %}
 <div class="steps" aria-label="Progress">
-  <a href="#scope" class="{{ 'done' if has_auth }}">1. Signed authorization</a>
-  <a href="#targets" class="{{ 'done' if e.assets }}">2. Targets in scope ({{ e.assets|length }})</a>
-  <a href="#plan" class="{{ 'done' if plan and plan|selectattr('findings')|list }}">3. Test plan</a>
-  <a href="#scans" class="{{ 'done' if scans }}">4. Automated scans ({{ scans|length }})</a>
-  <a href="#import" class="{{ 'done' if imports }}">5. Results imported ({{ imports|length }})</a>
-  <a href="#reports" class="{{ 'done' if reports }}">6. Reports ({{ reports|length }})</a>
+  <a href="#scope" class="{{ 'done' if has_auth }}"><span class="step-row"><span class="step-num">1</span>Signed authorization</span><span class="step-meta">{{ "Complete" if has_auth else "Pending" }}</span></a>
+  <a href="#targets" class="{{ 'done' if e.assets }}"><span class="step-row"><span class="step-num">2</span>Targets in scope</span><span class="step-meta">{{ e.assets|length }} target{{ "s" if e.assets|length != 1 }}</span></a>
+  <a href="#plan" class="{{ 'done' if plan and plan|selectattr('findings')|list }}"><span class="step-row"><span class="step-num">3</span>Test plan</span><span class="step-meta">{{ "Complete" if plan and plan|selectattr('findings')|list else "Pending" }}</span></a>
+  <a href="#scans" class="{{ 'done' if scans }}"><span class="step-row"><span class="step-num">4</span>Automated scans</span><span class="step-meta">{{ scans|length }} run</span></a>
+  <a href="#import" class="{{ 'done' if imports }}"><span class="step-row"><span class="step-num">5</span>Results imported</span><span class="step-meta">{{ imports|length }} file{{ "s" if imports|length != 1 }}</span></a>
+  <a href="#reports" class="{{ 'done' if reports }}"><span class="step-row"><span class="step-num">6</span>Reports</span><span class="step-meta">{{ reports|length }} generated</span></a>
+</div>
+
+<div class="sev-strip" aria-label="Open findings by severity">
+  {% for s in ["critical","high","medium","low","info"] %}
+  <div class="sev-card">
+    <span class="pill {{ s }}">{{ s|capitalize }}</span>
+    <span class="value">{{ sev.get(s, 0) }}</span>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="grid">
   <div class="card">
-    <h2>Open findings</h2>
-    <div class="row">
-      {% for s in ["critical","high","medium","low","info"] %}<div class="kpi"><span class="pill {{ s }}">{{ s }}</span><b>{{ sev.get(s, 0) }}</b></div>{% endfor %}
-    </div>
-  </div>
-  <div class="card">
     <h2>{{ fw_names[fw] }}</h2>
-    <form method="get" class="row" style="margin-bottom:8px">
+    <form method="get" class="row" style="margin-bottom:12px">
       <label for="fw_select" class="meta" style="margin:0">Framework</label>
       <select id="fw_select" name="framework">
         {% for k, n in fw_names.items() %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ n }}</option>{% endfor %}

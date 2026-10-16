@@ -1,14 +1,17 @@
 {% extends "_layout.html" %}
 {% block title %}{{ status_code }} {{ title }} &middot; Attestra{% endblock %}
 {% block main %}
-<div class="card" style="max-width:560px;margin:40px auto">
-  <h1>{{ title }}</h1>
-  <p>{{ message }}</p>
-  {% if detail %}<p class="meta">Details: {{ detail }}</p>{% endif %}
-  <p class="row">
-    {% if not principal %}<a class="btn" href="/login?next={{ path|urlencode }}">Sign in</a>{% endif %}
-    {% if principal and principal.role in ("client_viewer", "auditor") %}<a class="btn" href="/portal">Back to the portal</a>
-    {% else %}<a class="btn" href="/">Back to engagements</a>{% endif %}
-  </p>
+<div class="auth-shell" style="max-width:560px">
+  <div class="card auth-card">
+    <p class="meta" style="margin:0 0 6px;font-weight:650;letter-spacing:.04em;text-transform:uppercase">{{ status_code }}</p>
+    <h1>{{ title }}</h1>
+    <p class="lede">{{ message }}</p>
+    {% if detail %}<p class="meta">Details: {{ detail }}</p>{% endif %}
+    <p class="row" style="margin-top:20px">
+      {% if not principal %}<a class="btn" href="/login?next={{ path|urlencode }}">Sign in</a>{% endif %}
+      {% if principal and principal.role in ("client_viewer", "auditor") %}<a class="btn" href="/portal">Back to the portal</a>
+      {% else %}<a class="btn" href="/">Back to engagements</a>{% endif %}
+    </p>
+  </div>
 </div>
 {% endblock %}

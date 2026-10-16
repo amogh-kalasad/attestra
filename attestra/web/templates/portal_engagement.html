@@ -1,43 +1,64 @@
 {% extends "_layout.html" %}
 {% block title %}{{ e.name }} &middot; Client portal &middot; Attestra{% endblock %}
 {% block main %}
-<p class="meta"><a href="/portal">&larr; All engagements</a>{% if role == "auditor" %} &middot; <a href="/auditor/engagements/{{ e.id }}">Audit trail</a>{% endif %}</p>
-<h1>{{ e.name }}</h1>
-<p class="meta">{{ e.tenant.name }} &middot; {{ type_labels.get(e.type, e.type) }} &middot; read-only view</p>
+<p class="back-link"><a href="/portal">&larr; All engagements</a>{% if role == "auditor" %} &middot; <a href="/auditor/engagements/{{ e.id }}">Audit trail</a>{% endif %}</p>
 
-<div class="card" id="summary">
-  <h2>Open findings</h2>
-  {% for s in ["critical","high","medium","low","info"] %}<span class="pill {{ s }}">{{ sev.get(s, 0) }} {{ s }}</span> {% endfor %}
+<div class="page-head">
+  <div>
+    <h1>{{ e.name }}</h1>
+    <p class="lede">{{ e.tenant.name }} &middot; {{ type_labels.get(e.type, e.type) }} &middot; read-only view</p>
+  </div>
+</div>
+
+<div class="stat-strip" aria-label="Open findings">
+  {% for s in ["critical","high","medium","low","info"] %}
+  <div class="stat-card">
+    <div class="label">{{ s }}</div>
+    <div class="value">{{ sev.get(s, 0) }}</div>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="card" id="findings">
   <h2>Findings</h2>
+  <div class="table-wrap">
   <table>
+    <thead>
     <tr><th>#</th><th>Severity</th><th>Title</th><th>Location</th><th>Status</th><th>SLA due</th><th>Ticket</th></tr>
+    </thead>
+    <tbody>
     {% for f in findings %}
     <tr>
       <td>{{ f.id }}</td><td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
       <td>{{ f.title }}</td><td class="mono">{{ f.location }}</td><td><span class="st">{{ f.status|label }}</span></td>
       <td>{{ f.sla_due or "-" }}</td><td class="mono">{{ f.ticket_ref or "-" }}</td>
     </tr>
-    {% else %}<tr><td colspan="7">No findings to show yet. They appear here once the test team has triaged them.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7"><div class="empty">No findings to show yet. They appear here once the test team has triaged them.</div></td></tr>{% endfor %}
+    </tbody>
   </table>
+  </div>
 </div>
 
 <div class="card" id="compliance">
   <h2>Compliance: {{ fw_names.get(fw, fw) }}</h2>
-  <p>{% for st, n in counts.items() %}<span class="st st-{{ st }}">{{ n }} {{ st|label }}</span>{{ " &middot; "|safe if not loop.last }}{% else %}No controls assessed yet.{% endfor %}</p>
+  <p class="meta" style="margin-bottom:12px">{% for st, n in counts.items() %}<span class="st st-{{ st }}">{{ n }} {{ st|label }}</span>{{ " &middot; "|safe if not loop.last }}{% else %}No controls assessed yet.{% endfor %}</p>
   <form method="get" class="row"><label for="pfw" class="meta" style="margin:0">Framework</label><select id="pfw" name="framework">{% for k in e.frameworks %}<option value="{{ k }}" {% if k == fw %}selected{% endif %}>{{ fw_names.get(k, k) }}</option>{% endfor %}</select> <button type="submit" class="secondary">Show</button></form>
 </div>
 
 <div class="card" id="reports">
   <h2>Reports</h2>
+  <div class="table-wrap">
   <table>
+    <thead>
     <tr><th>#</th><th>Kind</th><th>Version</th><th>Status</th><th>SHA-256</th><th>Signed</th><th></th></tr>
+    </thead>
+    <tbody>
     {% for r in reports %}
     <tr><td>{{ r.id }}</td><td>{{ r.kind|label }}</td><td>{{ r.version }}</td><td><span class="st">{{ r.status|label }}</span></td><td class="mono">{{ r.sha256[:16] }}&hellip;</td><td>{{ r.signed_at|dt if r.signed_at else "-" }}</td>
       <td>{% if r.status == "signed" %}<a href="/reports/{{ r.id }}" target="_blank" rel="noopener">Download <span aria-hidden="true">&#8599;</span></a>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="7">No signed reports yet.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7"><div class="empty">No signed reports yet.</div></td></tr>{% endfor %}
+    </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

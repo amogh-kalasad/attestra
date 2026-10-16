@@ -1,15 +1,19 @@
 {% extends "_layout.html" %}
 {% block title %}Users &middot; Attestra{% endblock %}
 {% block main %}
-<h1>Users</h1>
-<p class="meta">Invite people by email. There is no open sign-up. SSO users appear here after their first sign-in.</p>
+<div class="page-head">
+  <div>
+    <h1>Users</h1>
+    <p class="lede">Invite people by email. There is no open sign-up. SSO users appear here after their first sign-in.</p>
+  </div>
+</div>
 
 <div class="card">
   <h2>Invite a user</h2>
   <form method="post" action="/users/invite">
     <div class="fields">
-      <div><label for="email">Email *</label><input id="email" name="email" type="email" required placeholder="name@company.com"></div>
-      <div><label for="role">Role *</label>
+      <div><label for="email">Email <span style="color:var(--danger)">*</span></label><input id="email" name="email" type="email" required placeholder="name@company.com"></div>
+      <div><label for="role">Role <span style="color:var(--danger)">*</span></label>
         <select id="role" name="role">{% for r in roles %}<option value="{{ r }}">{{ role_labels.get(r, r) }}</option>{% endfor %}</select></div>
       <div><label for="tenant_id">Tenant</label>
         <select id="tenant_id" name="tenant_id"><option value="">{% if is_admin %}None (platform staff){% else %}Select a tenant{% endif %}</option>
@@ -20,32 +24,52 @@
         {% for e in engagements %}<option value="{{ e.id }}">#{{ e.id }} {{ e.name }}</option>{% endfor %}</select>
         <div class="hint">For client viewers and auditors: limits them to this engagement.</div></div>
     </div>
-    <button type="submit">Create invite link</button>
-    <span class="meta">{% if smtp %}An email is also sent.{% else %}Email is off; copy the link and share it yourself.{% endif %}</span>
+    <div class="row">
+      <button type="submit">Create invite link</button>
+      <span class="hint" style="font-size:13px">{% if smtp %}An email is also sent.{% else %}Email is off; copy the link and share it yourself.{% endif %}</span>
+    </div>
   </form>
 </div>
 
 <div class="card">
-  <h2>People</h2>
-  <form method="get" action="/users" class="row" style="margin-bottom:8px">
-    <label for="tenant_filter" class="meta" style="margin:0">Tenant</label>
-    <select id="tenant_filter" name="tenant_id"><option value="">All tenants</option>
-    {% for t in tenants %}<option value="{{ t.id }}" {% if tenant_filter == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
-    <button class="secondary" type="submit">Filter</button>
-  </form>
+  <div class="card-head">
+    <h2 style="margin:0;padding:0;border:0">People <span class="count-soft">{{ users|length }}</span></h2>
+    <form method="get" action="/users" class="filter-bar" style="margin:0">
+      <div>
+        <label for="tenant_filter">Tenant</label>
+        <select id="tenant_filter" name="tenant_id"><option value="">All tenants</option>
+        {% for t in tenants %}<option value="{{ t.id }}" {% if tenant_filter == t.id %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
+      </div>
+      <button class="secondary" type="submit">Filter</button>
+    </form>
+  </div>
+  <div class="table-wrap" style="margin:0 -24px -24px">
   <table>
+    <thead>
     <tr><th>User</th><th>Role</th><th>Status</th><th>Tenant</th><th>Source</th><th>Last login ({{ tz_label }})</th>{% if is_admin %}<th>Actions</th>{% endif %}</tr>
+    </thead>
+    <tbody>
     {% for u in users %}
+    {% set uparts = u.username.replace('_',' ').replace('.',' ').split() %}
+    {% set uinit = (uparts[0][0] ~ (uparts[1][0] if uparts|length > 1 else uparts[0][1] if uparts[0]|length > 1 else ''))|upper %}
     <tr>
-      <td><b>{{ u.username }}</b><div class="meta">{{ u.display_name }}</div></td>
-      <td>{{ role_labels.get(u.role, u.role) }}</td>
-      <td class="st">{{ u.status|label }}</td>
-      <td>{{ u.tenant or "-" }}</td>
-      <td>{{ "SSO" if u.source == "oidc" else u.source|label }}</td>
+      <td>
+        <div class="user-cell">
+          <div class="user-avatar" aria-hidden="true">{{ uinit }}</div>
+          <div>
+            <strong style="font-weight:600;color:var(--ink)">{{ u.username }}</strong>
+            <span class="meta">{{ u.display_name }}</span>
+          </div>
+        </div>
+      </td>
+      <td><span class="role-chip">{{ role_labels.get(u.role, u.role) }}</span></td>
+      <td><span class="status-pill {{ 'active' if u.status == 'active' else 'disabled' }}"><span class="dot" aria-hidden="true"></span>{{ u.status|label }}</span></td>
+      <td>{% if u.tenant %}{{ u.tenant }}{% else %}<span style="color:#98A2B3">-</span>{% endif %}</td>
+      <td><span class="source-chip">{{ "SSO" if u.source == "oidc" else u.source|label }}</span></td>
       <td class="meta">{{ u.last_login_at|dt if u.last_login_at else "-" }}</td>
       {% if is_admin %}
       <td>
-        <form method="post" action="/users/{{ u.id }}/role" style="display:inline-flex;gap:4px" onsubmit="return confirm({{ ('Change the role of ' ~ u.username ~ '? Their access changes immediately.')|tojson|forceescape }})">
+        <form method="post" action="/users/{{ u.id }}/role" style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-bottom:4px" onsubmit="return confirm({{ ('Change the role of ' ~ u.username ~ '? Their access changes immediately.')|tojson|forceescape }})">
           <select name="role" aria-label="Role for {{ u.username }}">{% for r in all_roles %}<option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}</select>
           <button class="secondary" type="submit">Set role</button>
         </form>
@@ -61,15 +85,24 @@
       {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="7" class="meta">No users yet. Invite someone above.</td></tr>
+    <tr><td colspan="{{ 7 if is_admin else 6 }}"><div class="empty">No users yet. Invite someone above.</div></td></tr>
     {% endfor %}
+    </tbody>
   </table>
+  </div>
 </div>
 
-<div class="card">
-  <h2>Pending links</h2>
+<div class="card" style="padding-bottom:0">
+  <div class="card-head" style="margin-bottom:0">
+    <h2 style="margin:0;padding:0;border:0">Pending links</h2>
+  </div>
+  {% if invites %}
+  <div class="table-wrap" style="margin:0 -24px">
   <table>
+    <thead>
     <tr><th>Type</th><th>Email</th><th>Role</th><th>Expires ({{ tz_label }})</th><th>By</th><th></th></tr>
+    </thead>
+    <tbody>
     {% for i in invites %}
     <tr>
       <td>{{ i.purpose|label }}</td><td>{{ i.email or ("user #" ~ i.user_id) }}</td><td>{{ role_labels.get(i.role, i.role) }}</td>
@@ -77,9 +110,18 @@
       <td>{{ i.created_by }}</td>
       <td><form method="post" action="/users/invites/{{ i.id }}/revoke" onsubmit="return confirm('Revoke this link? It stops working immediately.')"><button class="danger" type="submit">Revoke</button></form></td>
     </tr>
-    {% else %}
-    <tr><td colspan="6" class="meta">No pending links.</td></tr>
     {% endfor %}
+    </tbody>
   </table>
+  </div>
+  {% else %}
+  <div class="empty-block">
+    <div class="icon" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/></svg>
+    </div>
+    <span style="font-size:14px;font-weight:500;color:var(--ink-2)">No pending links</span>
+    <span class="hint">Invite links you create will show up here until they are used or expire.</span>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

@@ -15,7 +15,7 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - [[compliance]] — hub-and-spoke mapping, status proposal, assessor confirm
 - [[reports]] — HTML generation, four-eyes approval, HMAC signing
 - [[audit]] — hash-chained audit log and verification
-- [[interfaces]] — REST API, CLI, web dashboard, config
+- [[interfaces]] — REST API, CLI, web dashboard, config, product marketing page
 - [[runner]] — scoped scanner dispatch, SSRF/DNS pin, gate, durable jobs
 - [[tests]] — pytest suite: fixtures, test modules, and what each verifies
 
