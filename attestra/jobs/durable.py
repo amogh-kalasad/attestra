@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 import uuid
 from datetime import timedelta
@@ -200,6 +201,28 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     run.raw_sha256 = sha
     run.tool_version = result.tool_version
     run.image_digest = result.image_digest
+    # C5: persist pass/fail check list from the scanner when present.
+    check_rows = result.extra.get("checks") if isinstance(result.extra, dict) else None
+    if not check_rows and result.raw_path:
+        try:
+            from attestra import checks as checklib
+
+            doc = json.loads(result.raw_path.read_text(encoding="utf-8"))
+            if isinstance(doc, dict):
+                if run.tool == "webcheck" or (result.import_tool or "") == "webcheck":
+                    check_rows = checklib.checks_from_webcheck_report(doc)
+                elif run.tool == "zap":
+                    check_rows = checklib.zap_checks_from_report(result.raw_path.read_bytes())
+        except Exception:
+            check_rows = None
+    if check_rows:
+        run.checks_json = json.dumps({"checks": check_rows})
+        try:
+            from attestra.checks import write_checks_sidecar
+
+            write_checks_sidecar(result.raw_path, check_rows)
+        except OSError:
+            pass
     data = result.raw_path.read_bytes()
     try:
         imp = services.import_results(

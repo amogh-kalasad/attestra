@@ -1,0 +1,47 @@
+{% extends "_layout.html" %}
+{% block title %}{{ asset.identifier }} · Attestra{% endblock %}
+{% block main %}
+<p class="meta"><a href="/engagements/{{ e.id }}">← {{ e.name }}</a></p>
+<h1>{{ asset.name or asset.identifier }}</h1>
+<p class="meta mono">{{ asset.identifier }} · {{ asset.kind }} · {{ asset.environment or "production" }} ·
+  Criticality {{ asset.criticality }}/5 ·
+  {{ "Internet-facing" if asset.exposure == "internet" else "Internal" if asset.exposure == "internal" else asset.exposure }}
+</p>
+
+<div class="card">
+  <h2>Scan history</h2>
+  <p class="meta">Past scans for this target. Grade is A–F from that scan’s findings (A = no medium/high/critical). New / fixed / still-open compare each scan to the previous one with results.</p>
+  {% if history %}
+  <table>
+    <tr>
+      <th>Date</th><th>Tool</th><th>Status</th><th>Grade</th>
+      <th>Crit</th><th>High</th><th>Med</th><th>Low</th><th>Info</th>
+      <th>New</th><th>Fixed</th><th>Still open</th>
+    </tr>
+    {% for row in history %}
+    <tr>
+      <td>{% if row.ended_at %}{{ row.ended_at|dt }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{{ row.tool }}{% if row.profile and row.profile != "baseline" %} <span class="meta">({{ row.profile }})</span>{% endif %}</td>
+      <td>{{ row.status }}</td>
+      <td><b>{{ row.grade }}</b></td>
+      <td>{{ row.by_sev.critical }}</td>
+      <td>{{ row.by_sev.high }}</td>
+      <td>{{ row.by_sev.medium }}</td>
+      <td>{{ row.by_sev.low }}</td>
+      <td>{{ row.by_sev.info }}</td>
+      <td>{% if row.new is not none %}{{ row.new }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{% if row.fixed is not none %}{{ row.fixed }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{% if row.still_open is not none %}{{ row.still_open }}{% else %}<span class="meta">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if history[-1].trend_svg %}
+  <h3>Trend (latest vs previous)</h3>
+  <p class="meta">Solid bars = latest scan with results. Faded bars = previous scan with results.</p>
+  <div>{{ history[-1].trend_svg|safe }}</div>
+  {% endif %}
+  {% else %}
+  <p class="meta">No finished scans for this target yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

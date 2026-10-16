@@ -64,7 +64,14 @@ def safe_request(
             body = resp.read(max_body + 1)
             if len(body) > max_body:
                 raise AuthorizationError("response body exceeds size limit")
-            headers = {k.lower(): v for k, v in resp.getheaders()}
+            # Preserve every Set-Cookie line (dict would keep only the last one).
+            headers: dict[str, str] = {}
+            for k, v in resp.getheaders():
+                key = k.lower()
+                if key == "set-cookie" and key in headers:
+                    headers[key] = f"{headers[key]}\n{v}"
+                else:
+                    headers[key] = v
             if resp.status in (301, 302, 303, 307, 308) and "location" in headers:
                 if not follow_redirects:
                     return SafeResponse(status=resp.status, headers=headers, body=body, final_url=current)

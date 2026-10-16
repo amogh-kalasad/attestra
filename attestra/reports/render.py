@@ -35,33 +35,10 @@ _env = Environment(
 
 
 def _trend_svg(current: Counter, previous: Counter | None) -> str:
-    """Inline SVG bar chart comparing open findings by severity."""
-    sevs = ["critical", "high", "medium", "low", "info"]
-    colors = {"critical": "#b91c1c", "high": "#c2410c", "medium": "#a16207", "low": "#15803d", "info": "#475569"}
-    width, height, gap = 320, 120, 8
-    bar_w = (width - gap * (len(sevs) + 1)) // (len(sevs) * (2 if previous is not None else 1))
-    max_v = max([current.get(s, 0) for s in sevs] + ([previous.get(s, 0) for s in sevs] if previous else [1]) + [1])
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height + 24}" '
-        f'role="img" aria-label="Open findings by severity trend">'
-    ]
-    for i, sev in enumerate(sevs):
-        x0 = gap + i * ((bar_w * (2 if previous is not None else 1)) + gap)
-        h1 = int((current.get(sev, 0) / max_v) * height)
-        parts.append(
-            f'<rect x="{x0}" y="{height - h1}" width="{bar_w}" height="{h1}" fill="{colors[sev]}" />'
-        )
-        if previous is not None:
-            h0 = int((previous.get(sev, 0) / max_v) * height)
-            parts.append(
-                f'<rect x="{x0 + bar_w}" y="{height - h0}" width="{bar_w}" height="{h0}" '
-                f'fill="{colors[sev]}" opacity="0.35" />'
-            )
-        parts.append(
-            f'<text x="{x0}" y="{height + 14}" font-size="9" fill="#334155">{sev[:4]}</text>'
-        )
-    parts.append("</svg>")
-    return "".join(parts)
+    """Inline SVG bar chart comparing open findings by severity (shared with C11 target history)."""
+    from attestra.history import trend_svg
+
+    return trend_svg(current, previous)
 
 
 def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
@@ -96,6 +73,8 @@ def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
         "eng": eng,
         "tenant": eng.tenant.name,
         "findings": reportable,
+        "passed_checks": services.list_passed_checks(s, engagement_id),
+        "tls_summaries": services.tls_summaries(s, engagement_id),
         "open_findings": open_f,
         "by_sev": by_sev,
         "prev_by_sev": prev_by_sev,

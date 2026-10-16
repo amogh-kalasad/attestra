@@ -15,10 +15,49 @@ from attestra.runner.dns_pin import PinnedTarget
 from attestra.runner.http_safe import SafeResponse, safe_get
 from attestra.runner.scanners.base import ScannerAdapter, ScannerResult
 
-_STRICT_REFERRER = frozenset({"no-referrer", "same-origin", "strict-origin"})
+# Referrer-Policy: no finding for the strongest values; Info for strict-origin*; Low otherwise.
+_REFERRER_OK = frozenset({"no-referrer", "same-origin"})
+_REFERRER_INFO = frozenset({"strict-origin", "strict-origin-when-cross-origin"})
+_REFERRER_LOW = frozenset(
+    {"no-referrer-when-downgrade", "origin", "origin-when-cross-origin", "unsafe-url"}
+)
 _WAF_HEADERS = frozenset({"cf-ray", "x-sucuri-id", "x-amz-cf-id", "x-azure-ref"})
+# hstspreload.org /api/v2/status values that mean the domain is clearly not on the preload list.
+# unknown = not submitted; pending = submitted but not yet shipped; rejected/removed = off the list.
+# preloaded / pending-removal / pending-automated-removal mean it is (still) on the list → no finding.
+_HSTS_NOT_PRELOADED_STATUSES = frozenset({"unknown", "pending", "rejected", "removed"})
+_HSTS_PRELOADED_STATUSES = frozenset({"preloaded", "pending-removal", "pending-automated-removal"})
 _VERSION_RE = re.compile(r"\d+\.\d+")
 _CSP_DIR_RE = re.compile(r"(?:^|;)\s*([a-z0-9-]+)\b", re.IGNORECASE)
+
+# Cookie names treated as session-like even when Max-Age/Expires is set.
+_SESSION_COOKIE_NAMES = frozenset(
+    {
+        "session",
+        "sessionid",
+        "sess",
+        "sessid",
+        "sid",
+        "jsessionid",
+        "phpsessid",
+        "aspxauth",
+        "auth",
+        "authorization",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "jwt",
+        "connect.sid",
+        "csrf",
+        "csrftoken",
+        "xsrf",
+        "xsrftoken",
+        "_session",
+        "rack.session",
+    }
+)
+_COOKIE_FLAGS = ("Secure", "HttpOnly", "SameSite")
 
 
 def _finding(
@@ -29,6 +68,8 @@ def _finding(
     description: str,
     location: str,
     recommendation: str = "",
+    param: str = "",
+    variant: str = "",
 ) -> dict:
     out = {
         "id": fid,
@@ -40,6 +81,10 @@ def _finding(
     }
     if recommendation:
         out["recommendation"] = recommendation
+    if param:
+        out["param"] = param
+    if variant:
+        out["variant"] = variant
     return out
 
 
@@ -68,20 +113,351 @@ def _csp_directives(csp: str) -> set[str]:
     return {m.group(1).lower() for m in _CSP_DIR_RE.finditer(csp)}
 
 
-def check_csp_base_uri(headers: dict[str, str], location: str) -> dict | None:
+def set_cookie_values(headers: dict[str, str]) -> list[str]:
+    """Return every Set-Cookie value. Multiple headers are joined with newlines by http_safe."""
+    raw = headers.get("set-cookie")
+    if raw is None:
+        for key, val in headers.items():
+            if key.lower() == "set-cookie":
+                raw = val
+                break
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    text = str(raw).strip()
+    if not text:
+        return []
+    # Prefer newline-separated values (http_safe). Also accept a rare single-line list
+    # only when there is no Expires= date comma ambiguity — keep split on newlines only.
+    return [line.strip() for line in text.split("\n") if line.strip()]
+
+
+def parse_set_cookie(raw: str) -> dict[str, str] | None:
+    """Parse ``name=value; Attr; Attr=val`` into name + lowercase attribute map."""
+    text = (raw or "").strip()
+    if not text or "=" not in text.split(";", 1)[0]:
+        return None
+    first, *rest = text.split(";")
+    name, _, value = first.strip().partition("=")
+    name = name.strip()
+    if not name:
+        return None
+    attrs: dict[str, str] = {"_name": name, "_value": value.strip()}
+    for part in rest:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            ak, _, av = part.partition("=")
+            attrs[ak.strip().lower()] = av.strip()
+        else:
+            attrs[part.lower()] = ""
+    return attrs
+
+
+def is_session_cookie(attrs: dict[str, str]) -> bool:
+    """Session cookie: no Max-Age/Expires, or a session-like name.
+
+    Non-session cookies (tracking, prefs, consent) get Info severity for missing flags.
+    Session cookies get Low. Documented in lat.md under webcheck cookie flags.
+    """
+    name = (attrs.get("_name") or "").strip().lower()
+    if name in _SESSION_COOKIE_NAMES:
+        return True
+    # Common prefixes/suffixes: session_*, *_session, *sess*
+    if "session" in name or name.endswith("sess") or name.startswith("sess"):
+        return True
+    has_max_age = "max-age" in attrs
+    has_expires = "expires" in attrs
+    return not (has_max_age or has_expires)
+
+
+def _cookie_flag_id(cookie_name: str, flag: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]+", "_", cookie_name.strip())[:80] or "unnamed"
+    return f"cookie:{safe}:{flag.lower()}"
+
+
+def check_cookies(headers: dict[str, str], location: str) -> tuple[list[dict], list[dict]]:
+    """One finding per cookie per missing Secure / HttpOnly / SameSite flag.
+
+    Returns ``(findings, check_rows)``. Fully flagged cookies become C5 passed rows.
+    No Set-Cookie → one skipped check row (not tested).
+    """
+    from attestra.checks import FAILED, PASSED, SKIPPED, check_row
+
+    values = set_cookie_values(headers)
+    if not values:
+        return [], [
+            check_row(
+                check_id="cookie-flags",
+                name="Cookie Secure / HttpOnly / SameSite flags",
+                status=SKIPPED,
+                source="webcheck",
+                evidence="no Set-Cookie header",
+            )
+        ]
+
+    findings: list[dict] = []
+    checks: list[dict] = []
+    cwe_for = {"Secure": 614, "HttpOnly": 1004, "SameSite": 1275}
+    for raw in values:
+        attrs = parse_set_cookie(raw)
+        if not attrs:
+            continue
+        name = attrs["_name"]
+        session = is_session_cookie(attrs)
+        severity = "low" if session else "info"
+        kind = "session" if session else "non-session"
+        missing: list[str] = []
+        if "secure" not in attrs:
+            missing.append("Secure")
+        if "httponly" not in attrs:
+            missing.append("HttpOnly")
+        if "samesite" not in attrs:
+            missing.append("SameSite")
+
+        if not missing:
+            checks.append(
+                check_row(
+                    check_id=f"cookie:{re.sub(r'[^a-zA-Z0-9_.-]+', '_', name)[:80]}",
+                    name=f"Cookie {name} Secure+HttpOnly+SameSite",
+                    status=PASSED,
+                    source="webcheck",
+                    evidence=raw[:200],
+                )
+            )
+            continue
+
+        for flag in missing:
+            fid = _cookie_flag_id(name, flag)
+            findings.append(
+                _finding(
+                    fid,
+                    f"Cookie {name} missing {flag} flag",
+                    severity,
+                    cwe_for[flag],
+                    f"{kind} cookie {name!r} is missing the {flag} attribute. Evidence: {raw[:300]}",
+                    location,
+                    f"Set the {flag} attribute on the {name} cookie"
+                    + (" (SameSite=Lax or Strict)." if flag == "SameSite" else "."),
+                )
+            )
+            checks.append(
+                check_row(
+                    check_id=fid,
+                    name=f"Cookie {name} {flag}",
+                    status=FAILED,
+                    source="webcheck",
+                    evidence=raw[:200],
+                )
+            )
+    return findings, checks
+
+
+_CSP_PARAM = "Content-Security-Policy"
+_CSP_REQUIRED = ("default-src", "object-src", "base-uri", "frame-ancestors")
+# Map known issues onto ZAP Baseline alertRef so webcheck and ZAP share a fingerprint.
+_CSP_ZAP_VARIANT = {
+    ("script-src", "unsafe-inline"): "10055-5",
+    ("style-src", "unsafe-inline"): "10055-6",
+    ("script-src", "unsafe-eval"): "10055-10",
+}
+
+
+def parse_csp(policy: str) -> dict[str, list[str]]:
+    """Parse a Content-Security-Policy header into directive → source tokens."""
+    out: dict[str, list[str]] = {}
+    for part in (policy or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        tokens = part.split()
+        if not tokens:
+            continue
+        directive = tokens[0].lower()
+        out[directive] = tokens[1:]
+    return out
+
+
+def _csp_source_key(token: str) -> str:
+    t = token.strip().lower()
+    if t in {"'unsafe-inline'", "unsafe-inline"}:
+        return "unsafe-inline"
+    if t in {"'unsafe-eval'", "unsafe-eval"}:
+        return "unsafe-eval"
+    if t == "*":
+        return "wildcard"
+    if t.startswith("http:"):
+        return "http-source"
+    return ""
+
+
+def check_csp_policy(headers: dict[str, str], location: str) -> tuple[list[dict], list[dict]]:
+    """C10: one finding per CSP issue (unsafe-*, wildcard, http:, missing directives).
+
+    Variants use ``csp:{directive}:{issue}`` so they merge with ZAP 10055 alerts that
+    use the same semantic variant. ``param`` is Content-Security-Policy (ZAP style).
+    """
+    from attestra.checks import FAILED, PASSED, SKIPPED, check_row
+
     csp = _header(headers, "content-security-policy")
     if not csp:
+        return [], [
+            check_row(
+                check_id="csp-policy",
+                name="Content-Security-Policy analysis",
+                status=SKIPPED,
+                source="webcheck",
+                evidence="no Content-Security-Policy header",
+            )
+        ]
+
+    directives = parse_csp(csp)
+    findings: list[dict] = []
+    checks: list[dict] = []
+    seen: set[str] = set()
+
+    def _emit(
+        fid: str,
+        title: str,
+        severity: str,
+        evidence: str,
+        recommendation: str,
+        *,
+        variant: str = "",
+    ) -> None:
+        if fid in seen:
+            return
+        seen.add(fid)
+        findings.append(
+            _finding(
+                fid,
+                title,
+                severity,
+                693,
+                evidence,
+                location,
+                recommendation,
+                param=_CSP_PARAM,
+                variant=variant or fid,
+            )
+        )
+        checks.append(
+            check_row(
+                check_id=fid,
+                name=title,
+                status=FAILED,
+                source="webcheck",
+                evidence=evidence[:200],
+            )
+        )
+
+    for req in _CSP_REQUIRED:
+        if req in directives:
+            continue
+        _emit(
+            f"csp:missing:{req}",
+            f"CSP: {req} directive missing",
+            "low",
+            f"Content-Security-Policy has no {req} directive. Evidence: {csp[:300]}",
+            f"Add {req} with a tight value (for example 'self' or 'none').",
+        )
+
+    for directive, sources in directives.items():
+        for src in sources:
+            kind = _csp_source_key(src)
+            if not kind:
+                continue
+            zap_variant = _CSP_ZAP_VARIANT.get((directive, kind), "")
+            if kind == "unsafe-inline":
+                _emit(
+                    f"csp:{directive}:unsafe-inline",
+                    f"CSP: {directive} unsafe-inline",
+                    "medium",
+                    f"{directive} includes 'unsafe-inline'. Evidence: {directive} {' '.join(sources)}"[:500],
+                    f"Remove 'unsafe-inline' from {directive}; use nonces or hashes instead.",
+                    variant=zap_variant,
+                )
+            elif kind == "unsafe-eval":
+                _emit(
+                    f"csp:{directive}:unsafe-eval",
+                    f"CSP: {directive} unsafe-eval",
+                    "medium",
+                    f"{directive} includes 'unsafe-eval'. Evidence: {directive} {' '.join(sources)}"[:500],
+                    f"Remove 'unsafe-eval' from {directive}.",
+                    variant=zap_variant,
+                )
+            elif kind == "wildcard":
+                _emit(
+                    f"csp:{directive}:wildcard",
+                    f"CSP: {directive} wildcard source",
+                    "medium",
+                    f"{directive} allows wildcard source *. Evidence: {directive} {' '.join(sources)}"[:500],
+                    f"Replace * in {directive} with an explicit allow-list.",
+                )
+            elif kind == "http-source":
+                _emit(
+                    f"csp:{directive}:http-source",
+                    f"CSP: {directive} http: source",
+                    "medium",
+                    f"{directive} allows http: source {src}. Evidence: {directive} {' '.join(sources)}"[:500],
+                    f"Use https: sources only in {directive}; remove {src}.",
+                )
+    if not findings:
+        checks.append(
+            check_row(
+                check_id="csp-policy",
+                name="Content-Security-Policy analysis",
+                status=PASSED,
+                source="webcheck",
+                evidence=csp[:200],
+            )
+        )
+    return findings, checks
+
+
+def check_csp_base_uri(headers: dict[str, str], location: str) -> dict | None:
+    """Compatibility wrapper: missing base-uri finding from [[check_csp_policy]]."""
+    findings, _checks = check_csp_policy(headers, location)
+    for f in findings:
+        if f.get("id") == "csp:missing:base-uri":
+            return f
+    return None
+
+
+def check_x_content_type_options(headers: dict[str, str], location: str) -> dict | None:
+    """Fail when X-Content-Type-Options is missing or not nosniff."""
+    val = _header(headers, "x-content-type-options")
+    if val.lower() == "nosniff":
         return None
-    if "base-uri" in _csp_directives(csp):
-        return None
+    evidence = val or "(missing)"
     return _finding(
-        "csp-base-uri",
-        "CSP: base-uri directive missing",
+        "x-content-type-options",
+        "X-Content-Type-Options is missing or not nosniff",
         "low",
         693,
-        f"Content-Security-Policy is set but has no base-uri directive. Evidence: {csp[:300]}",
+        f"X-Content-Type-Options should be nosniff. Evidence: {evidence}",
         location,
-        "Add base-uri 'self' (or a tight allow-list) to the Content-Security-Policy header.",
+        "Set X-Content-Type-Options: nosniff on all responses.",
+    )
+
+
+def check_hsts_present(headers: dict[str, str], location: str, *, scheme: str) -> dict | None:
+    """On HTTPS, fail when Strict-Transport-Security is missing or has no max-age."""
+    if scheme.lower() != "https":
+        return None
+    sts = _header(headers, "strict-transport-security")
+    if sts and re.search(r"max-age\s*=\s*\d+", sts, re.IGNORECASE):
+        return None
+    return _finding(
+        "hsts-present",
+        "HSTS header missing on HTTPS",
+        "medium",
+        319,
+        f"HTTPS response has no usable Strict-Transport-Security header. Evidence: {sts or '(missing)'}",
+        location,
+        "Send Strict-Transport-Security with a positive max-age on HTTPS responses.",
     )
 
 
@@ -125,24 +501,29 @@ def check_referrer_policy(headers: dict[str, str], location: str) -> dict | None
         return _finding(
             "referrer-policy",
             "Referrer-Policy is not a strict value",
-            "info",
+            "low",
             200,
             "Referrer-Policy header is missing.",
             location,
-            "Set Referrer-Policy to no-referrer, same-origin, or strict-origin.",
+            "Set Referrer-Policy to no-referrer or same-origin.",
         )
     # Take the first token if multiple policies are listed.
     primary = val.split(",")[0].strip().lower()
-    if primary in _STRICT_REFERRER:
+    if primary in _REFERRER_OK:
         return None
+    if primary in _REFERRER_INFO:
+        severity = "info"
+    else:
+        # Known weak values and any other unrecognized value → Low.
+        severity = "low"
     return _finding(
         "referrer-policy",
         "Referrer-Policy is not a strict value",
-        "low",
+        severity,
         200,
         f"Referrer-Policy is set but not strict. Evidence: {val}",
         location,
-        "Set Referrer-Policy to no-referrer, same-origin, or strict-origin.",
+        "Set Referrer-Policy to no-referrer or same-origin.",
     )
 
 
@@ -275,31 +656,44 @@ def _hsts_include_subdomains(sts: str) -> bool:
     return bool(re.search(r"(?:^|;)\s*includesubdomains\s*(?:;|$)", sts, re.IGNORECASE))
 
 
-def check_hsts_not_preloaded(domain: str, headers: dict[str, str], location: str) -> dict | None:
+def check_hsts_not_preloaded(
+    domain: str, headers: dict[str, str], location: str
+) -> tuple[dict | None, str | None]:
+    """Return (finding, note). Lookup only when ATTESTRA_HSTS_PRELOAD_LOOKUP=1.
+
+    Not-preloaded statuses (finding): unknown, pending, rejected, removed.
+    On-list statuses (no finding): preloaded, pending-removal, pending-automated-removal.
+    Anything else or a failed lookup → no finding, note "preload lookup failed".
+    """
     if os.environ.get("ATTESTRA_HSTS_PRELOAD_LOOKUP", "").strip() != "1":
-        return None
+        return None, None
     sts = _header(headers, "strict-transport-security")
     if not sts or not _hsts_requests_preload(sts):
-        return None
+        return None, None
     try:
         api = f"https://hstspreload.org/api/v2/status?domain={domain}"
         req = Request(api, headers={"User-Agent": "attestra-webcheck/0.1"})
         with urlopen(req, timeout=10) as resp:  # noqa: S310 - public status API, not engagement target
             raw = resp.read(64_000)
         data = json.loads(raw.decode("utf-8", errors="replace"))
-        status = str(data.get("status") or "").lower()
-        if status == "preloaded":
-            return None
-        return _finding(
-            "hsts-not-preloaded",
-            "HSTS preload requested but not on preload list",
-            "info",
-            693,
-            f"HSTS header requests preload but hstspreload.org status is {status or 'unknown'} for {domain}.",
-            location,
-        )
+        status = str(data.get("status") or "").lower().strip()
+        if status in _HSTS_PRELOADED_STATUSES:
+            return None, None
+        if status in _HSTS_NOT_PRELOADED_STATUSES:
+            return (
+                _finding(
+                    "hsts-not-preloaded",
+                    "HSTS preload requested but not on preload list",
+                    "info",
+                    693,
+                    f"HSTS header requests preload but hstspreload.org status is {status} for {domain}.",
+                    location,
+                ),
+                None,
+            )
+        return None, "preload lookup failed"
     except Exception:
-        return None
+        return None, "preload lookup failed"
 
 
 def check_hsts_parent_missing(
@@ -329,23 +723,75 @@ def check_hsts_parent_missing(
     )
 
 
-def evaluate_primary(headers: dict[str, str], location: str, host: str) -> list[dict]:
+def _check_status(check_id: str, name: str, finding: dict | None, *, source: str = "webcheck") -> dict:
+    from attestra.checks import FAILED, PASSED, check_row
+
+    if finding is None:
+        return check_row(check_id=check_id, name=name, status=PASSED, source=source)
+    return check_row(
+        check_id=check_id,
+        name=name,
+        status=FAILED,
+        source=source,
+        evidence=(finding.get("description") or "")[:200],
+    )
+
+
+def evaluate_primary(
+    headers: dict[str, str], location: str, host: str, *, scheme: str = "https"
+) -> tuple[list[dict], list[str], list[dict]]:
+    """Return findings, notes, and pass/fail check rows for the primary response."""
     findings: list[dict] = []
-    for fn in (
-        check_csp_base_uri,
-        check_server_disclosure,
-        check_x_xss_protection,
-        check_referrer_policy,
-        check_expect_ct,
-        check_waf_none_seen,
-    ):
+    notes: list[str] = []
+    checks: list[dict] = []
+
+    # Always-evaluated header checks (C5 passed rows when clean).
+    hsts_f = check_hsts_present(headers, location, scheme=scheme)
+    if hsts_f:
+        findings.append(hsts_f)
+    if scheme.lower() == "https":
+        checks.append(_check_status("hsts-present", "HSTS header present", hsts_f))
+
+    xcto_f = check_x_content_type_options(headers, location)
+    if xcto_f:
+        findings.append(xcto_f)
+    checks.append(_check_status("x-content-type-options", "X-Content-Type-Options nosniff", xcto_f))
+
+    ref_f = check_referrer_policy(headers, location)
+    if ref_f:
+        findings.append(ref_f)
+    checks.append(_check_status("referrer-policy", "Referrer-Policy strict value", ref_f))
+
+    # C10: full CSP analysis (includes missing base-uri and unsafe/wildcard/http sources).
+    csp_findings, csp_checks = check_csp_policy(headers, location)
+    findings.extend(csp_findings)
+    checks.extend(csp_checks)
+
+    named = (
+        (check_server_disclosure, "server-disclosure", "Server header not disclosing software", False),
+        (check_x_xss_protection, "x-xss-protection", "X-XSS-Protection not set (legacy)", False),
+        (check_expect_ct, "expect-ct", "Expect-CT header", False),
+        (check_waf_none_seen, "waf-none-seen", "WAF or CDN signature seen", False),
+    )
+    for fn, cid, name, _only_when_csp in named:
         got = fn(headers, location)
         if got:
             findings.append(got)
-    pre = check_hsts_not_preloaded(host, headers, location)
+        # server-disclosure / x-xss / waf: "passed" means the bad signal was absent.
+        checks.append(_check_status(cid, name, got))
+    pre, pre_note = check_hsts_not_preloaded(host, headers, location)
     if pre:
         findings.append(pre)
-    return findings
+    if pre_note:
+        notes.append(pre_note)
+    if os.environ.get("ATTESTRA_HSTS_PRELOAD_LOOKUP", "").strip() == "1":
+        checks.append(_check_status("hsts-not-preloaded", "HSTS preload list membership", pre))
+
+    # C9: one finding per cookie per missing Secure / HttpOnly / SameSite.
+    cookie_findings, cookie_checks = check_cookies(headers, location)
+    findings.extend(cookie_findings)
+    checks.extend(cookie_checks)
+    return findings, notes, checks
 
 
 class WebcheckAdapter(ScannerAdapter):
@@ -387,9 +833,12 @@ class WebcheckAdapter(ScannerAdapter):
         if out_file.exists():
             out_file.unlink()
 
+        from attestra.checks import SKIPPED, check_row, write_checks_sidecar
+
         requests_log: list[dict] = []
         findings: list[dict] = []
         notes: list[str] = []
+        checks: list[dict] = []
 
         primary_url = build_url(pin, "/")
         security_url = build_url(pin, "/.well-known/security.txt")
@@ -404,7 +853,12 @@ class WebcheckAdapter(ScannerAdapter):
             notes.append(f"primary request failed: {exc}")
 
         if primary is not None:
-            findings.extend(evaluate_primary(primary.headers, primary_url, pin.host))
+            primary_findings, primary_notes, primary_checks = evaluate_primary(
+                primary.headers, primary_url, pin.host, scheme=pin.scheme
+            )
+            findings.extend(primary_findings)
+            notes.extend(primary_notes)
+            checks.extend(primary_checks)
 
         sec_resp: SafeResponse | None = None
         try:
@@ -418,6 +872,7 @@ class WebcheckAdapter(ScannerAdapter):
         sec_finding = check_security_txt(sec_resp, security_url)
         if sec_finding:
             findings.append(sec_finding)
+        checks.append(_check_status("security-txt", "security.txt present and valid", sec_finding))
 
         # Plain HTTP probe (no redirect follow). Skip when HTTP is out of scope.
         http_url = build_url(pin, "/", scheme="http")
@@ -426,6 +881,24 @@ class WebcheckAdapter(ScannerAdapter):
             authorize_target(scope, http_url, "url")
         except AuthorizationError:
             notes.append("skipped: http not in scope")
+            checks.append(
+                check_row(
+                    check_id="http-no-redirect",
+                    name="HTTP redirects to HTTPS",
+                    status=SKIPPED,
+                    source="webcheck",
+                    evidence="http not in scope",
+                )
+            )
+            checks.append(
+                check_row(
+                    check_id="hsts-on-http",
+                    name="HSTS not sent over HTTP",
+                    status=SKIPPED,
+                    source="webcheck",
+                    evidence="http not in scope",
+                )
+            )
         else:
             http_pin = pin if pin.scheme == "http" else PinnedTarget(host=pin.host, ip=pin.ip, port=80, scheme="http")
             try:
@@ -438,6 +911,7 @@ class WebcheckAdapter(ScannerAdapter):
             hsts_http = check_hsts_on_http(http_resp, http_url)
             if hsts_http:
                 findings.append(hsts_http)
+            checks.append(_check_status("hsts-on-http", "HSTS not sent over HTTP", hsts_http))
             # HTTPS-upgrade check only when the pin is https (separate http:// listener).
             # On an http pin the primary URL is already plain HTTP, so a self-redirect
             # would break the header checks that need a 200 body.
@@ -445,15 +919,43 @@ class WebcheckAdapter(ScannerAdapter):
                 no_redir = check_http_no_redirect(http_resp, http_url)
                 if no_redir:
                     findings.append(no_redir)
+                checks.append(_check_status("http-no-redirect", "HTTP redirects to HTTPS", no_redir))
             else:
                 notes.append("skipped: http-no-redirect requires https pin")
+                checks.append(
+                    check_row(
+                        check_id="http-no-redirect",
+                        name="HTTP redirects to HTTPS",
+                        status=SKIPPED,
+                        source="webcheck",
+                        evidence="requires https pin",
+                    )
+                )
 
         # Parent HSTS includeSubDomains — only when parent is in scope (+1 request).
         parent = parent_domain(pin.host)
         if parent is None:
             notes.append("skipped: no parent domain")
+            checks.append(
+                check_row(
+                    check_id="hsts-parent-missing",
+                    name="Parent HSTS includeSubDomains",
+                    status=SKIPPED,
+                    source="webcheck",
+                    evidence="no parent domain",
+                )
+            )
         elif parent not in scope.allowed_hosts:
             notes.append("skipped: parent not in scope")
+            checks.append(
+                check_row(
+                    check_id="hsts-parent-missing",
+                    name="Parent HSTS includeSubDomains",
+                    status=SKIPPED,
+                    source="webcheck",
+                    evidence="parent not in scope",
+                )
+            )
         else:
             parent_url = f"https://{parent}/"
             parent_headers: dict[str, str] | None = None
@@ -474,24 +976,57 @@ class WebcheckAdapter(ScannerAdapter):
                 notes.append(note)
             if finding:
                 findings.append(finding)
+            if skipped:
+                checks.append(
+                    check_row(
+                        check_id="hsts-parent-missing",
+                        name="Parent HSTS includeSubDomains",
+                        status=SKIPPED,
+                        source="webcheck",
+                        evidence=skipped,
+                    )
+                )
+            else:
+                checks.append(_check_status("hsts-parent-missing", "Parent HSTS includeSubDomains", finding))
 
         # Passive DNS posture checks (CAA, AAAA, SPF, TLSA) — same report file.
         # Skip for IP-literal pins (no useful parent/CAA walk on 127.0.0.1).
         from attestra.runner.scanners.base import is_ip_literal
         from attestra.runner.scanners.webcheck_dns import dns_checks
 
+        dns_ids = (
+            ("dns-caa", "DNS CAA record"),
+            ("dns-aaaa", "DNS AAAA (IPv6) address"),
+            ("dns-spf", "DNS SPF when host has no MX"),
+            ("dns-tlsa", "DNS TLSA (DANE) record"),
+        )
         if is_ip_literal(pin.host):
             notes.append("skipped: DNS checks require a hostname, not an IP literal")
+            for cid, name in dns_ids:
+                checks.append(
+                    check_row(
+                        check_id=cid,
+                        name=name,
+                        status=SKIPPED,
+                        source="webcheck",
+                        evidence="host is an IP literal",
+                    )
+                )
         else:
+            dns_findings: dict[str, dict] = {}
             for item in dns_checks(pin.host):
                 if item.get("skipped"):
                     notes.append(item.get("description") or item.get("title") or "DNS checks skipped")
                 else:
                     findings.append(item)
+                    dns_findings[str(item.get("id") or "")] = item
+            for cid, name in dns_ids:
+                checks.append(_check_status(cid, name, dns_findings.get(cid)))
 
-        report = {"requests": requests_log, "findings": findings, "notes": notes}
+        report = {"requests": requests_log, "findings": findings, "notes": notes, "checks": checks}
         payload = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
         out_file.write_bytes(payload)
+        write_checks_sidecar(out_file, checks)
         digest = hashlib.sha256(payload).hexdigest()
         return ScannerResult(
             tool=self.name,
@@ -499,4 +1034,5 @@ class WebcheckAdapter(ScannerAdapter):
             import_tool=self.import_tool,
             raw_path=out_file,
             raw_sha256=digest,
+            extra={"checks": checks},
         )

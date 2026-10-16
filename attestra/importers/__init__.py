@@ -18,8 +18,10 @@ from attestra.importers import (
     kube_bench,
     naabu,
     nuclei,
+    observatory,
     prowler,
     sarif,
+    ssllabs,
     testssl,
     trivy,
     webcheck,
@@ -42,6 +44,8 @@ PARSERS: dict[str, Callable[[bytes], list[NormalizedFinding]]] = {
     "checkov": checkov.parse,
     "naabu": naabu.parse,
     "webcheck": webcheck.parse,
+    "observatory": observatory.parse,
+    "ssllabs": ssllabs.parse,
 }
 
 

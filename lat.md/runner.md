@@ -66,6 +66,24 @@ Pure-Python adapter for security headers, HSTS, security.txt, and DNS posture.
 
 [[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] is registered as `webcheck` in [[attestra/runner/scanners/registry.py#_ADAPTERS]] and listed in [[attestra/runner/gate.py#URL_TOOLS]]. It requires `scope`, uses only [[attestra/runner/http_safe.py#safe_get]], writes `webcheck.json`, and merges [[attestra/runner/scanners/webcheck_dns.py#dns_checks]] into the same report. [[attestra/jobs/durable.py#run_one_job]] passes `scope=` for webcheck like zap.
 
+R10 Referrer-Policy ([[attestra/runner/scanners/webcheck.py#check_referrer_policy]]): no finding for `no-referrer` / `same-origin`; Info for `strict-origin` / `strict-origin-when-cross-origin`; Low for weaker values or a missing header.
+
+R13 HSTS preload ([[attestra/runner/scanners/webcheck.py#check_hsts_not_preloaded]]): off unless `ATTESTRA_HSTS_PRELOAD_LOOKUP=1`; finding only for hstspreload.org statuses `unknown` / `pending` / `rejected` / `removed`; lookup failures become a report note (`preload lookup failed`) with no finding.
+
+#### CSP analysis (C10)
+
+Parse Content-Security-Policy and emit one finding per issue with directive evidence.
+
+[[attestra/runner/scanners/webcheck.py#check_csp_policy]] flags `'unsafe-inline'`, `'unsafe-eval'`, bare `*` wildcards, `http:` sources, and missing `default-src` / `object-src` / `base-uri` / `frame-ancestors`. Check ids stay semantic (`csp:{directive}:{issue}`); fingerprint `variant` uses the matching ZAP Baseline `alertRef` when known (`10055-5` / `10055-6` / `10055-10`) and `param=Content-Security-Policy` so webcheck and ZAP merge. [[attestra/runner/scanners/webcheck.py#check_csp_base_uri]] remains a thin wrapper over the missing base-uri finding.
+
+#### Cookie flags (C9)
+
+One finding per cookie per missing Secure, HttpOnly, or SameSite on the primary response.
+
+[[attestra/runner/scanners/webcheck.py#check_cookies]] uses headers already fetched (no extra requests). Variant / finding id is `cookie:{name}:{flag}`. [[attestra/runner/http_safe.py#safe_request]] keeps every Set-Cookie line (joined with newlines).
+
+Session vs non-session severity: a cookie is a **session cookie** when it has neither `Max-Age` nor `Expires`, or its name matches session-like names (`session`, `sid`, `jsessionid`, `token`, `jwt`, `csrf`, …). Session cookies → Low for missing flags. Clearly non-session cookies (Max-Age/Expires set and a non-session name) → Info. Fully flagged cookies become C5 passed rows; no Set-Cookie → one skipped "not tested" row.
+
 ### testssl baseline flags
 
 [[attestra/runner/scanners/testssl.py#_flags]] for `profile=baseline` runs config checks only (`-p -S -P -f -H`) and never passes `-U` / `--vulnerable`. Non-baseline keeps the default full run (includes vulnerability checks).

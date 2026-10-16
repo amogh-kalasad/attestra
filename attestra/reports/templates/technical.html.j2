@@ -38,11 +38,48 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   <div class="kpi">False positives<b>{{ false_positives }}</b>excluded</div>
 </div>
 
-<h2>4. Findings</h2>
+<h2>4. Passed checks</h2>
+<p class="meta">Checks that ran clean (green) sit next to checks that failed. Skipped means the check was not run for this target.</p>
+<table>
+  <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
+  {% for c in passed_checks %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
+    <td>{{ c.source }}</td>
+    <td class="mono">{{ c.evidence or "—" }}</td>
+  </tr>
+  {% else %}<tr><td colspan="4">No check list stored yet. Re-import a ZAP or webcheck report, or run a new scan.</td></tr>{% endfor %}
+</table>
+
+<h2>5. TLS summary</h2>
+<p class="meta">Protocols, ciphers, certificate and OCSP from the latest testssl result for each target.</p>
+{% for t in tls_summaries %}
+  {% if not t.scanned %}
+  <p><b>{{ t.asset or "Target" }}:</b> not scanned</p>
+  {% else %}
+  <table>
+    <tr><th style="width:180px">Target</th><td class="mono">{{ t.asset or t.host }}</td></tr>
+    <tr><th>Protocols</th><td>{{ t.protocols|join("; ") }}</td></tr>
+    <tr><th>Best cipher</th><td class="mono">{{ t.best_cipher }}</td></tr>
+    <tr><th>Weakest cipher</th><td class="mono">{{ t.weakest_cipher }}</td></tr>
+    <tr><th>Certificate expiry</th><td>{{ t.cert_expiry }}</td></tr>
+    <tr><th>Chain of trust</th><td>{{ t.chain_ok }}</td></tr>
+    <tr><th>Certificate signature</th><td class="mono">{{ t.cert_signature }}</td></tr>
+    <tr><th>Handshake signatures</th><td class="mono">{{ t.handshake_signatures }}</td></tr>
+    <tr><th>OCSP</th><td>{{ t.ocsp }}</td></tr>
+  </table>
+  {% endif %}
+{% else %}
+<p>not scanned</p>
+{% endfor %}
+
+<h2>6. Findings</h2>
 {% for f in findings %}
 <div class="finding">
   <h3>F-{{ f.id }} · {{ f.title }}</h3>
   <div><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+    {% if f.asset and f.asset.exposure == "internet" %}&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}
     &nbsp;Status: <b>{{ f.status|replace("_", " ") }}</b>
     &nbsp;· Risk {{ "%.1f"|format(f.risk_score) }}
     {% if f.cvss_score is not none %}&nbsp;· CVSS {{ f.cvss_score }}{% endif %}

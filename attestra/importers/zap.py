@@ -31,6 +31,7 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             pluginid = str(alert.get("pluginid", ""))
             alert_ref = alert.get("alertRef")
             # Distinct alertRef (e.g. 10055-5) keeps CSP subtypes from collapsing.
+            # webcheck C10 uses the same alertRef values as variant for known CSP issues.
             variant = str(alert_ref) if alert_ref is not None and str(alert_ref) != pluginid else ""
             instances = alert.get("instances") or [{"uri": site.get("@name", "")}]
             for inst in instances:

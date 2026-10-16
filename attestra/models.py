@@ -244,6 +244,8 @@ class ImportRun(Base):
     new_findings: Mapped[int] = mapped_column(Integer, default=0)
     updated_findings: Mapped[int] = mapped_column(Integer, default=0)
     unmatched_findings: Mapped[int] = mapped_column(Integer, default=0)  # no in-scope target matched
+    # C5: JSON list of {id,name,status,source} check rows (passed/failed/skipped).
+    checks_json: Mapped[str] = mapped_column(Text, default="")
 
 
 class ScanRun(Base):
@@ -265,6 +267,8 @@ class ScanRun(Base):
     raw_sha256: Mapped[str] = mapped_column(String(64), default="")
     import_run_id: Mapped[int | None] = mapped_column(ForeignKey("import_runs.id"))
     refuse_reason: Mapped[str] = mapped_column(String(500), default="")
+    # C5: JSON list of {id,name,status,source} check rows (passed/failed/skipped).
+    checks_json: Mapped[str] = mapped_column(Text, default="")
 
     engagement: Mapped[Engagement] = relationship()
     asset: Mapped[Asset] = relationship()

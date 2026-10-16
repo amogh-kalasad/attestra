@@ -578,6 +578,33 @@ def import_results(
     sha = _sha256(masked)
     path = _store(eng.tenant_id, "imports", sha, filename, masked)
     run = ImportRun(engagement_id=engagement_id, tool=tool, filename=filename, raw_path=str(path), sha256=sha, imported_by=actor)
+    # C5: derive passed/failed check rows for tools that expose them.
+    try:
+        from attestra import checks as checklib
+
+        check_rows: list[dict] = []
+        if tool == "zap":
+            check_rows = checklib.zap_checks_from_report(masked)
+        elif tool == "webcheck":
+            try:
+                doc = json.loads(masked.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError:
+                doc = {}
+            if isinstance(doc, dict):
+                check_rows = checklib.checks_from_webcheck_report(doc)
+        elif tool == "observatory":
+            from attestra.importers.observatory import checks_from_observatory
+
+            check_rows = checks_from_observatory(masked)
+        if check_rows:
+            run.checks_json = json.dumps({"checks": check_rows})
+            try:
+                checklib.write_checks_sidecar(path, check_rows)
+            except OSError:
+                pass
+    except Exception:
+        # Check derivation must never block an import.
+        pass
     s.add(run)
     s.flush()
 
@@ -756,6 +783,103 @@ def enrich(s: Session, *, kev_json: bytes | None = None, epss_csv: bytes | None 
 
 
 # ---------------------------------------------------------------- findings
+
+
+def list_passed_checks(s: Session, engagement_id: int) -> list[dict]:
+    """C5: merged pass/fail/skipped check rows from scan runs and imports."""
+    from attestra.checks import FAILED, PASSED, SKIPPED, load_checks_json, merge_check_lists
+
+    lists: list[list[dict]] = []
+    for run in s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id)):
+        rows = load_checks_json(run.checks_json)
+        if rows:
+            lists.append(rows)
+    for run in s.scalars(select(ImportRun).where(ImportRun.engagement_id == engagement_id).order_by(ImportRun.id)):
+        rows = load_checks_json(run.checks_json)
+        if rows:
+            lists.append(rows)
+    merged = merge_check_lists(*lists)
+    order = {FAILED: 0, SKIPPED: 1, PASSED: 2}
+    return sorted(merged, key=lambda r: (order.get(r.get("status", ""), 9), r.get("name") or r.get("id") or ""))
+
+
+def _read_bytes(path_str: str) -> bytes | None:
+    """Read a local path when it exists; ignore missing or non-file URIs."""
+    if not path_str:
+        return None
+    try:
+        p = Path(path_str)
+        if p.is_file():
+            return p.read_bytes()
+    except OSError:
+        return None
+    return None
+
+
+def _tls_host_key(value: str) -> str:
+    """Normalize host/URL labels so scan and import summaries for the same target merge."""
+    text = (value or "").strip().lower()
+    if not text or text == "—":
+        return ""
+    text = text.replace("https://", "").replace("http://", "")
+    text = text.split("/")[0]
+    text = text.split(":")[0]
+    return text
+
+
+def tls_summaries(s: Session, engagement_id: int) -> list[dict]:
+    """C8: TLS summary boxes from the latest testssl import/scan per engagement.
+
+    Returns a list of summary dicts (usually one). When no testssl data is present,
+    returns a single ``{"scanned": False}`` entry so the report can show "not scanned".
+    """
+    from attestra.importers import testssl as testssl_importer
+
+    by_host: dict[str, dict] = {}
+
+    def _add(summary: dict, asset_label: str) -> None:
+        if not summary.get("scanned"):
+            return
+        summary = dict(summary)
+        summary["asset"] = asset_label or summary.get("host") or "—"
+        key = _tls_host_key(summary["asset"]) or _tls_host_key(str(summary.get("host") or ""))
+        if not key:
+            key = summary["asset"]
+        # First wins (callers pass newest scan runs first).
+        if key not in by_host:
+            by_host[key] = summary
+
+    # Prefer finished scan runs (tied to an asset), then imports.
+    for run in s.scalars(
+        select(ScanRun)
+        .where(ScanRun.engagement_id == engagement_id, ScanRun.tool == "testssl")
+        .order_by(ScanRun.id.desc())
+    ):
+        raw = _read_bytes(run.raw_artifact_uri or "")
+        if raw is None and run.import_run_id:
+            imp = s.get(ImportRun, run.import_run_id)
+            if imp:
+                raw = _read_bytes(imp.raw_path or "")
+        if raw is None:
+            continue
+        summary = testssl_importer.summarize(raw)
+        asset = s.get(Asset, run.asset_id) if run.asset_id else None
+        _add(summary, asset.identifier if asset else str(summary.get("host") or ""))
+
+    for run in s.scalars(
+        select(ImportRun)
+        .where(ImportRun.engagement_id == engagement_id, ImportRun.tool == "testssl")
+        .order_by(ImportRun.id.desc())
+    ):
+        raw = _read_bytes(run.raw_path or "")
+        if raw is None:
+            continue
+        summary = testssl_importer.summarize(raw)
+        _add(summary, str(summary.get("host") or run.filename or ""))
+
+    if not by_host:
+        return [{"scanned": False, "asset": "—"}]
+    return list(by_host.values())
 
 
 def list_findings(s: Session, engagement_id: int, status: str | None = None, severity: str | None = None) -> list[Finding]:
@@ -1209,6 +1333,24 @@ def request_scan(
 def list_scans(s: Session, engagement_id: int) -> list[ScanRun]:
     get_engagement(s, engagement_id)
     return list(s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id.desc())))
+
+
+def get_asset(s: Session, asset_id: int, principal=None) -> Asset:
+    """Load a target; when ``principal`` is set, enforce engagement access."""
+    a = s.get(Asset, asset_id)
+    if not a:
+        raise LookupError(f"target {asset_id} not found")
+    if principal is not None:
+        get_engagement(s, a.engagement_id, principal)
+    return a
+
+
+def asset_scan_history(s: Session, asset_id: int, principal=None) -> list[dict]:
+    """C11: per-target scan history with A–F grade and new/fixed/still-open diffs."""
+    from attestra.history import asset_scan_history as _history
+
+    get_asset(s, asset_id, principal)
+    return _history(s, asset_id)
 
 
 def get_scan(s: Session, scan_id: int) -> ScanRun:

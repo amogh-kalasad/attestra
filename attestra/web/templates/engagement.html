@@ -130,7 +130,8 @@
     {% for a in e.assets %}
     {% set nf = asset_findings.get(a.id, 0) %}{% set ns = asset_schedules.get(a.id, 0) %}
     <tr>
-      <td><span class="mono">{{ a.identifier }}</span>{% if a.name %}<div class="meta">{{ a.name }}</div>{% endif %}</td>
+      <td><a href="/engagements/{{ e.id }}/targets/{{ a.id }}" class="mono">{{ a.identifier }}</a>{% if a.name %}<div class="meta">{{ a.name }}</div>{% endif %}
+          <div class="meta"><a href="/engagements/{{ e.id }}/targets/{{ a.id }}">History and trends</a></div></td>
       <td><span class="env env-{{ a.environment or 'production' }}">{{ a.environment or "production" }}</span>
           {% if (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">Not authorized</div>{% endif %}</td>
       <td>{{ asset_kinds.get(a.kind, a.kind) }}</td>
@@ -305,6 +306,23 @@
   </form>
 </div>
 
+<!-- ============================================================ PASSED CHECKS (C5) -->
+<div class="card" id="passed-checks">
+  <h2>Passed checks</h2>
+  <p class="meta">Green rows are checks that ran and passed. Failed rows match findings from the same scan or import. Skipped means the check was not run for this target.</p>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
+    {% for c in passed_checks %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
+      <td>{{ c.source }}</td>
+      <td class="mono">{{ c.evidence or "—" }}</td>
+    </tr>
+    {% else %}<tr><td colspan="4">No check list yet. Import a ZAP or webcheck report, or run a scan that writes checks.</td></tr>{% endfor %}
+  </table>
+</div>
+
 <!-- ============================================================ FINDINGS -->
 <div class="card" id="findings">
   <h2>Findings (ranked by risk)</h2>
@@ -314,7 +332,7 @@
     {% for f in findings %}
     <tr id="f-{{ f.id }}">
       <td><a href="#f-{{ f.id }}">F-{{ f.id }}</a></td>
-      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>

@@ -14,7 +14,10 @@ from datetime import date, timedelta
 from attestra import config
 
 # Used only when a tool gives a severity but no CVSS score.
+# Info stays 0 for internal assets; internet-facing Info uses INFO_INTERNET_BASE in risk_score.
 DEFAULT_CVSS = {"critical": 9.5, "high": 7.5, "medium": 5.0, "low": 3.0, "info": 0.0}
+# Small base so Info on internet-facing (or CDE) assets is never risk 0 after exposure weight.
+INFO_INTERNET_BASE = 1.0
 DEFAULT_EXPOSURE_WEIGHT = 1.3
 
 
@@ -68,6 +71,13 @@ def risk_score(
     weights: RiskWeights | None = None,
 ) -> float:
     base = cvss if cvss is not None else DEFAULT_CVSS.get(severity, 0.0)
+    # C7: Info on internet-facing or CDE assets gets a small base so risk is never 0.
+    if (
+        base == 0.0
+        and (severity or "").lower() == "info"
+        and (exposure == "internet" or in_cde)
+    ):
+        base = INFO_INTERNET_BASE
     score = (
         base * (1 + (epss or 0.0)) * (1.5 if kev else 1.0)
         * asset_weight(criticality, weights) * exposure_weight(exposure, in_cde, weights)

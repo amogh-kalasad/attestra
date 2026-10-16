@@ -23,13 +23,14 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             NormalizedFinding(
                 tool="webcheck",
                 rule_id=f"webcheck/{fid}",
-                variant=fid,
+                variant=str(item.get("variant") or fid),
                 title=str(item.get("title") or fid),
                 severity=norm_severity(str(item.get("severity") or "info")),
                 location=str(item.get("location") or ""),
                 description=str(item.get("description") or ""),
                 recommendation=str(item.get("recommendation") or ""),
                 cwe=parse_cwe(item.get("cwe")),
+                param=str(item.get("param") or ""),
             )
         )
     return out

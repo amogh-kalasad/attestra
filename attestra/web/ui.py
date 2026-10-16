@@ -75,6 +75,8 @@ IMPORT_FORMAT_LABELS = {
     "trivy": "Trivy (JSON)",
     "sarif": "SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks...)",
     "webcheck": "Attestra webcheck (JSON)",
+    "observatory": "Mozilla HTTP Observatory (saved JSON)",
+    "ssllabs": "Qualys SSL Labs (saved JSON)",
 }
 ROLE_LABELS = {
     "admin": "Admin",
@@ -442,6 +444,7 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
             "e": e,
             "type_label": ENGAGEMENT_TYPE_LABELS.get(e.type, e.type),
             "findings": findings,
+            "passed_checks": services.list_passed_checks(s, eid),
             "imports": imports,
             "scans": scans,
             "reports": reports,
@@ -485,6 +488,24 @@ async def add_authorization(
         services.add_authorization, eid, filename=document.filename or "authorization", data=data, signer=signer,
         signed_on=signed_on, expires_on=expires_on, environments=environments, rules_of_engagement=rules_of_engagement,
     )
+
+
+@router.get("/engagements/{eid}/targets/{aid}", response_class=HTMLResponse)
+def target_page(request: Request, eid: int, aid: int):
+    """C11: per-target scan history, A–F grades, and new/fixed/still-open diffs."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    with db.session() as s:
+        try:
+            e = services.get_engagement(s, eid, principal)
+            asset = services.get_asset(s, aid, principal)
+        except LookupError:
+            raise HTTPException(404, "target not found")
+        if asset.engagement_id != eid:
+            raise HTTPException(404, "target not found")
+        history = services.asset_scan_history(s, aid, principal)
+        return _render(request, "asset.html", {"e": e, "asset": asset, "history": history})
 
 
 @router.post("/engagements/{eid}/targets")

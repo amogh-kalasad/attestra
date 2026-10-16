@@ -51,17 +51,20 @@ Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/u
 
 Report lifecycle buttons post to `/engagements/{eid}/reports/{rid}/submit`, `/qa-approve`, `/qa-reject` and `/sign`; see [[reports#Workflow]]. Report links open `/reports/{rid}` in a new tab with the sign-off record on top ([[reports#Sign-off record]]).
 
+### Target history (C11)
+
+Per-target page at `/engagements/{eid}/targets/{aid}` ([[attestra/web/ui.py#target_page]], template `asset.html`).
+
+[[attestra/history.py#asset_scan_history]] lists finished scans for that target with date, tool, A–F grade ([[attestra/history.py#scan_letter_grade]]), severity counts, and new/fixed/still-open vs the previous scan of the **same tool** ([[attestra/history.py#diff_fingerprints]]). Snapshots come from each scan’s saved raw/import file. The page shows a small trend chart via [[attestra/history.py#trend_svg]] (same chart the technical report uses). Engagement target rows link to this page.
+
+Shared look-and-feel lives in `attestra/web/templates/_layout.html` (staff/portal) and `attestra/web/templates/_public.html` (Trust Center). Authenticated pages use a light app shell: white sidebar (Work / Library / Ops), sticky top bar, and content workspace. `attestra/web/templates/login.html` is a standalone split-screen sign-in (brand panel + form) matching the product login sample; it still posts username/password to [[attestra/web/ui.py#login]]. Visual system uses Geist + Geist Mono and indigo `#4338CA`. Page templates (engagements home, engagement detail, new engagement, PCI calendar, users, report templates, library, portal) follow that shell with KPI strips, status pills, breadcrumbs, and stepped progress where the product UI samples define them. Routes, forms, and permissions are unchanged.
+
 ## Scheduled scans and CI gates
 
 Recurring scan schedules and a pass/fail check that CI pipelines can call.
 
 - Schedules: `GET/POST /api/engagements/{eid}/schedules`, `PATCH/DELETE /api/engagements/{eid}/schedules/{sid}`, and `POST /api/engagements/{eid}/schedules/run-due` ([[attestra/api.py#run_due_schedules]]). Cadence is `quarterly` or `monthly` ([[attestra/services.py#update_scan_schedule]]); due schedules are queued by [[attestra/services.py#enqueue_due_schedules]] through the normal scan gate. Managing them needs `scan.start`; listing needs `scan.read`.
 - CI gate: `GET /api/engagements/{eid}/gate` runs [[attestra/services.py#ci_gate]]. It fails when open findings at or above `fail_on` (default `high`) are more than `max_findings` (default 0). `tool` limits the check to one importer. Accepted-risk, fixed and false-positive findings never block. The answer lists counts by severity and up to 50 blocking findings.
-Shared look-and-feel lives in [[attestra/web/templates/_layout.html]] (staff/portal) and [[attestra/web/templates/_public.html]] (Trust Center). Authenticated pages use a light app shell: white sidebar (Work / Library / Ops), sticky top bar, and content workspace. [[attestra/web/templates/login.html]] is a standalone split-screen sign-in (brand panel + form) matching the product login sample; it still posts username/password to [[attestra/web/ui.py#login]]. Visual system uses Geist + Geist Mono and indigo `#4338CA`. Page templates (engagements home, engagement detail, new engagement, PCI calendar, users, report templates, library, portal) follow that shell with KPI strips, status pills, breadcrumbs, and stepped progress where the product UI samples define them. Routes, forms, and permissions are unchanged.
-
-## Scheduled scans and CI gates
-
-Scan schedules and a CI policy check share the services layer with the dashboard and API.
 
 [[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates. [[attestra/services.py#ci_gate]] fails a pipeline when open findings at or above `fail_on` exceed `max_findings` (accepted-risk / fixed / false-positive do not block).
 
@@ -81,4 +84,4 @@ Environment variables and on-disk data layout.
 
 Standalone AntHive-branded HTML describing implemented Attestra capabilities for the public website.
 
-[[docs/marketing/attestra.html]] is a self-contained product page (hero, problem, solution workflow, features, advantages, report deliverables, audiences, CTA). Claims track [[README.md]], [[architecture]], [[reports]], and report templates under [[attestra/reports/templates]]. It is not served by the app; drop it into anthive.tech when integrating.
+`docs/marketing/attestra.html` is a self-contained product page (hero, problem, solution workflow, features, advantages, report deliverables, audiences, CTA). Claims track `README.md`, [[architecture]], [[reports]], and report templates under `attestra/reports/templates`. It is not served by the app; drop it into anthive.tech when integrating.
