@@ -55,7 +55,7 @@ Command-line entrypoint sharing the same services layer.
 
 Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/ui.py#login]]); session cookie replaces the old free-text actor bar.
 
-[[attestra/web/ui.py]] — server-rendered UI mounted with the API.
+[[attestra/web/ui.py]] — server-rendered UI mounted with the API. Form POSTs redirect via [[attestra/web/ui.py#_back]], which appends `msg`/`error` with `?` or `&` so existing query strings (for example `tenant_id`) stay intact.
 
 Report lifecycle buttons post to `/engagements/{eid}/reports/{rid}/submit`, `/qa-approve`, `/qa-reject` and `/sign`; see [[reports#Workflow]]. Report links open `/reports/{rid}` in a new tab with the sign-off record on top ([[reports#Sign-off record]]).
 
@@ -106,7 +106,7 @@ Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside
 
 Tokenized read-only links for one target grade or one scan, plus an SVG badge.
 
-[[attestra/share/service.py#create_share]] issues a long random token (`secrets`, at least 32 bytes) and stores only [[attestra/share/service.py#hash_token]] on [[attestra/share/models.py#ShareLink]]. Default expiry is 7 days (max 90). [[attestra/share/service.py#revoke_share]] and expiry both make the link invalid. Public page `/share/{token}` and badge `/share/{token}/badge.svg` ([[attestra/share/routes.py]]) show only target name, grade, score breakdown, and finding title/severity/status/fix (via [[attestra/comments.py#finding_fields_for_share]]); never evidence, comments, emails, tenant id, notes, API keys, or paths ([[attestra/share/service.py#FORBIDDEN_PUBLIC_KEYS]]). Invalid, expired, and revoked tokens return the same “link not valid” answer (410) with `noindex` and no-cache headers. Audits: `share.created`, `share.revoked`, and rate-limited `share.viewed`. Roles: `share.create` / `share.manage` for admin, lead, tester. UI list/revoke at `/shares`; API under `/api/v1/shares`.
+[[attestra/share/service.py#create_share]] issues a long random token (`secrets`, at least 32 bytes) and stores only [[attestra/share/service.py#hash_token]] on [[attestra/share/models.py#ShareLink]]. Default expiry is 7 days (max 90). [[attestra/share/service.py#revoke_share]] and expiry both make the link invalid. Public page `/share/{token}` and badge `/share/{token}/badge.svg` ([[attestra/share/routes.py]]) show only target name, grade, score breakdown, and finding title/severity/status/tool (via [[attestra/comments.py#finding_fields_for_share]]); never evidence, comments, emails, tenant id, notes, API keys, or paths ([[attestra/share/service.py#FORBIDDEN_PUBLIC_KEYS]]). Invalid, expired, and revoked tokens return the same “link not valid” answer (410) with `noindex` and no-cache headers. Audits: `share.created`, `share.revoked`, and rate-limited `share.viewed`. Roles: `share.create` / `share.manage` for admin, lead, tester. UI list/revoke at `/shares`; API under `/api/v1/shares`. `GET /api/v1/shares` takes optional `tenant_id`; when omitted, [[attestra/share/routes.py#_default_share_tenant]] picks the caller’s home tenant, else the first allowed membership, else (unrestricted lead/admin) the first tenant by name.
 
 ## Email alerts
 
@@ -120,7 +120,7 @@ Events (same hooks as webhooks):
 2. Security header changed — [[attestra/alerts/service.py#notify_header_change]] on `scan.finished` ([[attestra/webhooks/service.py#safe_emit_scan]]); compares the last two saved scans of the same tool via [[attestra/alerts/headers.py#diff_headers]]. Webcheck stores a `headers` snapshot in its report.
 3. SLA missed — [[attestra/alerts/service.py#run_sla_missed_alerts]] (`attestra sla-alert-check`); one email per finding, recorded in [[attestra/models.py#EmailAlertSent]].
 
-Per-tenant toggles and recipient list live in [[attestra/models.py#EmailAlertSettings]]. Admin/lead UI at `/settings/alerts` ([[attestra/alerts/routes.py]]); API `GET/PUT /api/alerts/settings` needs `webhook.manage`. Audit: `alert.settings.update` and `alert.email.sent` (event, count, recipients count — not the body). Finding links use `ATTESTRA_PUBLIC_URL` or `ATTESTRA_URL` when set.
+Per-tenant toggles and recipient list live in [[attestra/models.py#EmailAlertSettings]]. Admin/lead UI at `/settings/alerts` ([[attestra/alerts/routes.py]]); API `GET/PUT /api/alerts/settings` needs `webhook.manage`. When `tenant_id` is omitted, [[attestra/alerts/routes.py#_default_tenant]] uses the principal's home tenant, else the first allowed tenant, else (unrestricted lead/admin) the first tenant by name — not an error. Audit: `alert.settings.update` and `alert.email.sent` (event, count, recipients count — not the body). Finding links use `ATTESTRA_PUBLIC_URL` or `ATTESTRA_URL` when set.
 
 ## Configuration
 

@@ -35,12 +35,26 @@ class SettingsIn(BaseModel):
 
 
 def _default_tenant(s, principal) -> int:
-    allowed = services.tenant_ids_for(s, principal)
+    """Pick a tenant for settings when the caller did not pass tenant_id.
+
+    ``tenant_ids_for`` returns ``None`` for unrestricted platform leads/admins —
+    that means every tenant, so we take the first by name, not an error.
+    """
+    from sqlalchemy import select
+
+    from attestra.models import Tenant
+
     if principal.tenant_id:
         return int(principal.tenant_id)
-    if allowed:
+    allowed = services.tenant_ids_for(s, principal)
+    if allowed is not None:
+        if not allowed:
+            raise alerts.AlertError("no tenant in scope for email alert settings")
         return sorted(allowed)[0]
-    raise alerts.AlertError("no tenant in scope for email alert settings")
+    row = s.scalars(select(Tenant).order_by(Tenant.name, Tenant.id)).first()
+    if row is None:
+        raise alerts.AlertError("no tenant in scope for email alert settings")
+    return int(row.id)
 
 
 @api_router.get("/settings")

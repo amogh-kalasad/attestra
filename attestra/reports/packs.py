@@ -81,6 +81,10 @@ def build_framework_pack(s: Session, engagement_id: int, framework: str) -> Path
     out_dir = config.DATA_DIR / "tenants" / str(eng.tenant_id) / "packs"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"eng{eng.id}-{framework}-pack.zip"
+    # Fixed path is sealed 0o444 after write; clear before rebuild so re-download works.
+    if out.exists():
+        out.chmod(0o666)
+        out.unlink()
     out.write_bytes(buf.getvalue())
     out.chmod(0o444)
     return out

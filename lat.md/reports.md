@@ -73,7 +73,7 @@ DOCX/PDF, framework packs, SARIF, and OSCAL.
 
 Zip binders with a sha256 manifest for PCI / ISO / SOC 2 evidence export.
 
-[[attestra/reports/packs.py#build_framework_pack]] builds a framework-indexed zip under `DATA_DIR/packs/` with `MANIFEST.sha256`.
+[[attestra/reports/packs.py#build_framework_pack]] builds a framework-indexed zip under `DATA_DIR/tenants/<id>/packs/` with `MANIFEST.sha256`. The path is fixed per engagement/framework and sealed `0o444`; rebuilds chmod+unlink the prior zip before rewrite so re-download does not hit PermissionError.
 
 ## Verification
 

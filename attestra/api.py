@@ -792,11 +792,22 @@ def _report_file(s, rid: int, principal: Principal) -> tuple[Report, Path]:
         raise HTTPException(404, "report not found")
     eng = services.get_engagement(s, r.engagement_id, principal)
     path = Path(r.path).resolve()
-    allowed_roots = [
-        (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
-        cfg.DATA_DIR.resolve(),  # legacy pre-tenant paths
-    ]
+    data_root = cfg.DATA_DIR.resolve()
+    tenant_root = (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve()
+    allowed_roots = [tenant_root, data_root]  # legacy pre-tenant paths under DATA_DIR
     if not any(str(path).startswith(str(root)) for root in allowed_roots):
+        # DATA_DIR moved (or a temp DB copy): remap .../tenants/<id>/... under the current root.
+        parts = path.parts
+        if "tenants" in parts:
+            idx = parts.index("tenants")
+            candidate = (cfg.DATA_DIR.joinpath(*parts[idx:])).resolve()
+            if str(candidate).startswith(str(tenant_root)) and candidate.is_file():
+                path = candidate
+            else:
+                raise HTTPException(404, "report not found")
+        else:
+            raise HTTPException(404, "report not found")
+    if not path.is_file():
         raise HTTPException(404, "report not found")
     return r, path
 

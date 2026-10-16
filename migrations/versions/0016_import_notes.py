@@ -17,11 +17,21 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _has_column(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    rows = bind.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+    # PRAGMA row: cid, name, type, notnull, dflt_value, pk
+    return any(r[1] == column for r in rows)
+
+
 def upgrade() -> None:
-    with op.batch_alter_table("scan_runs", schema=None) as b:
-        b.add_column(sa.Column("notes_json", sa.Text(), nullable=False, server_default=""))
-    with op.batch_alter_table("import_runs", schema=None) as b:
-        b.add_column(sa.Column("notes_json", sa.Text(), nullable=False, server_default=""))
+    # Idempotent: some DBs already have notes_json from model create_all / partial apply.
+    if not _has_column("scan_runs", "notes_json"):
+        with op.batch_alter_table("scan_runs", schema=None) as b:
+            b.add_column(sa.Column("notes_json", sa.Text(), nullable=False, server_default=""))
+    if not _has_column("import_runs", "notes_json"):
+        with op.batch_alter_table("import_runs", schema=None) as b:
+            b.add_column(sa.Column("notes_json", sa.Text(), nullable=False, server_default=""))
 
 
 def downgrade() -> None:

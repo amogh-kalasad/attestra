@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from attestra import db, services
-from attestra.models import WebhookDelivery, WebhookEndpoint, WorkflowRule
+from attestra.models import Tenant, WebhookDelivery, WebhookEndpoint, WorkflowRule
 from attestra.webhooks import formats
 from attestra.webhooks import service as wh
 
@@ -31,8 +31,10 @@ def _call(fn):
 
 
 def _tenant_ok(s, principal, tenant_id: int) -> None:
+    """Scope check plus row existence (``tenant_ids_for`` None = all tenants, not skip existence)."""
+    t = s.get(Tenant, tenant_id)
     allowed = services.tenant_ids_for(s, principal)
-    if allowed is not None and tenant_id not in allowed:
+    if not t or (allowed is not None and tenant_id not in allowed):
         raise LookupError(f"tenant {tenant_id} not found")
 
 

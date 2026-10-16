@@ -200,8 +200,12 @@ def _login_redirect(next_url: str = "/", error: str = "Sign in to continue.") ->
 
 
 def _back(url: str, *, msg: str | None = None, error: str | None = None, anchor: str = "") -> RedirectResponse:
-    q = f"?msg={quote(msg)}" if msg else f"?error={quote(error)}" if error else ""
-    return RedirectResponse(f"{url}{q}{anchor}", status_code=303)
+    # Preserve any existing query on url (e.g. /settings/alerts?tenant_id=1).
+    flash = f"msg={quote(msg)}" if msg else f"error={quote(error)}" if error else ""
+    if not flash:
+        return RedirectResponse(f"{url}{anchor}", status_code=303)
+    sep = "&" if "?" in url else "?"
+    return RedirectResponse(f"{url}{sep}{flash}{anchor}", status_code=303)
 
 
 def _require_login(request: Request, next_url: str | None = None):

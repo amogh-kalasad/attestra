@@ -79,13 +79,33 @@ def create_share(body: ShareCreateIn, principal=Depends(_principal)):
         raise _err(e) from e
 
 
+def _default_share_tenant(s, principal) -> int:
+    """Resolve tenant for list when query param omitted. ``None`` scope = all tenants."""
+    from sqlalchemy import select
+
+    from attestra.models import Tenant
+
+    if getattr(principal, "tenant_id", None):
+        return int(principal.tenant_id)
+    allowed = services.tenant_ids_for(s, principal)
+    if allowed is not None:
+        if not allowed:
+            raise services.ServiceError("no tenant in scope for share list")
+        return sorted(allowed)[0]
+    row = s.scalars(select(Tenant).order_by(Tenant.name, Tenant.id)).first()
+    if row is None:
+        raise services.ServiceError("no tenant in scope for share list")
+    return int(row.id)
+
+
 @api_router.get("")
-def list_shares(tenant_id: int = Query(...), principal=Depends(_principal)):
+def list_shares(tenant_id: int | None = Query(None), principal=Depends(_principal)):
     if not has_permission(principal.role, "share.manage"):
         raise HTTPException(403, "permission denied: share.manage")
     try:
         with db.session() as s:
-            rows = share.list_shares(s, principal, tenant_id)
+            tid = tenant_id if tenant_id is not None else _default_share_tenant(s, principal)
+            rows = share.list_shares(s, principal, tid)
             return [share.to_list_item(r) for r in rows]
     except (LookupError, services.ServiceError) as e:
         raise _err(e) from e

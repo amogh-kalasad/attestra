@@ -686,7 +686,7 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 
 ### tests/test_phase4_exports.py
 
-Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip, executive trend SVG, signature verify.
+Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip (including sealed-path rebuild), executive trend SVG, signature verify.
 
 ## Phase 5 evidence hardening
 
@@ -767,8 +767,8 @@ Test modules for features added on top of the core flow. Each line says what the
 - `tests/test_trust_center.py`: the trust center is off by default, publishes only by hand, accepts only signed reports, and gates items behind an NDA.
 - `tests/test_user_management.py`: invites, roles, expiry, one-time tokens, password rules, last admin guard, disabled login and password reset.
 - `tests/test_webhooks.py`: outbound webhooks block private addresses, are signed, retry with backoff, and follow workflow rules.
-- `tests/test_email_alerts.py`: SMTP off skips quietly; grouped Critical/High email; header before/after; SLA once; password never logged; settings role checks; HarmonyPM live header compare on a DB copy.
-- `tests/test_ui_audit_fixes.py`: friendly 403, 404 and 422 pages, nav links by role, sign-in `next=` redirect, and confirm before destructive actions.
+- `tests/test_email_alerts.py`: SMTP off skips quietly; grouped Critical/High email; header before/after; SLA once; password never logged; settings role checks; unrestricted lead default tenant; HarmonyPM live header compare on a DB copy.
+- `tests/test_ui_audit_fixes.py`: friendly 403, 404 and 422 pages, nav links by role, sign-in `next=` redirect, confirm before destructive actions, and `_back` flash query joining.
 - `tests/runner/test_phase7_adapters.py`: command lines for the extra scanner adapters; network tools use the pinned IP and nothing runs.
 
 ## Scan, ownership and sign-off tests
@@ -812,6 +812,10 @@ The SMTP password never appears in log output when an alert is sent through the 
 
 A lead can read and update alert settings; a reviewer cannot.
 
+### Unrestricted lead default tenant
+
+A platform lead with no home tenant still loads and updates alert settings via the default-tenant picker.
+
 ### Header snapshot helpers
 
 Diff helpers report added, removed, and value-changed security headers.
@@ -819,6 +823,14 @@ Diff helpers report added, removed, and value-changed security headers.
 ### Live HarmonyPM header compare
 
 On a temp copy of the live DB, the header-change compare runs for HarmonyPM targets and prints what would be emailed (nothing is sent).
+
+## test_ui_audit_fixes.py
+
+Friendly HTML errors, role nav, and flash redirect helpers for the server-rendered UI ([[tests/test_ui_audit_fixes.py]]).
+
+### Back preserves existing query
+
+[[attestra/web/ui.py#_back]] appends `msg`/`error` with `&` when the redirect URL already has a query string (for example `/settings/alerts?tenant_id=1`).
 
 ## test_cert_expiry.py
 
