@@ -1,12 +1,12 @@
 # Attestra Roadmap: from v0.1.0 to the full product
 
-Date: 2026-10-14 (IST). Target spec: "VAPT & Compliance Platform Architecture v2", Ravi Linganuri, Oct 13 2026.
-Inputs: `docs/GAP_ANALYSIS.md`, `docs/gap_part_compliance.md`, and the Desktop VAPT audit (`C:\Users\t480s\Desktop\VAPT\docs\VAPT_IMPLEMENTATION_AUDIT.md`).
+Date: 2026-10-14 (IST). Target spec: "Security Testing & Compliance Platform Architecture v2", Oct 13 2026.
+Inputs: `docs/GAP_ANALYSIS.md`, `docs/gap_part_compliance.md`, and the Desktop predecessor implementation audit.
 
 Labels:
 - **ESTIMATE** means an effort guess for one developer working with assistance. It is not a commitment.
 - **INFERENCE** means a judgement drawn from the documents that nobody has verified.
-- **Source** shows where the work comes from. **Port** means reuse code from `Desktop\VAPT\src\vapt\...`. **New** means write it fresh in attestra.
+- **Source** shows where the work comes from. **Port** means reuse code from the Desktop predecessor `src\vapt\...` tree. **New** means write it fresh in attestra.
 
 ---
 
@@ -44,8 +44,8 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 **Goal:** a clean, repeatable base that can be changed safely.
 **Depends on:** nothing.
 1. Add schema migrations with Alembic and replace the ad-hoc migration in `db.py`. Files: `attestra/db.py`, new `migrations/`. Source: New.
-2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (VAPT `ci.yml`).
-3. Restore the tests to the GitHub copy. `tests/` was removed from `E:\GitHub\attestra` before the first push. Decide with Ravi whether tests belong in the repo (recommended: yes). Source: existing.
+2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (predecessor `ci.yml`).
+3. Restore the tests to the GitHub copy. `tests/` was removed from `E:\GitHub\attestra` before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
 4. Add a `SECURITY.md` and a threat-model note covering the scope gate, signing key and audit chain. Source: New.
 5. Fix the Starlette TestClient deprecation warning. Source: New.
 
@@ -57,7 +57,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 **Goal:** Attestra itself dispatches Trivy, Semgrep, Nuclei and ZAP, and nothing can run without passing the scope gate.
 **Depends on:** Phase 0.
 1. Port the scope authorization module into `attestra/runner/authorization.py` and wire it to Attestra's Authorization, Asset and Engagement records. Source: Port `core/authorization.py`.
-2. While porting, **fix the image-scope prefix bug**: exact match unless the entry ends in `*`. Source: Port + fix (VAPT audit R4).
+2. While porting, **fix the image-scope prefix bug**: exact match unless the entry ends in `*`. Source: Port + fix (predecessor audit R4).
 3. Widen the SSRF policy: deny unless `ip.is_global`, unwrap IPv4-mapped IPv6, and block 100.64/10, 0.0.0.0/8 and `fd00:ec2::254`. Source: Port + fix (R10).
 4. Port DNS/IP pinning and the safe HTTP client into `attestra/runner/{dns_pin,http_safe}.py`. Source: Port `core/dns_pin.py`, `core/http_safe.py`.
 5. Port the subprocess base and the scanner adapters into `attestra/runner/scanners/{base,trivy,semgrep,nuclei,nuclei_policy,zap,registry}.py`. Adapters write raw output, and the existing `attestra/importers/*` parse it. Source: Port.
@@ -78,18 +78,18 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 - Every ScanRun carries the tool digest and the full-output sha256.
 - An end-to-end run against local fixtures (Trivy fs, Semgrep, Nuclei and ZAP against a loopback test app) produces findings in Attestra.
 
-**Tests:** port the VAPT security tests (`test_authorization`, `test_dns_ip_binding`, `test_redirect_reauth`, `test_nuclei_active_gate`) and add new tests for the kill switch, window and rate limit, plus a live loopback E2E. Never test against external targets.
+**Tests:** port the predecessor security tests (`test_authorization`, `test_dns_ip_binding`, `test_redirect_reauth`, `test_nuclei_active_gate`) and add new tests for the kill switch, window and rate limit, plus a live loopback E2E. Never test against external targets.
 **Effort:** 3–4 weeks (ESTIMATE). Porting saves roughly half compared with writing new (INFERENCE).
 
 ### Phase 2: Identity, roles and tenant isolation
 **Goal:** real users, real roles, and no data leaking between clients.
 **Depends on:** Phase 0. It can overlap the end of Phase 1.
-1. Replace the `X-Attestra-Actor` header with authenticated users. Start with API keys and hashed passwords (port the VAPT `auth/keys.py` and `require_role`), then add OIDC. Files: `api.py`, `web/ui.py`, new `attestra/auth/`. Source: Port.
+1. Replace the `X-Attestra-Actor` header with authenticated users. Start with API keys and hashed passwords (port the predecessor `auth/keys.py` and `require_role`), then add OIDC. Files: `api.py`, `web/ui.py`, new `attestra/auth/`. Source: Port.
 2. Add roles from the spec: tester, reviewer (QA), engagement lead, client viewer and auditor (read-only), plus admin. Every route carries a `require_role` check. Source: Port + New.
 3. Add `tenant_id` scoping to every query through one helper, `services.scoped(...)`. Add Tenant `data_region` and `plan`. Files: `models.py`, `services.py`. Source: New.
 4. Use per-tenant storage prefixes for evidence, raw files and reports. Files: `services._store`. Source: New.
 5. Add a rate limit and security headers. Source: Port `api/security.py`.
-6. Add Keycloak OIDC (auth code + PKCE, state/nonce, issuer and audience checks) behind a flag. Source: New (VAPT only has a stub).
+6. Add Keycloak OIDC (auth code + PKCE, state/nonce, issuer and audience checks) behind a flag. Source: New (predecessor only has a stub).
 
 **Acceptance:** anonymous requests to protected routes get 401. A cross-tenant read test returns 403 or 404 for every list and get endpoint. The role matrix is tested, and four-eyes cannot be bypassed by sending a different name.
 **Tests:** a parametrized route × role × tenant matrix and OIDC tests against a mocked IdP.
@@ -119,7 +119,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 1. A three-step workflow: tester submits, QA approves or rejects (rejection goes back to the tester), and the lead signs. File: `reports/render.py`.
 2. Retest runs with false-fix guards. A finding becomes fixed only if the retest **actually fetched the affected asset**; otherwise it is "inconclusive". Use asset-aware correlation keys for DAST. Source: Port `findings/lifecycle.py` + fix (R2, R3).
 3. A retest/closure letter and a letter of attestation (no vulnerability detail). New templates.
-4. DOCX via docxtpl and PDF via Gotenberg, or WeasyPrint as a lighter local option (INFERENCE: decide with Ravi).
+4. DOCX via docxtpl and PDF via Gotenberg, or WeasyPrint as a lighter local option (INFERENCE: decide with the architecture owner).
 5. Replace HMAC with X.509 or cosign signatures that a customer can verify. File: `reports/signing.py`.
 6. Framework packs: a PCI binder indexed by requirement, an ISO Annex A evidence register, and a SOC 2 period population and sample export (CSV).
 7. Executive trend against the last cycle.
@@ -170,7 +170,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 ### Phase 8: GA, then optional extras
 1. A third-party pentest of Attestra itself, fixing everything critical or high. A load test.
 2. v2.1 framework packs (CERT-In, RBI, SEBI CSCRF, DORA, NIST CSF 2.0) as YAML libraries only.
-3. **AI (optional, last).** The user prefers **no LLM or paid AI unless Ravi requires it**. If required, add draft narratives marked "AI-generated" until a reviewer edits them, with no client data used for training and an off switch. Otherwise use template-based narratives.
+3. **AI (optional, last).** The user prefers **no LLM or paid AI unless the architecture owner requires it**. If required, add draft narratives marked "AI-generated" until a reviewer edits them, with no client data used for training and an off switch. Otherwise use template-based narratives.
 
 **Effort:** GA hardening 2–3 weeks. AI 2 weeks if needed (ESTIMATE).
 
@@ -182,7 +182,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 
 Steps:
 1. Create a branch in GitHub Desktop: **Branch → New branch** named `phase1-scope-gate`.
-2. Read `C:\Users\t480s\Desktop\VAPT\src\vapt\core\authorization.py` and `tests\unit\test_authorization.py`.
+2. Read the predecessor `src\vapt\core\authorization.py` and its `tests\unit\test_authorization.py`.
 3. Copy them to `E:\GitHub\attestra\attestra\runner\authorization.py` and `tests\runner\test_authorization.py`. Change the imports to `attestra.*`.
 4. Write an adapter function `authorize_target(engagement, target)` that builds the allowed scope from Attestra's `Authorization` (valid and unexpired), `Asset` rows and the engagement window.
 5. Fix the bug around `authorization.py:382`: images match exactly unless the entry ends with `*`. Add a test showing `nginx` does **not** allow `nginx-evil/x`.
@@ -225,8 +225,8 @@ Total effort: about 6–9 months for one developer, or about 3–4 months for a 
 - [ ] A retest can never mark a finding fixed without proof that the asset was re-tested.
 - [ ] Evidence is masked at capture, hashed, stored WORM, encrypted per tenant and retained by policy. Every action including downloads is in an exportable, append-only audit log.
 - [ ] Postgres, Temporal, Keycloak, Vault and S3/SeaweedFS run under Helm as SaaS or on-prem, with observability, backup and restore that has been tested.
-- [ ] CI is green: lint, unit, security, and E2E against local fixtures only. Coverage targets are agreed with Ravi.
+- [ ] CI is green: lint, unit, security, and E2E against local fixtures only. Coverage targets are agreed with the architecture owner.
 - [ ] License review is done (AGPL/GPL/NPSL run as separate services or are licensed). The legal pack exists.
 - [ ] The platform has had a third-party pentest with no critical or high findings open.
-- [ ] AI features exist only if Ravi requires them, are clearly labelled and can be switched off.
+- [ ] AI features exist only if the architecture owner requires them, are clearly labelled and can be switched off.
 - [ ] A final gap analysis against the spec shows 100% of the in-scope requirements Done.

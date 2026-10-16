@@ -602,7 +602,7 @@ Spawns a 60-second `python -c "time.sleep"` process via [[attestra/runner/scanne
 
 ## test_cancel_scan_typo_ui.py
 
-Phase 7 cancel scan, portal typo check, and the four partly-fixed UI audit points ([[tests/test_cancel_scan_typo_ui.py]]).
+Phase 7 cancel scan, portal typo check, and the four partly-fixed UI audit points (tests/test_cancel_scan_typo_ui.py).
 
 ### Cancel queued scan
 
@@ -730,19 +730,19 @@ Evidence download creates an `evidence.download` audit event.
 
 ## Engagement type label
 
-Display label for stored type key `vapt` is `VA + PT`; reports must not print VAPT.
+Display label for stored type key `vapt` is `VA + PT`; reports must not print the legacy acronym.
 
 ### Maps key and legacy label
 
-[[attestra/models.py#normalize_engagement_type]] and [[attestra/models.py#engagement_type_label]] map `vapt` and the old string `VAPT (VA + PT)` to the new label.
+[[attestra/models.py#normalize_engagement_type]] and [[attestra/models.py#engagement_type_label]] map `vapt` and the old string that lowercases to `vapt (va + pt)` to the new label.
 
 ### Create accepts legacy label
 
 [[attestra/services.py#create_engagement]] accepts the old label and stores the canonical key `vapt`.
 
-### No VAPT in report titles
+### No legacy acronym in report titles
 
-Rendered technical, executive, compliance, closure, and attestation reports for a `vapt` engagement contain `VA + PT` and never the word VAPT.
+Rendered technical, executive, compliance, closure, and attestation reports for a `vapt` engagement contain `VA + PT` and never the legacy acronym.
 
 ## Feature tests
 
@@ -781,12 +781,12 @@ Tests for real scan runs, target ownership, and the report sign-off buttons. Not
 - `tests/test_ownership_private_confirm.py`: a lead or admin can record the owner's confirmation for a private IP only, and the scan gate then allows it.
 - `tests/test_ui_report_lifecycle.py`: Submit for QA, QA approve or reject, and Approve and sign buttons, with three different people and no self-approval.
 - `tests/test_report_signoff_record.py`: the report view shows the sign-off record, the sealed file stays byte-identical, a changed file is flagged, and `user set-password` works.
-- `tests/test_vapt_label_rename.py`: engagement type label is `VA + PT`; legacy label maps to key `vapt`; rendered report titles never contain VAPT.
+- `tests/test_vapt_label_rename.py`: engagement type label is `VA + PT`; legacy label maps to key `vapt`; rendered report titles never contain the legacy acronym.
 - `tests/test_findings_csv_ct.py`: findings CSV columns and formula guard, tenant check, mocked CT filters (one request, no scope/scan change), CT button off when apex out of scope, HarmonyPM live CSV row count on a DB copy.
 
 ## test_email_alerts.py
 
-Email alerts for new Critical/High findings, header changes, and missed SLA ([[tests/test_email_alerts.py]]).
+Email alerts for new Critical/High findings, header changes, and missed SLA (tests/test_email_alerts.py).
 
 ### No SMTP skips quietly
 
@@ -826,7 +826,7 @@ On a temp copy of the live DB, the header-change compare runs for HarmonyPM targ
 
 ## test_ui_audit_fixes.py
 
-Friendly HTML errors, role nav, and flash redirect helpers for the server-rendered UI ([[tests/test_ui_audit_fixes.py]]).
+Friendly HTML errors, role nav, and flash redirect helpers for the server-rendered UI (tests/test_ui_audit_fixes.py).
 
 ### Back preserves existing query
 
@@ -834,7 +834,7 @@ Friendly HTML errors, role nav, and flash redirect helpers for the server-render
 
 ## test_cert_expiry.py
 
-Certificate expiry warning bands, daily job and fixture parses ([[tests/test_cert_expiry.py]]).
+Certificate expiry warning bands, daily job and fixture parses (tests/test_cert_expiry.py).
 
 ### Band edges
 
@@ -870,7 +870,7 @@ An already-expired fixture still produces a High finding.
 
 ## test_share_link_badge.py
 
-Read-only share links and SVG grade badges ([[tests/test_share_link_badge.py]]).
+Read-only share links and SVG grade badges (tests/test_share_link_badge.py).
 
 ### Create stores hash only
 
@@ -906,7 +906,7 @@ Against a temp copy of live data, a HarmonyPM target can be shared and viewed.
 
 ## test_http_redirect.py
 
-Phase 15 HTTP to HTTPS redirect checks with mocked HTTP only ([[tests/test_http_redirect.py]]).
+Phase 15 HTTP to HTTPS redirect checks with mocked HTTP only (tests/test_http_redirect.py).
 
 ### 301 same host passes
 
@@ -962,7 +962,7 @@ Live-data check uses a DB copy only and does not open a network connection.
 
 ## Phase 19 small extras
 
-Findings CSV export and CT subdomain suggestions ([[tests/test_findings_csv_ct.py]]).
+Findings CSV export and CT subdomain suggestions (tests/test_findings_csv_ct.py).
 
 ### CSV export columns and formula guard
 

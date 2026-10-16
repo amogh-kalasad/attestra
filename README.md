@@ -2,7 +2,7 @@
 
 **From findings to signed attestation.**
 
-Attestra turns VAPT results into audit-ready evidence. It imports results from the open-source scanners your testers already run, de-duplicates and risk-ranks them, records human validation, maps every finding to **PCI DSS v4.0.1, ISO/IEC 27001:2022 and SOC 2** controls, and produces reports that are hashed, four-eyes approved and signed.
+Attestra turns security testing results into audit-ready evidence. It imports results from the open-source scanners your testers already run, de-duplicates and risk-ranks them, records human validation, maps every finding to **PCI DSS v4.0.1, ISO/IEC 27001:2022 and SOC 2** controls, and produces reports that are hashed, four-eyes approved and signed.
 
 Attestra does not run scanners or attack anything. Testers run tools under the client's signed authorization and import the result files. Attestra refuses imports for an engagement with no currently valid signed authorization.
 
@@ -12,7 +12,7 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Security: [SECURITY.
 
 | Area | Capability |
 | --- | --- |
-| Engagements | Tenants, engagements (VA / PT / VAPT / retest / continuous), test window, target frameworks |
+| Engagements | Tenants, engagements (VA / PT / VA + PT / retest / continuous), test window, target frameworks |
 | Authorization gate | Signed authorization (hashed, stored write-once). Imports are blocked without a valid one (ISO A.8.34) |
 | Scope | Assets with criticality 1–5, internet/internal exposure, PCI CDE flag |
 | Import | OWASP ZAP JSON, Nuclei JSONL, Trivy JSON (vulnerabilities and misconfigurations), any SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks and others) |
@@ -21,7 +21,7 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Security: [SECURITY.
 | Lifecycle | new → triaged → validated → fixed → retest_passed, plus false_positive and risk_accepted (reason required). A fixed finding seen again reopens automatically. SLA due dates (critical 30 days, per PCI 6.3.3) |
 | Evidence | Files hashed (SHA-256), content-addressed, write-once |
 | Compliance | CWE → control objective → framework requirement crosswalk (hub and spoke). Process controls (scanning, pentest, retest, authorization) derived from engagement records. PCI evaluation is scoped to CDE assets. Assessor confirmation with rationale overrides the proposal |
-| Reports | Technical VAPT report, executive summary, per-framework compliance evidence pack. Versioned, SHA-256 hashed, four-eyes approval, signed |
+| Reports | Technical VA + PT report, executive summary, per-framework compliance evidence pack. Versioned, SHA-256 hashed, four-eyes approval, signed |
 | Audit | Append-only, hash-chained audit log with tamper verification |
 | Interfaces | REST API (OpenAPI at `/docs`), web dashboard, CLI |
 
@@ -65,7 +65,7 @@ Write calls need an `X-Attestra-Actor` header. This is a placeholder until SSO i
 
 ```bash
 curl -X POST localhost:8000/api/engagements -H 'X-Attestra-Actor: priya' -H 'Content-Type: application/json' \
-  -d '{"tenant":"Acme","name":"Q4 VAPT","type":"vapt","frameworks":["pci_dss_4","soc2"]}'
+  -d '{"tenant":"Acme","name":"Q4 VA + PT","type":"vapt","frameworks":["pci_dss_4","soc2"]}'
 curl -X POST localhost:8000/api/engagements/1/authorizations -H 'X-Attestra-Actor: priya' \
   -F document=@signed-roe.pdf -F signer="CISO, Acme" -F signed_on=2026-10-01 -F expires_on=2026-12-31
 curl -X POST localhost:8000/api/engagements/1/imports -H 'X-Attestra-Actor: arjun' -F tool=zap -F file=@zap.json

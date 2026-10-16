@@ -28,7 +28,7 @@ controls:
 titles:
   "GV.OV": Board and management oversight of cyber risk
   "GV.SC": Manage third-party and supply chain cyber risk
-  "ID.RA": Assess risk, including periodic VAPT
+  "ID.RA": Assess risk, including periodic security testing
   "PR.AA": Identity, authentication and access management
   "PR.DS": Protect data at rest and in transit
   "PR.IP": Secure baselines, secure development and change control

@@ -1,6 +1,6 @@
-# VAPT & Compliance Platform — Architecture (v2: PCI, ISO 27001, SOC 2)
+# Security Testing & Compliance Platform — Architecture (v2: PCI, ISO 27001, SOC 2)
 
-Oct 13, 2026 · @Ravi Linganuri
+Oct 13, 2026
 
 ## Executive summary
 
@@ -18,11 +18,11 @@ We should build the layer that sits around existing open-source scanners: orches
 | --- | --- | --- | --- |
 | VA: Vulnerability Assessment | Breadth-first automated scan for known CVEs, missing patches and misconfigurations | Scanners | Orchestrate, normalize, deduplicate, score |
 | PT: Penetration Testing | Depth-first, human-led validation of whether a weakness is really exploitable | Certified testers | Workbench, checklists, evidence capture. The platform never exploits anything autonomously |
-| VAPT | VA for coverage, then PT to validate impact | Both | One engagement: scope, scan, triage, validate, report, retest |
+| VA + PT | VA for coverage, then PT to validate impact | Both | One engagement: scope, scan, triage, validate, report, retest |
 | OWASP | Open standards: Top 10, ASVS, WSTG, MASVS | Reference | Test methodology and finding taxonomy |
 | VPAT (accessibility) | Accessibility conformance report against WCAG 2.2, Section 508 and EN 301 549 | Accessibility auditors | A later module that reuses the same scan, validate, map and report pipeline |
 
-**Scope of this document:** architecture for v1 (core VAPT) and the v2 compliance module (PCI DSS, ISO 27001 and SOC 2). It also covers the open-source components each layer builds on. Licenses below are from memory and must be verified before any commercial use.
+**Scope of this document:** architecture for v1 (core security testing) and the v2 compliance module (PCI DSS, ISO 27001 and SOC 2). It also covers the open-source components each layer builds on. Licenses below are from memory and must be verified before any commercial use.
 
 ## Open-source landscape
 
@@ -74,11 +74,11 @@ The platform has three parts. A control plane holds state and decisions. A runne
 
 The numbered boxes follow one engagement: scope (1) gates the orchestrator (2), runners scan, findings (3) go to human validation (4), then compliance mapping (5) and signed reports (6). The highlighted box is the scope gate, which no job can bypass. Each scanner is a plugin, so adding one means writing a parser and a run profile, not changing the core.
 
-## End-to-end VAPT engagement flow
+## End-to-end VA + PT engagement flow
 
 One engagement runs as a single resumable Temporal workflow, from signed authorization to closure letter. Automation covers breadth (VA). People decide exploitability, control status and sign-off.
 
-&#91;embedded content: VAPT engagement flow · 8 steps, 1 retest loop\]
+&#91;embedded content: VA + PT engagement flow · 8 steps, 1 retest loop\]
 
 If a tester marks a finding not exploitable at step 4, it closes as a false positive with a reason. If QA rejects a draft at step 6, it goes back to the tester. Continuous mode reruns steps 2 and 3 on a schedule, for PCI quarterly scans and SOC 2 Type II periods, and through CI/CD gates.
 
@@ -91,7 +91,7 @@ One normalized finding schema, keyed on CWE and asset, is what makes the platfor
 | Entity | Key fields | Notes |
 | --- | --- | --- |
 | Tenant | id, name, data\_region, plan | Hard isolation boundary for data, runners and encryption keys |
-| Engagement | id, tenant\_id, type (VA / PT / VAPT / retest / continuous), frameworks\[\], window\_start, window\_end, status | One audit cycle or test |
+| Engagement | id, tenant\_id, type (VA / PT / VA + PT / retest / continuous), frameworks\[\], window\_start, window\_end, status | One audit cycle or test |
 | Authorization | engagement\_id, signed\_doc\_uri, sha256, signer, rules\_of\_engagement, expires\_at | No valid authorization means no scan. The scope gate enforces this |
 | Asset | id, type (url / ip / cidr / repo / image / cloud\_account / mobile\_app), identifier, criticality (1–5), in\_cde (bool), owner, tags | `in_cde` marks the PCI cardholder data environment and drives PCI scope |
 | ScopeRule | engagement\_id, asset\_id or pattern, allow / deny, rate\_limit | Allow-list, evaluated by OPA before any job is dispatched |
@@ -129,7 +129,7 @@ Starting weights: w\_KEV = 1.5 if the CVE is on the KEV list, otherwise 1.0. w\_
 
 ## v2 compliance module: PCI DSS, ISO 27001, SOC 2
 
-v2 adds a mapping layer between findings and controls. Each confirmed finding links to every control it affects, in every framework, through one crosswalk. A single VAPT engagement can then produce a PCI report, an ISO 27001 evidence pack and a SOC 2 evidence pack without retesting.
+v2 adds a mapping layer between findings and controls. Each confirmed finding links to every control it affects, in every framework, through one crosswalk. A single VA + PT engagement can then produce a PCI report, an ISO 27001 evidence pack and a SOC 2 evidence pack without retesting.
 
 ### How the mapping works
 
@@ -139,7 +139,7 @@ v2 adds a mapping layer between findings and controls. Each confirmed finding li
 4. **Process controls:** controls about the testing process itself (for example "pentest performed annually" or "internal scans run quarterly") are met by the engagement record and its evidence. They are not met by findings.
 5. **Status roll-up:** the system proposes a control status. Critical or high open findings on a mapped control make it **not met**; medium findings make it **partial**. The process evidence then decides whether the control can be **met**. A named assessor confirms every status. The platform proposes; a person decides.
 
-### Crosswalk: where VAPT evidence satisfies each framework
+### Crosswalk: where VA + PT evidence satisfies each framework
 
 | Control objective | PCI DSS 4.0.1 | ISO/IEC 27001:2022 Annex A | SOC 2 (TSC 2017, rev. 2022) | Platform evidence produced |
 | --- | --- | --- | --- | --- |
@@ -171,7 +171,7 @@ Control references above are from the published standards as I recall them. Veri
 
 **ISO/IEC 27001:2022**
 
-- A Statement of Applicability (SoA) view showing which Annex A controls VAPT evidence supports.
+- A Statement of Applicability (SoA) view showing which Annex A controls VA + PT evidence supports.
 - Nonconformities and corrective actions (clause 10.2) linked to findings and retests.
 - Internal audit support (clause 9.2): an evidence pack per control, with sampling.
 - Output: an Annex A evidence register and a vulnerability management records pack for the certification body.
@@ -184,7 +184,7 @@ Control references above are from the published standards as I recall them. Veri
 
 ### Phase v2.1 framework packs (same engine)
 
-CERT-In VAPT guidelines, the RBI cyber security framework, SEBI CSCRF, HIPAA Security Rule, NIST CSF 2.0, DORA, and EU CRA. Each is a new mapping library, with no new code.
+CERT-In security testing guidelines, the RBI cyber security framework, SEBI CSCRF, HIPAA Security Rule, NIST CSF 2.0, DORA, and EU CRA. Each is a new mapping library, with no new code.
 
 ## Reporting and evidence
 
@@ -195,7 +195,7 @@ Reports are generated from the finding and control data, reviewed by a person, t
 | Report | Audience | Contents | Trigger |
 | --- | --- | --- | --- |
 | Executive summary | Board, CISO | Risk posture, top 5 risks, trend against the last cycle, framework readiness percentage | Every engagement |
-| Technical VAPT report | Engineering | Scope, methodology, each finding with CVSS v4, evidence, reproduction notes and remediation | Every engagement |
+| Technical VA + PT report | Engineering | Scope, methodology, each finding with CVSS v4, evidence, reproduction notes and remediation | Every engagement |
 | Retest / closure letter | Auditor, customer | Status of every original finding after retest, signed | After retest |
 | Letter of attestation | Customers, trust page | Test dates, scope summary, no open critical or high findings. No vulnerability detail | On request |
 | PCI DSS evidence binder | QSA | Index by requirement (6.3, 11.3, 11.4) with scan runs, the pentest report, segmentation results and the ASV import | Quarterly and annually |
@@ -256,7 +256,7 @@ Use Python for the control plane, because DefectDojo, CISO Assistant and most sc
 
 &#91;embedded content: roadmap · 4 phases, 3 gates\]
 
-These are proposed durations for a team of 4 to 6 engineers plus one compliance lead. v2 is the commercial wedge: it turns one VAPT engagement into evidence for PCI, ISO and SOC 2 at once.
+These are proposed durations for a team of 4 to 6 engineers plus one compliance lead. v2 is the commercial wedge: it turns one VA + PT engagement into evidence for PCI, ISO and SOC 2 at once.
 
 ## Risks, open questions and next steps
 
@@ -269,11 +269,11 @@ The largest risks are licensing, mapping accuracy and positioning, not technolog
 | Wrong control mappings | An auditor rejects the evidence, and customers lose trust | Every mapping carries a rationale and strength. Have a QSA or ISO lead auditor review the mapping library. Assessors confirm all control statuses |
 | Scanner false positives | Noise erodes trust in reports | Human validation step. Per-tenant suppression rules. Track the false-positive rate per tool and rule |
 | Scope breach (testing an unauthorized asset) | Legal liability | OPA scope gate, ownership verification, kill switch, insurance |
-| Positioning against commercial tools (Tenable, Qualys, Rapid7, Vanta, Drata) | Hard to differentiate | Position as the VAPT-to-audit bridge: services firms and regulated mid-market companies in India and APAC first, where CERT-In and RBI formats matter |
+| Positioning against commercial tools (Tenable, Qualys, Rapid7, Vanta, Drata) | Hard to differentiate | Position as the security-testing-to-audit bridge: services firms and regulated mid-market companies in India and APAC first, where CERT-In and RBI formats matter |
 
 ### Open questions
 
-- Business model: a platform sold to VAPT services firms, a managed VAPT service we deliver ourselves, or both?
+- Business model: a platform sold to security testing firms, a managed security testing service we deliver ourselves, or both?
 - Fork DefectDojo, or run it upstream behind our API? Forking gives control; running upstream keeps merges cheap.
 - Adopt SysReptor for reporting, or build reports on docxtpl from the start?
 - Do we pursue CERT-In empanelment or PCI ASV status ourselves, or partner?
@@ -285,5 +285,5 @@ The largest risks are licensing, mapping accuracy and positioning, not technolog
 - [ ] Proof of concept: ZAP + Nuclei + Trivy into DefectDojo, with the OPA scope gate (2 weeks)
 - [ ] Stand up CISO Assistant and load the PCI DSS 4.0.1, ISO 27001:2022 and SOC 2 libraries. Test mapping a sample findings set
 - [ ] Draft the finding schema (JSON Schema) and the CWE-to-control mapping seed
-- [ ] Interview 5 VAPT firms and 5 compliance leads to validate turnaround and report-format pain points
+- [ ] Interview 5 security testing firms and 5 compliance leads to validate turnaround and report-format pain points
 - [ ] Write the rules-of-engagement and authorization templates

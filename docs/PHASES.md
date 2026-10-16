@@ -6,7 +6,7 @@ Work through the phases in order. Each phase lists goal, tasks, dependencies, ac
 **Goal:** a clean, repeatable base that can be changed safely.
 **Depends on:** nothing.
 1. Add schema migrations with Alembic and replace the ad-hoc migration in `db.py`. Files: `attestra/db.py`, new `migrations/`. Source: New.
-2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (VAPT `ci.yml`).
+2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (predecessor `ci.yml`).
 3. Restore the tests to the GitHub copy. `tests/` was removed from `E:\GitHub\attestra` before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
 4. Add a `SECURITY.md` and a threat-model note covering the scope gate, signing key and audit chain. Source: New.
 5. Fix the Starlette TestClient deprecation warning. Source: New.
@@ -19,7 +19,7 @@ Work through the phases in order. Each phase lists goal, tasks, dependencies, ac
 **Goal:** Attestra itself dispatches Trivy, Semgrep, Nuclei and ZAP, and nothing can run without passing the scope gate.
 **Depends on:** Phase 0.
 1. Port the scope authorization module into `attestra/runner/authorization.py` and wire it to Attestra's Authorization, Asset and Engagement records. Source: Port `core/authorization.py`.
-2. While porting, **fix the image-scope prefix bug**: exact match unless the entry ends in `*`. Source: Port + fix (VAPT audit R4).
+2. While porting, **fix the image-scope prefix bug**: exact match unless the entry ends in `*`. Source: Port + fix (predecessor audit R4).
 3. Widen the SSRF policy: deny unless `ip.is_global`, unwrap IPv4-mapped IPv6, and block 100.64/10, 0.0.0.0/8 and `fd00:ec2::254`. Source: Port + fix (R10).
 4. Port DNS/IP pinning and the safe HTTP client into `attestra/runner/{dns_pin,http_safe}.py`. Source: Port `core/dns_pin.py`, `core/http_safe.py`.
 5. Port the subprocess base and the scanner adapters into `attestra/runner/scanners/{base,trivy,semgrep,nuclei,nuclei_policy,zap,registry}.py`. Adapters write raw output, and the existing `attestra/importers/*` parse it. Source: Port.
@@ -40,18 +40,18 @@ Work through the phases in order. Each phase lists goal, tasks, dependencies, ac
 - Every ScanRun carries the tool digest and the full-output sha256.
 - An end-to-end run against local fixtures (Trivy fs, Semgrep, Nuclei and ZAP against a loopback test app) produces findings in Attestra.
 
-**Tests:** port the VAPT security tests (`test_authorization`, `test_dns_ip_binding`, `test_redirect_reauth`, `test_nuclei_active_gate`) and add new tests for the kill switch, window and rate limit, plus a live loopback E2E. Never test against external targets.
+**Tests:** port the predecessor security tests (`test_authorization`, `test_dns_ip_binding`, `test_redirect_reauth`, `test_nuclei_active_gate`) and add new tests for the kill switch, window and rate limit, plus a live loopback E2E. Never test against external targets.
 **Effort:** 3–4 weeks (ESTIMATE). Porting saves roughly half compared with writing new (INFERENCE).
 
 ### Phase 2: Identity, roles and tenant isolation
 **Goal:** real users, real roles, and no data leaking between clients.
 **Depends on:** Phase 0. It can overlap the end of Phase 1.
-1. Replace the `X-Attestra-Actor` header with authenticated users. Start with API keys and hashed passwords (port the VAPT `auth/keys.py` and `require_role`), then add OIDC. Files: `api.py`, `web/ui.py`, new `attestra/auth/`. Source: Port.
+1. Replace the `X-Attestra-Actor` header with authenticated users. Start with API keys and hashed passwords (port the predecessor `auth/keys.py` and `require_role`), then add OIDC. Files: `api.py`, `web/ui.py`, new `attestra/auth/`. Source: Port.
 2. Add roles from the spec: tester, reviewer (QA), engagement lead, client viewer and auditor (read-only), plus admin. Every route carries a `require_role` check. Source: Port + New.
 3. Add `tenant_id` scoping to every query through one helper, `services.scoped(...)`. Add Tenant `data_region` and `plan`. Files: `models.py`, `services.py`. Source: New.
 4. Use per-tenant storage prefixes for evidence, raw files and reports. Files: `services._store`. Source: New.
 5. Add a rate limit and security headers. Source: Port `api/security.py`.
-6. Add Keycloak OIDC (auth code + PKCE, state/nonce, issuer and audience checks) behind a flag. Source: New (VAPT only has a stub).
+6. Add Keycloak OIDC (auth code + PKCE, state/nonce, issuer and audience checks) behind a flag. Source: New (predecessor only has a stub).
 
 **Acceptance:** anonymous requests to protected routes get 401. A cross-tenant read test returns 403 or 404 for every list and get endpoint. The role matrix is tested, and four-eyes cannot be bypassed by sending a different name.
 **Tests:** a parametrized route × role × tenant matrix and OIDC tests against a mocked IdP.

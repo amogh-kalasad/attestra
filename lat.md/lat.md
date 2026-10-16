@@ -2,7 +2,7 @@ This directory defines the high-level concepts, business logic, and architecture
 
 # Attestra knowledge graph
 
-Attestra turns imported VAPT scanner results into de-duplicated, risk-ranked findings, maps them to PCI DSS / ISO 27001 / SOC 2 controls, and produces hashed, four-eyes-approved, signed reports. It does not run scanners.
+Attestra turns imported security testing scanner results into de-duplicated, risk-ranked findings, maps them to PCI DSS / ISO 27001 / SOC 2 controls, and produces hashed, four-eyes-approved, signed reports. It does not run scanners.
 
 ## Index
 

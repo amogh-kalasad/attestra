@@ -8,7 +8,7 @@ SQLAlchemy finding entity and related engagement constants.
 
 [[attestra/models.py#Finding]] holds title, description, recommendation, tools, rule_ids, CWE/CVEs, location, severity, CVSS, EPSS, KEV, risk_score, SLA due, lifecycle status, and fingerprint.
 
-Engagement types, frameworks, asset kinds, test types, and allowed status transitions live as module constants in [[attestra/models.py]] (`ENGAGEMENT_TYPES`, `ENGAGEMENT_TYPE_LABELS`, `FRAMEWORKS`, `ASSET_KINDS`, `TEST_TYPES`, `TRANSITIONS`). The stored type key `vapt` stays; its display label is `VA + PT` via [[attestra/models.py#engagement_type_label]]. Legacy label `VAPT (VA + PT)` maps to key `vapt` through [[attestra/models.py#normalize_engagement_type]] on create and on display.
+Engagement types, frameworks, asset kinds, test types, and allowed status transitions live as module constants in [[attestra/models.py]] (`ENGAGEMENT_TYPES`, `ENGAGEMENT_TYPE_LABELS`, `FRAMEWORKS`, `ASSET_KINDS`, `TEST_TYPES`, `TRANSITIONS`). The stored type key `vapt` stays; its display label is `VA + PT` via [[attestra/models.py#engagement_type_label]]. Legacy label `vapt (va + pt)` maps to key `vapt` through [[attestra/models.py#normalize_engagement_type]] on create and on display.
 
 ## Deduplication
 

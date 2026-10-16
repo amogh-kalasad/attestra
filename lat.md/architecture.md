@@ -1,6 +1,6 @@
 # Architecture
 
-Attestra v0.1 is an **import-and-report** VAPT evidence platform. Testers run scanners elsewhere; Attestra imports result files, normalizes findings, maps them to compliance controls, and produces hashed, four-eyes-approved, signed reports.
+Attestra v0.1 is an **import-and-report** security testing evidence platform. Testers run scanners elsewhere; Attestra imports result files, normalizes findings, maps them to compliance controls, and produces hashed, four-eyes-approved, signed reports.
 
 It does **not** execute scanners, spawn runners, or attack targets. That boundary is intentional (license isolation and legal scope).
 
@@ -8,7 +8,7 @@ It does **not** execute scanners, spawn runners, or attack targets. That boundar
 
 Cut the path from engagement kick-off to a signed, audit-ready report. Every claim in a report should be traceable to raw imported evidence.
 
-See also `docs/ARCHITECTURE.md` and `docs/VAPT & Compliance Platform — Architecture (v2 PCI, ISO 27001, SOC 2).md`.
+See also `docs/ARCHITECTURE.md` and `docs/Security Testing & Compliance Platform — Architecture (v2 PCI, ISO 27001, SOC 2).md`.
 
 ## System layers
 

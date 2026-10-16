@@ -1,6 +1,6 @@
-# Attestra — Gap analysis vs "VAPT & Compliance Platform Architecture v2"
+# Attestra — Gap analysis vs "Security Testing & Compliance Platform Architecture v2"
 
-Date: 2026-10-14 (IST). Spec: Ravi Linganuri, Oct 13 2026. Code: `E:\attestra` v0.1.0, reviewed read-only (no code changes).
+Date: 2026-10-14 (IST). Spec dated Oct 13 2026. Code: `E:\attestra` v0.1.0, reviewed read-only (no code changes).
 
 ## Summary
 
@@ -185,11 +185,11 @@ Status counts: Done 19, Done-untested 3, Partial 19, Stub 3, Not done 44
 | E7 | Audit covers downloads | Evidence chain | **Not done** | api.py:262 |
 | E8 | Audit export for auditors | Evidence chain | **Not done** |  |
 
-## What Desktop\VAPT already has that can fill gaps
+## What the Desktop predecessor already has that can fill gaps
 
-Source: `C:\Users\t480s\Desktop\VAPT\docs\VAPT_IMPLEMENTATION_AUDIT.md`.
+Source: the Desktop predecessor implementation audit.
 
-| Attestra gap | VAPT asset | Caveat from that audit |
+| Attestra gap | Predecessor asset | Caveat from that audit |
 |---|---|---|
 | S3/S4/S5 scope gate at dispatch | `core/authorization.py` fail-closed URL/path/image scope, re-authorized at run and resume (`engine.py:100-129`), tested | Image scope prefix-match bug (`authorization.py:382`); SSRF list narrow |
 | R5 egress / SSRF safety | `core/dns_pin.py`, `core/http_safe.py` DNS/IP pinning + redirect re-auth, tested | ZAP is pinned only pre-flight, no egress confinement |
@@ -198,11 +198,11 @@ Source: `C:\Users\t480s\Desktop\VAPT\docs\VAPT_IMPLEMENTATION_AUDIT.md`.
 | Q6 retest | retest outcomes with false-`verified_fixed` guards | ZAP correlation asset-blind |
 | F7 OWASP refs | `owasp/mapping.py` WSTG/ASVS labels, tested | labels only |
 
-Suggested path: port VAPT's authorization + dns_pin + scanner adapters as Attestra's runner plane, emitting files Attestra already imports; fix the image-scope bug and ZAP egress first.
+Suggested path: port the predecessor's authorization + dns_pin + scanner adapters as Attestra's runner plane, emitting files Attestra already imports; fix the image-scope bug and ZAP egress first.
 
 ## Recommended next 5 tasks
 
-1. Runner plane: reuse VAPT scanners behind an Attestra job API, gated by the scope check (authorization valid + window + allow-list + intrusive flag), plus a kill switch.
+1. Runner plane: reuse the predecessor scanners behind an Attestra job API, gated by the scope check (authorization valid + window + allow-list + intrusive flag), plus a kill switch.
 2. Real identity: Keycloak OIDC + roles (tester/reviewer/lead/client/auditor) replacing the X-Attestra-Actor header; tenant scoping on every query.
 3. Close crosswalk gaps (PCI 11.3.x/11.4.x/12.3.1, ISO A.8.22/6.1.2, SOC2 CC7.4/CC6.8/CC3.2) with strength+rationale per mapping; get QSA review.
 4. Retest/closure letter + letter of attestation; 3-step four-eyes with reject loop; DOCX/PDF output and X.509/cosign signing.
