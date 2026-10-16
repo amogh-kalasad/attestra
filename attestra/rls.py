@@ -103,6 +103,21 @@ POLICIES.update(LIBRARY_POLICIES)
 # User management (migration 0014_user_invites).
 USER_POLICIES: dict[str, str] = {"user_invites": _tenant("tenant_id")}
 POLICIES.update(USER_POLICIES)
+# Certificate expiry webhook state (migration 0017_cert_expiry_alerts).
+CERT_EXPIRY_POLICIES: dict[str, str] = {"cert_expiry_alerts": _tenant("tenant_id")}
+POLICIES.update(CERT_EXPIRY_POLICIES)
+# Finding comments (migration 0018_finding_comments).
+COMMENT_POLICIES: dict[str, str] = {"finding_comments": _tenant("tenant_id")}
+POLICIES.update(COMMENT_POLICIES)
+# Share links (migration 0019_share_links).
+SHARE_POLICIES: dict[str, str] = {"share_links": _tenant("tenant_id")}
+POLICIES.update(SHARE_POLICIES)
+# Email alerts (migration 0020_email_alerts).
+EMAIL_ALERT_POLICIES: dict[str, str] = {
+    "email_alert_settings": _tenant("tenant_id"),
+    "email_alert_sent": _tenant("tenant_id"),
+}
+POLICIES.update(EMAIL_ALERT_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

@@ -1,0 +1,94 @@
+{% extends "_layout.html" %}
+{% block title %}Sites · Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Targets across your engagements</p>
+    <h1>Sites</h1>
+    <p class="lede">Every target you can see: Observatory-style grade, open findings by severity, last scan, and score trend vs the previous finished scan. Cancelled and failed scans are left out of the grade and the trend.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+    <h2 style="margin:0;padding:0;border:0">All sites</h2>
+    <form method="get" action="/sites" class="row" style="gap:8px;margin:0;flex-wrap:wrap">
+      <label class="meta" style="display:flex;align-items:center;gap:6px">
+        Filter
+        <input type="search" name="q" value="{{ q }}" placeholder="Name or URL" style="min-width:12rem">
+      </label>
+      <label class="meta" style="display:flex;align-items:center;gap:6px">
+        Sort
+        <select name="sort">
+          <option value="grade" {% if sort == 'grade' %}selected{% endif %}>Worst grade first</option>
+          <option value="name" {% if sort == 'name' %}selected{% endif %}>Name</option>
+          <option value="last_scan" {% if sort == 'last_scan' %}selected{% endif %}>Last scan</option>
+        </select>
+      </label>
+      <button type="submit" class="secondary">Apply</button>
+    </form>
+  </div>
+  <div class="table-wrap" style="margin: 0 -24px -24px">
+  <table>
+    <thead>
+    <tr>
+      <th>Target</th>
+      <th>Grade</th>
+      <th>Last scan</th>
+      <th>Critical</th>
+      <th>High</th>
+      <th>Medium</th>
+      <th>Low</th>
+      <th>Trend</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>
+        <a class="row-title" href="{{ r.url }}">{{ r.name or r.identifier }}</a>
+        <div class="meta mono">{{ r.identifier }}</div>
+        <div class="meta">{{ r.engagement_name }} · ENG-{{ r.engagement_id }}</div>
+      </td>
+      <td>
+        {% if r.grade %}
+          <b style="font-size:1.15rem">{{ r.grade }}</b>
+          <span class="meta"> · {{ r.score }}</span>
+        {% else %}
+          <span class="meta">not graded</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.last_scan_at %}
+          {{ r.last_scan_at|dt }}
+          <div class="meta">{{ r.last_scan_status }}</div>
+        {% else %}
+          <span class="meta">—</span>
+        {% endif %}
+      </td>
+      <td>{{ r.open_by_sev.critical }}</td>
+      <td>{{ r.open_by_sev.high }}</td>
+      <td>{{ r.open_by_sev.medium }}</td>
+      <td>{{ r.open_by_sev.low }}</td>
+      <td>
+        {% if r.trend == 'up' %}
+          <span title="Score improved vs previous finished scan" aria-label="up">↑</span>
+        {% elif r.trend == 'down' %}
+          <span title="Score fell vs previous finished scan" aria-label="down">↓</span>
+        {% elif r.trend == 'same' %}
+          <span title="Score unchanged vs previous finished scan" aria-label="same">→</span>
+        {% else %}
+          <span class="meta">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8"><div class="empty">No targets in your view yet.<br><br>
+      <a class="btn secondary" href="/">Open engagements</a> to add targets in scope.
+    </div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

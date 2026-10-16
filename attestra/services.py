@@ -17,7 +17,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from attestra import audit, config, importers, scoring
-from attestra.fingerprint import fingerprint, normalize_title
+from attestra.fingerprint import (
+    caa_legacy_fingerprints,
+    canonicalize_for_merge,
+    fingerprint,
+    is_caa_variant,
+    is_cert_expiry_variant,
+    normalize_title,
+)
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
@@ -44,6 +51,7 @@ from attestra.models import (
     SegmentationTest,
     Tenant,
     TenantMembership,
+    normalize_engagement_type,
     utcnow,
 )
 
@@ -193,6 +201,7 @@ def create_engagement(
 ) -> Engagement:
     if not name.strip():
         raise ServiceError("engagement name is required")
+    type = normalize_engagement_type(type)
     if type not in ENGAGEMENT_TYPES:
         raise ServiceError(f"type must be one of {ENGAGEMENT_TYPES}")
     from attestra.compliance import load_library
@@ -223,8 +232,12 @@ def update_engagement(
     window_end: date | None,
     frameworks: list[str],
     actor: str,
+    client_name: str | None = None,
 ) -> Engagement:
-    """Edit an engagement's name, test window and frameworks (UI audit #47). Audited."""
+    """Edit an engagement's name, client name, test window and frameworks (UI audit #47). Audited.
+
+    Delete is intentionally omitted: engagements hold signed evidence.
+    """
     e = get_engagement(s, engagement_id)
     if not name.strip():
         raise ServiceError("engagement name is required")
@@ -236,15 +249,34 @@ def update_engagement(
         raise ServiceError(f"unknown frameworks {bad}; choose from {known}")
     if window_start and window_end and window_end < window_start:
         raise ServiceError("the test window end must be on or after the start date")
-    before = {"name": e.name, "window_start": str(e.window_start or ""), "window_end": str(e.window_end or ""),
-              "frameworks": list(e.frameworks or [])}
+    before = {
+        "name": e.name,
+        "client_name": e.tenant.name if e.tenant else "",
+        "window_start": str(e.window_start or ""),
+        "window_end": str(e.window_end or ""),
+        "frameworks": list(e.frameworks or []),
+    }
     e.name = name.strip()
     e.window_start = window_start
     e.window_end = window_end
     e.frameworks = list(frameworks)
-    audit.record(s, actor, "engagement.update", "engagement", e.id, before=before,
-                 after={"name": e.name, "window_start": str(window_start or ""), "window_end": str(window_end or ""),
-                        "frameworks": list(frameworks)})
+    if client_name is not None and client_name.strip() and e.tenant is not None:
+        new_client = client_name.strip()
+        if new_client != e.tenant.name:
+            clash = s.scalar(select(Tenant).where(Tenant.name == new_client, Tenant.id != e.tenant_id))
+            if clash:
+                raise ServiceError(f"another client is already named {new_client!r}")
+            e.tenant.name = new_client
+    audit.record(
+        s, actor, "engagement.update", "engagement", e.id, before=before,
+        after={
+            "name": e.name,
+            "client_name": e.tenant.name if e.tenant else "",
+            "window_start": str(window_start or ""),
+            "window_end": str(window_end or ""),
+            "frameworks": list(frameworks),
+        },
+    )
     return e
 
 
@@ -564,6 +596,12 @@ def import_results(
     assets = list(eng.assets)
     fallback = next((a for a in assets if default_asset_id is not None and a.id == default_asset_id), None)
     matched = [(nf, match_asset(assets, nf.location) or fallback) for nf in parsed]
+    # Burp/Nessus multi-host exports: drop hosts with no matching in-scope asset.
+    skipped_hosts = 0
+    if tool in ("burp", "nessus"):
+        kept = [(nf, a) for nf, a in matched if a is not None]
+        skipped_hosts = len(matched) - len(kept)
+        matched = kept
     outside = sorted({f"{a.identifier} ({a.environment})" for _, a in matched if a and a.environment not in allowed_envs})
     if outside:
         raise ServiceError(
@@ -605,20 +643,40 @@ def import_results(
     except Exception:
         # Check derivation must never block an import.
         pass
+    # Scanner tool notes (testssl engine_problem / Nessus scan info) — stored, not findings.
+    if tool == "testssl":
+        try:
+            from attestra.importers import testssl as testssl_importer
+
+            note_list = testssl_importer.extract_notes(masked)
+            if note_list:
+                run.notes_json = json.dumps({"notes": note_list})
+        except Exception:
+            pass
+    elif tool == "nessus":
+        try:
+            from attestra.importers import nessus as nessus_importer
+
+            note_list = nessus_importer.extract_notes(masked)
+            if note_list:
+                run.notes_json = json.dumps({"notes": note_list})
+        except Exception:
+            pass
     s.add(run)
     s.flush()
 
     existing = {f.fingerprint: f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id))}
     now = utcnow()
     new = updated = suppressed = 0
-    unmatched = sum(1 for _, a in matched if a is None)
+    unmatched = skipped_hosts + sum(1 for _, a in matched if a is None)
     from attestra import tuning
 
     rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
     known_fps = set(existing)
     for nf, asset in matched:
         asset_id = asset.id if asset else None
-        fp = fingerprint(
+        variant = getattr(nf, "variant", "") or ""
+        raw_kwargs = dict(
             location=nf.location,
             cwe=nf.cwe,
             cves=nf.cves,
@@ -626,11 +684,30 @@ def import_results(
             param=nf.param,
             package=nf.package,
             asset_id=asset_id,
-            variant=getattr(nf, "variant", "") or "",
+            variant=variant,
         )
+        # CAA: webcheck dns-caa and testssl DNS_CAArecord share one merge key (R15).
+        merge_kwargs = canonicalize_for_merge(**raw_kwargs)
+        fp = fingerprint(**merge_kwargs)
         f = existing.get(fp)
+
+        def _adopt(legacy_fp: str) -> None:
+            nonlocal f
+            legacy = existing.get(legacy_fp)
+            if legacy is None:
+                return
+            f = legacy
+            del existing[legacy_fp]
+            f.fingerprint = fp
+            existing[fp] = f
+
+        # Raw (pre-canonical) key so older testssl DNS_CAArecord rows still match.
+        if f is None:
+            raw_fp = fingerprint(**raw_kwargs)
+            if raw_fp != fp:
+                _adopt(raw_fp)
         # Legacy rows stored before variant existed: same title, old fingerprint (no variant).
-        if f is None and (getattr(nf, "variant", "") or ""):
+        if f is None and variant:
             legacy_fp = fingerprint(
                 location=nf.location,
                 cwe=nf.cwe,
@@ -643,10 +720,15 @@ def import_results(
             )
             legacy = existing.get(legacy_fp)
             if legacy is not None and normalize_title(legacy.title) == normalize_title(nf.title):
-                f = legacy
-                del existing[legacy_fp]
-                f.fingerprint = fp
-                existing[fp] = f
+                _adopt(legacy_fp)
+        # Older testssl CAA shapes (host:port + DNS_CAArecord param/variant).
+        if f is None and is_caa_variant(variant):
+            for alt_fp in caa_legacy_fingerprints(host=str(merge_kwargs["location"]), asset_id=asset_id):
+                if alt_fp == fp:
+                    continue
+                _adopt(alt_fp)
+                if f is not None:
+                    break
         rule = tuning.first_match(rules, nf) if f is None and rules else None
         if rule is not None:
             # Suppressed (Phase 7.4): not stored; counted on the rule and in the audit event.
@@ -685,7 +767,15 @@ def import_results(
                 f.tools = [*f.tools, nf.tool]
             if nf.rule_id and nf.rule_id not in f.rule_ids:
                 f.rule_ids = [*f.rule_ids, nf.rule_id]
-            if _rank(nf.severity) > _rank(f.severity):
+            if is_cert_expiry_variant(variant):
+                # Band change (30→14→7) updates the same row: title and severity in place.
+                f.title = nf.title[:500]
+                f.severity = nf.severity
+                if nf.description:
+                    f.description = nf.description
+                if nf.recommendation:
+                    f.recommendation = nf.recommendation
+            elif _rank(nf.severity) > _rank(f.severity):
                 f.severity = nf.severity
             if f.cvss_score is None and nf.cvss_score is not None:
                 f.cvss_score, f.cvss_vector = nf.cvss_score, nf.cvss_vector
@@ -698,6 +788,37 @@ def import_results(
                 audit.record(s, actor, "finding.reopened", "finding", f.id, import_run=run.id)
             updated += 1
         rescore(f)
+
+    # Renewed cert (>30 days left): close open expiry findings for this target.
+    # Healthy imports emit no expiry finding, so matched may be empty — still close by asset.
+    # Use the original ``data`` (not masked): date-like notAfter strings can look like phones.
+    if tool in ("testssl", "webcheck"):
+        from attestra.cert_expiry import close_renewed_for_asset, end_date_from_raw
+
+        end = end_date_from_raw(tool, data)
+        if end is not None:
+            asset_ids = {a.id for _, a in matched if a is not None}
+            if default_asset_id is not None:
+                asset_ids.add(default_asset_id)
+            if not asset_ids:
+                # No finding rows (healthy cert): match host from the saved summary to assets.
+                from attestra.fingerprint import caa_host
+
+                host = ""
+                if tool == "testssl":
+                    from attestra.importers import testssl as testssl_importer
+
+                    summary = testssl_importer.summarize(data)
+                    host = caa_host(str(summary.get("host") or ""))
+                for a in assets:
+                    if host and (host in caa_host(a.identifier) or caa_host(a.identifier) in host):
+                        asset_ids.add(a.id)
+                    elif not host and a.kind in ("web_app", "host", "url"):
+                        asset_ids.add(a.id)
+            for aid in asset_ids:
+                close_renewed_for_asset(
+                    s, engagement_id=engagement_id, asset_id=aid, end=end, actor=actor,
+                )
 
     run.new_findings, run.updated_findings, run.unmatched_findings = new, updated, unmatched
     s.flush()
@@ -833,6 +954,7 @@ def tls_summaries(s: Session, engagement_id: int) -> list[dict]:
     Returns a list of summary dicts (usually one). When no testssl data is present,
     returns a single ``{"scanned": False}`` entry so the report can show "not scanned".
     """
+    from attestra.cert_expiry import days_left, parse_not_after, today_utc
     from attestra.importers import testssl as testssl_importer
 
     by_host: dict[str, dict] = {}
@@ -842,6 +964,8 @@ def tls_summaries(s: Session, engagement_id: int) -> list[dict]:
             return
         summary = dict(summary)
         summary["asset"] = asset_label or summary.get("host") or "—"
+        end = parse_not_after(str(summary.get("cert_expiry") or ""))
+        summary["days_left"] = days_left(end, today=today_utc()) if end else None
         key = _tls_host_key(summary["asset"]) or _tls_host_key(str(summary.get("host") or ""))
         if not key:
             key = summary["asset"]
@@ -1353,10 +1477,216 @@ def asset_scan_history(s: Session, asset_id: int, principal=None) -> list[dict]:
     return _history(s, asset_id)
 
 
+def asset_site_grade(s: Session, asset_id: int, principal=None) -> dict:
+    """Overall Observatory-style site grade for a target from its open findings."""
+    from attestra.grade import score_from_findings
+    from attestra.models import Finding
+
+    asset = get_asset(s, asset_id, principal)
+    findings = list(
+        s.scalars(
+            select(Finding).where(
+                Finding.asset_id == asset_id,
+                Finding.engagement_id == asset.engagement_id,
+            )
+        )
+    )
+    result = score_from_findings(findings)
+    result["asset_id"] = asset_id
+    result["identifier"] = asset.identifier
+    return result
+
+
+def list_tenant_sites(
+    s: Session,
+    principal=None,
+    *,
+    sort: str = "grade",
+    q: str = "",
+) -> list[dict]:
+    """All targets the principal can see, with grade, open counts, last scan, and trend.
+
+    One grouped query for open severity counts; findings and scans loaded in bulk
+    (no per-row queries). Cancelled and failed scans are ignored for grade and trend.
+    Default sort is worst grade first.
+    """
+    # @lat: [[interfaces#Web dashboard#Sites dashboard]]
+    from collections import defaultdict
+
+    from attestra.grade import grade_rank, score_from_findings
+    from attestra.history import _HISTORY_STATUSES, observatory_score_for_scan
+
+    assets = list(s.scalars(scoped(s, Asset, principal).order_by(Asset.id.asc())))
+    if not assets:
+        return []
+
+    asset_ids = [a.id for a in assets]
+    eng_ids = {a.engagement_id for a in assets}
+    engagements = {
+        e.id: e
+        for e in s.scalars(select(Engagement).where(Engagement.id.in_(eng_ids)))
+    }
+
+    # Open findings by asset (one query) for severity counts.
+    open_rows = s.execute(
+        select(Finding.asset_id, Finding.severity, func.count())
+        .where(
+            Finding.asset_id.in_(asset_ids),
+            Finding.status.in_(OPEN_STATUSES),
+        )
+        .group_by(Finding.asset_id, Finding.severity)
+    ).all()
+    open_by_asset: dict[int, dict[str, int]] = defaultdict(lambda: {
+        "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+    })
+    for aid, sev, n in open_rows:
+        if aid is None:
+            continue
+        key = (sev or "info").lower()
+        if key not in open_by_asset[aid]:
+            open_by_asset[aid][key] = 0
+        open_by_asset[aid][key] += int(n)
+
+    # All findings for grade (same inputs as asset_site_grade), bulk-loaded.
+    all_findings = list(
+        s.scalars(select(Finding).where(Finding.asset_id.in_(asset_ids)))
+    )
+    findings_by_asset: dict[int, list] = defaultdict(list)
+    for f in all_findings:
+        if f.asset_id is not None:
+            findings_by_asset[f.asset_id].append(f)
+
+    # All scans for last-scan display and finished-scan trend, one query.
+    scans = list(
+        s.scalars(
+            select(ScanRun)
+            .where(ScanRun.asset_id.in_(asset_ids))
+            .order_by(ScanRun.id.asc())
+        )
+    )
+    scans_by_asset: dict[int, list[ScanRun]] = defaultdict(list)
+    for run in scans:
+        scans_by_asset[run.asset_id].append(run)
+
+    needle = (q or "").strip().lower()
+    rows: list[dict] = []
+    for asset in assets:
+        eng = engagements.get(asset.engagement_id)
+        label = (asset.name or "").strip() or asset.identifier
+        if needle and needle not in label.lower() and needle not in asset.identifier.lower():
+            continue
+
+        asset_scans = scans_by_asset.get(asset.id, [])
+        finished = [r for r in asset_scans if r.status in _HISTORY_STATUSES]
+        last = asset_scans[-1] if asset_scans else None
+        findings = findings_by_asset.get(asset.id, [])
+
+        # Grade only when there is at least one finished (non-cancelled/failed) scan.
+        if finished:
+            graded = score_from_findings(findings)
+            grade = graded["grade"]
+            score = int(graded["score"])
+        else:
+            grade = None
+            score = None
+
+        trend = "-"
+        if len(finished) >= 2:
+            prev_score = observatory_score_for_scan(s, finished[-2], asset)
+            cur_score = observatory_score_for_scan(s, finished[-1], asset)
+            if prev_score is not None and cur_score is not None:
+                if cur_score > prev_score:
+                    trend = "up"
+                elif cur_score < prev_score:
+                    trend = "down"
+                else:
+                    trend = "same"
+
+        last_at = None
+        if last is not None:
+            last_at = last.ended_at or last.started_at
+
+        rows.append(
+            {
+                "asset_id": asset.id,
+                "engagement_id": asset.engagement_id,
+                "engagement_name": eng.name if eng else "",
+                "identifier": asset.identifier,
+                "name": asset.name or "",
+                "kind": asset.kind,
+                "grade": grade,
+                "score": score,
+                "last_scan_at": last_at,
+                "last_scan_status": last.status if last else None,
+                "open_by_sev": dict(open_by_asset[asset.id]),
+                "trend": trend,
+                "url": f"/engagements/{asset.engagement_id}/targets/{asset.id}",
+            }
+        )
+
+    sort_key = (sort or "grade").strip().lower()
+    if sort_key == "name":
+        rows.sort(key=lambda r: ((r["name"] or r["identifier"] or "").lower(), r["asset_id"]))
+    elif sort_key in ("last_scan", "last_scan_date", "date"):
+        # Newest finished activity first; targets with no scans last.
+        dated = [r for r in rows if r["last_scan_at"] is not None]
+        undated = [r for r in rows if r["last_scan_at"] is None]
+        dated.sort(key=lambda r: (r["last_scan_at"], r["asset_id"]), reverse=True)
+        rows = dated + undated
+    else:
+        # Worst grade first; within a letter, lower score first; not graded last.
+        rows.sort(
+            key=lambda r: (
+                grade_rank(r["grade"]),
+                r["score"] if r["score"] is not None else 999,
+                (r["name"] or r["identifier"] or "").lower(),
+                r["asset_id"],
+            )
+        )
+    return rows
+
+
 def get_scan(s: Session, scan_id: int) -> ScanRun:
     run = s.get(ScanRun, scan_id)
     if not run:
         raise LookupError(f"scan {scan_id} not found")
+    return run
+
+
+# Statuses a user may cancel. Finished (done), failed, refused, quarantined, cancelled cannot.
+_SCAN_CANCELABLE = frozenset({"queued", "running"})
+
+
+def cancel_scan(s: Session, scan_id: int, *, actor: str, principal=None) -> ScanRun:
+    """Cancel a queued or running scan. Reuses job cancel; writes scan.cancelled audit.
+
+    Keeps any results already saved. Does not emit scan.finished webhooks.
+    """
+    from attestra.jobs import durable as durable_mod
+    from attestra.models import utcnow
+    from attestra.orchestration import cancel_scan_workflow, orchestrator
+
+    run = get_scan(s, scan_id)
+    get_engagement(s, run.engagement_id, principal)
+    if run.status not in _SCAN_CANCELABLE:
+        raise ServiceError(f"cannot cancel a {run.status} scan")
+
+    job = s.scalars(select(Job).where(Job.scan_run_id == run.id)).first()
+    if job is not None:
+        durable_mod.request_cancel(s, job.id)
+        if job.status in ("queued", "running", "cancelled"):
+            job.status = "cancelled"
+    run.status = "cancelled"
+    run.ended_at = run.ended_at or utcnow()
+    audit.record(s, actor, "scan.cancelled", "scan_run", run.id, tool=run.tool, profile=run.profile)
+
+    if orchestrator() == "temporal":
+        try:
+            from attestra.orchestration import run_coro
+
+            run_coro(cancel_scan_workflow(run.id))
+        except Exception:  # noqa: BLE001 - inline cancel already applied; temporal best-effort
+            pass
     return run
 
 

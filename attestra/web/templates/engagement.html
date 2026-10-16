@@ -72,11 +72,13 @@
       <form method="post" action="/engagements/{{ e.id }}/edit">
         <div class="fields">
           <div><label for="edit_name">Engagement name *</label><input type="text" id="edit_name" name="name" required value="{{ e.name }}"></div>
+          <div><label for="edit_client">Client / company name *</label><input type="text" id="edit_client" name="client_name" required value="{{ e.tenant.name }}"></div>
           <div><label for="edit_ws">Test window start</label><input type="date" id="edit_ws" name="window_start" value="{{ e.window_start or '' }}"></div>
           <div><label for="edit_we">Test window end</label><input type="date" id="edit_we" name="window_end" value="{{ e.window_end or '' }}" min="{{ e.window_start or '' }}"></div>
         </div>
         <label>Compliance frameworks</label>
         <div class="checks">{% for k, n in fw_names.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" {{ "checked" if k in e.frameworks }}> {{ n }}</label>{% endfor %}</div>
+        <p class="hint">Engagements are not deleted here: they hold signed evidence. Fix name typos with this form.</p>
         <button type="submit">Save changes</button>
       </form>
     </details>
@@ -220,6 +222,39 @@
       <div class="form-actions"><button type="submit">Add target</button></div>
     </form>
   </details>
+
+  <div id="suggestions" style="margin-top:16px">
+    <h3>Subdomain suggestions (certificate transparency)</h3>
+    <p class="meta">Looks up public CT logs for an in-scope apex domain only. Results are suggestions: they are never added to scope and never scanned. Copy a name if you want to add it by hand after the usual signed approval.</p>
+    {% if ct_apexes and can(prole, "asset.write") %}
+    <form method="post" action="/engagements/{{ e.id }}/scope/suggestions" class="row" style="margin-bottom:12px">
+      <label for="ct_apex" class="meta" style="margin:0">Apex in scope</label>
+      <select id="ct_apex" name="apex">
+        {% for a in ct_apexes %}<option value="{{ a }}" {{ "selected" if a == ct_apex }}>{{ a }}</option>{% endfor %}
+      </select>
+      <button type="submit" class="secondary">Find subdomain suggestions</button>
+    </form>
+    {% else %}
+    <p class="meta">Button off: add the apex domain itself (for example <span class="mono">example.com</span>) to signed scope first. Subdomain-only targets do not enable this check (R14).</p>
+    {% endif %}
+    {% if ct_suggestions %}
+    <p class="meta">Suggestions for <span class="mono">{{ ct_apex }}</span> ({{ ct_suggestions|length }}). Not in scope until you add them by hand.</p>
+    <table>
+      <tr><th>Name</th><th>First seen</th><th>Issuer</th><th></th></tr>
+      {% for s in ct_suggestions %}
+      <tr>
+        <td class="mono">{{ s.name }}</td>
+        <td class="meta">{{ s.first_seen or "—" }}</td>
+        <td class="meta">{{ s.issuer or "—" }}</td>
+        <td>
+          <button type="button" class="secondary" onclick="navigator.clipboard.writeText({{ s.name|tojson|forceescape }})">Copy</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p><a class="btn secondary" href="/engagements/{{ e.id }}#targets">Dismiss</a></p>
+    {% endif %}
+  </div>
 </div>
 
 <!-- ============================================================ TEST PLAN -->
@@ -253,14 +288,23 @@
     <span class="meta">Status: <b class="st st-{{ e.status }}">{{ e.status|label }}</b></span>
   </div>
   <table>
-    <tr><th>ID</th><th>Tool</th><th>Target</th><th>Profile</th><th>Status</th><th>SHA-256</th></tr>
+    <tr><th>ID</th><th>Tool</th><th>Target</th><th>Profile</th><th>Status</th><th>SHA-256</th><th></th></tr>
     {% for r in scans %}
     <tr>
-      <td>{{ r.id }}</td><td>{{ r.tool }}</td><td class="mono">{{ r.asset.identifier if r.asset else r.asset_id }}</td>
+      <td><a href="/engagements/{{ e.id }}/scans/{{ r.id }}">#{{ r.id }}</a></td>
+      <td>{{ r.tool }}</td><td class="mono">{{ r.asset.identifier if r.asset else r.asset_id }}</td>
       <td>{{ r.profile|capitalize }}</td><td><span class="st st-{{ r.status }}">{{ r.status|label }}</span>{% if r.refuse_reason %}<div class="meta st-not_met">{{ r.refuse_reason }}</div>{% endif %}</td>
       <td class="mono">{% if r.raw_sha256 %}{{ r.raw_sha256[:16] }}&hellip;{% else %}-{% endif %}</td>
+      <td>
+        {% if r.status in ("queued", "running") and can(prole, "scan.start") %}
+        <form method="post" action="/engagements/{{ e.id }}/scans/{{ r.id }}/cancel"
+              onsubmit="return confirm('Cancel scan #{{ r.id }}?')">
+          <button type="submit" class="danger">Cancel</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
-    {% else %}<tr><td colspan="6">No scans yet. Queue one below once a target is in scope.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7">No scans yet. Queue one below once a target is in scope.</td></tr>{% endfor %}
   </table>
   <details {{ "open" if not e.assets or not has_auth }}>
     <summary>+ Queue a scan</summary>
@@ -331,12 +375,17 @@
 <!-- ============================================================ FINDINGS -->
 <div class="card" id="findings">
   <h2>Findings (ranked by risk)</h2>
+  <div class="row" style="margin-bottom:12px">
+    {% if can(prole, "finding.read") %}
+    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Export findings CSV</a>
+    {% endif %}
+  </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
   <table>
     <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Tools</th><th>Status</th><th>Fix by</th></tr>
     {% for f in findings %}
     <tr id="f-{{ f.id }}">
-      <td><a href="#f-{{ f.id }}">F-{{ f.id }}</a></td>
+      <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>

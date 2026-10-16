@@ -14,7 +14,39 @@ from attestra.fingerprint import fingerprint
 from attestra.models import SEVERITIES, Asset, ImportRun, ScanRun
 
 # Statuses that contribute a history row (finished runs with usable results).
+# Cancelled and failed scans are excluded from grade and trend.
 _HISTORY_STATUSES = frozenset({"done", "quarantined"})
+
+
+def observatory_score_for_scan(s: Session, run: ScanRun, asset: Asset) -> int | None:
+    """Observatory-style numeric score from one finished scan's saved raw results.
+
+    Returns None when raw results are missing or cannot be parsed. Cancelled and
+    failed runs should not be passed in (callers filter with ``_HISTORY_STATUSES``).
+    """
+    # @lat: [[interfaces#Web dashboard#Sites dashboard]]
+    from attestra.grade import score_from_findings
+
+    if run.status not in _HISTORY_STATUSES:
+        return None
+    raw, tool = _raw_for_scan(s, run)
+    if not raw or not tool:
+        return None
+    try:
+        parsed = importers.parse(tool, raw)
+    except (ValueError, KeyError, Exception):  # noqa: BLE001 - bad/missing parser → no score
+        return None
+    findings = [
+        {
+            "title": nf.title,
+            "variant": getattr(nf, "variant", "") or "",
+            "param": getattr(nf, "param", "") or "",
+            "tools": [nf.tool],
+            "status": "new",
+        }
+        for nf in parsed
+    ]
+    return int(score_from_findings(findings)["score"])
 
 
 def scan_letter_grade(by_sev: Counter | dict[str, int]) -> str:

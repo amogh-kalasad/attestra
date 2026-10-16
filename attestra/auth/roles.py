@@ -30,6 +30,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "audit.read": frozenset({"admin", "lead", "auditor"}),
     "user.manage": frozenset({"admin"}),
     "webhook.manage": frozenset({"admin", "lead"}),
+    "share.create": frozenset({"admin", "lead", "tester"}),
+    "share.manage": frozenset({"admin", "lead", "tester"}),
 }
 
 

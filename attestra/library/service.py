@@ -10,9 +10,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit, services
+from attestra.library.fix_snippets import (
+    EFFORT_VALUES,
+    FIX_FIELD_KEYS,
+    IMPORTANCE_VALUES,
+    api_fix_fields,
+    detect_server_type,
+    enrich,
+    guidance_from_mapping,
+    has_fix_content,
+    is_fix_target,
+    match_seed_guidance,
+    snippets_for_report,
+)
 from attestra.models import SEVERITIES, Engagement, Finding, LibraryEntry, utcnow
 
-FIELDS = ("title", "description", "impact", "remediation", "references", "cwe", "default_severity", "tags", "rule_ids")
+FIELDS = (
+    "title", "description", "impact", "remediation", "references", "cwe", "default_severity", "tags", "rule_ids",
+    *FIX_FIELD_KEYS,
+)
 MAX_TEXT = 20000
 
 
@@ -56,6 +72,16 @@ def _validate(data: dict) -> dict:
             if v not in SEVERITIES:
                 raise LibraryError(f"default_severity must be one of {SEVERITIES}")
             out[k] = v
+        elif k == "importance":
+            v = (v or "").strip()
+            if v and v not in IMPORTANCE_VALUES:
+                raise LibraryError(f"importance must be one of {IMPORTANCE_VALUES}")
+            out[k] = v
+        elif k == "effort":
+            v = (v or "").strip()
+            if v and v not in EFFORT_VALUES:
+                raise LibraryError(f"effort must be one of {EFFORT_VALUES}")
+            out[k] = v
         else:
             v = (v or "").strip()
             if len(v) > MAX_TEXT:
@@ -73,7 +99,11 @@ def entry_dict(e: LibraryEntry) -> dict:
         "id": e.id, "tenant_id": e.tenant_id, "title": e.title, "description": e.description,
         "impact": e.impact, "remediation": e.remediation, "references": list(e.references or []),
         "cwe": e.cwe, "default_severity": e.default_severity, "tags": list(e.tags or []),
-        "rule_ids": list(e.rule_ids or []), "updated_by": e.updated_by, "updated_at": e.updated_at,
+        "rule_ids": list(e.rule_ids or []),
+        "importance": e.importance or "", "effort": e.effort or "", "fix_steps": e.fix_steps or "",
+        "snippet_nginx": e.snippet_nginx or "", "snippet_apache": e.snippet_apache or "",
+        "snippet_iis": e.snippet_iis or "", "snippet_cloudflare": e.snippet_cloudflare or "",
+        "updated_by": e.updated_by, "updated_at": e.updated_at,
     }
 
 
@@ -134,20 +164,48 @@ def delete_entry(s: Session, entry: LibraryEntry, *, actor: str) -> None:
     s.delete(entry)
 
 
+def _backfill_fix_fields(entry: LibraryEntry, data: dict) -> bool:
+    """Fill empty fix-snippet columns from seed data; never overwrite custom text."""
+    changed = False
+    for key in FIX_FIELD_KEYS:
+        new = (data.get(key) or "").strip()
+        if not new:
+            continue
+        if (getattr(entry, key, "") or "").strip():
+            continue
+        setattr(entry, key, new)
+        changed = True
+    return changed
+
+
 def seed_defaults(s: Session, tenant_id: int, *, actor: str) -> int:
-    """Add the built-in writeups the tenant does not have yet (matched by title)."""
+    """Add the built-in writeups the tenant does not have yet (matched by title).
+
+    Also backfills empty importance / effort / fix-steps / snippet fields on existing
+    rows that match a seed title, without overwriting custom text.
+    """
     from attestra.library.seed import SEED
 
-    have = set(s.scalars(select(LibraryEntry.title).where(LibraryEntry.tenant_id == tenant_id)))
+    existing = {
+        e.title: e
+        for e in s.scalars(select(LibraryEntry).where(LibraryEntry.tenant_id == tenant_id))
+    }
     added = 0
+    backfilled = 0
     for item in SEED:
-        if item["title"] in have:
+        data = _validate(enrich(item))
+        title = data["title"]
+        if title in existing:
+            if _backfill_fix_fields(existing[title], data):
+                existing[title].updated_by = actor
+                existing[title].updated_at = utcnow()
+                backfilled += 1
             continue
-        s.add(LibraryEntry(tenant_id=tenant_id, updated_by=actor, updated_at=utcnow(), **_validate(item)))
+        s.add(LibraryEntry(tenant_id=tenant_id, updated_by=actor, updated_at=utcnow(), **data))
         added += 1
     s.flush()
-    if added:
-        audit.record(s, actor, "library.seed", "tenant", tenant_id, added=added)
+    if added or backfilled:
+        audit.record(s, actor, "library.seed", "tenant", tenant_id, added=added, backfilled=backfilled)
     return added
 
 
@@ -174,6 +232,46 @@ def suggest(s: Session, f: Finding, limit: int = 3) -> list[LibraryEntry]:
         if score:
             scored.append((-score, e.title, e))
     return [e for *_, e in sorted(scored, key=lambda t: (t[0], t[1]))[:limit]]
+
+
+def guidance_for_finding(s: Session, f: Finding) -> dict | None:
+    """Library (or built-in seed) fix guidance for a finding, if any."""
+    for entry in suggest(s, f, limit=3):
+        g = guidance_from_mapping(entry)
+        if has_fix_content(g) and is_fix_target(entry.tags, entry.title):
+            return g
+        if has_fix_content(g):
+            return g
+    return match_seed_guidance(f)
+
+
+def server_type_for_findings(findings: list[Finding]) -> str | None:
+    """Infer nginx/apache/iis/cloudflare from finding text when unambiguous."""
+    parts = []
+    for f in findings:
+        parts.append(f.title or "")
+        parts.append(f.description or "")
+        parts.append(f.location or "")
+    return detect_server_type(*parts)
+
+
+def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
+    """Maps finding id → guidance and report snippet pairs; plus detected server type."""
+    server_type = server_type_for_findings(findings)
+    by_id: dict[int, dict] = {}
+    report_snips: dict[int, list[tuple[str, str]]] = {}
+    for f in findings:
+        g = guidance_for_finding(s, f)
+        if not g:
+            continue
+        by_id[f.id] = g
+        report_snips[f.id] = snippets_for_report(g, server_type)
+    return {"server_type": server_type, "fix_by_id": by_id, "report_snippets_by_id": report_snips}
+
+
+def finding_api_fix_fields(s: Session, f: Finding) -> dict[str, str]:
+    """Flat fix fields for API finding output (empty strings when unknown)."""
+    return api_fix_fields(guidance_for_finding(s, f))
 
 
 def suggestions_for_engagement(s: Session, engagement_id: int) -> dict[int, list[LibraryEntry]]:

@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("ATTESTRA_DATA_DIR", Path.cwd() / "data")).resolve()
+
+# Google Safe Browsing (webcheck). Off by default; needs both flag and API key.
+# ATTESTRA_GSB_ENABLED=1 and ATTESTRA_GSB_API_KEY=... — key is never logged or stored.
 # Production default is PostgreSQL 16 (Phase 6.1), e.g.
 #   ATTESTRA_DATABASE_URL=postgresql+psycopg://attestra_app:***@db:5432/attestra
 # (install the ``postgres`` extra). SQLite stays as the zero-config local/dev fallback.

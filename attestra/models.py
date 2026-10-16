@@ -17,6 +17,43 @@ def utcnow() -> datetime:
 
 
 ENGAGEMENT_TYPES = ("va", "pt", "vapt", "retest", "continuous")
+# Display labels for ENGAGEMENT_TYPES. Key "vapt" stays stored; label is "VA + PT".
+ENGAGEMENT_TYPE_LABELS = {
+    "va": "Vulnerability Assessment (VA)",
+    "pt": "Penetration Test (PT)",
+    "vapt": "VA + PT",
+    "retest": "Retest",
+    "continuous": "Continuous scanning",
+}
+# Old display strings that may still sit on engagement.type rows.
+_LEGACY_ENGAGEMENT_TYPE_KEYS = {
+    "vapt (va + pt)": "vapt",
+    "va + pt": "vapt",
+}
+
+
+def normalize_engagement_type(value: str) -> str:
+    """Map a type key or legacy label to a canonical ENGAGEMENT_TYPES key."""
+    raw = (value or "").strip()
+    if raw in ENGAGEMENT_TYPES:
+        return raw
+    lower = raw.lower()
+    if lower in ENGAGEMENT_TYPES:
+        return lower
+    if lower in _LEGACY_ENGAGEMENT_TYPE_KEYS:
+        return _LEGACY_ENGAGEMENT_TYPE_KEYS[lower]
+    for key, label in ENGAGEMENT_TYPE_LABELS.items():
+        if label.lower() == lower:
+            return key
+    return raw
+
+
+def engagement_type_label(value: str) -> str:
+    """Human label for a stored type key or legacy label. Does not rewrite rows."""
+    key = normalize_engagement_type(value)
+    return ENGAGEMENT_TYPE_LABELS.get(key, value)
+
+
 # Core frameworks; v2.1 packs in compliance/data/packs add more at load time.
 FRAMEWORKS = ("pci_dss_4", "iso_27001_2022", "soc2")
 SEVERITIES = ("critical", "high", "medium", "low", "info")
@@ -246,6 +283,8 @@ class ImportRun(Base):
     unmatched_findings: Mapped[int] = mapped_column(Integer, default=0)  # no in-scope target matched
     # C5: JSON list of {id,name,status,source} check rows (passed/failed/skipped).
     checks_json: Mapped[str] = mapped_column(Text, default="")
+    # Scanner tool notes/warnings (e.g. testssl engine_problem); not findings.
+    notes_json: Mapped[str] = mapped_column(Text, default="")
 
 
 class ScanRun(Base):
@@ -269,6 +308,8 @@ class ScanRun(Base):
     refuse_reason: Mapped[str] = mapped_column(String(500), default="")
     # C5: JSON list of {id,name,status,source} check rows (passed/failed/skipped).
     checks_json: Mapped[str] = mapped_column(Text, default="")
+    # Scanner tool notes/warnings copied from import; not findings.
+    notes_json: Mapped[str] = mapped_column(Text, default="")
 
     engagement: Mapped[Engagement] = relationship()
     asset: Mapped[Asset] = relationship()
@@ -328,6 +369,24 @@ class Finding(Base):
     asset: Mapped[Asset | None] = relationship()
     evidence: Mapped[list[Evidence]] = relationship(back_populates="finding")
     risk_acceptances: Mapped[list[RiskAcceptance]] = relationship(back_populates="finding")
+    comments: Mapped[list[FindingComment]] = relationship(back_populates="finding")
+
+
+class FindingComment(Base):
+    """Plain-text comment on a finding. Soft-deleted via ``deleted``; not in share links or default reports."""
+
+    __tablename__ = "finding_comments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    finding: Mapped[Finding] = relationship(back_populates="comments")
 
 
 class Evidence(Base):
@@ -616,6 +675,9 @@ class SuppressionRule(Base):
     hits: Mapped[int] = mapped_column(Integer, default=0)
 
 
+# Share links (migration 0019_share_links) live in attestra/share/models.py.
+from attestra.share import models as _share_models  # noqa: E402, F401
+
 # Trust center tables (migration 0011_trust_center) live in attestra/trust/models.py.
 from attestra.trust import models as _trust_models  # noqa: E402, F401
 
@@ -636,6 +698,13 @@ class LibraryEntry(Base):
     default_severity: Mapped[str] = mapped_column(String(10), default="medium")
     tags: Mapped[list] = mapped_column(JSON, default=list)
     rule_ids: Mapped[list] = mapped_column(JSON, default=list)
+    importance: Mapped[str] = mapped_column(String(10), default="")  # High / Medium / Low
+    effort: Mapped[str] = mapped_column(String(10), default="")  # Easy / Medium / Hard
+    fix_steps: Mapped[str] = mapped_column(Text, default="")
+    snippet_nginx: Mapped[str] = mapped_column(Text, default="")
+    snippet_apache: Mapped[str] = mapped_column(Text, default="")
+    snippet_iis: Mapped[str] = mapped_column(Text, default="")
+    snippet_cloudflare: Mapped[str] = mapped_column(Text, default="")
     updated_by: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -739,3 +808,48 @@ class FindingAssignment(Base):
     rule_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_rules.id"))
     assigned_by: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CertExpiryAlert(Base):
+    """Which expiry bands (30/14/7) already sent a cert.expiring webhook for one cert."""
+
+    __tablename__ = "cert_expiry_alerts"
+    __table_args__ = (UniqueConstraint("asset_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"))
+    end_date: Mapped[date] = mapped_column(Date)
+    alerted_bands: Mapped[list] = mapped_column(JSON, default=list)  # e.g. ["30", "14"]
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EmailAlertSettings(Base):
+    """Per-tenant toggles and recipient list for outbound email alerts."""
+
+    __tablename__ = "email_alert_settings"
+    __table_args__ = (UniqueConstraint("tenant_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    notify_new_high: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_header_change: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_sla_missed: Mapped[bool] = mapped_column(Boolean, default=True)
+    recipients: Mapped[list] = mapped_column(JSON, default=list)
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EmailAlertSent(Base):
+    """Dedup row so SLA-missed (and similar) emails are sent only once per entity."""
+
+    __tablename__ = "email_alert_sent"
+    __table_args__ = (UniqueConstraint("event_type", "entity_type", "entity_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    event_type: Mapped[str] = mapped_column(String(50))
+    entity_type: Mapped[str] = mapped_column(String(50))
+    entity_id: Mapped[int] = mapped_column(Integer)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

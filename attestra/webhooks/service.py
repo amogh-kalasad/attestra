@@ -193,6 +193,33 @@ def safe_emit_report(s: Session, report, *, actor: str = "system") -> None:
         log.exception("webhook emit failed for report.signed")
 
 
+def safe_emit_scan(s: Session, run, event: str, *, actor: str = "system", **extra) -> None:
+    """Emit a scan lifecycle webhook; never breaks the caller. Cancelled scans must not use scan.finished."""
+    try:
+        if event == "scan.finished" and getattr(run, "status", "") != "done":
+            return
+        s.flush()
+        eng = s.get(Engagement, run.engagement_id)
+        if eng is None:
+            return
+        data = {
+            "scan_id": run.id,
+            "engagement_id": run.engagement_id,
+            "asset_id": run.asset_id,
+            "tool": run.tool,
+            "profile": run.profile,
+            "status": run.status,
+            **extra,
+        }
+        emit(s, event, tenant_id=eng.tenant_id, data=data, actor=actor)
+        if event == "scan.finished":
+            from attestra.alerts.service import safe_notify_header_change
+
+            safe_notify_header_change(s, run, actor=actor)
+    except Exception:  # noqa: BLE001
+        log.exception("webhook emit failed for %s", event)
+
+
 # ---------------------------------------------------------------- delivery
 
 

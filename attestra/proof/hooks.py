@@ -10,6 +10,7 @@ log = logging.getLogger(__name__)
 
 
 def after_import(s: Session, engagement_id: int, tool: str, data: bytes, new_findings: list, *, actor: str) -> None:
+    from attestra.alerts.service import safe_notify_new_high
     from attestra.proof.capture import capture_from_import
     from attestra.webhooks.service import safe_emit_finding
 
@@ -20,3 +21,5 @@ def after_import(s: Session, engagement_id: int, tool: str, data: bytes, new_fin
         log.exception("proof auto-capture failed for %s import", tool)
     for f in new_findings:
         safe_emit_finding(s, f, "finding.created", actor=actor)
+    # Grouped Critical/High email (one message per import, same event point as webhooks).
+    safe_notify_new_high(s, engagement_id, new_findings, actor=actor)

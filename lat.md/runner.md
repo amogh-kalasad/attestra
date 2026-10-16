@@ -16,6 +16,8 @@ Resolve once, pin IP, re-authorize every redirect.
 
 [[attestra/runner/dns_pin.py#pin_url]] returns [[attestra/runner/dns_pin.py#PinnedTarget]]. [[attestra/runner/http_safe.py#safe_get]] / [[attestra/runner/http_safe.py#safe_request]] connect only to the pinned IP, use SNI for `pin.host` on HTTPS, and refuse out-of-scope redirects with an audit entry. `follow_redirects=False` returns the redirect response without following.
 
+[[attestra/runner/http_safe.py#passive_get]] is for third-party HTTPS lookups about an in-scope domain (for example crt.sh), not for engagement targets. It uses the same timeout and body limit as safe_request and refuses private destinations. Callers must gate on signed scope first.
+
 ## Dispatch gate
 
 Every scan is checked at enqueue and again when a job resumes.
@@ -28,7 +30,7 @@ Every scan is checked at enqueue and again when a job resumes.
 
 Adapters build argv without a shell; durable jobs run them and import raw output.
 
-Adapters live under `attestra/runner/scanners/` and are looked up by [[attestra/runner/scanners/registry.py#get_adapter]]. [[attestra/jobs/durable.py#run_one_job]] claims work, re-checks the gate, hashes full raw output, and imports. Kill switch: [[attestra/services.py#halt_engagement]] sets `cancel_requested` and [[attestra/jobs/durable.py#signal_engagement_cancel]]. CLI: `attestra worker`.
+Adapters live under `attestra/runner/scanners/` and are looked up by [[attestra/runner/scanners/registry.py#get_adapter]]. [[attestra/jobs/durable.py#run_one_job]] claims work, re-checks the gate, hashes full raw output, and imports. Kill switch: [[attestra/services.py#halt_engagement]] sets `cancel_requested` and [[attestra/jobs/durable.py#signal_engagement_cancel]]. Single-scan cancel: [[attestra/services.py#cancel_scan]] via [[attestra/jobs/durable.py#request_cancel]] and [[attestra/jobs/durable.py#signal_job_cancel]] (per-job Event while the adapter runs). A successful `done` run emits `scan.finished`; cancel does not. CLI: `attestra worker`.
 
 The job commits before the scanner starts, so the page shows Running and SQLite is not write-locked during the scan. If the adapter raises, or returns an error (no report, unreadable report, timeout, tool missing), [[attestra/jobs/durable.py#_fail_run]] marks the run failed with the reason, audits `scan.failed` and does not retry. Import errors are also saved as the run's reason. Findings with no matching target (for example a repo file path) are linked to the scanned target through `default_asset_id` in [[attestra/services.py#import_results]].
 
@@ -64,11 +66,17 @@ ZAP runs only in Docker. The report folder is mounted at `/zap/wrk`, the only pl
 
 Pure-Python adapter for security headers, HSTS, security.txt, and DNS posture.
 
-[[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] is registered as `webcheck` in [[attestra/runner/scanners/registry.py#_ADAPTERS]] and listed in [[attestra/runner/gate.py#URL_TOOLS]]. It requires `scope`, uses only [[attestra/runner/http_safe.py#safe_get]], writes `webcheck.json`, and merges [[attestra/runner/scanners/webcheck_dns.py#dns_checks]] into the same report. [[attestra/jobs/durable.py#run_one_job]] passes `scope=` for webcheck like zap.
+[[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] is registered as `webcheck` in [[attestra/runner/scanners/registry.py#_ADAPTERS]] and listed in [[attestra/runner/gate.py#URL_TOOLS]]. It requires `scope`, uses only [[attestra/runner/http_safe.py#safe_get]], writes `webcheck.json`, and merges [[attestra/runner/scanners/webcheck_dns.py#dns_posture]] into the same report. [[attestra/jobs/durable.py#run_one_job]] passes `scope=` for webcheck like zap.
 
 R10 Referrer-Policy ([[attestra/runner/scanners/webcheck.py#check_referrer_policy]]): no finding for `no-referrer` / `same-origin`; Info for `strict-origin` / `strict-origin-when-cross-origin`; Low for weaker values or a missing header.
 
 R13 HSTS preload ([[attestra/runner/scanners/webcheck.py#check_hsts_not_preloaded]]): off unless `ATTESTRA_HSTS_PRELOAD_LOOKUP=1`; finding only for hstspreload.org statuses `unknown` / `pending` / `rejected` / `removed`; lookup failures become a report note (`preload lookup failed`) with no finding.
+
+#### Email DNS and DNSSEC
+
+Passive DMARC, DKIM, MTA-STS, TLS-RPT, and DNSSEC checks on the in-scope apex.
+
+[[attestra/runner/scanners/webcheck_dns.py#dns_posture]] extends CAA/AAAA/SPF/TLSA with email and DNSSEC posture. Email lookups use the apex only when that apex is in scope; otherwise the checks are skipped with a note. No MX → DMARC/DKIM/MTA-STS/TLS-RPT are passed as not applicable (DMARC `p=reject` still yields a good-practice note). DKIM queries only [[attestra/runner/scanners/webcheck_dns.py#DKIM_SELECTORS]]. MTA-STS policy HTTP fetch runs at most once via [[attestra/runner/http_safe.py#safe_get]] and only when `mta-sts.<apex>` is in scope. Findings carry stable ids/variants and recommendation text; starter library writeups live in [[attestra/library/seed.py#SEED]].
 
 #### CSP analysis (C10)
 
@@ -83,6 +91,24 @@ One finding per cookie per missing Secure, HttpOnly, or SameSite on the primary 
 [[attestra/runner/scanners/webcheck.py#check_cookies]] uses headers already fetched (no extra requests). Variant / finding id is `cookie:{name}:{flag}`. [[attestra/runner/http_safe.py#safe_request]] keeps every Set-Cookie line (joined with newlines).
 
 Session vs non-session severity: a cookie is a **session cookie** when it has neither `Max-Age` nor `Expires`, or its name matches session-like names (`session`, `sid`, `jsessionid`, `token`, `jwt`, `csrf`, …). Session cookies → Low for missing flags. Clearly non-session cookies (Max-Age/Expires set and a non-session name) → Info. Fully flagged cookies become C5 passed rows; no Set-Cookie → one skipped "not tested" row.
+
+#### HTTP to HTTPS redirect
+
+One plain-HTTP probe with redirects off; classify the first answer only.
+
+[[attestra/runner/scanners/webcheck.py#check_http_no_redirect]] reads status and `Location` from the existing http:// probe (same `safe_get` call as HSTS-on-HTTP; `follow_redirects=False`). Results: 301/308 to `https://` on the same host → pass; 302/307 same host → Low temporary redirect; https on another host → Low; redirect to `http://` or a non-redirect (e.g. 200) → Medium; no answer → pass with note `HTTP not served`. Out-of-scope http is skipped (no request). Redirect `Location` is stored on the request log for offline reuse. Grade key `http_no_https_redirect` (−20) in [[attestra/grade.py#MODIFIERS]] fires for Medium no-upgrade and other-host cases, not for temporary same-host HTTPS.
+
+#### SRI and mixed content
+
+Parse the already-fetched primary HTML only; never fetch discovered URLs.
+
+[[attestra/runner/scanners/webcheck.py#check_sri]] flags cross-origin `<script src>` / `<link rel="stylesheet">` tags with no `integrity` attribute (same-origin resources are ignored). One finding `sri` lists up to 20 URLs in evidence; severity Medium when any listed URL is a script, otherwise Low. [[attestra/runner/scanners/webcheck.py#check_mixed_content]] runs on https pages only: `http://` script/style/iframe/object/form → `mixed-content-active` (Medium); `http://` img/audio/video/source → `mixed-content-passive` (Low). Relative and protocol-relative (`//`) URLs are not mixed content on https. [[attestra/runner/scanners/webcheck.py#evaluate_primary]] takes optional `body=` and [[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] passes `primary.body`. Clean pages get C5 passed rows; empty body → skipped.
+
+#### Safe Browsing
+
+Passive Google Safe Browsing v4 reputation lookup for in-scope target URLs.
+
+[[attestra/runner/scanners/safe_browsing.py#check_safe_browsing]] is off unless `ATTESTRA_GSB_ENABLED=1` **and** `ATTESTRA_GSB_API_KEY` is set. One batched `threatMatches:find` POST per scan (lookup to Google, not the target). Missing key with the flag on → scan note `Safe Browsing check skipped: no API key` (not a finding). Listed `MALWARE` / `SOCIAL_ENGINEERING` / `UNWANTED_SOFTWARE` → one High finding; clean → passed check `Not on Google Safe Browsing list`. API errors become notes. The API key is never logged, saved, or written into the report. [[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] calls it for the in-scope primary URL only. Starter writeup: [[attestra/library/seed.py#SEED]].
 
 ### testssl baseline flags
 

@@ -21,7 +21,14 @@ _BEARER = re.compile(r"(?i)\b(bearer\s+)([A-Za-z0-9._\-+=/]{8,})")
 _API_KEY_INLINE = re.compile(r"(?i)\b((?:api[_-]?key|token|secret)[=:]\s*)([A-Za-z0-9_\-]{8,})")
 
 
+_ISO_DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
 def _is_phone_shaped(s: str) -> bool:
+    # ISO dates like "2026-08-30 00:00" must not be treated as phone numbers
+    # (they appear in testssl cert_notAfter and similar scanner fields).
+    if _ISO_DATE_PREFIX.match((s or "").strip()):
+        return False
     return bool(re.search(r"[\s().+-]", s)) and len(re.sub(r"\D", "", s)) <= 15
 
 

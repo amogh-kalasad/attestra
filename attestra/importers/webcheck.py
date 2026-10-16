@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from attestra.fingerprint import CAA_VARIANT, is_caa_variant
 from attestra.importers.base import NormalizedFinding, norm_severity, parse_cwe
 
 
@@ -19,11 +20,15 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
         fid = str(item.get("id") or "").strip()
         if not fid:
             continue
+        variant = str(item.get("variant") or fid)
+        # Align with testssl DNS_CAArecord via shared CAA_VARIANT (R15 merge).
+        if fid == "dns-caa" or is_caa_variant(variant):
+            variant = CAA_VARIANT
         out.append(
             NormalizedFinding(
                 tool="webcheck",
                 rule_id=f"webcheck/{fid}",
-                variant=str(item.get("variant") or fid),
+                variant=variant,
                 title=str(item.get("title") or fid),
                 severity=norm_severity(str(item.get("severity") or "info")),
                 location=str(item.get("location") or ""),

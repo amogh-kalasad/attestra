@@ -20,6 +20,8 @@ from attestra.runner.scanners.registry import get_adapter
 
 # engagement_id → Event set by kill switch so run_process exits quickly
 _ENGAGEMENT_CANCEL: dict[int, threading.Event] = {}
+# job_id → cancel Event for the in-flight run_one_job (single-scan cancel)
+_ACTIVE_JOB_CANCEL: dict[int, threading.Event] = {}
 
 
 def signal_engagement_cancel(engagement_id: int) -> None:
@@ -35,6 +37,13 @@ def clear_engagement_cancel(engagement_id: int) -> None:
 
 def cancel_event_for(engagement_id: int) -> threading.Event:
     return _ENGAGEMENT_CANCEL.setdefault(engagement_id, threading.Event())
+
+
+def signal_job_cancel(job_id: int) -> None:
+    """Stop an in-flight scanner for one job (sets its active cancel Event if any)."""
+    ev = _ACTIVE_JOB_CANCEL.get(job_id)
+    if ev is not None:
+        ev.set()
 
 
 def enqueue(s: Session, scan_run_id: int) -> Job:
@@ -92,6 +101,7 @@ def request_cancel(s: Session, job_id: int) -> Job:
     if not job:
         raise LookupError(f"job {job_id} not found")
     job.cancel_requested = True
+    signal_job_cancel(job_id)
     audit.record(s, "system", "job.cancel_requested", "job", job.id)
     return job
 
@@ -155,6 +165,7 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     adapter = get_adapter(run.tool)
     out_dir = config.DATA_DIR / "raw" / f"scan-{run.id}"
     cancel = cancel or cancel_event_for(run.engagement_id)
+    _ACTIVE_JOB_CANCEL[job.id] = cancel
     if job.cancel_requested:
         cancel.set()
 
@@ -171,6 +182,8 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     except Exception as exc:  # noqa: BLE001 - a broken scanner run must not stop the worker
         _fail_run(s, run, job, f"{run.tool} could not run: {exc}")
         return
+    finally:
+        _ACTIVE_JOB_CANCEL.pop(job.id, None)
 
     if result.extra.get("cancelled") or job.cancel_requested:
         run.status = "cancelled"
@@ -235,9 +248,14 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
             default_asset_id=run.asset_id,
         )
         run.import_run_id = imp.id
+        if getattr(imp, "notes_json", ""):
+            run.notes_json = imp.notes_json
         run.status = "done"
         run.ended_at = utcnow()
         complete_job(s, job)
+        from attestra.webhooks.service import safe_emit_scan
+
+        safe_emit_scan(s, run, "scan.finished", actor=run.requested_by)
     except Exception as exc:
         run.status = "failed"
         run.ended_at = utcnow()

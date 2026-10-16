@@ -2,7 +2,7 @@
 {% block title %}Technical security testing report{% endblock %}
 {% block body %}
 <h1>Technical security testing report: {{ eng.name }}</h1>
-<div class="meta">Type: {{ eng.type|upper }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }} · Frameworks: {{ eng.frameworks|join(", ") or "none" }}</div>
+<div class="meta">Type: {{ type_label }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }} · Frameworks: {{ eng.frameworks|join(", ") or "none" }}</div>
 
 <h2>1. Scope and authorization</h2>
 <table>
@@ -52,7 +52,26 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% else %}<tr><td colspan="4">No check list stored yet. Re-import a ZAP or webcheck report, or run a new scan.</td></tr>{% endfor %}
 </table>
 
-<h2>5. TLS summary</h2>
+<h2>5. Site grades</h2>
+<p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>
+{% for g in site_grades %}
+  <h3>{{ g.identifier }} — <b>{{ g.grade }}</b> (score {{ g.score }})</h3>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    {% for row in g.breakdown %}
+    <tr>
+      <td class="mono">{{ row.check }}</td>
+      <td>{{ row.result }}</td>
+      <td>{% if row.points > 0 %}+{{ row.points }}{% else %}{{ row.points }}{% endif %}</td>
+      <td>{{ row.reason }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+<p>No targets graded.</p>
+{% endfor %}
+
+<h2>6. TLS summary</h2>
 <p class="meta">Protocols, ciphers, certificate and OCSP from the latest testssl result for each target.</p>
 {% for t in tls_summaries %}
   {% if not t.scanned %}
@@ -63,7 +82,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     <tr><th>Protocols</th><td>{{ t.protocols|join("; ") }}</td></tr>
     <tr><th>Best cipher</th><td class="mono">{{ t.best_cipher }}</td></tr>
     <tr><th>Weakest cipher</th><td class="mono">{{ t.weakest_cipher }}</td></tr>
-    <tr><th>Certificate expiry</th><td>{{ t.cert_expiry }}</td></tr>
+    <tr><th>Certificate expiry</th><td>{{ t.cert_expiry }}{% if t.days_left is defined and t.days_left is not none %} ({{ t.days_left }} days left){% endif %}</td></tr>
     <tr><th>Chain of trust</th><td>{{ t.chain_ok }}</td></tr>
     <tr><th>Certificate signature</th><td class="mono">{{ t.cert_signature }}</td></tr>
     <tr><th>Handshake signatures</th><td class="mono">{{ t.handshake_signatures }}</td></tr>
@@ -74,7 +93,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 <p>not scanned</p>
 {% endfor %}
 
-<h2>6. Findings</h2>
+<h2>7. Findings</h2>
 {% for f in findings %}
 <div class="finding">
   <h3>F-{{ f.id }} · {{ f.title }}</h3>
@@ -97,8 +116,25 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   </table>
   {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
   {% if f.recommendation %}<p><b>Recommendation.</b> {{ f.recommendation }}</p>{% endif %}
+  {% set fix = fix_by_id.get(f.id) if fix_by_id is defined else none %}
+  {% if fix %}
+  <p><b>How to fix.</b>
+    {% if fix.importance %}Importance: {{ fix.importance }}.{% endif %}
+    {% if fix.effort %} Effort: {{ fix.effort }}.{% endif %}
+  </p>
+  {% if fix.fix_steps %}<p style="white-space:pre-wrap">{{ fix.fix_steps }}</p>{% endif %}
+  {% set snips = report_snippets_by_id.get(f.id, []) if report_snippets_by_id is defined else [] %}
+  {% for name, text in snips %}
+  <p><b>{{ name }} config.</b></p>
+  <pre class="mono" style="white-space:pre-wrap">{{ text }}</pre>
+  {% endfor %}
+  {% endif %}
   {% if ai_narratives and ai_narratives.get(f.id) %}<p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>{% endif %}
   {% if f.evidence %}<p><b>Evidence.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  {% if include_comments and comments_by_finding.get(f.id) %}
+  <p><b>Comments.</b></p>
+  <ul>{% for c in comments_by_finding[f.id] %}<li style="white-space:pre-wrap">{{ c.body }}</li>{% endfor %}</ul>
+  {% endif %}
 </div>
 {% else %}
 <p>No findings.</p>

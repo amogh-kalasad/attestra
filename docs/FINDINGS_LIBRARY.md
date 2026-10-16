@@ -3,7 +3,9 @@
 ## Findings library
 
 Per-tenant reusable writeups (`library_entries`): title, description, impact,
-remediation, references, CWE, default severity, tags and tool rule ids.
+remediation, references, CWE, default severity, tags, tool rule ids, plus optional
+importance / effort / fix steps and nginx, Apache, IIS and Cloudflare snippets
+(migration `0018_library_fix_snippets`; empty values stay valid).
 
 - **UI:** `/library` (search, create, "Add starter writeups"), `/library/{id}` (edit, delete, apply to a finding).
 - **API** (`finding.write`: admin, lead, tester):
@@ -34,5 +36,5 @@ title, logo (PNG/JPEG/GIF up to 500 KB, stored as a data URI), section order
 - If there is no template, it is disabled, or it fails at render time, the built-in
   report template is used. The signed/hashed report flow is unchanged.
 
-Code: `attestra/library/`. Migration: `0012_findings_library` (RLS on both tables).
-Tests: `tests/test_findings_library.py`.
+Code: `attestra/library/` (fix text helpers in `fix_snippets.py`). Migrations: `0012_findings_library` (RLS on both tables), `0018_library_fix_snippets` (importance/effort/fix steps/snippets).
+Tests: `tests/test_findings_library.py`, `tests/test_fix_snippets.py`.

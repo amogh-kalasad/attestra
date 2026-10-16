@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1>{{ e.name }}</h1>
-    <p class="lede">{{ e.tenant.name }} &middot; {{ type_labels.get(e.type, e.type) }} &middot; read-only view</p>
+    <p class="lede">{{ e.tenant.name }} &middot; {{ e.type|type_label }} &middot; read-only view</p>
   </div>
 </div>
 

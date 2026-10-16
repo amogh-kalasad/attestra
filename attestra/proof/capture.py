@@ -1,4 +1,4 @@
-"""Auto-capture request/response pairs from ZAP and Nuclei output when present."""
+"""Auto-capture request/response pairs from ZAP, Nuclei and Burp output when present."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from attestra.models import Finding
 from attestra.proof.pair import HttpPair, pair_from_raw
 from attestra.proof.store import attach_http_pair, has_http_pair
 
-TOOLS = ("zap", "nuclei")
+TOOLS = ("zap", "nuclei", "burp")
 
 
 def _nuclei(data: bytes) -> Iterator[HttpPair]:
@@ -53,11 +53,24 @@ def _zap(data: bytes) -> Iterator[HttpPair]:
                 yield pair_from_raw(req, resp, url=inst.get("uri") or "", match=inst.get("evidence") or "", source="zap")
 
 
+def _burp(data: bytes) -> Iterator[HttpPair]:
+    from attestra.importers import burp as burp_importer
+
+    try:
+        triples = burp_importer.extract_pairs(data)
+    except ValueError:
+        return
+    for url, req, resp in triples:
+        yield pair_from_raw(req, resp, url=url, source="burp")
+
+
 def extract_pairs(tool: str, data: bytes) -> list[HttpPair]:
     if tool == "nuclei":
         return list(_nuclei(data))
     if tool == "zap":
         return list(_zap(data))
+    if tool == "burp":
+        return list(_burp(data))
     return []
 
 

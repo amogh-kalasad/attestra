@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 from attestra.importers._jsonutil import load_json_or_lines
@@ -10,7 +11,13 @@ from attestra.importers.base import NormalizedFinding, norm_severity, parse_cwe
 
 _SKIP = {"OK", "INFO", "DEBUG", "FATAL", ""}
 # Scanner diagnostics / noise — not TLS configuration findings.
-_SKIP_IDS = {"engine_problem", "scanTime", "service", "pre_128cipher"}
+# Stored as import/scan notes via extract_notes(); never become findings.
+_NOTE_IDS = {"engine_problem", "scanTime", "service", "pre_128cipher"}
+_SKIP_IDS = _NOTE_IDS
+_ENGINE_NOTE_RE = re.compile(
+    r"no engine or gost support|gost support via engine|scan.?engine",
+    re.IGNORECASE,
+)
 
 # Weak cert / handshake signature hashes kept even at INFO/OK (R17).
 _WEAK_SIG_RE = re.compile(r"\b(SHA224|SHA1|MD5)\b", re.IGNORECASE)
@@ -107,6 +114,49 @@ def _is_r18(check: str, finding: str) -> bool:
     return "not offered" in finding.lower()
 
 
+def _is_tool_note(check: str, finding: str, sev: str = "", host: str = "") -> bool:
+    """True for testssl scanner diagnostics (engine/GOST/service), not TLS findings."""
+    if check in _NOTE_IDS:
+        return True
+    if _ENGINE_NOTE_RE.search(finding or ""):
+        return True
+    # Pretty-JSON client warnings and orphan WARN rows with ip "/" are scan notes.
+    h = (host or "").strip().strip("/")
+    if sev == "WARN" and not h and ("engine" in check.lower() or check.startswith("clientProblem")):
+        return True
+    return False
+
+
+def extract_notes(raw: bytes) -> list[str]:
+    """Scanner tool notes/warnings from testssl JSON (not findings)."""
+    doc = load_json_or_lines(raw)
+    notes: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        t = (text or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            notes.append(t)
+
+    for e, host, _port in _entries(doc):
+        check = str(e.get("id", ""))
+        finding = str(e.get("finding", ""))
+        sev = str(e.get("severity", "")).upper()
+        if _is_tool_note(check, finding, sev, host):
+            _add(finding or check)
+
+    # Pretty JSON puts client warnings at the document root, outside scanResult.
+    if isinstance(doc, dict):
+        for key, value in doc.items():
+            if not str(key).startswith("clientProblem") or not isinstance(value, list):
+                continue
+            for e in value:
+                if isinstance(e, dict):
+                    _add(str(e.get("finding", "")).strip() or str(e.get("id", "")).strip())
+    return notes
+
+
 def _offered(finding: str) -> bool:
     text = finding.lower()
     if "not offered" in text:
@@ -147,17 +197,43 @@ def _clear_title(check: str, finding: str) -> str | None:
     return None
 
 
-def parse(raw: bytes) -> list[NormalizedFinding]:
+def parse(raw: bytes, *, today: date | None = None) -> list[NormalizedFinding]:
+    """Parse testssl JSON. Optional ``today`` freezes the cert-expiry clock for tests."""
+    from attestra.cert_expiry import (
+        CERT_EXPIRY_VARIANT,
+        days_from_expiration_text,
+        expiry_band,
+        finding_for_end_date,
+        parse_not_after,
+        today_utc,
+    )
+
     doc = load_json_or_lines(raw)
     entries = _entries(doc)
     has_ocsp = _has_ocsp_url(entries)
     out: list[NormalizedFinding] = []
+    # Per-host cert end date / expiry text for one band-based finding at the end.
+    cert_after: dict[str, str] = {}
+    cert_status: dict[str, str] = {}
+    day = today or today_utc()
     for e, host, port in entries:
         sev = str(e.get("severity", "")).upper()
         check = str(e.get("id", ""))
         finding = str(e.get("finding", ""))
         location = f"{host}:{port}" if port else host
         cves = [c for c in str(e.get("cve", "")).split() if c.upper().startswith("CVE-")]
+
+        # Tool notes (engine_problem / GOST / service) stay off the findings list.
+        if _is_tool_note(check, finding, sev, host):
+            continue
+
+        # Collect cert dates; emit one band finding per host after the loop.
+        if check == "cert_notAfter" and finding.strip():
+            cert_after[location] = finding.strip()
+            continue
+        if check in {"cert_expirationStatus", "cert_expiration"}:
+            cert_status[location] = finding
+            continue
 
         if _is_r17_handshake(check, finding):
             out.append(
@@ -213,26 +289,6 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             )
             continue
 
-        # Explicit keepers for expiry / chain when testssl marks them OK/INFO incorrectly,
-        # or when the text clearly shows a problem.
-        if check in {"cert_expirationStatus", "cert_expiration"} and _expired_or_expiring(finding):
-            out.append(
-                NormalizedFinding(
-                    tool="testssl",
-                    rule_id=check,
-                    title="TLS: certificate expired or expiring soon",
-                    severity="high" if "expired" in finding.lower() else "medium",
-                    location=location,
-                    description=finding,
-                    recommendation="Replace the certificate before it expires.",
-                    cwe=298,
-                    cves=cves,
-                    param=check,
-                    variant="cert_expirationStatus",
-                )
-            )
-            continue
-
         if check == "cert_chain_of_trust" and _chain_failed(finding):
             out.append(
                 NormalizedFinding(
@@ -275,9 +331,7 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
         severity = "low" if sev == "WARN" else norm_severity(sev)
         title = _clear_title(check, finding) or f"TLS: {check} - {finding}"[:500]
         variant = check
-        if check in {"cert_expirationStatus", "cert_expiration"}:
-            variant = "cert_expirationStatus"
-        elif check == "cert_chain_of_trust":
+        if check == "cert_chain_of_trust":
             variant = "cert_chain_of_trust"
         out.append(
             NormalizedFinding(
@@ -294,6 +348,60 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                 variant=variant,
             )
         )
+
+    # One expiry finding per host from notAfter (preferred) or expirationStatus text.
+    hosts = sorted(set(cert_after) | set(cert_status))
+    for location in hosts:
+        end = parse_not_after(cert_after.get(location, ""))
+        if end is not None:
+            nf = finding_for_end_date(
+                end=end,
+                location=location,
+                tool="testssl",
+                rule_id="cert_notAfter",
+                today=day,
+            )
+            if nf is not None:
+                out.append(nf)
+            continue
+        status_text = cert_status.get(location, "")
+        if not _expired_or_expiring(status_text):
+            continue
+        left = days_from_expiration_text(status_text)
+        if left is None:
+            # Keep a clear expired finding when the text says expired but has no date.
+            out.append(
+                NormalizedFinding(
+                    tool="testssl",
+                    rule_id="cert_expirationStatus",
+                    title="TLS: certificate expired",
+                    severity="high",
+                    location=location,
+                    description=status_text,
+                    recommendation="Replace the expired certificate and reload the TLS service.",
+                    cwe=298,
+                    param="cert_expirationStatus",
+                    variant=CERT_EXPIRY_VARIANT,
+                )
+            )
+            continue
+        band = expiry_band(left)
+        if band is None:
+            continue
+        # Synthesize an end date so title/severity stay consistent with the band helper.
+        from datetime import timedelta
+
+        synth_end = day + timedelta(days=left)
+        nf = finding_for_end_date(
+            end=synth_end,
+            location=location,
+            tool="testssl",
+            rule_id="cert_expirationStatus",
+            today=day,
+        )
+        if nf is not None:
+            nf.description = status_text or nf.description
+            out.append(nf)
     return out
 
 

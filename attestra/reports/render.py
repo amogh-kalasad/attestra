@@ -14,7 +14,15 @@ from sqlalchemy.orm import Session
 
 from attestra import __version__, audit, config, services
 from attestra.compliance import load_library, objectives_for
-from attestra.models import OPEN_STATUSES, SEVERITIES, Engagement, ImportRun, Report, utcnow
+from attestra.models import (
+    OPEN_STATUSES,
+    SEVERITIES,
+    Engagement,
+    ImportRun,
+    Report,
+    engagement_type_label,
+    utcnow,
+)
 from attestra.reports import signing
 
 KINDS = (
@@ -55,7 +63,7 @@ def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
     return Counter(f.severity for f in open_f)
 
 
-def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
+def _context(s: Session, engagement_id: int, framework: str = "", *, include_comments: bool = False) -> dict:
     eng = services.get_engagement(s, engagement_id)
     findings = services.list_findings(s, engagement_id)
     reportable = [f for f in findings if f.status != "false_positive"]
@@ -69,12 +77,30 @@ def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
         results = services.compliance(s, engagement_id, fw)
         counts = Counter(r.status for r in results)
         frameworks[fw] = {"name": lib.frameworks[fw]["name"], "results": results, "counts": counts}
+    site_grades = []
+    for asset in eng.assets:
+        try:
+            site_grades.append(services.asset_site_grade(s, asset.id))
+        except Exception:
+            continue
+
+    comments_by_finding: dict[int, list] = {}
+    if include_comments:
+        from attestra.comments import comments_for_findings
+
+        comments_by_finding = comments_for_findings(s, [f.id for f in reportable])
+
+    from attestra.library import service as library_service
+
+    fix_ctx = library_service.fix_context_for_engagement(s, reportable)
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
+        "type_label": engagement_type_label(eng.type),
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
         "tls_summaries": services.tls_summaries(s, engagement_id),
+        "site_grades": site_grades,
         "open_findings": open_f,
         "by_sev": by_sev,
         "prev_by_sev": prev_by_sev,
@@ -92,6 +118,11 @@ def _context(s: Session, engagement_id: int, framework: str = "") -> dict:
         "version_str": __version__,
         "open_critical_high": sum(1 for f in open_f if f.severity in ("critical", "high")),
         "feed_catalog": _feed_catalog(),
+        "include_comments": include_comments,
+        "comments_by_finding": comments_by_finding,
+        "fix_by_id": fix_ctx["fix_by_id"],
+        "report_snippets_by_id": fix_ctx["report_snippets_by_id"],
+        "server_type": fix_ctx["server_type"],
         **_ai_context(engagement_id, eng.tenant_id),
     }
 
@@ -120,6 +151,7 @@ def generate_report(
     actor: str,
     framework: str = "",
     user_id: int | None = None,
+    include_comments: bool = False,
 ) -> Report:
     if kind not in KINDS:
         raise services.ServiceError(f"kind must be one of {KINDS}")
@@ -144,7 +176,7 @@ def generate_report(
         )
         or 0
     ) + 1
-    ctx = _context(s, engagement_id, framework)
+    ctx = _context(s, engagement_id, framework, include_comments=include_comments)
     if kind == "iso_soa":
         fw = framework or "iso_27001_2022"
         ctx["soa_results"] = services.compliance(s, engagement_id, fw)

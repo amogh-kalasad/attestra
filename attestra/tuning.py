@@ -233,5 +233,22 @@ def fp_rate_by_tool(s: Session, tenant_ids=None) -> list[dict]:
     ]
 
 
+def findings_for_tool(s: Session, tool: str, tenant_ids=None) -> list[Finding]:
+    """Findings that list ``tool`` in their tools array (UI audit #87 drill-down)."""
+    tool = (tool or "").strip()
+    if not tool:
+        return []
+    q = select(Finding).order_by(Finding.id.desc())
+    if tenant_ids is not None:
+        q = q.join(Engagement, Engagement.id == Finding.engagement_id).where(
+            Engagement.tenant_id.in_(list(tenant_ids))
+        )
+    out: list[Finding] = []
+    for f in s.scalars(q):
+        if tool in (f.tools or []):
+            out.append(f)
+    return out
+
+
 def suppression_count(s: Session, tenant_id: int) -> int:
     return s.scalar(select(func.count(SuppressionRule.id)).where(SuppressionRule.tenant_id == tenant_id)) or 0

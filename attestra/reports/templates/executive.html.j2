@@ -2,7 +2,7 @@
 {% block title %}Executive summary{% endblock %}
 {% block body %}
 <h1>Executive summary: {{ eng.name }}</h1>
-<div class="meta">{{ eng.type|upper }} engagement · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+<div class="meta">{{ type_label }} engagement · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
 
 {% set crit_high = by_sev.get("critical", 0) + by_sev.get("high", 0) %}
 <p class="note">

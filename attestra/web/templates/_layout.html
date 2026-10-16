@@ -303,6 +303,7 @@
   .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--quiet)}
   .st-queued,.st-running{color:var(--med)} .st-succeeded,.st-completed,.st-done{color:var(--low)}
   .st-failed,.st-refused,.st-error,.st-halted{color:var(--crit)}
+  .st-cancelled{color:var(--quiet)}
   .st { font-weight: 600; text-transform: capitalize; }
   .mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all; color: var(--quiet); }
 
@@ -633,6 +634,10 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10"/></svg>
           Engagements
         </a>
+        <a href="/sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+          Sites
+        </a>
         {% if can(role, "engagement.create") %}
         <a href="/engagements/new" {{ 'aria-current=page' if path == '/engagements/new' }}>
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -643,6 +648,12 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>
           PCI calendar
         </a>
+        {% if can(role, "share.manage") %}
+        <a href="/shares" {{ 'aria-current=page' if path == '/shares' or path.startswith('/shares/') }}>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+          Share links
+        </a>
+        {% endif %}
       </div>
       {% if can(role, "finding.write") %}
       <div class="nav-group">
@@ -667,6 +678,10 @@
         <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg>
           Users
+        </a>
+        <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
+          Email alerts
         </a>
         {% endif %}
         <a href="/docs">

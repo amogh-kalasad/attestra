@@ -141,6 +141,10 @@ class TransitionIn(BaseModel):
     note: str = ""
 
 
+class CommentIn(BaseModel):
+    body: str = Field(..., min_length=1, max_length=5000)
+
+
 class ConfirmIn(BaseModel):
     framework: str
     ref: str
@@ -168,8 +172,10 @@ def _eng_dict(e) -> dict:
     }
 
 
-def _finding_dict(f) -> dict:
-    return {
+def _finding_dict(f, fix: dict | None = None) -> dict:
+    from attestra.library.fix_snippets import empty_fix_fields
+
+    out = {
         "id": f.id,
         "title": f.title,
         "severity": f.severity,
@@ -190,6 +196,8 @@ def _finding_dict(f) -> dict:
         "asvs_ref": f.asvs_ref,
         "wstg_ref": f.wstg_ref,
     }
+    out.update(fix if fix is not None else empty_fix_fields())
+    return out
 
 
 def _report_dict(r) -> dict:
@@ -335,6 +343,45 @@ def list_assets(eid: int, principal: Principal = Depends(require("engagement.rea
     )
 
 
+@app.get("/api/engagements/{eid}/assets/{aid}/grade")
+def asset_grade(eid: int, aid: int, principal: Principal = Depends(require("engagement.read"))):
+    """Site grade, score, and breakdown for one target (tenant-scoped)."""
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        asset = services.get_asset(s, aid, principal)
+        if asset.engagement_id != eid:
+            raise LookupError("target not found")
+        return services.asset_site_grade(s, aid, principal)
+
+    try:
+        return _run(fn)
+    except LookupError:
+        raise HTTPException(404, "target not found")
+
+
+@app.get("/api/sites")
+def list_sites(
+    sort: str = Query("grade"),
+    q: str = Query(""),
+    principal: Principal = Depends(require("engagement.read")),
+):
+    """Tenant-scoped list of all targets with grade, open counts, last scan, and trend."""
+
+    def fn(s):
+        rows = services.list_tenant_sites(s, principal, sort=sort, q=q)
+        out = []
+        for r in rows:
+            item = dict(r)
+            at = item.get("last_scan_at")
+            if at is not None and hasattr(at, "isoformat"):
+                item["last_scan_at"] = at.isoformat()
+            out.append(item)
+        return out
+
+    return _run(fn)
+
+
 @app.delete("/api/assets/{aid}", status_code=204)
 def remove_asset(aid: int, principal: Principal = Depends(require("asset.write"))):
     _run(services.remove_asset, aid, actor=principal.actor)
@@ -382,19 +429,112 @@ def findings(
     principal: Principal = Depends(require("finding.read")),
 ):
     def fn(s):
+        from attestra.library import service as lib
+
         services.get_engagement(s, eid, principal)
-        return [_finding_dict(f) for f in services.list_findings(s, eid, status, severity)]
+        rows = services.list_findings(s, eid, status, severity)
+        return [_finding_dict(f, lib.finding_api_fix_fields(s, f)) for f in rows]
+
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/findings/export")
+def findings_export(
+    eid: int,
+    asset_id: int | None = Query(None, description="limit to one target"),
+    principal: Principal = Depends(require("finding.read")),
+):
+    """CSV export of findings (formula-injection guarded). Audited as findings.exported."""
+    from fastapi.responses import PlainTextResponse
+
+    from attestra.reports.findings_csv import export_findings_csv
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        if asset_id is not None:
+            asset = services.get_asset(s, asset_id, principal)
+            if asset.engagement_id != eid:
+                raise LookupError("target not found")
+        return export_findings_csv(s, eid, actor=principal.actor, asset_id=asset_id)
+
+    body = _run(fn)
+    name = f"eng{eid}-findings.csv" if asset_id is None else f"eng{eid}-asset{asset_id}-findings.csv"
+    return PlainTextResponse(
+        body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/engagements/{eid}/scope/suggestions")
+def scope_suggestions_status(
+    eid: int,
+    principal: Principal = Depends(require("asset.write")),
+):
+    """Which apex domains can run CT subdomain suggestions (in signed scope only)."""
+    from attestra.runner.authorization import AuthorizationError, scope_for_engagement
+    from attestra.runner.ct_suggestions import in_scope_apexes
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        try:
+            scope = scope_for_engagement(s, eid)
+        except AuthorizationError:
+            return {"enabled": False, "apexes": []}
+        apexes = in_scope_apexes(scope)
+        return {"enabled": bool(apexes), "apexes": apexes}
+
+    return _run(fn)
+
+
+@app.post("/api/engagements/{eid}/scope/suggestions")
+def scope_suggestions_fetch(
+    eid: int,
+    apex: str = Query(..., description="in-scope apex domain, for example example.com"),
+    principal: Principal = Depends(require("asset.write")),
+):
+    """One passive CT lookup. Suggestions only — never adds to scope or starts a scan."""
+    from attestra.runner.ct_suggestions import suggestions_for_engagement
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return suggestions_for_engagement(s, eid, apex, actor=principal.actor)
 
     return _run(fn)
 
 
 @app.post("/api/findings/{fid}/transition")
 def transition(fid: int, body: TransitionIn, principal: Principal = Depends(require("finding.write"))):
-    return _run(
-        lambda s: _finding_dict(
-            services.transition(s, fid, to=body.to, note=body.note, actor=principal.actor)
-        )
-    )
+    def fn(s):
+        from attestra.library import service as lib
+
+        f = services.transition(s, fid, to=body.to, note=body.note, actor=principal.actor)
+        return _finding_dict(f, lib.finding_api_fix_fields(s, f))
+
+    return _run(fn)
+
+
+@app.get("/api/findings/{fid}/comments")
+def list_finding_comments(fid: int, principal: Principal = Depends(require("finding.read"))):
+    from attestra import comments as finding_comments
+
+    return _run(lambda s: finding_comments.list_comments(s, fid, principal))
+
+
+@app.post("/api/findings/{fid}/comments", status_code=201)
+def add_finding_comment(fid: int, body: CommentIn, principal: Principal = Depends(get_principal)):
+    from attestra import comments as finding_comments
+
+    if not finding_comments.can_add_comment(principal.role):
+        raise HTTPException(403, "permission denied: cannot add comments")
+    return _run(lambda s: finding_comments.add_comment(s, fid, body=body.body, principal=principal))
+
+
+@app.delete("/api/findings/{fid}/comments/{cid}")
+def delete_finding_comment(fid: int, cid: int, principal: Principal = Depends(require("finding.read"))):
+    from attestra import comments as finding_comments
+
+    return _run(lambda s: finding_comments.delete_comment(s, fid, cid, principal))
 
 
 @app.post("/api/findings/{fid}/evidence", status_code=201)
@@ -532,8 +672,11 @@ def add_segmentation(eid: int, body: SegIn, principal: Principal = Depends(requi
 @app.get("/api/engagements/{eid}/sla")
 def engagement_sla(eid: int, principal: Principal = Depends(require("finding.read"))):
     def fn(s):
+        from attestra.library import service as lib
+
         services.get_engagement(s, eid, principal)
-        return [_finding_dict(f) for f in services.sla_breaches(s, eid)]
+        rows = services.sla_breaches(s, eid)
+        return [_finding_dict(f, lib.finding_api_fix_fields(s, f)) for f in rows]
 
     return _run(fn)
 
@@ -827,6 +970,17 @@ def get_scan(sid: int, principal: Principal = Depends(require("scan.read"))):
     return _run(fn)
 
 
+@app.post("/api/scans/{sid}/cancel")
+def cancel_scan(sid: int, principal: Principal = Depends(require("scan.start"))):
+    """Cancel a queued or running scan. Same permission as starting a scan."""
+
+    def fn(s):
+        run = services.cancel_scan(s, sid, actor=principal.actor, principal=principal)
+        return _scan_dict(run)
+
+    return _run(fn)
+
+
 @app.post("/api/engagements/{eid}/halt")
 def halt(eid: int, principal: Principal = Depends(require("engagement.halt"))):
     def fn(s):
@@ -996,6 +1150,12 @@ from attestra.users.routes import ui_router as users_ui_router  # noqa: E402
 app.include_router(users_api_router)
 app.include_router(users_ui_router)
 
+from attestra.alerts.routes import api_router as alerts_api_router  # noqa: E402
+from attestra.alerts.routes import ui_router as alerts_ui_router  # noqa: E402
+
+app.include_router(alerts_api_router)
+app.include_router(alerts_ui_router)
+
 
 # ---------------------------------------------------------------- C9 / C10: PCI calendar, ASV import, ISO records
 
@@ -1075,6 +1235,14 @@ from attestra.library.routes import ui_router as library_ui_router  # noqa: E402
 
 app.include_router(library_api_router)
 app.include_router(library_ui_router)
+
+from attestra.share.routes import api_router as share_api_router  # noqa: E402
+from attestra.share.routes import public_router as share_public_router  # noqa: E402
+from attestra.share.routes import ui_router as share_ui_router  # noqa: E402
+
+app.include_router(share_api_router)
+app.include_router(share_public_router)
+app.include_router(share_ui_router)
 
 from attestra.web.errors import install as install_ui_errors  # noqa: E402
 

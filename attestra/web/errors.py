@@ -149,6 +149,12 @@ def install(app: FastAPI) -> None:
 
                 nxt = request.url.path + (f"?{request.url.query}" if request.url.query else "")
                 return _login_redirect(nxt)
+            # UI audit #6: read-only POST → portal with a clear message (keep API as 403 JSON).
+            if exc.status_code == 403 and str(exc.detail) == "read-only role":
+                return RedirectResponse(
+                    "/portal?error=" + quote("Your role is read-only, so you can't change anything here."),
+                    status_code=303,
+                )
             resp = error_page(request, exc.status_code, str(exc.detail) if exc.detail else None)
             for k, v in (getattr(exc, "headers", None) or {}).items():
                 resp.headers[k] = v

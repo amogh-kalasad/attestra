@@ -1,0 +1,154 @@
+{% extends "_layout.html" %}
+{% block title %}F-{{ f.id }} {{ f.title }} &middot; Attestra{% endblock %}
+{% block main %}
+{% set prole = principal.role if principal else "" %}
+<p class="back-link"><a href="/engagements/{{ e.id }}#findings">&larr; {{ e.name }}</a></p>
+<div class="page-head">
+  <div>
+    <h1>F-{{ f.id }}: {{ f.title }}</h1>
+    <p class="lede">
+      <span class="pill {{ f.severity }}">{{ f.severity }}</span>
+      &middot; Risk {{ "%.1f"|format(f.risk_score) }}
+      &middot; <span class="st">{{ f.status|label }}</span>
+      {% if f.asset %} &middot; {{ f.asset.name or f.asset.identifier }}{% endif %}
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Finding</h2>
+  <table>
+    <tr><th>Location</th><td class="mono">{{ f.location or "-" }}</td></tr>
+    <tr><th>Tools</th><td>{{ f.tools|join(", ") or "-" }}</td></tr>
+    <tr><th>CWE / CVE</th><td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td></tr>
+    <tr><th>Fix by</th><td>{{ f.sla_due or "-" }}</td></tr>
+    <tr><th>First / last seen</th><td>{{ f.first_seen|dt }} &middot; {{ f.last_seen|dt }}</td></tr>
+  </table>
+  {% if f.description %}
+  <h3>Description</h3>
+  <p style="white-space:pre-wrap">{{ f.description }}</p>
+  {% endif %}
+  {% if f.recommendation %}
+  <h3>Recommendation</h3>
+  <p style="white-space:pre-wrap">{{ f.recommendation }}</p>
+  {% endif %}
+</div>
+
+{% set snip_texts = (fix.snippets.values()|list) if fix and fix.snippets else [] %}
+{% if fix and (fix.importance or fix.effort or fix.fix_steps or (snip_texts|select|list)) %}
+<div class="card" id="fix-guidance">
+  <h2>How to fix</h2>
+  <p class="meta">
+    {% if fix.importance %}<span class="pill info">Importance: {{ fix.importance }}</span>{% endif %}
+    {% if fix.effort %} &middot; <span class="pill info">Effort: {{ fix.effort }}</span>{% endif %}
+  </p>
+  {% if fix.fix_steps %}
+  <h3>Steps</h3>
+  <p style="white-space:pre-wrap">{{ fix.fix_steps }}</p>
+  {% endif %}
+  {% if fix.snippets and (fix.snippets.values()|select|list) %}
+  <h3>Config snippets</h3>
+  <nav class="tabs" aria-label="Server config snippets" id="snippet-tabs">
+    {% for name, text in fix.snippets.items() if text %}
+    <a href="#snip-{{ name }}" data-snip="{{ name }}" {% if loop.first %}aria-current="page"{% endif %}>{{ name }}</a>
+    {% endfor %}
+  </nav>
+  {% for name, text in fix.snippets.items() if text %}
+  <div class="snip-panel" id="snip-{{ name }}" {% if not loop.first %}hidden{% endif %}>
+    <pre class="mono" style="white-space:pre-wrap;background:var(--field);padding:12px;border-radius:8px;border:1px solid var(--rule)">{{ text }}</pre>
+  </div>
+  {% endfor %}
+  <script>
+  (function () {
+    var tabs = document.querySelectorAll('#snippet-tabs a');
+    tabs.forEach(function (a) {
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var name = a.getAttribute('data-snip');
+        tabs.forEach(function (t) { t.removeAttribute('aria-current'); });
+        a.setAttribute('aria-current', 'page');
+        document.querySelectorAll('.snip-panel').forEach(function (p) {
+          p.hidden = p.id !== ('snip-' + name);
+        });
+      });
+    });
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if can(prole, "finding.write") %}
+<div class="card" id="status">
+  <h2>Change status</h2>
+  {% set nexts = transitions.get(f.status, []) %}
+  {% if nexts %}
+  <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status">
+    <div class="fields">
+      <div><label for="to">Move to</label>
+        <select id="to" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
+      </div>
+      <div style="grid-column:span 2"><label for="note">Reason</label>
+        <input id="note" name="note" type="text" placeholder="Needed for false positive / risk accepted" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Save status</button></div>
+  </form>
+  {% else %}
+  <p class="meta">No further status moves from {{ f.status|label }}.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card" id="evidence">
+  <h2>Evidence</h2>
+  <table>
+    <tr><th>Kind</th><th>File</th><th>Note</th><th>By</th><th>When</th></tr>
+    {% for ev in f.evidence %}
+    <tr>
+      <td>{{ ev.kind|label }}</td>
+      <td class="mono">{{ ev.filename }}</td>
+      <td>{{ ev.note or "-" }}</td>
+      <td>{{ ev.captured_by }}</td>
+      <td>{{ ev.captured_at|dt }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No evidence yet.</td></tr>
+    {% endfor %}
+  </table>
+  <p class="meta"><a href="/library?tenant_id={{ e.tenant_id }}">Apply a library writeup</a> if this finding needs a standard description.</p>
+</div>
+
+<div class="card" id="comments">
+  <h2>Comments</h2>
+  <p class="meta">Plain text only. Times shown in {{ tz_label }}.</p>
+  {% if comments %}
+  <ul class="comment-list" style="list-style:none;padding:0;margin:0 0 16px">
+    {% for c in comments %}
+    <li style="border-top:1px solid var(--border, #e5e7eb);padding:12px 0">
+      <div class="meta">{{ c.author_name }} &middot; {{ c.created_at|dt }}</div>
+      <p style="white-space:pre-wrap;margin:6px 0 0">{{ c.body }}</p>
+      {% if c.can_delete %}
+      <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/comments/{{ c.id }}/delete" style="margin-top:8px">
+        <button type="submit" class="secondary">Delete</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">No comments yet.</p>
+  {% endif %}
+  {% if can_add_comment %}
+  <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/comments">
+    <div class="fields">
+      <div style="grid-column:1/-1">
+        <label for="comment_body">Add a comment</label>
+        <textarea id="comment_body" name="body" rows="3" maxlength="5000" required placeholder="Plain text, up to 5000 characters"></textarea>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Post comment</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

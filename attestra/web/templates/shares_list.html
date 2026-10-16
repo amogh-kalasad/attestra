@@ -1,0 +1,74 @@
+{% extends "_layout.html" %}
+{% block title %}Share links · Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <div class="breadcrumb"><a href="/">Engagements</a> <span>/</span> <span class="current">Share links</span></div>
+    <h1>Share links</h1>
+    <p class="lede">Create a read-only link for a target grade or a scan. The token is shown once; only a hash is stored.</p>
+  </div>
+</div>
+
+{% if msg %}<div class="flash ok">{{ msg }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+{% if new_token %}
+<div class="card">
+  <h2>New share token</h2>
+  <p>Copy this now. It will not be shown again.</p>
+  <p><code style="word-break:break-all">{{ new_token }}</code></p>
+  <p class="hint">Page: <a href="/share/{{ new_token }}" target="_blank" rel="noopener">/share/{{ new_token }}</a></p>
+  <p class="hint">Badge: <a href="/share/{{ new_token }}/badge.svg" target="_blank" rel="noopener">/share/{{ new_token }}/badge.svg</a></p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Create a share link</h2>
+  <form method="post" action="/shares/create" class="stack">
+    <label for="kind">Kind</label>
+    <select id="kind" name="kind">
+      <option value="grade">Target grade</option>
+      <option value="scan">Scan result</option>
+    </select>
+    <label for="asset_id">Target id (for grade)</label>
+    <input id="asset_id" name="asset_id" type="number" min="1" placeholder="asset id">
+    <label for="scan_run_id">Scan id (for scan)</label>
+    <input id="scan_run_id" name="scan_run_id" type="number" min="1" placeholder="scan run id">
+    <label for="ttl_days">Expires in days (1–90, default 7)</label>
+    <input id="ttl_days" name="ttl_days" type="number" min="1" max="90" value="7">
+    <label for="label">Label (optional)</label>
+    <input id="label" name="label" type="text" maxlength="200" placeholder="e.g. Q3 external share">
+    <button type="submit" class="btn">Create share link</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Your share links</h2>
+  <table>
+    <thead>
+      <tr><th>Id</th><th>Kind</th><th>Target / scan</th><th>Label</th><th>Status</th><th>Expires</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for s in shares %}
+      <tr>
+        <td>{{ s.id }}</td>
+        <td>{{ s.kind }}</td>
+        <td>{% if s.kind == "grade" %}asset {{ s.asset_id }}{% else %}scan {{ s.scan_run_id }}{% endif %}</td>
+        <td>{{ s.label or "—" }}</td>
+        <td>{{ s.status }}</td>
+        <td>{{ s.expires_at }}</td>
+        <td>
+          {% if s.status == "active" %}
+          <form method="post" action="/shares/{{ s.id }}/revoke" style="display:inline">
+            <button type="submit" class="btn ghost">Revoke</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7"><div class="empty">No share links yet.</div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

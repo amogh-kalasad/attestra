@@ -107,6 +107,7 @@ Packages added after the core flow. Each one calls the shared services and recor
 - [[attestra/proof/replay.py]]: redacted HTTP proof and in-scope replay for retests.
 - [[attestra/trust/service.py]]: opt-in trust center for signed reports.
 - [[attestra/webhooks/service.py]] and [[attestra/integrations/tickets.py]]: signed outbound webhooks and Jira or GitHub ticket sync.
+- [[attestra/alerts/service.py]]: tenant email alerts for new Critical/High findings, security header changes, and missed SLA (SMTP off by default).
 - [[attestra/ai_narratives.py]]: AI draft text, off by default, used only after tester approval.
 - [[attestra/tuning.py]] and [[attestra/rls.py]]: per-tenant risk weights and suppression, and PostgreSQL row-level security.
 - [[attestra/runner/ownership.py]]: target ownership check by DNS TXT, well-known file, or owner confirmation for a private IP.

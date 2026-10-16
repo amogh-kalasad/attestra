@@ -8,19 +8,39 @@ import json
 import time
 
 FORMATS = ("json", "slack", "teams")
-EVENTS = ("finding.created", "finding.status_changed", "report.signed", "retest.completed")
+EVENTS = (
+    "finding.created",
+    "finding.status_changed",
+    "finding.commented",
+    "report.signed",
+    "retest.completed",
+    "scan.finished",
+    "cert.expiring",
+)
 SIG_HEADER = "X-Attestra-Signature"
 TS_HEADER = "X-Attestra-Timestamp"
 
 
 def summary(event: str, data: dict) -> str:
     if event.startswith("finding."):
+        if event == "finding.commented":
+            return (
+                f"[{str(data.get('severity', '')).upper()}] {data.get('title', '')} "
+                f"- comment on finding #{data.get('finding_id')}"
+            )
         extra = f" ({data.get('from')} -> {data.get('status')})" if event == "finding.status_changed" else ""
         return f"[{str(data.get('severity', '')).upper()}] {data.get('title', '')} - finding #{data.get('finding_id')}{extra}"
     if event == "report.signed":
         return f"Report #{data.get('report_id')} ({data.get('kind')}) signed by {data.get('signed_by')}"
     if event == "retest.completed":
         return f"Retest #{data.get('retest_id')} of finding #{data.get('finding_id')}: {data.get('result')}"
+    if event == "scan.finished":
+        return f"Scan #{data.get('scan_id')} ({data.get('tool')}) finished with status {data.get('status')}"
+    if event == "cert.expiring":
+        return (
+            f"Certificate for {data.get('target', '')} expires in {data.get('days_left')} day(s) "
+            f"(band {data.get('band')}, end {data.get('end_date')})"
+        )
     return event
 
 

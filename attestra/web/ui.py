@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -25,19 +25,25 @@ from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
+    ENGAGEMENT_TYPE_LABELS,
     ENVIRONMENTS,
     OPEN_STATUSES,
     TEST_TYPES,
     Engagement,
     ImportRun,
     Report,
+    engagement_type_label,
 )
 
 READ_ONLY_ROLES = frozenset({"client_viewer", "auditor"})
 
 
 def _block_read_only_writes(request: Request) -> None:
-    """Step 7.1: client_viewer and auditor sessions may never write through the UI."""
+    """Step 7.1: client_viewer and auditor sessions may never write through the UI.
+
+    Raises 403 ``read-only role``. The HTML error handler turns that into a
+    portal redirect with a clear message (UI audit #6); API clients keep JSON.
+    """
     if request.method != "POST" or request.url.path in ("/login", "/logout"):
         return
     principal = _principal(request)
@@ -47,14 +53,6 @@ def _block_read_only_writes(request: Request) -> None:
 
 router = APIRouter(include_in_schema=False, dependencies=[Depends(_block_read_only_writes)])
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-
-ENGAGEMENT_TYPE_LABELS = {
-    "va": "Vulnerability Assessment (VA)",
-    "pt": "Penetration Test (PT)",
-    "vapt": "VAPT (VA + PT)",
-    "retest": "Retest",
-    "continuous": "Continuous scanning",
-}
 
 # Tools the scan runner and the scheduler accept (one list for both forms).
 SCAN_TOOLS = ("zap", "nuclei", "testssl", "naabu", "webcheck", "trivy", "semgrep", "gitleaks", "checkov")
@@ -77,6 +75,8 @@ IMPORT_FORMAT_LABELS = {
     "webcheck": "Attestra webcheck (JSON)",
     "observatory": "Mozilla HTTP Observatory (saved JSON)",
     "ssllabs": "Qualys SSL Labs (saved JSON)",
+    "burp": "Burp Suite (Issues XML)",
+    "nessus": "Nessus (.nessus XML)",
 }
 ROLE_LABELS = {
     "admin": "Admin",
@@ -141,6 +141,7 @@ def fw_name(key) -> str:
 templates.env.filters["dt"] = format_dt
 templates.env.filters["label"] = label
 templates.env.filters["fw_name"] = fw_name
+templates.env.filters["type_label"] = engagement_type_label
 templates.env.globals.update(
     type_labels=ENGAGEMENT_TYPE_LABELS, role_labels=ROLE_LABELS, can=has_permission, tz_label=TZ_LABEL,
 )
@@ -279,6 +280,22 @@ def home(request: Request):
         return _render(request, "home.html", {"rows": rows})
 
 
+@router.get("/sites", response_class=HTMLResponse)
+def sites_dashboard(request: Request):
+    """All targets for the signed-in tenant: grade, open counts, last scan, trend."""
+    # @lat: [[interfaces#Web dashboard#Sites dashboard]]
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse("/portal", status_code=303)
+    sort = (request.query_params.get("sort") or "grade").strip().lower()
+    q = (request.query_params.get("q") or "").strip()
+    with db.session() as s:
+        rows = services.list_tenant_sites(s, principal, sort=sort, q=q)
+        return _render(request, "sites.html", {"rows": rows, "sort": sort, "q": q})
+
+
 @router.get("/tuning/false-positives", response_class=HTMLResponse)
 def false_positive_rates(request: Request):
     """Phase 7.4: share of each tool's findings marked false_positive, within the user's tenants."""
@@ -292,6 +309,29 @@ def false_positive_rates(request: Request):
     with db.session() as s:
         rows = tuning.fp_rate_by_tool(s, services.tenant_ids_for(s, principal))
         return _render(request, "tuning_fp.html", {"rows": rows, "small_sample": SMALL_SAMPLE})
+
+
+@router.get("/tuning/false-positives/{tool}", response_class=HTMLResponse)
+def false_positive_tool_findings(request: Request, tool: str):
+    """Per-tool findings list for the FP rates page (UI audit #87)."""
+    from attestra import tuning
+
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse("/portal", status_code=303)
+    with db.session() as s:
+        tenant_ids = services.tenant_ids_for(s, principal)
+        findings = tuning.findings_for_tool(s, tool, tenant_ids)
+        fp_n = sum(1 for f in findings if f.status == "false_positive")
+        return _render(request, "tuning_fp_tool.html", {
+            "tool": tool,
+            "findings": findings,
+            "false_positive": fp_n,
+            "total": len(findings),
+            "small_sample": SMALL_SAMPLE,
+        })
 
 
 @router.get("/engagements/new", response_class=HTMLResponse)
@@ -390,6 +430,98 @@ def _test_plan(e: Engagement) -> list[dict]:
     return plan
 
 
+def _ct_apexes_for(s, eid: int) -> list[str]:
+    """Apex domains that may run CT suggestions (R14: apex itself in signed scope)."""
+    from attestra.runner.authorization import AuthorizationError, scope_for_engagement
+    from attestra.runner.ct_suggestions import in_scope_apexes
+
+    try:
+        return in_scope_apexes(scope_for_engagement(s, eid))
+    except AuthorizationError:
+        return []
+
+
+def _engagement_ctx(
+    request: Request,
+    s,
+    principal,
+    eid: int,
+    framework: str | None = None,
+    *,
+    ct_suggestions: list | None = None,
+    ct_apex: str = "",
+) -> dict:
+    """Shared context for the engagement page (overview + CT suggestion results)."""
+    e = services.get_engagement(s, eid, principal)
+    lib = load_library()
+    fw = framework if framework in lib.frameworks else (e.frameworks[0] if e.frameworks else "pci_dss_4")
+    results = services.compliance(s, eid, fw)
+    findings = services.list_findings(s, eid)
+    imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
+    reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
+    scans = services.list_scans(s, eid)
+    authorized = services.authorized_environments(e)
+    asv_scans = list(e.asv_scans)
+    segmentation_tests = list(e.segmentation_tests)
+    nonconformities = list(e.nonconformities)
+    schedules = services.list_scan_schedules(s, eid)
+    today = date.today()
+    asset_findings = Counter(f.asset_id for f in e.findings if f.asset_id)
+    asset_schedules = Counter(sch.asset_id for sch in schedules)
+    frameworks = e.frameworks or []
+    from attestra.runner import ownership
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    services.ensure_ownership_tokens(e)
+    ov = request.query_params.get("ov", "")
+    return {
+        "ownership_kinds": OWNERSHIP_KINDS,
+        "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
+        "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
+        "ov_open": int(ov) if ov.isdigit() else None,
+        "ov_message": request.query_params.get("ovmsg", ""),
+        "scan_tools": SCAN_TOOLS,
+        "scan_tool_labels": SCAN_TOOL_LABELS,
+        "import_labels": IMPORT_FORMAT_LABELS,
+        "asset_findings": asset_findings,
+        "asset_schedules": asset_schedules,
+        "due_schedules": sum(1 for sch in schedules if sch.next_due and sch.next_due <= today),
+        "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
+        "report_kinds": _report_kinds(),
+        "auth_default_expiry": e.window_end or (today + timedelta(days=90)),
+        "has_pci": _has_pci(frameworks),
+        "has_iso": _has_iso(frameworks),
+        "ai_enabled": ai_narratives.is_enabled(tenant_id=e.tenant_id),
+        "e": e,
+        "type_label": engagement_type_label(e.type),
+        "findings": findings,
+        "passed_checks": services.list_passed_checks(s, eid),
+        "imports": imports,
+        "scans": scans,
+        "reports": reports,
+        "asv_scans": asv_scans,
+        "segmentation_tests": segmentation_tests,
+        "nonconformities": nonconformities,
+        "schedules": schedules,
+        "results": results,
+        "fw": fw,
+        "fw_names": {k: v["name"] for k, v in lib.frameworks.items()},
+        "counts": Counter(r.status for r in results),
+        "sev": Counter(f.severity for f in findings if f.status in OPEN_STATUSES),
+        "authorized_envs": authorized,
+        "plan": _test_plan(e),
+        "environments": ENVIRONMENTS,
+        "asset_kinds": ASSET_KINDS,
+        "test_types": TEST_TYPES,
+        "default_tests": DEFAULT_TESTS,
+        "import_formats": sorted(PARSERS),
+        "today": date.today(),
+        "ct_apexes": _ct_apexes_for(s, eid),
+        "ct_suggestions": ct_suggestions or [],
+        "ct_apex": ct_apex,
+    }
+
+
 @router.get("/engagements/{eid}", response_class=HTMLResponse)
 def engagement_page(request: Request, eid: int, framework: str | None = None):
     principal, redirect = _require_login(request)
@@ -399,73 +531,65 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
     with db.session() as s:
         try:
-            e = services.get_engagement(s, eid, principal)
+            ctx = _engagement_ctx(request, s, principal, eid, framework)
         except LookupError:
             raise HTTPException(404, "engagement not found")
-        lib = load_library()
-        fw = framework if framework in lib.frameworks else (e.frameworks[0] if e.frameworks else "pci_dss_4")
-        results = services.compliance(s, eid, fw)
-        findings = services.list_findings(s, eid)
-        imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
-        reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
-        scans = services.list_scans(s, eid)
-        authorized = services.authorized_environments(e)
-        asv_scans = list(e.asv_scans)
-        segmentation_tests = list(e.segmentation_tests)
-        nonconformities = list(e.nonconformities)
-        schedules = services.list_scan_schedules(s, eid)
-        today = date.today()
-        asset_findings = Counter(f.asset_id for f in e.findings if f.asset_id)
-        asset_schedules = Counter(sch.asset_id for sch in schedules)
-        frameworks = e.frameworks or []
-        from attestra.runner import ownership
-        from attestra.runner.policy import OWNERSHIP_KINDS
+        return _render(request, "engagement.html", ctx)
 
-        services.ensure_ownership_tokens(e)
-        ov = request.query_params.get("ov", "")
-        return _render(request, "engagement.html", {
-            "ownership_kinds": OWNERSHIP_KINDS,
-            "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
-            "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
-            "ov_open": int(ov) if ov.isdigit() else None,
-            "ov_message": request.query_params.get("ovmsg", ""),
-            "scan_tools": SCAN_TOOLS,
-            "scan_tool_labels": SCAN_TOOL_LABELS,
-            "import_labels": IMPORT_FORMAT_LABELS,
-            "asset_findings": asset_findings,
-            "asset_schedules": asset_schedules,
-            "due_schedules": sum(1 for sch in schedules if sch.next_due and sch.next_due <= today),
-            "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
-            "report_kinds": _report_kinds(),
-            "auth_default_expiry": e.window_end or (today + timedelta(days=90)),
-            "has_pci": _has_pci(frameworks),
-            "has_iso": _has_iso(frameworks),
-            "ai_enabled": ai_narratives.is_enabled(tenant_id=e.tenant_id),
-            "e": e,
-            "type_label": ENGAGEMENT_TYPE_LABELS.get(e.type, e.type),
-            "findings": findings,
-            "passed_checks": services.list_passed_checks(s, eid),
-            "imports": imports,
-            "scans": scans,
-            "reports": reports,
-            "asv_scans": asv_scans,
-            "segmentation_tests": segmentation_tests,
-            "nonconformities": nonconformities,
-            "schedules": schedules,
-            "results": results,
-            "fw": fw,
-            "fw_names": {k: v["name"] for k, v in lib.frameworks.items()},
-            "counts": Counter(r.status for r in results),
-            "sev": Counter(f.severity for f in findings if f.status in OPEN_STATUSES),
-            "authorized_envs": authorized,
-            "plan": _test_plan(e),
-            "environments": ENVIRONMENTS,
-            "asset_kinds": ASSET_KINDS,
-            "test_types": TEST_TYPES,
-            "default_tests": DEFAULT_TESTS,
-            "import_formats": sorted(PARSERS),
-            "today": date.today(),
-        })
+
+@router.get("/engagements/{eid}/findings/export")
+def export_findings_ui(request: Request, eid: int, asset_id: int | None = None):
+    """Page button: download findings CSV (same guard and audit as the API)."""
+    from attestra.reports.findings_csv import export_findings_csv
+
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.read"):
+        raise HTTPException(403, "permission denied: finding.read")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            if asset_id is not None:
+                asset = services.get_asset(s, asset_id, principal)
+                if asset.engagement_id != eid:
+                    raise LookupError("target not found")
+            body = export_findings_csv(s, eid, actor=principal.actor, asset_id=asset_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    name = f"eng{eid}-findings.csv" if asset_id is None else f"eng{eid}-asset{asset_id}-findings.csv"
+    return PlainTextResponse(
+        body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.post("/engagements/{eid}/scope/suggestions")
+def fetch_ct_suggestions_ui(request: Request, eid: int, apex: str = Form(...)):
+    """Find subdomain suggestions from CT logs (one request). Never changes scope."""
+    from attestra.runner.ct_suggestions import suggestions_for_engagement
+
+    principal, redirect = _require_login(request, f"/engagements/{eid}")
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.write"):
+        return _back(f"/engagements/{eid}", error="Only a lead or tester with asset write can fetch suggestions.",
+                     anchor="#targets")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            result = suggestions_for_engagement(s, eid, apex, actor=principal.actor)
+            ctx = _engagement_ctx(
+                request, s, principal, eid,
+                ct_suggestions=result["suggestions"],
+                ct_apex=result["apex"],
+            )
+            return _render(request, "engagement.html", ctx)
+    except LookupError as e:
+        return _back(f"/engagements/{eid}", error=str(e), anchor="#targets")
+    except services.ServiceError as e:
+        return _back(f"/engagements/{eid}", error=str(e), anchor="#targets")
 
 
 @router.post("/engagements/{eid}/authorizations")
@@ -492,7 +616,7 @@ async def add_authorization(
 
 @router.get("/engagements/{eid}/targets/{aid}", response_class=HTMLResponse)
 def target_page(request: Request, eid: int, aid: int):
-    """C11: per-target scan history, A–F grades, and new/fixed/still-open diffs."""
+    """Target page: site grade breakdown (Phase 1) and C11 scan history."""
     principal, redirect = _require_login(request)
     if redirect:
         return redirect
@@ -505,7 +629,21 @@ def target_page(request: Request, eid: int, aid: int):
         if asset.engagement_id != eid:
             raise HTTPException(404, "target not found")
         history = services.asset_scan_history(s, aid, principal)
-        return _render(request, "asset.html", {"e": e, "asset": asset, "history": history})
+        site_grade = services.asset_site_grade(s, aid, principal)
+        from attestra.cert_expiry import asset_cert_status
+
+        cert_status = asset_cert_status(s, aid)
+        return _render(
+            request,
+            "asset.html",
+            {
+                "e": e,
+                "asset": asset,
+                "history": history,
+                "site_grade": site_grade,
+                "cert_status": cert_status,
+            },
+        )
 
 
 @router.post("/engagements/{eid}/targets")
@@ -636,6 +774,48 @@ def queue_scan(
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#scans")
     return _back(url, msg=f"Scan #{run.id} queued ({tool}/{profile}).", anchor="#scans")
+
+
+@router.get("/engagements/{eid}/scans/{sid}", response_class=HTMLResponse)
+def scan_page(request: Request, eid: int, sid: int):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
+    with db.session() as s:
+        try:
+            e = services.get_engagement(s, eid, principal)
+            run = services.get_scan(s, sid)
+        except LookupError:
+            raise HTTPException(404, "scan not found") from None
+        if run.engagement_id != eid:
+            raise HTTPException(404, "scan not found")
+        return _render(request, "scan.html", {
+            "e": e,
+            "run": run,
+            "can_cancel": run.status in ("queued", "running") and has_permission(principal.role, "scan.start"),
+        })
+
+
+@router.post("/engagements/{eid}/scans/{sid}/cancel")
+def ui_cancel_scan(request: Request, eid: int, sid: int):
+    url = f"/engagements/{eid}/scans/{sid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "scan.start"):
+        return _back(f"/engagements/{eid}", error="Your role can't cancel scans.", anchor="#scans")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            run = services.get_scan(s, sid)
+            if run.engagement_id != eid:
+                raise LookupError(f"scan {sid} not found")
+            services.cancel_scan(s, sid, actor=principal.actor, principal=principal)
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e))
+    return _back(url, msg=f"Scan #{sid} cancelled.")
 
 
 @router.post("/engagements/{eid}/asv")
@@ -921,6 +1101,7 @@ def edit_engagement(
     request: Request,
     eid: int,
     name: str = Form(...),
+    client_name: str = Form(""),
     window_start: str = Form(""),
     window_end: str = Form(""),
     frameworks: list[str] = Form([]),
@@ -940,16 +1121,105 @@ def edit_engagement(
         with db.session() as s:
             services.get_engagement(s, eid, principal)
             services.update_engagement(
-                s, eid, name=name, window_start=ws, window_end=we, frameworks=frameworks, actor=principal.actor,
+                s, eid, name=name, window_start=ws, window_end=we, frameworks=frameworks,
+                actor=principal.actor, client_name=client_name or None,
             )
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#edit")
     return _back(url, msg="Engagement updated.")
 
 
+@router.get("/engagements/{eid}/findings/{fid}", response_class=HTMLResponse)
+def finding_page(request: Request, eid: int, fid: int):
+    """Finding detail page (UI audit #55)."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
+    with db.session() as s:
+        try:
+            e = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "engagement not found") from None
+        from attestra.comments import can_add_comment, can_delete_comment, list_comments
+        from attestra.library import service as lib
+        from attestra.models import Finding
+
+        f = s.get(Finding, fid)
+        if not f or f.engagement_id != eid:
+            raise HTTPException(404, "finding not found")
+        # Touch relationships while the session is open.
+        _ = list(f.evidence)
+        _ = f.asset
+        comments = list_comments(s, fid, principal)
+        for c in comments:
+            c["can_delete"] = can_delete_comment(
+                principal.role, author_user_id=c["author_user_id"], actor_user_id=principal.user_id
+            )
+        return _render(request, "finding.html", {
+            "e": e,
+            "f": f,
+            "fix": lib.guidance_for_finding(s, f),
+            "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
+            "comments": comments,
+            "can_add_comment": can_add_comment(principal.role),
+        })
+
+
+@router.post("/engagements/{eid}/findings/{fid}/comments")
+async def ui_add_finding_comment(request: Request, eid: int, fid: int, body: str = Form("")):
+    detail = f"/engagements/{eid}/findings/{fid}"
+    principal, redirect = _require_login(request, detail)
+    if redirect:
+        return redirect
+    from attestra.comments import add_comment, can_add_comment
+
+    if not can_add_comment(principal.role):
+        return _back(detail, error="Your role can't add comments.", anchor="#comments")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            from attestra.models import Finding
+
+            f = s.get(Finding, fid)
+            if not f or f.engagement_id != eid:
+                raise LookupError(f"finding F-{fid} is not in this engagement")
+            add_comment(s, fid, body=body, principal=principal)
+    except (services.ServiceError, LookupError) as e:
+        return _back(detail, error=str(e), anchor="#comments")
+    return _back(detail, msg="Comment posted.", anchor="#comments")
+
+
+@router.post("/engagements/{eid}/findings/{fid}/comments/{cid}/delete")
+def ui_delete_finding_comment(request: Request, eid: int, fid: int, cid: int):
+    detail = f"/engagements/{eid}/findings/{fid}"
+    principal, redirect = _require_login(request, detail)
+    if redirect:
+        return redirect
+    from attestra.comments import delete_comment
+
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            from attestra.models import Finding
+
+            f = s.get(Finding, fid)
+            if not f or f.engagement_id != eid:
+                raise LookupError(f"finding F-{fid} is not in this engagement")
+            delete_comment(s, fid, cid, principal)
+    except (services.ServiceError, LookupError) as e:
+        return _back(detail, error=str(e), anchor="#comments")
+    return _back(detail, msg="Comment deleted.", anchor="#comments")
+
+
 @router.post("/engagements/{eid}/findings/{fid}/status")
 def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(...), note: str = Form("")):
-    url = f"/engagements/{eid}"
+    detail = f"/engagements/{eid}/findings/{fid}"
+    list_url = f"/engagements/{eid}"
+    # Prefer returning to the detail page when the form was posted from there.
+    referer = request.headers.get("referer") or ""
+    url = detail if f"/findings/{fid}" in referer else list_url
     principal, redirect = _require_login(request, url)
     if redirect:
         return redirect
@@ -965,8 +1235,9 @@ def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(.
                 raise LookupError(f"finding F-{fid} is not in this engagement")
             services.transition(s, fid, to=to, note=note, actor=principal.actor)
     except (services.ServiceError, LookupError) as e:
-        return _back(url, error=str(e), anchor=f"#f-{fid}")
-    return _back(url, msg=f"F-{fid} moved to {label(to).lower()}.", anchor=f"#f-{fid}")
+        return _back(url, error=str(e), anchor=f"#f-{fid}" if url == list_url else "#status")
+    return _back(url, msg=f"F-{fid} moved to {label(to).lower()}.",
+                 anchor=f"#f-{fid}" if url == list_url else "#status")
 
 
 @router.post("/engagements/{eid}/reports/generate")

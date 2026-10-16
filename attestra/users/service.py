@@ -331,10 +331,14 @@ def set_role(s: Session, principal, user_id: int, role: str) -> User:
 
 
 def set_active(s: Session, principal, user_id: int, active: bool) -> User:
-    _require_admin(principal)
+    """Enable or disable a user. Admins may change any account; leads may only
+    change tester / reviewer / client_viewer accounts in their tenant scope."""
+    _require_manager(principal)
     user = _get_user(s, principal, user_id)
     if user.active == active:
         return user
+    if principal.role == "lead" and user.role not in LEAD_INVITABLE:
+        raise UserAdminError("not allowed: leads may only enable or disable tester, reviewer, or client_viewer")
     if not active and user.role == "admin" and _active_admins(s) <= 1:
         raise UserAdminError("cannot disable the last admin")
     user.active = active
@@ -344,6 +348,17 @@ def set_active(s: Session, principal, user_id: int, active: bool) -> User:
             inv.revoked_at = utcnow()
     audit.record(s, principal.actor, "user.enable" if active else "user.disable", "user", user.id)
     return user
+
+
+def disable_by_username(s: Session, principal, username: str) -> User:
+    """CLI helper: disable a user looked up by username (same rules as set_active)."""
+    name = (username or "").strip()
+    user = s.scalar(select(User).where(User.username == name)) or s.scalar(
+        select(User).where(func.lower(User.username) == name.lower())
+    )
+    if user is None:
+        raise LookupError(f"user {name!r} not found")
+    return set_active(s, principal, user.id, False)
 
 
 def tenants_for_form(s: Session, principal) -> list[Tenant]:

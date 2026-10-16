@@ -107,6 +107,40 @@ def cmd_user_set_password(args) -> None:
         print("Note: this account is disabled, so it can't sign in until an admin enables it.")
 
 
+def _resolve_principal(args):
+    """Return a Principal from --api-key / ATTESTRA_API_KEY or --user (required)."""
+    from attestra.auth.keys import Principal, authenticate_api_key
+
+    raw_key = getattr(args, "api_key", None) or os.environ.get("ATTESTRA_API_KEY")
+    if raw_key:
+        with db.session() as s:
+            principal = authenticate_api_key(s, raw_key)
+        if not principal:
+            print("error: invalid or revoked API key", file=sys.stderr)
+            sys.exit(2)
+        return principal
+    username = getattr(args, "user", None)
+    if username:
+        from sqlalchemy import select
+
+        from attestra.models import User
+
+        with db.session() as s:
+            user = s.scalar(select(User).where(User.username == username.strip().lower()))
+            if not user or not user.active:
+                print(f"error: unknown user {username!r}", file=sys.stderr)
+                sys.exit(2)
+            return Principal(
+                user_id=user.id,
+                username=user.username,
+                display_name=user.display_name,
+                role=user.role,
+                tenant_id=user.tenant_id,
+            )
+    print("error: --api-key or --user is required", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_key_create(args) -> None:
     from sqlalchemy import select
 
@@ -123,6 +157,53 @@ def cmd_key_create(args) -> None:
         print(f"api key #{row.id} prefix={row.prefix}")
         print(raw)
         print("Store this key now; it will not be shown again.", file=sys.stderr)
+
+
+def cmd_key_list(args) -> None:
+    from attestra.auth.keys import list_api_keys
+
+    db.init(use_migrations=True)
+    with db.session() as s:
+        rows = list_api_keys(s, username=args.username)
+    if not rows:
+        print("No API keys found.")
+        return
+    for row in rows:
+        print(
+            f"#{row['id']} user={row['username']} prefix={row['prefix']} "
+            f"status={row['status']} created={row['created_at']} "
+            f"revoked={row['revoked_at'] or '-'} last_used={row['last_used_at'] or '-'}"
+        )
+
+
+def cmd_key_revoke(args) -> None:
+    from attestra.auth.keys import revoke_api_key
+
+    db.init(use_migrations=True)
+    actor, _ = _resolve_actor(args)
+    try:
+        with db.session() as s:
+            row = revoke_api_key(s, args.key_id, actor=actor)
+            kid, prefix, revoked = row.id, row.prefix, row.revoked_at
+    except LookupError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+    print(f"api key #{kid} prefix={prefix} revoked_at={revoked}")
+
+
+def cmd_user_disable(args) -> None:
+    from attestra.users.service import UserAdminError, disable_by_username
+
+    db.init(use_migrations=True)
+    principal = _resolve_principal(args)
+    try:
+        with db.session() as s:
+            user = disable_by_username(s, principal, args.username)
+            name, active = user.username, user.active
+    except (UserAdminError, LookupError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(2)
+    print(f"user {name} disabled (active={active}).")
 
 
 def cmd_migrate_storage(args) -> None:
@@ -200,6 +281,32 @@ def cmd_purge(args) -> None:
     actor, _ = _resolve_actor(args)
     with db.session() as s:
         _print(purge_expired(s, dry_run=not args.execute, actor=actor))
+
+
+def cmd_cert_expiry_check(args) -> None:
+    """Daily job: alert on saved cert end dates (no new network)."""
+    from datetime import date
+
+    from attestra.cert_expiry import run_daily_cert_alerts
+
+    db.init(use_migrations=True)
+    actor, _ = _resolve_actor(args)
+    today = date.fromisoformat(args.today) if getattr(args, "today", None) else None
+    with db.session() as s:
+        _print(run_daily_cert_alerts(s, today=today, actor=actor))
+
+
+def cmd_sla_alert_check(args) -> None:
+    """Daily job: email once per open finding past its SLA due date."""
+    from datetime import date
+
+    from attestra.alerts.service import run_sla_missed_alerts
+
+    db.init(use_migrations=True)
+    actor, _ = _resolve_actor(args)
+    today = date.fromisoformat(args.today) if getattr(args, "today", None) else None
+    with db.session() as s:
+        _print(run_sla_missed_alerts(s, today=today, actor=actor))
 
 
 def cmd_backup(args) -> None:
@@ -360,7 +467,7 @@ def cmd_demo(args) -> None:
             except ValueError:
                 pass
         e = services.create_engagement(
-            s, tenant="Example Retail Pvt Ltd", name="FY27 Q3 VAPT: e-commerce platform", type="vapt",
+            s, tenant="Example Retail Pvt Ltd", name="FY27 Q3 VA + PT: e-commerce platform", type="vapt",
             frameworks=["pci_dss_4", "iso_27001_2022", "soc2"],
             window_start=today - timedelta(days=7), window_end=today + timedelta(days=7), actor=lead,
         )
@@ -504,18 +611,29 @@ def main(argv: list[str] | None = None) -> None:
     spu.add_argument("username")
     spu.add_argument("--password", default=None, help="new password; leave out to type it at a hidden prompt")
     spu.set_defaults(fn=cmd_user_set_password)
+    spu = user_sub.add_parser("disable", help="disable a user (admin any; lead: own-tenant tester/reviewer/client_viewer)")
+    spu.add_argument("username")
+    spu.set_defaults(fn=cmd_user_disable)
 
     sp = sub.add_parser("key", help="API key management")
     key_sub = sp.add_subparsers(dest="key_cmd", required=True)
     spk = key_sub.add_parser("create", help="create an API key for a user")
     spk.add_argument("username")
     spk.set_defaults(fn=cmd_key_create)
+    spk = key_sub.add_parser("list", help="list API keys (id, user, prefix, status)")
+    spk.add_argument("--username", default=None, help="limit to one username")
+    spk.set_defaults(fn=cmd_key_list)
+    spk = key_sub.add_parser("revoke", help="revoke an API key by id (writes an audit row)")
+    spk.add_argument("key_id", type=int)
+    spk.set_defaults(fn=cmd_key_revoke)
 
     sub.add_parser("migrate-storage", help="move legacy files under tenants/<id>/").set_defaults(fn=cmd_migrate_storage)
 
+    from attestra.importers import PARSERS
+
     sp = sub.add_parser("import", help="import a scanner result file")
     sp.add_argument("engagement", type=int)
-    sp.add_argument("tool", choices=["zap", "nuclei", "trivy", "sarif"])
+    sp.add_argument("tool", choices=sorted(PARSERS))
     sp.add_argument("file")
     sp.set_defaults(fn=cmd_import)
 
@@ -528,6 +646,20 @@ def main(argv: list[str] | None = None) -> None:
     sp = sub.add_parser("purge", help="purge artifacts past retention (default dry-run)")
     sp.add_argument("--execute", action="store_true", help="actually delete (omit for dry-run)")
     sp.set_defaults(fn=cmd_purge)
+
+    sp = sub.add_parser(
+        "cert-expiry-check",
+        help="daily job: webhook when saved cert end dates cross 30/14/7 days (no network)",
+    )
+    sp.add_argument("--today", default=None, help="YYYY-MM-DD freeze clock for tests")
+    sp.set_defaults(fn=cmd_cert_expiry_check)
+
+    sp = sub.add_parser(
+        "sla-alert-check",
+        help="daily job: email once per open finding past its SLA due date",
+    )
+    sp.add_argument("--today", default=None, help="YYYY-MM-DD freeze clock for tests")
+    sp.set_defaults(fn=cmd_sla_alert_check)
 
     sp = sub.add_parser("backup", help="backup DB + evidence/reports with sha256 manifest")
     sp.add_argument("dest", help="destination directory")

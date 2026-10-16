@@ -59,6 +59,9 @@ table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e3e5ea;
 <p><b>Status:</b> {{ f.status }}{% if f.cwe %} &middot; CWE-{{ f.cwe }}{% endif %}{% if f.location %} &middot; {{ f.location }}{% endif %}</p>
 {% if f.description %}<p>{{ f.description }}</p>{% endif %}
 {% if f.recommendation %}<p><b>Recommendation:</b> {{ f.recommendation }}</p>{% endif %}
+{% if f.importance or f.effort %}<p>Importance: {{ f.importance or "—" }} · Effort: {{ f.effort or "—" }}</p>{% endif %}
+{% if f.fix_steps %}<p style="white-space:pre-wrap">{{ f.fix_steps }}</p>{% endif %}
+{% for name, text in (f.report_snippets or []) %}<p><b>{{ name }} config.</b></p><pre>{{ text }}</pre>{% endfor %}
 </div>
 {% else %}<p>No findings.</p>{% endfor %}
 </section>
@@ -113,16 +116,25 @@ def clean_sections(sections) -> list[str]:
 def safe_context(ctx: dict) -> dict:
     """Project the report context to plain data only."""
     eng = ctx["eng"]
-    findings = [
-        {"id": f.id, "title": f.title, "severity": f.severity, "status": f.status, "cwe": f.cwe,
-         "description": f.description, "recommendation": f.recommendation, "location": f.location,
-         "risk_score": f.risk_score, "cvss_score": f.cvss_score, "cves": list(f.cves or []),
-         "owasp_top10": f.owasp_top10}
-        for f in ctx.get("findings", [])
-    ]
+    fix_by_id = ctx.get("fix_by_id") or {}
+    report_snips = ctx.get("report_snippets_by_id") or {}
+    findings = []
+    for f in ctx.get("findings", []):
+        fix = fix_by_id.get(f.id) or {}
+        findings.append({
+            "id": f.id, "title": f.title, "severity": f.severity, "status": f.status, "cwe": f.cwe,
+            "description": f.description, "recommendation": f.recommendation, "location": f.location,
+            "risk_score": f.risk_score, "cvss_score": f.cvss_score, "cves": list(f.cves or []),
+            "owasp_top10": f.owasp_top10,
+            "importance": fix.get("importance", ""),
+            "effort": fix.get("effort", ""),
+            "fix_steps": fix.get("fix_steps", ""),
+            "report_snippets": list(report_snips.get(f.id) or []),
+        })
     return {
         "eng": {"id": eng.id, "name": eng.name, "type": eng.type},
         "tenant": ctx.get("tenant", ""),
+        "type_label": ctx.get("type_label", eng.type),
         "findings": findings,
         "open_count": len(ctx.get("open_findings", [])),
         "open_critical_high": ctx.get("open_critical_high", 0),
@@ -144,7 +156,8 @@ SAMPLE = {
     "eng": {"id": 0, "name": "Sample engagement", "type": "vapt"}, "tenant": "Sample tenant",
     "findings": [{"id": 1, "title": "Sample finding", "severity": "high", "status": "validated", "cwe": 79,
                   "description": "Text", "recommendation": "Fix", "location": "https://example.test/",
-                  "risk_score": 1.0, "cvss_score": 7.1, "cves": [], "owasp_top10": "A03"}],
+                  "risk_score": 1.0, "cvss_score": 7.1, "cves": [], "owasp_top10": "A03",
+                  "importance": "", "effort": "", "fix_steps": "", "report_snippets": []}],
     "open_count": 1, "open_critical_high": 1, "by_sev": {"high": 1},
     "severities": ["critical", "high", "medium", "low", "info"], "frameworks": {}, "imports": [],
     "today": "", "version_str": "", "kind": "technical", "version": 1, "generated_by": "", "generated_at": "",

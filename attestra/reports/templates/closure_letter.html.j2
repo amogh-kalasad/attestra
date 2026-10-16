@@ -6,7 +6,7 @@
 
 <p>Dear {{ eng.tenant.contact_name or "Client" }},</p>
 
-<p>This letter confirms that the {{ eng.type|upper }} engagement
+<p>This letter confirms that the {{ type_label }} engagement
 <strong>{{ eng.name }}</strong> for <strong>{{ tenant }}</strong>
 (window {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}) has been closed
 from Attestra's delivery perspective.</p>

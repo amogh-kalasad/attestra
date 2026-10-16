@@ -313,6 +313,8 @@ SEED: list[dict] = [
         "default_severity": "high",
         "tags": [
             "crypto",
+            "headers",
+            "tls",
             "owasp-a02"
         ],
         "rule_ids": [
@@ -343,6 +345,40 @@ SEED: list[dict] = [
         ]
     },
     {
+        "title": "Certificate expires soon",
+        "cwe": 298,
+        "default_severity": "low",
+        "tags": ["tls", "certificate", "expiry"],
+        "rule_ids": [
+            "cert_notAfter",
+            "cert_expirationStatus",
+            "webcheck/cert-expiry",
+        ],
+        "description": "The TLS certificate end date is within 30 days. Severity rises at 14 days (medium) and 7 days (high).",
+        "impact": "Browsers and API clients will start failing TLS handshakes when the certificate expires, causing outages.",
+        "remediation": "Issue and install a renewed certificate before the current notAfter date. Prefer automated renewal (ACME) with monitoring on the end date.",
+        "references": [
+            "https://cwe.mitre.org/data/definitions/298.html",
+        ],
+    },
+    {
+        "title": "TLS: certificate expired",
+        "cwe": 298,
+        "default_severity": "high",
+        "tags": ["tls", "certificate", "expiry"],
+        "rule_ids": [
+            "cert_expirationStatus",
+            "cert_notAfter",
+            "webcheck/cert-expiry",
+        ],
+        "description": "The TLS certificate notAfter date is in the past, so the certificate is already expired.",
+        "impact": "Clients reject the connection; users see certificate errors and automated clients fail.",
+        "remediation": "Replace the expired certificate immediately and reload the TLS service. Check that intermediates are served with the leaf.",
+        "references": [
+            "https://cwe.mitre.org/data/definitions/298.html",
+        ],
+    },
+    {
         "title": "Missing HTTP Strict Transport Security header",
         "cwe": 319,
         "default_severity": "low",
@@ -351,7 +387,8 @@ SEED: list[dict] = [
             "tls"
         ],
         "rule_ids": [
-            "zap:10035"
+            "zap:10035",
+            "webcheck/hsts-present",
         ],
         "description": "Responses over HTTPS do not include the Strict-Transport-Security header.",
         "impact": "A user's first request can be downgraded to HTTP by a network attacker.",
@@ -365,7 +402,8 @@ SEED: list[dict] = [
         "cwe": 693,
         "default_severity": "low",
         "tags": [
-            "headers"
+            "headers",
+            "csp"
         ],
         "rule_ids": [
             "zap:10038",
@@ -394,6 +432,33 @@ SEED: list[dict] = [
         "references": [
             "https://cwe.mitre.org/data/definitions/1021.html"
         ]
+    },
+    {
+        "title": "X-Content-Type-Options is missing or not nosniff",
+        "cwe": 693,
+        "default_severity": "low",
+        "tags": ["headers"],
+        "rule_ids": ["webcheck/x-content-type-options", "zap:10021"],
+        "description": "Responses omit X-Content-Type-Options or set a value other than nosniff.",
+        "impact": "Browsers may MIME-sniff responses and treat non-script content as script.",
+        "remediation": "Send X-Content-Type-Options: nosniff on all responses and keep Content-Type accurate.",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Content-Type-Options",
+            "https://cwe.mitre.org/data/definitions/693.html",
+        ],
+    },
+    {
+        "title": "Referrer-Policy is not a strict value",
+        "cwe": 200,
+        "default_severity": "low",
+        "tags": ["headers"],
+        "rule_ids": ["webcheck/referrer-policy"],
+        "description": "Referrer-Policy is missing or uses a weak value that can leak full URLs to other origins.",
+        "impact": "Path and query data may appear in Referer headers sent to third parties.",
+        "remediation": "Send Referrer-Policy: strict-origin-when-cross-origin, or a stricter value such as no-referrer.",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Referrer-Policy",
+        ],
     },
     {
         "title": "Overly permissive CORS policy",
@@ -436,11 +501,13 @@ SEED: list[dict] = [
         "cwe": 200,
         "default_severity": "info",
         "tags": [
+            "headers",
             "information-disclosure"
         ],
         "rule_ids": [
             "zap:10036",
-            "zap:10037"
+            "zap:10037",
+            "webcheck/server-disclosure",
         ],
         "description": "Response headers such as Server or X-Powered-By reveal product names and version numbers.",
         "impact": "It makes it easier to match the system with known vulnerabilities.",
@@ -561,5 +628,228 @@ SEED: list[dict] = [
         "references": [
             "https://cwe.mitre.org/data/definitions/1392.html"
         ]
-    }
+    },
+    {
+        "title": "DNS: no DMARC record",
+        "cwe": 16,
+        "default_severity": "medium",
+        "tags": ["email", "dns", "dmarc"],
+        "rule_ids": ["webcheck/dns-dmarc-missing"],
+        "description": "The domain has no DMARC TXT record at _dmarc.<domain>, so receivers have no published policy for unauthenticated mail.",
+        "impact": "Attackers can spoof mail from the domain more easily, and you get no aggregate failure reports.",
+        "remediation": "Add TXT at _dmarc.<domain>: v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>. Move to p=reject once reports look clean.",
+        "references": ["https://dmarc.org/overview/", "https://www.rfc-editor.org/rfc/rfc7489"],
+    },
+    {
+        "title": "DNS: DMARC policy is p=none",
+        "cwe": 16,
+        "default_severity": "low",
+        "tags": ["email", "dns", "dmarc"],
+        "rule_ids": ["webcheck/dns-dmarc-p-none"],
+        "description": "DMARC is published with p=none, so receivers only monitor and do not quarantine or reject failing messages.",
+        "impact": "Spoofed mail is still delivered while you only collect reports.",
+        "remediation": "Change DMARC p=none to p=quarantine, then p=reject after reviewing rua reports.",
+        "references": ["https://dmarc.org/overview/"],
+    },
+    {
+        "title": "DNS: DMARC record has bad syntax",
+        "cwe": 16,
+        "default_severity": "low",
+        "tags": ["email", "dns", "dmarc"],
+        "rule_ids": ["webcheck/dns-dmarc-bad-syntax"],
+        "description": "A TXT exists at _dmarc.<domain> but it is not a valid v=DMARC1 record with a usable p= tag.",
+        "impact": "Receivers may ignore the policy, leaving the domain without DMARC protection.",
+        "remediation": "Publish a single TXT starting with v=DMARC1; set p=quarantine or p=reject and add rua=.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc7489"],
+    },
+    {
+        "title": "DNS: DMARC has no rua reporting address",
+        "cwe": 16,
+        "default_severity": "info",
+        "tags": ["email", "dns", "dmarc"],
+        "rule_ids": ["webcheck/dns-dmarc-no-rua"],
+        "description": "The DMARC record has no rua= tag, so aggregate authentication reports are not requested.",
+        "impact": "You cannot see who is sending mail as your domain or tune SPF/DKIM before raising the policy.",
+        "remediation": "Add rua=mailto:dmarc-reports@<domain> to the DMARC record.",
+        "references": ["https://dmarc.org/overview/"],
+    },
+    {
+        "title": "DNS: no DKIM found on common selectors",
+        "cwe": 16,
+        "default_severity": "info",
+        "tags": ["email", "dns", "dkim"],
+        "rule_ids": ["webcheck/dns-dkim-none"],
+        "description": "No DKIM TXT was found on the short fixed list of common selectors; a custom selector may still exist.",
+        "impact": "Without DKIM, DMARC alignment is harder and spoofed mail is more likely to pass weak checks.",
+        "remediation": "Publish DKIM at <selector>._domainkey.<domain> for your mail provider, using at least a 2048-bit RSA key.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc6376"],
+    },
+    {
+        "title": "DNS: DKIM RSA key is under 1024 bits",
+        "cwe": 16,
+        "default_severity": "medium",
+        "tags": ["email", "dns", "dkim"],
+        "rule_ids": ["webcheck/dns-dkim-weak-key"],
+        "description": "A DKIM selector publishes an RSA public key shorter than 1024 bits.",
+        "impact": "A weak signing key can be factored, letting attackers forge DKIM signatures for the domain.",
+        "remediation": "Rotate the DKIM key to RSA 2048-bit or stronger and update the selector TXT record.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc8301"],
+    },
+    {
+        "title": "DNS: no MTA-STS record",
+        "cwe": 16,
+        "default_severity": "low",
+        "tags": ["email", "dns", "mta-sts"],
+        "rule_ids": ["webcheck/dns-mta-sts-missing"],
+        "description": "No MTA-STS TXT exists at _mta-sts.<domain>, so sending MTAs cannot discover a TLS policy for your MX hosts.",
+        "impact": "SMTP delivery may fall back to cleartext or accept weaker TLS without a published policy.",
+        "remediation": "Add TXT at _mta-sts.<domain> (v=STSv1; id=...) and serve https://mta-sts.<domain>/.well-known/mta-sts.txt with mode=enforce.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc8461"],
+    },
+    {
+        "title": "DNS: MTA-STS mode is testing",
+        "cwe": 16,
+        "default_severity": "info",
+        "tags": ["email", "dns", "mta-sts"],
+        "rule_ids": ["webcheck/dns-mta-sts-testing"],
+        "description": "The MTA-STS policy is published with mode=testing, so failures are reported but not enforced.",
+        "impact": "Senders will not refuse insecure delivery; you only learn about problems from reports.",
+        "remediation": "Set mode: enforce in the MTA-STS policy file when MX TLS is ready.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc8461"],
+    },
+    {
+        "title": "DNS: MTA-STS TXT without a valid policy file",
+        "cwe": 16,
+        "default_severity": "medium",
+        "tags": ["email", "dns", "mta-sts"],
+        "rule_ids": ["webcheck/dns-mta-sts-no-policy"],
+        "description": "An MTA-STS DNS TXT exists but the HTTPS policy file is missing or invalid.",
+        "impact": "Senders that support MTA-STS cannot apply a usable policy and may ignore it.",
+        "remediation": "Serve a valid STSv1 policy at https://mta-sts.<domain>/.well-known/mta-sts.txt with mode=enforce.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc8461"],
+    },
+    {
+        "title": "DNS: no TLS-RPT record",
+        "cwe": 16,
+        "default_severity": "info",
+        "tags": ["email", "dns", "tls-rpt"],
+        "rule_ids": ["webcheck/dns-tls-rpt-missing"],
+        "description": "No TLS-RPT TXT exists at _smtp._tls.<domain>, so SMTP TLS failure reports are not requested.",
+        "impact": "You will not receive reports when senders cannot negotiate TLS to your MX hosts.",
+        "remediation": "Add TXT at _smtp._tls.<domain>: v=TLSRPTv1; rua=mailto:tlsrpt@<domain>.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc8460"],
+    },
+    {
+        "title": "DNS: DNSSEC not detected",
+        "cwe": 16,
+        "default_severity": "low",
+        "tags": ["dns", "dnssec"],
+        "rule_ids": ["webcheck/dns-dnssec-missing"],
+        "description": "No DS and/or RRSIG evidence was found for the domain, so DNSSEC does not appear to be enabled.",
+        "impact": "DNS answers can be spoofed on the path, undermining HTTPS and email authentication lookups.",
+        "remediation": "Enable DNSSEC with your DNS host and publish DS records at the parent registry.",
+        "references": ["https://www.rfc-editor.org/rfc/rfc4035"],
+    },
+    {
+        "title": "External scripts or styles without Subresource Integrity",
+        "cwe": 353,
+        "default_severity": "medium",
+        "tags": ["sri", "supply-chain"],
+        "rule_ids": ["webcheck/sri", "observatory:subresource-integrity"],
+        "description": "The page loads scripts or stylesheets from another origin without an integrity attribute, so a change on that CDN is not detected by the browser.",
+        "impact": "A compromised or replaced third-party file can run script or change styles in the user's session.",
+        "remediation": "Add integrity (sha384 or stronger) and crossorigin attributes on every cross-origin script and stylesheet tag. Prefer self-hosting critical assets.",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity",
+            "https://cwe.mitre.org/data/definitions/353.html",
+        ],
+    },
+    {
+        "title": "Active mixed content",
+        "cwe": 311,
+        "default_severity": "medium",
+        "tags": ["mixed-content", "tls"],
+        "rule_ids": ["webcheck/mixed-content-active"],
+        "description": "An HTTPS page loads a script, stylesheet, frame, object, or form action over plain http://.",
+        "impact": "A network attacker can replace or alter the cleartext resource and run code or steal form data in the user's session.",
+        "remediation": "Change every http:// script, stylesheet, frame, object, and form action URL to https:// (or a same-origin relative path).",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content",
+            "https://cwe.mitre.org/data/definitions/311.html",
+        ],
+    },
+    {
+        "title": "Passive mixed content",
+        "cwe": 311,
+        "default_severity": "low",
+        "tags": ["mixed-content", "tls"],
+        "rule_ids": ["webcheck/mixed-content-passive"],
+        "description": "An HTTPS page loads an image or other media file over plain http://.",
+        "impact": "A network attacker can swap the image or media, track users, or use it as a side channel.",
+        "remediation": "Change every http:// image and media URL to https:// (or a same-origin relative path).",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content",
+            "https://cwe.mitre.org/data/definitions/311.html",
+        ],
+    },
+    {
+        "title": "HTTP does not redirect to HTTPS",
+        "cwe": 319,
+        "default_severity": "medium",
+        "tags": ["headers", "tls", "redirect"],
+        "rule_ids": ["webcheck/http-no-redirect"],
+        "description": "A request to http:// on the host returns a page or a non-HTTPS Location instead of upgrading to https:// on the same host.",
+        "impact": "Users and APIs that start on HTTP stay on a cleartext channel, so traffic can be read or changed on the path.",
+        "remediation": "Respond to http://<host>/ with 301 or 308 and Location: https://<same-host>/... Send HSTS only on HTTPS. Prefer 301/308 over 302/307.",
+        "references": [
+            "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/",
+            "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html",
+        ],
+    },
+    {
+        "title": "Temporary redirect to HTTPS",
+        "cwe": 319,
+        "default_severity": "low",
+        "tags": ["headers", "tls", "redirect"],
+        "rule_ids": ["webcheck/http-redirect-temporary"],
+        "description": "http:// redirects to https:// on the same host with 302 or 307 instead of a permanent 301 or 308.",
+        "impact": "Clients and caches may keep retrying HTTP; HSTS and bookmarks are weaker without a permanent upgrade.",
+        "remediation": "Change the upgrade redirect to 301 or 308 pointing at https:// on the same host.",
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Redirections",
+        ],
+    },
+    {
+        "title": "HTTP redirects to another host before HTTPS on the same host",
+        "cwe": 319,
+        "default_severity": "low",
+        "tags": ["headers", "tls", "redirect"],
+        "rule_ids": ["webcheck/http-redirect-other-host"],
+        "description": "The first HTTP answer sends the browser to https:// on a different host instead of https:// on the same host.",
+        "impact": "HSTS cannot be set for this host on that first hop, so a network attacker can still intercept later HTTP visits to this name.",
+        "remediation": "Redirect http://<host>/ to https://<same-host>/ with 301 or 308 first. Only then move to another hostname if needed.",
+        "references": [
+            "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html",
+        ],
+    },
+    {
+        "title": "Listed on Google Safe Browsing",
+        "cwe": 506,
+        "default_severity": "high",
+        "tags": ["malware", "reputation", "safe-browsing"],
+        "rule_ids": ["webcheck/safe-browsing"],
+        "description": "Google Safe Browsing lists this URL for malware, social engineering, or unwanted software.",
+        "impact": "Browsers and search warn or block visitors; users lose trust and may be harmed by the listed threat.",
+        "remediation": "Clean the site (remove malware, backdoors, and injected script), rotate any stolen credentials, then request a review in Google Search Console.",
+        "references": [
+            "https://developers.google.com/safe-browsing",
+            "https://support.google.com/webmasters/answer/9044101",
+            "https://cwe.mitre.org/data/definitions/506.html",
+        ],
+    },
 ]
+
+# Attach importance / effort / fix steps / snippets from the fix-snippet library.
+from attestra.library.fix_snippets import enrich as _enrich_fix  # noqa: E402
+
+SEED = [_enrich_fix(item) for item in SEED]

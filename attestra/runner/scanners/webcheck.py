@@ -7,7 +7,9 @@ import json
 import os
 import re
 import threading
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from attestra.runner.authorization import AuthorizationError, AuthorizedScope, authorize_target
@@ -252,6 +254,323 @@ def check_cookies(headers: dict[str, str], location: str) -> tuple[list[dict], l
                     evidence=raw[:200],
                 )
             )
+    return findings, checks
+
+
+# ---------------------------------------------------------------- HTML body: SRI + mixed content
+# Parse the already-fetched primary HTML only. Never fetch discovered URLs.
+
+_SRI_KINDS = frozenset({"script", "stylesheet"})
+_ACTIVE_MIXED_KINDS = frozenset({"script", "stylesheet", "iframe", "object", "form"})
+_PASSIVE_MIXED_KINDS = frozenset({"img", "audio", "video", "source"})
+_EVIDENCE_URL_CAP = 20
+
+
+class _PageResourceParser(HTMLParser):
+    """Collect script/link/img/iframe/media/object/form URLs from HTML tags."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.resources: list[dict[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_l = tag.lower()
+        ad = {str(k).lower(): ("" if v is None else str(v)) for k, v in attrs}
+        if tag_l == "script":
+            src = ad.get("src", "").strip()
+            if src:
+                self.resources.append(
+                    {
+                        "kind": "script",
+                        "url": src,
+                        "integrity": ad.get("integrity", "").strip(),
+                    }
+                )
+            return
+        if tag_l == "link":
+            rel_tokens = ad.get("rel", "").lower().split()
+            if "stylesheet" not in rel_tokens:
+                return
+            href = ad.get("href", "").strip()
+            if href:
+                self.resources.append(
+                    {
+                        "kind": "stylesheet",
+                        "url": href,
+                        "integrity": ad.get("integrity", "").strip(),
+                    }
+                )
+            return
+        if tag_l in {"img", "iframe", "audio", "video", "source"}:
+            src = ad.get("src", "").strip()
+            if src:
+                self.resources.append({"kind": tag_l, "url": src, "integrity": ""})
+            return
+        if tag_l == "object":
+            data = ad.get("data", "").strip()
+            if data:
+                self.resources.append({"kind": "object", "url": data, "integrity": ""})
+            return
+        if tag_l == "form":
+            action = ad.get("action", "").strip()
+            if action:
+                self.resources.append({"kind": "form", "url": action, "integrity": ""})
+
+
+def parse_page_resources(html: str) -> list[dict[str, str]]:
+    """Parse HTML into resource dicts with kind, url, and optional integrity."""
+    parser = _PageResourceParser()
+    try:
+        parser.feed(html or "")
+        parser.close()
+    except Exception:  # noqa: BLE001 - malformed HTML still yields what was collected
+        pass
+    return parser.resources
+
+
+def _page_origin(location: str) -> tuple[str, str, int] | None:
+    parts = urlsplit(location or "")
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    return (parts.scheme.lower(), parts.hostname.lower(), int(port))
+
+
+def resolve_resource_url(page_url: str, ref: str) -> str:
+    """Resolve a resource URL against the page. Protocol-relative uses the page scheme."""
+    ref = (ref or "").strip()
+    if not ref:
+        return ""
+    if ref.startswith("//"):
+        scheme = urlsplit(page_url).scheme or "https"
+        ref = f"{scheme}:{ref}"
+    return urljoin(page_url, ref)
+
+
+def is_same_origin(page_url: str, resource_url: str) -> bool:
+    """True when both URLs share scheme, host, and port (defaults applied)."""
+    left = _page_origin(page_url)
+    right = _page_origin(resource_url)
+    if left is None or right is None:
+        return False
+    return left == right
+
+
+def _format_url_evidence(urls: list[str], *, cap: int = _EVIDENCE_URL_CAP) -> str:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        unique.append(u)
+    if len(unique) <= cap:
+        return "; ".join(unique)
+    shown = "; ".join(unique[:cap])
+    return f"{shown}; ... and {len(unique) - cap} more"
+
+
+def _decode_html_body(body: bytes | str | None) -> str | None:
+    if body is None:
+        return None
+    if isinstance(body, bytes):
+        return body.decode("utf-8", errors="replace")
+    return str(body)
+
+
+def check_sri(html: str, location: str) -> tuple[list[dict], list[dict]]:
+    """Cross-origin script/stylesheet tags missing integrity → one finding.
+
+    Same-origin resources do not need SRI. Severity is Medium when any listed
+    URL is a script; otherwise Low. Fingerprint variant is ``sri`` (stable per target).
+    """
+    from attestra.checks import FAILED, PASSED, check_row
+
+    missing: list[tuple[str, str]] = []  # (kind, absolute url)
+    for res in parse_page_resources(html):
+        if res["kind"] not in _SRI_KINDS:
+            continue
+        if res.get("integrity"):
+            continue
+        abs_url = resolve_resource_url(location, res["url"])
+        if not abs_url:
+            continue
+        origin = _page_origin(abs_url)
+        if origin is None:
+            continue  # data:, javascript:, blob:, etc.
+        if is_same_origin(location, abs_url):
+            continue
+        missing.append((res["kind"], abs_url))
+
+    if not missing:
+        return [], [
+            check_row(
+                check_id="sri",
+                name="Subresource Integrity on cross-origin scripts/styles",
+                status=PASSED,
+                source="webcheck",
+                evidence="no cross-origin script/style without integrity",
+            )
+        ]
+
+    has_script = any(kind == "script" for kind, _ in missing)
+    severity = "medium" if has_script else "low"
+    urls = [u for _, u in missing]
+    evidence = (
+        "Cross-origin script or stylesheet tags have no integrity attribute. "
+        f"URLs: {_format_url_evidence(urls)}"
+    )
+    finding = _finding(
+        "sri",
+        "External scripts or styles without Subresource Integrity",
+        severity,
+        353,
+        evidence,
+        location,
+        "Add integrity (and crossorigin) attributes on third-party script and stylesheet tags.",
+        variant="sri",
+    )
+    return [finding], [
+        check_row(
+            check_id="sri",
+            name="Subresource Integrity on cross-origin scripts/styles",
+            status=FAILED,
+            source="webcheck",
+            evidence=evidence[:200],
+        )
+    ]
+
+
+def check_mixed_content(
+    html: str, location: str, *, scheme: str = "https"
+) -> tuple[list[dict], list[dict]]:
+    """On https pages, flag http:// subresources as active or passive mixed content.
+
+    Active (script/style/iframe/object/form) → Medium. Passive (img/audio/video/source) → Low.
+    Stable variants: ``mixed-content-active`` / ``mixed-content-passive``. Skipped on http.
+    """
+    from attestra.checks import FAILED, PASSED, SKIPPED, check_row
+
+    if (scheme or "").lower() != "https" and not (location or "").lower().startswith("https://"):
+        return [], [
+            check_row(
+                check_id="mixed-content",
+                name="No mixed content on HTTPS pages",
+                status=SKIPPED,
+                source="webcheck",
+                evidence="page is not https",
+            )
+        ]
+
+    active: list[str] = []
+    passive: list[str] = []
+    for res in parse_page_resources(html):
+        raw = (res.get("url") or "").strip()
+        if not raw.lower().startswith("http://"):
+            # Relative and protocol-relative URLs are not cleartext http on https pages.
+            continue
+        kind = res["kind"]
+        abs_url = resolve_resource_url(location, raw)
+        if kind in _ACTIVE_MIXED_KINDS:
+            active.append(abs_url or raw)
+        elif kind in _PASSIVE_MIXED_KINDS:
+            passive.append(abs_url or raw)
+
+    findings: list[dict] = []
+    checks: list[dict] = []
+    if active:
+        evidence = f"Active mixed content (http://) on an HTTPS page. URLs: {_format_url_evidence(active)}"
+        findings.append(
+            _finding(
+                "mixed-content-active",
+                "Active mixed content",
+                "medium",
+                311,
+                evidence,
+                location,
+                "Load scripts, stylesheets, frames, and form actions over https:// only.",
+                variant="mixed-content-active",
+            )
+        )
+        checks.append(
+            check_row(
+                check_id="mixed-content-active",
+                name="No active mixed content",
+                status=FAILED,
+                source="webcheck",
+                evidence=evidence[:200],
+            )
+        )
+    if passive:
+        evidence = f"Passive mixed content (http://) on an HTTPS page. URLs: {_format_url_evidence(passive)}"
+        findings.append(
+            _finding(
+                "mixed-content-passive",
+                "Passive mixed content",
+                "low",
+                311,
+                evidence,
+                location,
+                "Load images and media over https:// only (change http:// to https://).",
+                variant="mixed-content-passive",
+            )
+        )
+        checks.append(
+            check_row(
+                check_id="mixed-content-passive",
+                name="No passive mixed content",
+                status=FAILED,
+                source="webcheck",
+                evidence=evidence[:200],
+            )
+        )
+    if not findings:
+        checks.append(
+            check_row(
+                check_id="mixed-content",
+                name="No mixed content on HTTPS pages",
+                status=PASSED,
+                source="webcheck",
+                evidence="no http:// subresources on https page",
+            )
+        )
+    return findings, checks
+
+
+def check_html_body(
+    body: bytes | str | None, location: str, *, scheme: str = "https"
+) -> tuple[list[dict], list[dict]]:
+    """Run SRI and mixed-content checks on an already-fetched HTML body."""
+    from attestra.checks import SKIPPED, check_row
+
+    text = _decode_html_body(body)
+    if text is None:
+        return [], []
+    if not text.strip():
+        return [], [
+            check_row(
+                check_id="sri",
+                name="Subresource Integrity on cross-origin scripts/styles",
+                status=SKIPPED,
+                source="webcheck",
+                evidence="empty response body",
+            ),
+            check_row(
+                check_id="mixed-content",
+                name="No mixed content on HTTPS pages",
+                status=SKIPPED,
+                source="webcheck",
+                evidence="empty response body",
+            ),
+        ]
+    findings: list[dict] = []
+    checks: list[dict] = []
+    sri_f, sri_c = check_sri(text, location)
+    findings.extend(sri_f)
+    checks.extend(sri_c)
+    mix_f, mix_c = check_mixed_content(text, location, scheme=scheme)
+    findings.extend(mix_f)
+    checks.extend(mix_c)
     return findings, checks
 
 
@@ -599,21 +918,110 @@ def check_hsts_on_http(resp: SafeResponse | None, location: str) -> dict | None:
     )
 
 
-def check_http_no_redirect(resp: SafeResponse | None, location: str) -> dict | None:
+def _hosts_equal(a: str, b: str) -> bool:
+    """Compare hostnames ignoring case and a trailing dot."""
+    return (a or "").strip().lower().rstrip(".") == (b or "").strip().lower().rstrip(".")
+
+
+def check_http_no_redirect(
+    resp: SafeResponse | None,
+    location: str,
+    *,
+    expected_host: str = "",
+) -> tuple[dict | None, str | None]:
+    """Classify the first plain-HTTP answer (redirects not followed).
+
+    Returns ``(finding, note)``. Pass with no finding for 301/308 to
+    ``https://`` on the same host, or when HTTP is not served (``resp`` is
+    None → note ``HTTP not served``).
+    """
     if resp is None:
-        return None
-    if resp.status in (301, 302, 307, 308):
-        loc = _header(resp.headers, "location")
-        if loc.lower().startswith("https://"):
-            return None
-    return _finding(
-        "http-no-redirect",
-        "Plain HTTP does not redirect to HTTPS",
-        "medium",
-        319,
-        f"HTTP response did not redirect to HTTPS (status {resp.status}).",
-        location,
-        "Respond to HTTP with 301/302/307/308 Location: https://...",
+        return None, "HTTP not served"
+
+    expected = (expected_host or "").strip() or (urlsplit(location).hostname or "")
+    status = int(resp.status)
+    loc_hdr = _header(resp.headers, "location")
+
+    if status in (301, 302, 307, 308):
+        if not loc_hdr:
+            return (
+                _finding(
+                    "http-no-redirect",
+                    "HTTP does not redirect to HTTPS",
+                    "medium",
+                    319,
+                    f"HTTP {status} redirect has no Location header.",
+                    location,
+                    "Respond to HTTP with 301 or 308 Location: https://<same-host>/...",
+                    variant="http-no-redirect",
+                ),
+                None,
+            )
+        absolute = urljoin(location, loc_hdr)
+        parts = urlsplit(absolute)
+        scheme = (parts.scheme or "").lower()
+        host = (parts.hostname or "").lower()
+
+        if scheme == "https":
+            if expected and host and _hosts_equal(host, expected):
+                if status in (301, 308):
+                    return None, None
+                return (
+                    _finding(
+                        "http-redirect-temporary",
+                        "Temporary redirect to HTTPS",
+                        "low",
+                        319,
+                        f"HTTP {status} redirects to HTTPS on the same host; prefer 301 or 308. "
+                        f"Evidence: Location: {loc_hdr[:200]}",
+                        location,
+                        "Use a permanent redirect (301 or 308) to https:// on the same host.",
+                        variant="http-redirect-temporary",
+                    ),
+                    None,
+                )
+            return (
+                _finding(
+                    "http-redirect-other-host",
+                    "HTTP redirects to another host before HTTPS on the same host",
+                    "low",
+                    319,
+                    f"HTTP {status} redirects to https:// on a different host first "
+                    f"({host or loc_hdr[:80]}). HSTS cannot be set for this host this way. "
+                    f"Evidence: Location: {loc_hdr[:200]}",
+                    location,
+                    "Redirect http://<host>/ to https://<same-host>/ with 301 or 308 before any other host.",
+                    variant="http-redirect-other-host",
+                ),
+                None,
+            )
+
+        return (
+            _finding(
+                "http-no-redirect",
+                "HTTP redirects to http (not HTTPS)",
+                "medium",
+                319,
+                f"HTTP {status} redirects to http:// (not https). Evidence: Location: {loc_hdr[:200]}",
+                location,
+                "Redirect HTTP to https:// on the same host with 301 or 308.",
+                variant="http-redirect-to-http",
+            ),
+            None,
+        )
+
+    return (
+        _finding(
+            "http-no-redirect",
+            "HTTP does not redirect to HTTPS",
+            "medium",
+            319,
+            f"HTTP does not redirect to HTTPS (status {status}).",
+            location,
+            "Respond to HTTP with 301 or 308 Location: https://<same-host>/...",
+            variant="http-no-redirect",
+        ),
+        None,
     )
 
 
@@ -738,9 +1146,19 @@ def _check_status(check_id: str, name: str, finding: dict | None, *, source: str
 
 
 def evaluate_primary(
-    headers: dict[str, str], location: str, host: str, *, scheme: str = "https"
+    headers: dict[str, str],
+    location: str,
+    host: str,
+    *,
+    scheme: str = "https",
+    body: bytes | str | None = None,
 ) -> tuple[list[dict], list[str], list[dict]]:
-    """Return findings, notes, and pass/fail check rows for the primary response."""
+    """Return findings, notes, and pass/fail check rows for the primary response.
+
+    Optional ``body`` runs SRI and mixed-content checks on the already-fetched HTML
+    (no extra requests). When ``body`` is omitted, those checks are skipped so
+    header-only unit tests stay unchanged.
+    """
     findings: list[dict] = []
     notes: list[str] = []
     checks: list[dict] = []
@@ -791,6 +1209,12 @@ def evaluate_primary(
     cookie_findings, cookie_checks = check_cookies(headers, location)
     findings.extend(cookie_findings)
     checks.extend(cookie_checks)
+
+    # SRI + mixed content from the already-fetched HTML body (no extra requests).
+    if body is not None:
+        html_findings, html_checks = check_html_body(body, location, scheme=scheme)
+        findings.extend(html_findings)
+        checks.extend(html_checks)
     return findings, notes, checks
 
 
@@ -833,7 +1257,7 @@ class WebcheckAdapter(ScannerAdapter):
         if out_file.exists():
             out_file.unlink()
 
-        from attestra.checks import SKIPPED, check_row, write_checks_sidecar
+        from attestra.checks import PASSED, SKIPPED, check_row, write_checks_sidecar
 
         requests_log: list[dict] = []
         findings: list[dict] = []
@@ -852,13 +1276,47 @@ class WebcheckAdapter(ScannerAdapter):
         except Exception as exc:  # noqa: BLE001 - record and continue other checks
             notes.append(f"primary request failed: {exc}")
 
+        certificate: dict[str, str] = {}
         if primary is not None:
             primary_findings, primary_notes, primary_checks = evaluate_primary(
-                primary.headers, primary_url, pin.host, scheme=pin.scheme
+                primary.headers,
+                primary_url,
+                pin.host,
+                scheme=pin.scheme,
+                body=primary.body,
             )
             findings.extend(primary_findings)
             notes.extend(primary_notes)
             checks.extend(primary_checks)
+            # Saved peer cert end date (no extra request) for expiry bands / daily job.
+            if primary.peer_cert_not_after:
+                certificate = {"not_after": primary.peer_cert_not_after}
+                try:
+                    from attestra.cert_expiry import finding_for_end_date, parse_not_after
+
+                    end = parse_not_after(primary.peer_cert_not_after)
+                    if end is not None:
+                        nf = finding_for_end_date(
+                            end=end,
+                            location=primary_url,
+                            tool="webcheck",
+                            rule_id="webcheck/cert-expiry",
+                        )
+                        if nf is not None:
+                            findings.append(
+                                _finding(
+                                    "cert-expiry",
+                                    nf.title,
+                                    nf.severity,
+                                    nf.cwe or 298,
+                                    nf.description,
+                                    primary_url,
+                                    recommendation=nf.recommendation,
+                                    variant=nf.variant or "cert_expirationStatus",
+                                )
+                            )
+                except Exception as exc:  # noqa: BLE001 - never block the scan
+                    notes.append(f"cert expiry check skipped: {exc}")
 
         sec_resp: SafeResponse | None = None
         try:
@@ -875,10 +1333,13 @@ class WebcheckAdapter(ScannerAdapter):
         checks.append(_check_status("security-txt", "security.txt present and valid", sec_finding))
 
         # Plain HTTP probe (no redirect follow). Skip when HTTP is out of scope.
+        # One request only; reuse this answer for HSTS-on-HTTP and HTTPS-upgrade checks.
         http_url = build_url(pin, "/", scheme="http")
         http_resp: SafeResponse | None = None
+        http_in_scope = False
         try:
             authorize_target(scope, http_url, "url")
+            http_in_scope = True
         except AuthorizationError:
             notes.append("skipped: http not in scope")
             checks.append(
@@ -903,7 +1364,12 @@ class WebcheckAdapter(ScannerAdapter):
             http_pin = pin if pin.scheme == "http" else PinnedTarget(host=pin.host, ip=pin.ip, port=80, scheme="http")
             try:
                 http_resp = safe_get(http_url, scope=scope, pin=http_pin, follow_redirects=False)
-                requests_log.append({"method": "GET", "url": http_url, "status": http_resp.status})
+                entry: dict = {"method": "GET", "url": http_url, "status": http_resp.status}
+                if http_resp.status in (301, 302, 307, 308):
+                    loc = _header(http_resp.headers, "location")
+                    if loc:
+                        entry["location"] = loc
+                requests_log.append(entry)
             except Exception as exc:  # noqa: BLE001
                 notes.append(f"http probe failed: {exc}")
 
@@ -916,9 +1382,13 @@ class WebcheckAdapter(ScannerAdapter):
             # On an http pin the primary URL is already plain HTTP, so a self-redirect
             # would break the header checks that need a 200 body.
             if pin.scheme == "https":
-                no_redir = check_http_no_redirect(http_resp, http_url)
+                no_redir, redir_note = check_http_no_redirect(
+                    http_resp, http_url, expected_host=pin.host
+                )
                 if no_redir:
                     findings.append(no_redir)
+                if redir_note:
+                    notes.append(redir_note)
                 checks.append(_check_status("http-no-redirect", "HTTP redirects to HTTPS", no_redir))
             else:
                 notes.append("skipped: http-no-redirect requires https pin")
@@ -931,6 +1401,29 @@ class WebcheckAdapter(ScannerAdapter):
                         evidence="requires https pin",
                     )
                 )
+        elif http_in_scope and pin.scheme == "https":
+            # Port 80 closed / no answer → pass with note (do not fail the upgrade check).
+            _, redir_note = check_http_no_redirect(None, http_url, expected_host=pin.host)
+            if redir_note:
+                notes.append(redir_note)
+            checks.append(
+                check_row(
+                    check_id="http-no-redirect",
+                    name="HTTP redirects to HTTPS",
+                    status=PASSED,
+                    source="webcheck",
+                    evidence=redir_note or "HTTP not served",
+                )
+            )
+            checks.append(
+                check_row(
+                    check_id="hsts-on-http",
+                    name="HSTS not sent over HTTP",
+                    status=SKIPPED,
+                    source="webcheck",
+                    evidence=redir_note or "HTTP not served",
+                )
+            )
 
         # Parent HSTS includeSubDomains — only when parent is in scope (+1 request).
         parent = parent_domain(pin.host)
@@ -989,16 +1482,38 @@ class WebcheckAdapter(ScannerAdapter):
             else:
                 checks.append(_check_status("hsts-parent-missing", "Parent HSTS includeSubDomains", finding))
 
-        # Passive DNS posture checks (CAA, AAAA, SPF, TLSA) — same report file.
+        # Google Safe Browsing reputation (off by default; lookup to Google, not the target).
+        from attestra.runner.scanners.safe_browsing import check_safe_browsing
+
+        gsb_urls: list[str] = []
+        for candidate in (primary_url,):
+            try:
+                authorize_target(scope, candidate, "url")
+                gsb_urls.append(candidate)
+            except AuthorizationError:
+                pass
+        gsb = check_safe_browsing(gsb_urls)
+        findings.extend(gsb.findings)
+        for note in gsb.notes:
+            if note and note not in notes:
+                notes.append(note)
+        checks.extend(gsb.checks)
+
+        # Passive DNS posture checks (CAA, AAAA, SPF, TLSA, email, DNSSEC).
         # Skip for IP-literal pins (no useful parent/CAA walk on 127.0.0.1).
         from attestra.runner.scanners.base import is_ip_literal
-        from attestra.runner.scanners.webcheck_dns import dns_checks
+        from attestra.runner.scanners.webcheck_dns import dns_posture
 
         dns_ids = (
             ("dns-caa", "DNS CAA record"),
             ("dns-aaaa", "DNS AAAA (IPv6) address"),
             ("dns-spf", "DNS SPF when host has no MX"),
             ("dns-tlsa", "DNS TLSA (DANE) record"),
+            ("dns-dmarc", "DNS DMARC policy"),
+            ("dns-dkim", "DNS DKIM on common selectors"),
+            ("dns-mta-sts", "DNS MTA-STS policy"),
+            ("dns-tls-rpt", "DNS TLS-RPT record"),
+            ("dns-dnssec", "DNSSEC DS and RRSIG"),
         )
         if is_ip_literal(pin.host):
             notes.append("skipped: DNS checks require a hostname, not an IP literal")
@@ -1013,17 +1528,39 @@ class WebcheckAdapter(ScannerAdapter):
                     )
                 )
         else:
-            dns_findings: dict[str, dict] = {}
-            for item in dns_checks(pin.host):
+            dns_result = dns_posture(pin.host, scope=scope)
+            for item in dns_result.findings:
                 if item.get("skipped"):
                     notes.append(item.get("description") or item.get("title") or "DNS checks skipped")
                 else:
                     findings.append(item)
-                    dns_findings[str(item.get("id") or "")] = item
-            for cid, name in dns_ids:
-                checks.append(_check_status(cid, name, dns_findings.get(cid)))
+            for note in dns_result.notes:
+                if note and note not in notes:
+                    notes.append(note)
+            # Prefer rows built by dns_posture (includes N/A and SKIPPED).
+            if dns_result.checks:
+                checks.extend(dns_result.checks)
+            else:
+                dns_findings = {str(f.get("id") or ""): f for f in dns_result.findings if not f.get("skipped")}
+                for cid, name in dns_ids:
+                    checks.append(_check_status(cid, name, dns_findings.get(cid)))
 
-        report = {"requests": requests_log, "findings": findings, "notes": notes, "checks": checks}
+        # Snapshot of tracked security headers for change alerts (compare saved results only).
+        headers_snap: dict[str, str] = {}
+        if primary is not None:
+            from attestra.alerts.headers import SECURITY_HEADERS, snapshot_from_headers
+
+            headers_snap = snapshot_from_headers(
+                {name: _header(primary.headers, name) for name in SECURITY_HEADERS}
+            )
+        report = {
+            "requests": requests_log,
+            "findings": findings,
+            "notes": notes,
+            "checks": checks,
+            "certificate": certificate,
+            "headers": headers_snap,
+        }
         payload = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
         out_file.write_bytes(payload)
         write_checks_sidecar(out_file, checks)

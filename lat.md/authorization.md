@@ -37,7 +37,7 @@ Asset matching for imported locations: [[attestra/services.py#match_asset]] (hos
 
 Bearer API keys and signed session cookies identify callers; roles gate every route.
 
-[[attestra/api.py#get_principal]] resolves `Authorization: Bearer` via [[attestra/auth/keys.py#authenticate_api_key]] or the `attestra_session` cookie via [[attestra/auth/session.py#read_session]]. [[attestra/api.py#require]] checks [[attestra/auth/roles.py#has_permission]] against the six roles in [[attestra/auth/roles.py#ROLES]].
+[[attestra/api.py#get_principal]] resolves `Authorization: Bearer` via [[attestra/auth/keys.py#authenticate_api_key]] or the `attestra_session` cookie via [[attestra/auth/session.py#read_session]]. [[attestra/api.py#require]] checks [[attestra/auth/roles.py#has_permission]] against the six roles in [[attestra/auth/roles.py#ROLES]]. Share links use `share.create` and `share.manage` (admin, lead, tester); see [[interfaces#Share links]].
 
 UI login: [[attestra/web/ui.py#login]]. Passwords use scrypt ([[attestra/auth/keys.py#hash_password]]). Report workflow enforces distinct author / QA / signer user ids ([[attestra/reports/render.py#sign_report]]).
 
@@ -54,6 +54,12 @@ Queries and storage are scoped per tenant for non-admin principals.
 URL/path/image allow-list and SSRF checks used before scanner dispatch.
 
 See [[runner#Scope authorization]]. [[attestra/runner/authorization.py#authorize_target]] and [[attestra/runner/gate.py#check]] enforce engagement scope at enqueue and resume.
+
+## CT subdomain suggestions
+
+Passive Certificate Transparency suggestions for an in-scope apex; never auto-added to scope.
+
+[[attestra/runner/ct_suggestions.py#suggestions_for_engagement]] runs only when the user clicks Find subdomain suggestions. [[attestra/runner/ct_suggestions.py#apex_in_scope]] requires the apex itself on the signed allow-list (R14). One crt.sh JSON request goes through [[attestra/runner/http_safe.py#passive_get]]. [[attestra/runner/ct_suggestions.py#parse_ct_entries]] strips wildcards, drops duplicates and names outside the apex. Results are suggestions only (copy or dismiss) — never added to scope and never scanned or resolved. Audited as `scope.suggestions.fetched`.
 
 ## Target ownership
 

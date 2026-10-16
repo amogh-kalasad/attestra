@@ -17,7 +17,7 @@
     <tbody>
     {% for r in rows %}
     <tr>
-      <td class="mono">{{ r.tool }}</td>
+      <td class="mono"><a href="/tuning/false-positives/{{ r.tool }}">{{ r.tool }}</a></td>
       <td>{{ r.total }}</td>
       <td>{{ r.false_positive }}</td>
       <td>{{ "%.1f"|format(r.rate * 100) }}%{% if r.total < small_sample %} <span class="meta">(small sample, n={{ r.total }})</span>{% endif %}</td>
@@ -29,5 +29,5 @@
   </table>
   </div>
 </div>
-<p class="hint">There is no per-tool findings list yet. Each engagement's findings table shows which tools reported each finding.</p>
+<p class="hint">Open a tool name to see its findings and which ones reviewers marked false positive.</p>
 {% endblock %}

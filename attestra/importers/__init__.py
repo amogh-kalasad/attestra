@@ -11,12 +11,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from attestra.importers import (
+    burp,
     checkov,
     cyclonedx,
     dependency_track,
     gitleaks,
     kube_bench,
     naabu,
+    nessus,
     nuclei,
     observatory,
     prowler,
@@ -46,6 +48,8 @@ PARSERS: dict[str, Callable[[bytes], list[NormalizedFinding]]] = {
     "webcheck": webcheck.parse,
     "observatory": observatory.parse,
     "ssllabs": ssllabs.parse,
+    "burp": burp.parse,
+    "nessus": nessus.parse,
 }
 
 

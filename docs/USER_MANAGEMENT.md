@@ -4,12 +4,12 @@ Attestra has no open sign-up. People join through an **admin invite** or through
 
 ## Users page (`/users`)
 Admins and leads see users in their tenants with role, status, tenant, source (local or SSO) and last login.
-Admins can change roles, disable or enable users, and issue password-reset links. Leads can only invite.
+Admins can change roles, disable or enable users, and issue password-reset links. Leads can invite and can disable or enable tester, reviewer, and client_viewer accounts in their tenants. Role changes and password-reset links stay admin-only.
 
-| Who   | May invite                         | Change role / disable / reset |
-|-------|------------------------------------|-------------------------------|
-| admin | any role                           | yes                           |
-| lead  | tester, reviewer, client_viewer    | no                            |
+| Who   | May invite                         | Disable / enable (tester, reviewer, client_viewer) | Change role / reset |
+|-------|------------------------------------|----------------------------------------------------|---------------------|
+| admin | any role                           | yes (any role; not the last admin)                 | yes                 |
+| lead  | tester, reviewer, client_viewer    | yes (own tenant scope only)                        | no                  |
 
 Rules:
 - The last active admin cannot be demoted or disabled.
@@ -37,7 +37,7 @@ Rules:
 | POST | `/api/users/invites` `{email, role, tenant_id?, engagement_id?, ttl_hours?}` | admin, lead |
 | DELETE | `/api/users/invites/{id}` | admin, lead |
 | POST | `/api/users/{id}/role` `{role}` | admin |
-| POST | `/api/users/{id}/disable`, `/enable` | admin |
+| POST | `/api/users/{id}/disable`, `/enable` | admin; lead (tester/reviewer/client_viewer in scope) |
 | POST | `/api/users/{id}/reset-password` | admin |
 | POST | `/api/invites/accept` `{token, username, password, display_name?}` | public, rate-limited |
 | POST | `/api/password-reset` `{token, password}` | public, rate-limited |

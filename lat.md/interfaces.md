@@ -19,6 +19,9 @@ Notable routes:
 | POST | `/api/engagements/{eid}/assets` | Add target |
 | POST | `/api/engagements/{eid}/imports` | Import scanner file |
 | GET | `/api/engagements/{eid}/findings` | List findings |
+| GET | `/api/engagements/{eid}/findings/export` | Findings CSV (formula-safe); optional `asset_id` |
+| GET | `/api/engagements/{eid}/scope/suggestions` | Which apexes may run CT suggestions |
+| POST | `/api/engagements/{eid}/scope/suggestions` | One CT lookup; suggestions only |
 | POST | `/api/findings/{fid}/transition` | Lifecycle change |
 | GET | `/api/engagements/{eid}/compliance` | Control roll-up |
 | POST | `/api/engagements/{eid}/reports` | Generate report |
@@ -32,6 +35,7 @@ Notable routes:
 | GET | `/api/audit/verify` | Audit chain check |
 | GET | `/api/audit/export` | Audit export JSON/CSV + chain proof |
 | GET | `/api/evidence/{eid}/download` | Download evidence (audited) |
+| POST | `/api/scans/{sid}/cancel` | Cancel a queued or running scan (`scan.start`) |
 
 Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attestra/api.py#require]] for the route permission. Service errors map via [[attestra/api.py#_run]].
 
@@ -39,9 +43,13 @@ Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attes
 
 Command-line entrypoint sharing the same services layer.
 
-[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, user set-password, key create, migrate-storage, serve, worker, import, enrich (`--refresh`), purge, backup, restore, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
+[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, user set-password, user disable, key create, key list, key revoke, migrate-storage, serve, worker, import, enrich (`--refresh`), purge, backup, restore, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
 
 `attestra user set-password <username>` ([[attestra/cli.py#cmd_user_set_password]]) sets a local user's password. Without `--password` it asks twice at a hidden prompt and stops if the two do not match. [[attestra/users/service.py#set_password]] finds the user by name (exact, then case-insensitive), refuses SSO users, applies the same rules as [[attestra/users/service.py#validate_password]] (at least 12 characters, not the username, not too simple), revokes open reset links, and writes a `user.password_set` audit event with the CLI login name as actor. If the account is disabled, the command says it cannot sign in until an admin enables it.
+
+`attestra user disable <username>` ([[attestra/cli.py#cmd_user_disable]]) needs `--api-key` or `--user` so the caller is known. [[attestra/users/service.py#disable_by_username]] looks up the account and calls [[attestra/users/service.py#set_active]]. Admins may disable any user (except the last admin). Leads may only disable tester, reviewer, or client_viewer accounts in their tenant scope. The change writes a `user.disable` audit row.
+
+`attestra key list` ([[attestra/cli.py#cmd_key_list]]) prints id, username, prefix, status, and timestamps via [[attestra/auth/keys.py#list_api_keys]] (optional `--username`). `attestra key revoke <id>` ([[attestra/cli.py#cmd_key_revoke]]) calls [[attestra/auth/keys.py#revoke_api_key]], which sets `revoked_at` and writes an `api_key.revoke` audit row.
 
 ## Web dashboard
 
@@ -51,11 +59,35 @@ Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/u
 
 Report lifecycle buttons post to `/engagements/{eid}/reports/{rid}/submit`, `/qa-approve`, `/qa-reject` and `/sign`; see [[reports#Workflow]]. Report links open `/reports/{rid}` in a new tab with the sign-off record on top ([[reports#Sign-off record]]).
 
+### Sites dashboard
+
+Tenant-wide list of every target with grade, open counts, last scan, and score trend.
+
+`/sites` ([[attestra/web/ui.py#sites_dashboard]], template `sites.html`) and `GET /api/sites` call [[attestra/services.py#list_tenant_sites]]. Each row shows name/URL, Observatory grade and score (or “not graded” when there is no finished scan), last scan date/status, open Critical/High/Medium/Low counts (one grouped query), and a trend arrow from the last two finished scans’ Observatory scores via [[attestra/history.py#observatory_score_for_scan]]. Cancelled and failed scans are excluded from grade and trend. Default sort is worst grade first ([[attestra/grade.py#grade_rank]]); name and last-scan sorts and a name filter are available. Rows link to the target page. Sidebar Work nav includes Sites.
+
+### Finding comments
+
+Comment thread on the finding detail page and matching REST routes.
+
+Staff finding page (`/engagements/{eid}/findings/{fid}`, template `finding.html`) shows author, time in the display zone, escaped plain text, add form, and delete for authors or lead/admin. Routes: [[attestra/web/ui.py#ui_add_finding_comment]], [[attestra/web/ui.py#ui_delete_finding_comment]]. API: `GET/POST /api/findings/{fid}/comments`, `DELETE /api/findings/{fid}/comments/{cid}` via [[attestra/comments.py]]. See [[findings#Comments]].
+
+### Cancel a scan
+
+Staff can cancel a queued or running scan from the scan list or the scan page.
+
+[[attestra/services.py#cancel_scan]] needs `scan.start`, same tenant as the engagement. It reuses [[attestra/jobs/durable.py#request_cancel]] and [[attestra/jobs/durable.py#signal_job_cancel]], marks the scan and job `cancelled`, keeps any results already saved, and writes `scan.cancelled`. Finished, failed, or already-cancelled scans are refused. UI: Cancel on the engagement scans table and on `/engagements/{eid}/scans/{sid}` ([[attestra/web/ui.py#scan_page]], [[attestra/web/ui.py#ui_cancel_scan]]). API: `POST /api/scans/{sid}/cancel`. Cancelled scans do not emit `scan.finished` ([[attestra/webhooks/service.py#safe_emit_scan]]) and are excluded from history grade/trend (`done`/`quarantined` only).
+
+### Finding detail and FP drill-down
+
+Finding detail and per-tool false-positive lists finish the partly-done UI audit items.
+
+[[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence and status change (UI audit #55). False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
+
 ### Target history (C11)
 
 Per-target page at `/engagements/{eid}/targets/{aid}` ([[attestra/web/ui.py#target_page]], template `asset.html`).
 
-[[attestra/history.py#asset_scan_history]] lists finished scans for that target with date, tool, A–F grade ([[attestra/history.py#scan_letter_grade]]), severity counts, and new/fixed/still-open vs the previous scan of the **same tool** ([[attestra/history.py#diff_fingerprints]]). Snapshots come from each scan’s saved raw/import file. The page shows a small trend chart via [[attestra/history.py#trend_svg]] (same chart the technical report uses). Engagement target rows link to this page.
+The page opens with the Observatory-style **site grade** from [[attestra/services.py#asset_site_grade]] (letter, score, breakdown). [[attestra/history.py#asset_scan_history]] then lists finished scans for that target with date, tool, per-scan severity letter ([[attestra/history.py#scan_letter_grade]]), severity counts, and new/fixed/still-open vs the previous scan of the **same tool** ([[attestra/history.py#diff_fingerprints]]). Snapshots come from each scan’s saved raw/import file. The page shows a small trend chart via [[attestra/history.py#trend_svg]] (same chart the technical report uses). Engagement target rows link to this page. API: `GET /api/engagements/{eid}/assets/{aid}/grade`.
 
 Shared look-and-feel lives in `attestra/web/templates/_layout.html` (staff/portal) and `attestra/web/templates/_public.html` (Trust Center). Authenticated pages use a light app shell: white sidebar (Work / Library / Ops), sticky top bar, and content workspace. `attestra/web/templates/login.html` is a standalone split-screen sign-in (brand panel + form) matching the product login sample; it still posts username/password to [[attestra/web/ui.py#login]]. Visual system uses Geist + Geist Mono and indigo `#4338CA`. Page templates (engagements home, engagement detail, new engagement, PCI calendar, users, report templates, library, portal) follow that shell with KPI strips, status pills, breadcrumbs, and stepped progress where the product UI samples define them. Routes, forms, and permissions are unchanged.
 
@@ -65,13 +97,30 @@ Recurring scan schedules and a pass/fail check that CI pipelines can call.
 
 - Schedules: `GET/POST /api/engagements/{eid}/schedules`, `PATCH/DELETE /api/engagements/{eid}/schedules/{sid}`, and `POST /api/engagements/{eid}/schedules/run-due` ([[attestra/api.py#run_due_schedules]]). Cadence is `quarterly` or `monthly` ([[attestra/services.py#update_scan_schedule]]); due schedules are queued by [[attestra/services.py#enqueue_due_schedules]] through the normal scan gate. Managing them needs `scan.start`; listing needs `scan.read`.
 - CI gate: `GET /api/engagements/{eid}/gate` runs [[attestra/services.py#ci_gate]]. It fails when open findings at or above `fail_on` (default `high`) are more than `max_findings` (default 0). `tool` limits the check to one importer. Accepted-risk, fixed and false-positive findings never block. The answer lists counts by severity and up to 50 blocking findings.
-Shared look-and-feel lives in [[attestra/web/templates/_layout.html]] (staff/portal) and [[attestra/web/templates/_public.html]] (Trust Center). Authenticated pages use a light app shell: white sidebar (Work / Library / Ops), sticky top bar, and content workspace. [[attestra/web/templates/login.html]] is a standalone split-screen sign-in (brand panel + form) matching the product login sample; it still posts username/password to [[attestra/web/ui.py#login]]. Visual system uses Geist + Geist Mono and indigo `#4338CA`. Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside forms, QA action stacks, and post-table generate forms consistent with the product UI samples. Page templates (engagements home, engagement detail, new engagement, PCI calendar, users, report templates, library, portal) follow that shell with KPI strips, status pills, breadcrumbs, and stepped progress where the samples define them. Routes, forms, and permissions are unchanged.
 
-## Scheduled scans and CI gates
+Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside forms, QA action stacks, and post-table generate forms consistent with the product UI samples.
 
-Scan schedules and a CI policy check share the services layer with the dashboard and API.
+[[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates.
 
-[[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates. [[attestra/services.py#ci_gate]] fails a pipeline when open findings at or above `fail_on` exceed `max_findings` (accepted-risk / fixed / false-positive do not block).
+## Share links
+
+Tokenized read-only links for one target grade or one scan, plus an SVG badge.
+
+[[attestra/share/service.py#create_share]] issues a long random token (`secrets`, at least 32 bytes) and stores only [[attestra/share/service.py#hash_token]] on [[attestra/share/models.py#ShareLink]]. Default expiry is 7 days (max 90). [[attestra/share/service.py#revoke_share]] and expiry both make the link invalid. Public page `/share/{token}` and badge `/share/{token}/badge.svg` ([[attestra/share/routes.py]]) show only target name, grade, score breakdown, and finding title/severity/status/fix (via [[attestra/comments.py#finding_fields_for_share]]); never evidence, comments, emails, tenant id, notes, API keys, or paths ([[attestra/share/service.py#FORBIDDEN_PUBLIC_KEYS]]). Invalid, expired, and revoked tokens return the same “link not valid” answer (410) with `noindex` and no-cache headers. Audits: `share.created`, `share.revoked`, and rate-limited `share.viewed`. Roles: `share.create` / `share.manage` for admin, lead, tester. UI list/revoke at `/shares`; API under `/api/v1/shares`.
+
+## Email alerts
+
+Optional SMTP notifications that reuse the same event points as outbound webhooks.
+
+[[attestra/users/mailer.py#send_email]] sends plain plus HTML mail when `ATTESTRA_SMTP_HOST` is set (also `_PORT`, `_USER`, `_PASSWORD`, `_FROM`, `_TLS` / `_STARTTLS`). Off by default: one info log and no error. The password is never logged. Tests install an in-memory deliver function via [[attestra/users/mailer.py#set_deliver]].
+
+Events (same hooks as webhooks):
+
+1. New Critical or High findings — [[attestra/alerts/service.py#notify_new_high_findings]] after import ([[attestra/proof/hooks.py#after_import]]); many findings from one import become **one** email.
+2. Security header changed — [[attestra/alerts/service.py#notify_header_change]] on `scan.finished` ([[attestra/webhooks/service.py#safe_emit_scan]]); compares the last two saved scans of the same tool via [[attestra/alerts/headers.py#diff_headers]]. Webcheck stores a `headers` snapshot in its report.
+3. SLA missed — [[attestra/alerts/service.py#run_sla_missed_alerts]] (`attestra sla-alert-check`); one email per finding, recorded in [[attestra/models.py#EmailAlertSent]].
+
+Per-tenant toggles and recipient list live in [[attestra/models.py#EmailAlertSettings]]. Admin/lead UI at `/settings/alerts` ([[attestra/alerts/routes.py]]); API `GET/PUT /api/alerts/settings` needs `webhook.manage`. Audit: `alert.settings.update` and `alert.email.sent` (event, count, recipients count — not the body). Finding links use `ATTESTRA_PUBLIC_URL` or `ATTESTRA_URL` when set.
 
 ## Configuration
 
@@ -84,6 +133,10 @@ Environment variables and on-disk data layout.
 - `ATTESTRA_STORAGE` — `local` (default) or `s3` ([[attestra/storage/__init__.py#get_storage]])
 - `ATTESTRA_S3_BUCKET` / `ATTESTRA_S3_ENDPOINT` / `ATTESTRA_S3_OBJECT_LOCK` — S3 backend
 - `ATTESTRA_KEV_URL` / `ATTESTRA_EPSS_URL` — feed URLs for `enrich --refresh`
+- `ATTESTRA_GSB_ENABLED` — `1`/`true`/`yes` turns on Google Safe Browsing in webcheck (off by default)
+- `ATTESTRA_GSB_API_KEY` — Safe Browsing API key; required with the flag; never logged or stored in reports
+- `ATTESTRA_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_FROM` / `_TLS` (or `_STARTTLS`) — optional SMTP for invites and email alerts; off when host is unset; password never logged
+- `ATTESTRA_PUBLIC_URL` (or `ATTESTRA_URL`) — base URL used in alert email links to findings and targets
 
 ## Product marketing page
 

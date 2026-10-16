@@ -8,10 +8,12 @@ Per-tenant outbound webhooks for key events, plus simple automation rules. Code:
 |---|---|
 | `finding.created` | A new finding is created by an import |
 | `finding.status_changed` | A finding changes status (payload has `from` and `status`) |
+| `finding.commented` | A comment is added on a finding (`comment_id`, `author_user_id`; body is not sent) |
 | `retest.completed` | A retest is finalized (`retest_id`, `result`) |
 | `report.signed` | A report is signed (`report_id`, `kind`, `version`, `sha256`, `signed_by`) |
+| `cert.expiring` | Daily job: saved cert end date crossed the 30, 14 or 7 day band (`target`, `days_left`, `end_date`, `band`, `asset_id`, `engagement_id`). No secrets. Each band once per certificate. |
 
-Finding payloads carry `finding_id`, `engagement_id`, `title`, `severity`, `status`, `risk_score`, `location`. Emitting never breaks the business action that triggered it.
+Finding payloads carry `finding_id`, `engagement_id`, `title`, `severity`, `status`, `risk_score`, `location`. Emitting never breaks the business action that triggered it. Run `attestra cert-expiry-check` daily (reads saved scan end dates only; no new network).
 
 ## Endpoints
 

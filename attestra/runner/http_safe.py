@@ -24,6 +24,8 @@ class SafeResponse:
     headers: dict[str, str]
     body: bytes
     final_url: str
+    # Peer certificate notAfter when the hop was HTTPS (OpenSSL date string or "").
+    peer_cert_not_after: str = ""
 
 
 def resolve_redirect_url(current: str, location: str) -> str:
@@ -72,9 +74,13 @@ def safe_request(
                     headers[key] = f"{headers[key]}\n{v}"
                 else:
                     headers[key] = v
+            peer_na = getattr(conn, "peer_cert_not_after", "") or ""
             if resp.status in (301, 302, 303, 307, 308) and "location" in headers:
                 if not follow_redirects:
-                    return SafeResponse(status=resp.status, headers=headers, body=body, final_url=current)
+                    return SafeResponse(
+                        status=resp.status, headers=headers, body=body, final_url=current,
+                        peer_cert_not_after=peer_na,
+                    )
                 nxt = resolve_redirect_url(current, headers["location"])
                 try:
                     authorize_target(scope, nxt, "url")
@@ -83,7 +89,10 @@ def safe_request(
                     raise
                 current = nxt
                 continue
-            return SafeResponse(status=resp.status, headers=headers, body=body, final_url=current)
+            return SafeResponse(
+                status=resp.status, headers=headers, body=body, final_url=current,
+                peer_cert_not_after=peer_na,
+            )
         finally:
             conn.close()
     raise AuthorizationError("too many redirects")
@@ -93,6 +102,49 @@ def safe_get(url: str, **kwargs) -> SafeResponse:
     return safe_request("GET", url, **kwargs)
 
 
+def passive_get(
+    url: str,
+    *,
+    timeout: float = 30,
+    max_body: int = MAX_BODY,
+    user_agent: str = "attestra-safe/0.1",
+) -> SafeResponse:
+    """HTTPS GET for third-party lookups about in-scope domains (not engagement targets).
+
+    Uses the same timeout and body limit as [[attestra/runner/http_safe.py#safe_request]].
+    Callers must gate on signed scope before calling (for example CT lookups for an
+    in-scope apex). Private and link-local destinations are refused.
+    """
+    import ipaddress
+    import urllib.error
+    import urllib.request
+
+    from attestra.runner.authorization import BLOCKED_CIDRS
+
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise AuthorizationError("passive lookup requires an https URL with a host")
+    host = parts.hostname.lower()
+    try:
+        ip = ipaddress.ip_address(host)
+        if any(ip in net for net in BLOCKED_CIDRS) or not ip.is_global:
+            raise AuthorizationError(f"passive lookup host not allowed: {host}")
+    except ValueError:
+        pass  # hostname, not a literal IP
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https + host check above
+            body = resp.read(max_body + 1)
+            if len(body) > max_body:
+                raise AuthorizationError("response body exceeds size limit")
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            return SafeResponse(status=resp.status, headers=headers, body=body, final_url=url)
+    except urllib.error.HTTPError as exc:
+        body = exc.read(max_body) if exc.fp else b""
+        headers = {k.lower(): v for k, v in (exc.headers.items() if exc.headers else [])}
+        return SafeResponse(status=exc.code, headers=headers, body=body, final_url=url)
+
+
 class _PinnedHTTPSConnection(HTTPSConnection):
     """Connect to ``pin.ip`` but present SNI and verify the cert for ``pin.host``."""
 
@@ -100,10 +152,16 @@ class _PinnedHTTPSConnection(HTTPSConnection):
         ctx = ssl.create_default_context()
         super().__init__(pin.ip, pin.port, context=ctx, timeout=timeout)
         self._pin = pin
+        self.peer_cert_not_after: str = ""
 
     def connect(self) -> None:
         sock = socket.create_connection((self._pin.ip, self._pin.port), self.timeout)
         self.sock = self._context.wrap_socket(sock, server_hostname=self._pin.sni_hostname)
+        try:
+            cert = self.sock.getpeercert() or {}
+            self.peer_cert_not_after = str(cert.get("notAfter") or "")
+        except (AttributeError, OSError, ValueError):
+            self.peer_cert_not_after = ""
 
 
 def _connect(pin: PinnedTarget):

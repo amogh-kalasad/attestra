@@ -63,7 +63,7 @@
         <span style="display:block;font-weight:500">{{ r.e.tenant.name }}</span>
         {% if r.e.tenant.contact_name %}<span class="meta">{{ r.e.tenant.contact_name }}</span>{% endif %}
       </td>
-      <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
+      <td>{{ r.e.type|type_label }}</td>
       <td style="font-weight:600">{{ r.targets }}</td>
       <td>
         <div class="env-list">

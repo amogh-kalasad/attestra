@@ -14,7 +14,7 @@ How a report row and frozen HTML file are created.
 
 [[attestra/reports/render.py#generate_report]]:
 
-1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]).
+1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]). Finding comments are omitted unless `include_comments=True` (default off); see [[findings#Comments]].
 2. Render Jinja templates under `attestra/reports/templates`.
 3. Write under `DATA_DIR/tenants/<id>/reports/`.
 4. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
@@ -28,6 +28,8 @@ Names shown at the top of each report and in OSCAL output.
 - Compliance template (`attestra/reports/templates/compliance.html.j2`): heading "<framework name>: security testing evidence pack", page title "Compliance evidence pack".
 - Executive template (`attestra/reports/templates/executive.html.j2`): "Executive summary: <engagement name>".
 - [[attestra/reports/oscal.py#assessment_results]] names its result "Attestra security testing control roll-up".
+
+Report context includes `type_label` from [[attestra/models.py#engagement_type_label]] (for key `vapt`, that is `VA + PT`). Built-in templates print that label instead of `eng.type|upper`, so generated report pages do not contain the word VAPT.
 
 The shared footer in `attestra/reports/templates/_base.html.j2` shows who generated the file, when, and the Attestra version. It says QA, approval and signature are not inside the file; they live in the separate sign-off record (see [[reports#Sign-off record]]) and can be checked with `attestra verify-report`.
 

@@ -1,0 +1,37 @@
+{% extends "_layout.html" %}
+{% block title %}{{ tool }} false positives &middot; Attestra{% endblock %}
+{% block main %}
+<p class="back-link"><a href="/tuning/false-positives">&larr; False-positive rates</a></p>
+<div class="page-head">
+  <div>
+    <h1>Findings from {{ tool }}</h1>
+    <p class="lede">{{ total }} finding{{ "" if total == 1 else "s" }}; {{ false_positive }} marked false positive
+      {% if total %}({{ "%.1f"|format((false_positive / total) * 100) }}%){% endif %}
+      {% if total < small_sample %} &middot; small sample{% endif %}.
+    </p>
+  </div>
+</div>
+<div class="card">
+  <h2>Findings</h2>
+  <div class="table-wrap" style="margin:-4px -24px -24px">
+  <table>
+    <thead>
+    <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>Engagement</th></tr>
+    </thead>
+    <tbody>
+    {% for f in findings %}
+    <tr>
+      <td><a href="/engagements/{{ f.engagement_id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
+      <td><span class="st">{{ f.status|label }}</span></td>
+      <td><a href="/engagements/{{ f.engagement_id }}">#{{ f.engagement_id }}</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5"><div class="empty">No findings from this tool in your engagements.</div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

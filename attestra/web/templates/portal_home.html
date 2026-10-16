@@ -49,7 +49,7 @@
       <td class="meta">{{ r.e.id }}</td>
       <td><a href="/portal/engagements/{{ r.e.id }}"><strong>{{ r.e.name }}</strong></a></td>
       <td>{{ r.e.tenant.name }}</td>
-      <td>{{ type_labels.get(r.e.type, r.e.type) }}</td>
+      <td>{{ r.e.type|type_label }}</td>
       <td>{% set any_open = namespace(v=false) %}{% for s in ["critical","high","medium","low"] %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}">{{ r.open.get(s) }} {{ s }}</span> {% endif %}{% endfor %}{% if not any_open.v %}<span class="meta">None</span>{% endif %}</td>
       <td>{{ r.closed }}</td>
       <td>{% if role == "auditor" %}<a href="/auditor/engagements/{{ r.e.id }}">Audit trail</a>{% endif %}</td>

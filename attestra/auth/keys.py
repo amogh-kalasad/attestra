@@ -102,11 +102,37 @@ def create_api_key(s: Session, user: User) -> tuple[ApiKey, str]:
     return row, raw
 
 
-def revoke_api_key(s: Session, key_id: int) -> ApiKey:
+def list_api_keys(s: Session, *, username: str | None = None) -> list[dict]:
+    """Return API key rows (id, user, prefix, timestamps). Never includes the secret."""
+    q = select(ApiKey, User).join(User, ApiKey.user_id == User.id).order_by(ApiKey.id)
+    if username:
+        q = q.where(User.username == username.strip().lower())
+    out = []
+    for key, user in s.execute(q):
+        out.append({
+            "id": key.id,
+            "user_id": user.id,
+            "username": user.username,
+            "prefix": key.prefix,
+            "created_at": key.created_at.isoformat() if key.created_at else None,
+            "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
+            "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
+            "status": "revoked" if key.revoked_at is not None else "active",
+        })
+    return out
+
+
+def revoke_api_key(s: Session, key_id: int, *, actor: str = "cli") -> ApiKey:
+    """Revoke an API key and write an ``api_key.revoke`` audit row."""
+    from attestra import audit
+
     row = s.get(ApiKey, key_id)
     if not row:
         raise LookupError(f"api key {key_id} not found")
+    if row.revoked_at is not None:
+        return row
     row.revoked_at = utcnow()
+    audit.record(s, actor, "api_key.revoke", "api_key", row.id, user_id=row.user_id, prefix=row.prefix)
     return row
 
 

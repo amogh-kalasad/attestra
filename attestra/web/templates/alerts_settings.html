@@ -1,0 +1,66 @@
+{% extends "_layout.html" %}
+{% block title %}Email alerts &middot; Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <h1>Email alerts</h1>
+    <p class="lede">Turn events on or off and choose who gets the mail. SMTP is configured with environment variables; when it is off, nothing is sent.</p>
+  </div>
+</div>
+
+{% if not smtp %}
+<div class="card" style="border-color:#FEC84B;background:#FFFAEB">
+  <p style="margin:0">SMTP is off (<code>ATTESTRA_SMTP_HOST</code> not set). Settings still save; emails are skipped until SMTP is configured.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="post" action="/settings/alerts">
+    <div class="fields">
+      <div>
+        <label for="tenant_id">Tenant</label>
+        <select id="tenant_id" name="tenant_id" onchange="location.href='/settings/alerts?tenant_id='+this.value">
+          {% for t in tenants %}
+          <option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <h2>Events</h2>
+    <div class="fields" style="grid-template-columns:1fr">
+      <label style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" name="notify_new_high" value="1" {% if settings.notify_new_high %}checked{% endif %}>
+        <span><strong>New Critical or High findings</strong><br>
+          <span class="hint">One grouped email per scan or import (not one per finding).</span></span>
+      </label>
+      <label style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" name="notify_header_change" value="1" {% if settings.notify_header_change %}checked{% endif %}>
+        <span><strong>Security header changed</strong><br>
+          <span class="hint">Compares the last two saved scans of a target (added, removed, or value changed).</span></span>
+      </label>
+      <label style="display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" name="notify_sla_missed" value="1" {% if settings.notify_sla_missed %}checked{% endif %}>
+        <span><strong>SLA missed</strong><br>
+          <span class="hint">Open finding past its due date. Sent once per finding.</span></span>
+      </label>
+    </div>
+
+    <h2>Recipients</h2>
+    <div class="fields" style="grid-template-columns:1fr">
+      <div>
+        <label for="recipients">Email addresses</label>
+        <textarea id="recipients" name="recipients" rows="4" placeholder="lead@example.com&#10;secops@example.com">{{ settings.recipients|join('\n') }}</textarea>
+        <div class="hint">One address per line (or comma-separated). Lead or admin only. Emails only — no evidence or secrets in the message.</div>
+      </div>
+      {% if known_emails %}
+      <div class="hint">Known invite emails for this tenant: {{ known_emails|join(', ') }}</div>
+      {% endif %}
+    </div>
+
+    <div class="row">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

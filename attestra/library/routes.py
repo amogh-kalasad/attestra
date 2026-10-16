@@ -73,6 +73,13 @@ class EntryIn(BaseModel):
     default_severity: str = "medium"
     tags: list[str] = []
     rule_ids: list[str] = []
+    importance: str = ""
+    effort: str = ""
+    fix_steps: str = ""
+    snippet_nginx: str = ""
+    snippet_apache: str = ""
+    snippet_iis: str = ""
+    snippet_cloudflare: str = ""
 
 
 class EntryPatch(BaseModel):
@@ -85,6 +92,13 @@ class EntryPatch(BaseModel):
     default_severity: str | None = None
     tags: list[str] | None = None
     rule_ids: list[str] | None = None
+    importance: str | None = None
+    effort: str | None = None
+    fix_steps: str | None = None
+    snippet_nginx: str | None = None
+    snippet_apache: str | None = None
+    snippet_iis: str | None = None
+    snippet_cloudflare: str | None = None
 
 
 class ApplyIn(BaseModel):
@@ -250,10 +264,14 @@ def _ui_tenant(s, principal, tenant_id: int | None) -> int | None:
     return tenant_id if any(t.id == tenant_id for t in tenants) else None
 
 
-def _form_entry(title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids) -> dict:
+def _form_entry(title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
+                importance="", effort="", fix_steps="", snippet_nginx="", snippet_apache="",
+                snippet_iis="", snippet_cloudflare="") -> dict:
     return {"title": title, "description": description, "impact": impact, "remediation": remediation,
             "references": references, "cwe": cwe or None, "default_severity": default_severity,
-            "tags": tags, "rule_ids": rule_ids}
+            "tags": tags, "rule_ids": rule_ids, "importance": importance, "effort": effort,
+            "fix_steps": fix_steps, "snippet_nginx": snippet_nginx, "snippet_apache": snippet_apache,
+            "snippet_iis": snippet_iis, "snippet_cloudflare": snippet_cloudflare}
 
 
 @ui_router.get("/library", response_class=HTMLResponse)
@@ -272,7 +290,10 @@ def ui_library(request: Request, q: str = "", tenant_id: int | None = Query(None
 @ui_router.post("/library")
 def ui_create(request: Request, tenant_id: int = Form(...), title: str = Form(...), description: str = Form(""),
               impact: str = Form(""), remediation: str = Form(""), references: str = Form(""), cwe: str = Form(""),
-              default_severity: str = Form("medium"), tags: str = Form(""), rule_ids: str = Form("")):
+              default_severity: str = Form("medium"), tags: str = Form(""), rule_ids: str = Form(""),
+              importance: str = Form(""), effort: str = Form(""), fix_steps: str = Form(""),
+              snippet_nginx: str = Form(""), snippet_apache: str = Form(""), snippet_iis: str = Form(""),
+              snippet_cloudflare: str = Form("")):
     ui, principal, redirect = _ui_ctx(request)
     if redirect:
         return redirect
@@ -281,8 +302,14 @@ def ui_create(request: Request, tenant_id: int = Form(...), title: str = Form(..
         with db.session() as s:
             if _ui_tenant(s, principal, tenant_id) is None:
                 raise LookupError("tenant not found")
-            e = lib.create_entry(s, tenant_id, _form_entry(title, description, impact, remediation, references, cwe,
-                                                           default_severity, tags, rule_ids), actor=principal.actor)
+            e = lib.create_entry(
+                s, tenant_id,
+                _form_entry(
+                    title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
+                    importance, effort, fix_steps, snippet_nginx, snippet_apache, snippet_iis, snippet_cloudflare,
+                ),
+                actor=principal.actor,
+            )
             eid = e.id
     except (services.ServiceError, LookupError) as e:
         return ui._back("/library", error=str(e))
@@ -373,7 +400,9 @@ def ui_entry(request: Request, entry_id: int):
 def ui_update(request: Request, entry_id: int, title: str = Form(...), description: str = Form(""),
               impact: str = Form(""), remediation: str = Form(""), references: str = Form(""), cwe: str = Form(""),
               default_severity: str = Form("medium"), tags: str = Form(""), rule_ids: str = Form(""),
-              action: str = Form("save")):
+              importance: str = Form(""), effort: str = Form(""), fix_steps: str = Form(""),
+              snippet_nginx: str = Form(""), snippet_apache: str = Form(""), snippet_iis: str = Form(""),
+              snippet_cloudflare: str = Form(""), action: str = Form("save")):
     ui, principal, redirect = _ui_ctx(request)
     if redirect:
         return redirect
@@ -384,8 +413,14 @@ def ui_update(request: Request, entry_id: int, title: str = Form(...), descripti
                 tid = e.tenant_id
                 lib.delete_entry(s, e, actor=principal.actor)
                 return RedirectResponse(f"/library?tenant_id={tid}&msg=Writeup%20deleted.", status_code=303)
-            lib.update_entry(s, e, _form_entry(title, description, impact, remediation, references, cwe,
-                                               default_severity, tags, rule_ids), actor=principal.actor)
+            lib.update_entry(
+                s, e,
+                _form_entry(
+                    title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
+                    importance, effort, fix_steps, snippet_nginx, snippet_apache, snippet_iis, snippet_cloudflare,
+                ),
+                actor=principal.actor,
+            )
     except (services.ServiceError, LookupError) as e:
         return ui._back(f"/library/{entry_id}", error=str(e))
     return ui._back(f"/library/{entry_id}", msg="Saved.")

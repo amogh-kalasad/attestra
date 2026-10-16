@@ -8,6 +8,7 @@ from attestra.jobs.durable import (
     recover_interrupted_jobs,
     request_cancel,
     resume_queued_jobs,
+    signal_job_cancel,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "recover_interrupted_jobs",
     "request_cancel",
     "resume_queued_jobs",
+    "signal_job_cancel",
 ]
