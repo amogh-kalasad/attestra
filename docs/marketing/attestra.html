@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Attestra — From Findings to Signed Attestation | AntHive Tech</title>
+  <meta name="description" content="Attestra turns imported VAPT scanner results into de-duplicated, risk-ranked findings, maps them to PCI DSS, ISO 27001 and SOC 2 controls, and produces hashed, four-eyes-approved, signed reports." />
+  <meta property="og:title" content="Attestra — From Findings to Signed Attestation" />
+  <meta property="og:description" content="Import VAPT results. Normalize, prioritize, map to compliance controls, and ship signed audit-ready reports." />
+  <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#020617" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=Work+Sans:wght@600&display=swap" rel="stylesheet" />
+  <style>
+    /* Attestra product page — scoped to match anthive.tech design tokens */
+    :root {
+      --slate-950: #020617;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-400: #94a3b8;
+      --slate-300: #cbd5e1;
+      --white: #fff;
+      --purple-950: #3b0764;
+      --purple-900: #581c87;
+      --purple-600: #9333ea;
+      --purple-500: #a855f7;
+      --purple-400: #c084fc;
+      --cyan-600: #0891b2;
+      --cyan-500: #06b6d4;
+      --cyan-400: #22d3ee;
+      --pink-500: #ec4899;
+      --max-width: 80rem;
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--slate-950);
+      color: var(--slate-300);
+      font-family: var(--font-sans);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    img, svg { max-width: 100%; height: auto; display: block; }
+    a { color: inherit; text-decoration: none; }
+    a:focus-visible, button:focus-visible {
+      outline: 2px solid var(--cyan-400);
+      outline-offset: 3px;
+    }
+
+    .container {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Nav */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+      background: rgba(2, 6, 23, 0.8);
+      backdrop-filter: blur(24px);
+      border-bottom: 1px solid var(--slate-800);
+    }
+    .nav-inner {
+      max-width: var(--max-width); margin: 0 auto; padding: 1rem 1.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 1rem; }
+    .nav-product {
+      font-family: var(--font-display); font-weight: 600; font-size: 0.95rem;
+      color: var(--white); padding-left: 1rem; border-left: 1px solid var(--slate-700);
+      letter-spacing: 0.04em;
+    }
+    .nav-desktop { display: none; align-items: center; gap: 2rem; }
+    .nav-desktop a { color: var(--slate-300); font-weight: 500; transition: color 0.2s; }
+    .nav-desktop a:hover { color: var(--white); }
+    .nav-toggle {
+      display: flex; align-items: center; justify-content: center;
+      width: 2.5rem; height: 2.5rem; padding: 0; background: none; border: none;
+      color: var(--white); cursor: pointer;
+    }
+    .nav-toggle .icon-close { display: none; }
+    .nav.is-open .icon-menu { display: none; }
+    .nav.is-open .icon-close { display: block; }
+    .nav-mobile {
+      display: none; padding: 0 1.5rem 1rem; flex-direction: column; gap: 1rem;
+      border-top: 1px solid var(--slate-800);
+    }
+    .nav-mobile a { color: var(--slate-300); font-weight: 500; padding: 0.5rem 0; }
+    .nav.is-open .nav-mobile { display: flex; }
+    @media (min-width: 768px) {
+      .nav-desktop { display: flex; }
+      .nav-toggle { display: none; }
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      padding: 0.5rem 1.5rem; font-family: var(--font-sans); font-weight: 600;
+      font-size: 1rem; border-radius: 9999px; border: none; cursor: pointer;
+      transition: transform 0.3s, box-shadow 0.3s, background 0.2s;
+    }
+    .btn:hover { transform: scale(1.02); }
+    .btn-primary {
+      background: linear-gradient(to right, var(--purple-600), var(--cyan-600));
+      color: var(--white);
+    }
+    .btn-primary:hover { box-shadow: 0 10px 40px rgba(147, 51, 234, 0.45); }
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.1); color: var(--white);
+      border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(8px);
+    }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.2); }
+    .btn-lg { padding: 1rem 2rem; }
+    .arrow { transition: transform 0.2s; }
+    .btn:hover .arrow { transform: translateX(4px); }
+
+    .gradient-text {
+      background: linear-gradient(to right, var(--purple-400), var(--cyan-400));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+
+    /* Hero */
+    .hero {
+      position: relative; min-height: 100vh; display: flex; align-items: center;
+      justify-content: center; overflow: hidden;
+      background: linear-gradient(135deg, var(--slate-950) 0%, var(--purple-950) 50%, var(--slate-900) 100%);
+    }
+    .hero-bg { position: absolute; inset: 0; overflow: hidden; }
+    .hero-blur {
+      position: absolute; width: 20rem; height: 20rem; border-radius: 50%;
+      filter: blur(80px); opacity: 0.2;
+    }
+    .hero-blur-1 { top: -10rem; right: -10rem; background: var(--purple-500); animation: float1 8s ease-in-out infinite; }
+    .hero-blur-2 { bottom: -10rem; left: -10rem; background: var(--cyan-500); animation: float2 10s ease-in-out infinite; }
+    .hero-blur-3 { top: 50%; left: 50%; background: var(--pink-500); transform: translate(-50%, -50%); animation: float3 12s ease-in-out infinite; }
+    @keyframes float1 { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+    @keyframes float2 { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+    @keyframes float3 {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(calc(-50% + 40px), calc(-50% + 40px)) scale(1.1); }
+    }
+    .hero-grid {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(to right, rgba(79, 79, 79, 0.18) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(79, 79, 79, 0.18) 1px, transparent 1px);
+      background-size: 14px 24px;
+    }
+    .hero-inner {
+      position: relative; z-index: 10; max-width: var(--max-width);
+      margin: 0 auto; padding: 7.5rem 1.5rem 4rem; text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.5rem 1rem; border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-size: 0.875rem; color: var(--cyan-400); margin-bottom: 1.5rem;
+    }
+    .hero-brand {
+      font-family: var(--font-display); font-weight: 700;
+      font-size: clamp(2.75rem, 9vw, 5.5rem); line-height: 1; letter-spacing: -0.03em;
+      color: var(--white); margin: 0 0 0.75rem;
+    }
+    .hero-title {
+      font-family: var(--font-display); font-size: clamp(1.5rem, 4vw, 2.35rem);
+      font-weight: 600; line-height: 1.2; letter-spacing: -0.02em;
+      margin: 0 0 1.25rem; color: var(--slate-200, #e2e8f0);
+    }
+    .hero-title span {
+      background: linear-gradient(to right, var(--purple-400), var(--pink-500), var(--cyan-400));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .hero-subtitle {
+      font-size: clamp(1.05rem, 2vw, 1.25rem); color: var(--slate-300);
+      max-width: 42rem; margin: 0 auto 2.5rem; line-height: 1.65;
+    }
+    .hero-cta {
+      display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 3rem;
+    }
+    .hero-visual {
+      max-width: 52rem; margin: 0 auto;
+      border-radius: 1rem; border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(12px);
+      padding: 1.25rem; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+    .hero-visual svg { width: 100%; height: auto; }
+
+    /* Sections */
+    .section { padding: 5.5rem 0; position: relative; }
+    .section-dark { background: var(--slate-950); }
+    .section-alt { background: linear-gradient(180deg, var(--slate-900) 0%, var(--slate-950) 100%); }
+    .section-header { text-align: center; max-width: 44rem; margin: 0 auto 3rem; }
+    .section-badge {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--cyan-400); margin-bottom: 1rem;
+    }
+    .section-title {
+      font-family: var(--font-display); font-size: clamp(1.85rem, 4vw, 2.75rem);
+      font-weight: 700; color: var(--white); margin: 0 0 1rem; letter-spacing: -0.02em;
+    }
+    .section-subtitle { margin: 0; color: var(--slate-400); font-size: 1.1rem; }
+
+    /* Problem / feature grids */
+    .card-grid {
+      display: grid; gap: 1.25rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 640px) { .card-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (min-width: 1024px) { .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); } }
+
+    .info-card {
+      background: rgba(30, 41, 59, 0.55);
+      border: 1px solid var(--slate-800);
+      border-radius: 1rem; padding: 1.5rem 1.4rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .info-card:hover {
+      border-color: rgba(168, 85, 247, 0.45);
+      transform: translateY(-2px);
+    }
+    .info-card .card-icon {
+      width: 2.5rem; height: 2.5rem; border-radius: 0.75rem;
+      display: grid; place-items: center; margin-bottom: 1rem;
+      background: linear-gradient(135deg, rgba(147, 51, 234, 0.35), rgba(8, 145, 178, 0.35));
+      color: var(--white); font-size: 1.1rem;
+    }
+    .info-card h3 {
+      font-family: var(--font-display); font-size: 1.15rem; font-weight: 600;
+      color: var(--white); margin: 0 0 0.5rem;
+    }
+    .info-card p { margin: 0; color: var(--slate-400); font-size: 0.95rem; }
+    .info-card .benefit {
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid var(--slate-800);
+      font-size: 0.875rem; color: var(--cyan-400);
+    }
+
+    /* Workflow */
+    .workflow {
+      display: grid; gap: 0.75rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 900px) {
+      .workflow { grid-template-columns: repeat(7, 1fr); align-items: stretch; }
+    }
+    .wf-step {
+      background: rgba(30, 41, 59, 0.55); border: 1px solid var(--slate-800);
+      border-radius: 1rem; padding: 1.15rem 1rem; text-align: center; position: relative;
+    }
+    .wf-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.75rem; height: 1.75rem; border-radius: 9999px; margin-bottom: 0.65rem;
+      font-size: 0.75rem; font-weight: 700; color: var(--white);
+      background: linear-gradient(to right, var(--purple-600), var(--cyan-600));
+    }
+    .wf-step h3 {
+      font-family: var(--font-display); font-size: 0.95rem; color: var(--white);
+      margin: 0 0 0.35rem;
+    }
+    .wf-step p { margin: 0; font-size: 0.8rem; color: var(--slate-400); line-height: 1.4; }
+
+    /* Feature groups */
+    .feature-group { margin-bottom: 2.5rem; }
+    .feature-group:last-child { margin-bottom: 0; }
+    .feature-group-title {
+      font-family: var(--font-display); font-size: 1.25rem; color: var(--white);
+      margin: 0 0 1rem; display: flex; align-items: center; gap: 0.75rem;
+    }
+    .feature-group-title::after {
+      content: ""; flex: 1; height: 1px; background: var(--slate-800);
+    }
+
+    /* Reports */
+    .report-grid {
+      display: grid; gap: 1.25rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 768px) { .report-grid { grid-template-columns: repeat(2, 1fr); } }
+    .report-card {
+      background: linear-gradient(160deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
+      border: 1px solid var(--slate-800); border-radius: 1rem; padding: 1.5rem;
+      display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .report-card .tag {
+      align-self: flex-start; font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 0.3rem 0.65rem; border-radius: 9999px;
+      background: rgba(147, 51, 234, 0.2); color: var(--purple-400);
+      border: 1px solid rgba(147, 51, 234, 0.35);
+    }
+    .report-card h3 {
+      font-family: var(--font-display); font-size: 1.2rem; color: var(--white); margin: 0;
+    }
+    .report-card .audience { font-size: 0.85rem; color: var(--cyan-400); margin: 0; }
+    .report-card ul {
+      margin: 0; padding-left: 1.1rem; color: var(--slate-400); font-size: 0.92rem;
+    }
+    .report-card li { margin-bottom: 0.35rem; }
+    .report-preview {
+      margin-top: 2.5rem; border-radius: 1rem; border: 1px solid var(--slate-700);
+      background: var(--slate-900); overflow: hidden;
+    }
+    .report-preview-bar {
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--slate-800); background: rgba(2, 6, 23, 0.5);
+    }
+    .report-preview-dot {
+      width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--slate-600);
+    }
+    .report-preview-bar span { margin-left: 0.5rem; font-size: 0.8rem; color: var(--slate-400); }
+    .report-preview-body { padding: 1.5rem; }
+    .report-preview-body h4 {
+      font-family: var(--font-display); color: var(--white); margin: 0 0 0.5rem; font-size: 1.1rem;
+    }
+    .kpi-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+    .kpi {
+      flex: 1 1 5rem; min-width: 5rem; text-align: center;
+      background: rgba(2, 6, 23, 0.45); border: 1px solid var(--slate-800);
+      border-radius: 0.75rem; padding: 0.75rem 0.5rem;
+    }
+    .kpi b {
+      display: block; font-family: var(--font-display); font-size: 1.35rem; color: var(--white);
+    }
+    .kpi span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--slate-500); }
+    .kpi.crit b { color: #f87171; }
+    .kpi.high b { color: #fb923c; }
+    .kpi.med b { color: #fbbf24; }
+
+    /* Audience */
+    .audience-list {
+      display: grid; gap: 1rem;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 768px) { .audience-list { grid-template-columns: repeat(2, 1fr); } }
+    .audience-item {
+      display: flex; gap: 1rem; align-items: flex-start;
+      padding: 1.25rem; border-radius: 1rem;
+      border: 1px solid var(--slate-800); background: rgba(30, 41, 59, 0.4);
+    }
+    .audience-item strong {
+      display: block; font-family: var(--font-display); color: var(--white);
+      margin-bottom: 0.25rem;
+    }
+    .audience-item p { margin: 0; font-size: 0.92rem; color: var(--slate-400); }
+    .audience-mark {
+      flex-shrink: 0; width: 2.25rem; height: 2.25rem; border-radius: 0.65rem;
+      display: grid; place-items: center;
+      background: linear-gradient(to right, var(--purple-600), var(--cyan-600));
+      color: var(--white); font-weight: 700; font-size: 0.85rem;
+    }
+
+    /* CTA */
+    .cta-band {
+      text-align: center; padding: 4rem 1.5rem;
+      border-radius: 1.25rem;
+      background: linear-gradient(135deg, rgba(88, 28, 135, 0.45), rgba(8, 145, 178, 0.25));
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+    .cta-band h2 {
+      font-family: var(--font-display); font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+      color: var(--white); margin: 0 0 0.75rem;
+    }
+    .cta-band p { margin: 0 auto 1.75rem; max-width: 36rem; color: var(--slate-300); }
+    .cta-actions { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; }
+    .contact-note {
+      margin-top: 1.5rem; font-size: 0.95rem; color: var(--slate-400);
+    }
+    .contact-note a { color: var(--cyan-400); text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Footer */
+    .footer {
+      border-top: 1px solid var(--slate-800); padding: 3rem 0 0;
+      background: var(--slate-950);
+    }
+    .footer-grid {
+      display: grid; gap: 2rem;
+      grid-template-columns: 1fr;
+      padding-bottom: 2rem;
+    }
+    @media (min-width: 768px) {
+      .footer-grid { grid-template-columns: 1.4fr 1fr 1fr 1fr; }
+    }
+    .footer-brand p { color: var(--slate-400); margin: 0.5rem 0; }
+    .footer-brand a { color: var(--cyan-400); }
+    .footer-links h3 {
+      font-family: var(--font-display); font-size: 0.95rem; color: var(--white);
+      margin: 0 0 1rem;
+    }
+    .footer-links ul { list-style: none; margin: 0; padding: 0; }
+    .footer-links li { margin-bottom: 0.5rem; }
+    .footer-links a { color: var(--slate-400); font-size: 0.9rem; }
+    .footer-links a:hover { color: var(--white); }
+    .footer-bottom {
+      border-top: 1px solid var(--slate-800); padding: 1.25rem 0;
+      display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: space-between;
+      font-size: 0.85rem; color: var(--slate-500);
+    }
+    .footer-gradient-line {
+      height: 3px;
+      background: linear-gradient(to right, var(--purple-600), var(--pink-500), var(--cyan-500));
+    }
+
+    .note-muted {
+      margin-top: 1.5rem; text-align: center; font-size: 0.85rem; color: var(--slate-500);
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="https://www.anthive.tech/" class="nav-logo" aria-label="AntHive home">
+        <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 109" width="118" height="auto" aria-hidden="true"><g><polygon fill="#fff" fill-rule="evenodd" points="44.2,37 67.9,37 55.7,15.2"/><polygon fill="#fff" fill-rule="evenodd" points="23.1,76.3 13.5,93 97,93 89.3,76.5 74.3,76.2 76.4,79 35,79 36.7,76.3"/><polygon fill="#fff" points="41.7,40 69.1,40 87.4,74 72.1,74 67.9,65 48.4,65 52.1,58 63.6,58 56,43.2 39.5,74 24.1,74"/></g><text x="119" y="69" fill="#fff" font-family="Work Sans,sans-serif" font-size="43" letter-spacing="9">ANTHIVE</text></svg>
+        <span class="nav-product">Attestra</span>
+      </a>
+      <div class="nav-desktop">
+        <a href="#problem">Problem</a>
+        <a href="#solution">Solution</a>
+        <a href="#features">Features</a>
+        <a href="#reports">Reports</a>
+        <a href="#contact" class="btn btn-primary">Request a Demo</a>
+      </div>
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+        <svg class="icon-menu" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <svg class="icon-close" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="nav-mobile" id="navMobile">
+      <a href="#problem">Problem</a>
+      <a href="#solution">Solution</a>
+      <a href="#features">Features</a>
+      <a href="#reports">Reports</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#contact" class="btn btn-primary">Request a Demo</a>
+    </div>
+  </nav>
+
+  <main>
+    <!-- A. Hero -->
+    <section class="hero" aria-labelledby="hero-brand">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-blur hero-blur-1"></div>
+        <div class="hero-blur hero-blur-2"></div>
+        <div class="hero-blur hero-blur-3"></div>
+      </div>
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <p class="hero-badge"><span aria-hidden="true">✦</span> VAPT EVIDENCE PLATFORM</p>
+        <h1 class="hero-brand" id="hero-brand">Attestra</h1>
+        <p class="hero-title">From findings to <span>signed attestation</span></p>
+        <p class="hero-subtitle">
+          Import results from the scanners your testers already run. De-duplicate and risk-rank findings,
+          map them to PCI DSS, ISO 27001 and SOC 2 controls, and produce hashed, four-eyes-approved, signed reports.
+        </p>
+        <div class="hero-cta">
+          <a href="#contact" class="btn btn-primary btn-lg">Request a Demo <span class="arrow" aria-hidden="true">→</span></a>
+          <a href="#features" class="btn btn-ghost btn-lg">Explore Features</a>
+        </div>
+        <div class="hero-visual" aria-label="Attestra workflow illustration">
+          <svg viewBox="0 0 920 280" role="img" aria-labelledby="viz-title viz-desc">
+            <title id="viz-title">Attestra engagement pipeline</title>
+            <desc id="viz-desc">Authorize, import, normalize, prioritize, map controls, then sign reports.</desc>
+            <defs>
+              <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#9333ea"/><stop offset="100%" stop-color="#06b6d4"/>
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="920" height="280" rx="12" fill="#0f172a"/>
+            <text x="32" y="42" fill="#94a3b8" font-family="Inter,sans-serif" font-size="13">Engagement pipeline</text>
+            <text x="32" y="68" fill="#fff" font-family="Space Grotesk,sans-serif" font-size="22" font-weight="600">Authorize → Import → Rank → Map → Sign</text>
+            <!-- nodes -->
+            <g font-family="Inter,sans-serif" font-size="12">
+              <rect x="32" y="110" width="130" height="88" rx="10" fill="#1e293b" stroke="#334155"/>
+              <text x="48" y="142" fill="#c084fc" font-weight="600">1. Authorize</text>
+              <text x="48" y="164" fill="#94a3b8">Signed ROE gate</text>
+              <text x="48" y="182" fill="#64748b">Write-once hash</text>
+
+              <rect x="192" y="110" width="130" height="88" rx="10" fill="#1e293b" stroke="#334155"/>
+              <text x="208" y="142" fill="#22d3ee" font-weight="600">2. Import</text>
+              <text x="208" y="164" fill="#94a3b8">ZAP · Nuclei</text>
+              <text x="208" y="182" fill="#64748b">Trivy · SARIF</text>
+
+              <rect x="352" y="110" width="130" height="88" rx="10" fill="#1e293b" stroke="#334155"/>
+              <text x="368" y="142" fill="#c084fc" font-weight="600">3. Normalize</text>
+              <text x="368" y="164" fill="#94a3b8">Fingerprint dedup</text>
+              <text x="368" y="182" fill="#64748b">One finding schema</text>
+
+              <rect x="512" y="110" width="130" height="88" rx="10" fill="#1e293b" stroke="#334155"/>
+              <text x="528" y="142" fill="#22d3ee" font-weight="600">4. Prioritize</text>
+              <text x="528" y="164" fill="#94a3b8">CVSS · EPSS · KEV</text>
+              <text x="528" y="182" fill="#64748b">Asset criticality</text>
+
+              <rect x="672" y="110" width="130" height="88" rx="10" fill="#1e293b" stroke="#334155"/>
+              <text x="688" y="142" fill="#c084fc" font-weight="600">5. Compliance</text>
+              <text x="688" y="164" fill="#94a3b8">PCI · ISO · SOC 2</text>
+              <text x="688" y="182" fill="#64748b">Assessor confirm</text>
+
+              <rect x="780" y="220" width="108" height="36" rx="8" fill="url(#g1)"/>
+              <text x="798" y="243" fill="#fff" font-weight="600">Signed report</text>
+            </g>
+            <path d="M162 154 H192 M322 154 H352 M482 154 H512 M642 154 H672" stroke="url(#g1)" stroke-width="2" fill="none"/>
+            <path d="M737 198 C737 210 760 220 780 238" stroke="url(#g1)" stroke-width="2" fill="none"/>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- B. Problem -->
+    <section class="section section-dark" id="problem">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> The problem</p>
+          <h2 class="section-title">Security testing produces evidence. Audits need <span class="gradient-text">proof</span>.</h2>
+          <p class="section-subtitle">Teams already run scanners and pentests. The hard part is turning scattered results into prioritized work and audit-ready attestation.</p>
+        </header>
+        <div class="card-grid cols-3">
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">⧉</div>
+            <h3>Findings scattered across tools</h3>
+            <p>ZAP, Nuclei, Trivy, Semgrep and other SARIF producers each ship their own formats. The same issue often appears more than once.</p>
+          </article>
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">⇅</div>
+            <h3>Hard to prioritize</h3>
+            <p>CVSS alone does not reflect exploitability in the wild or how critical the affected asset is to the business.</p>
+          </article>
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">▦</div>
+            <h3>Compliance mapping is manual</h3>
+            <p>Linking findings to PCI DSS, ISO 27001 or SOC 2 requirements is slow, inconsistent, and difficult to defend in audit.</p>
+          </article>
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">✎</div>
+            <h3>Reporting takes too long</h3>
+            <p>Technical detail for testers, executive summaries for leadership, and framework evidence packs for assessors are rebuilt by hand.</p>
+          </article>
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">⌀</div>
+            <h3>Scope and authorization gaps</h3>
+            <p>Without a clear signed authorization and in-scope assets, imports and retests are hard to justify under ISO A.8.34-style controls.</p>
+          </article>
+          <article class="info-card">
+            <div class="card-icon" aria-hidden="true">⛓</div>
+            <h3>Weak evidence integrity</h3>
+            <p>Stakeholders need to know raw imports, evidence files and reports have not been silently altered after the engagement.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- C. Solution -->
+    <section class="section section-alt" id="solution">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> The Attestra solution</p>
+          <h2 class="section-title">Import. Normalize. Attest.</h2>
+          <p class="section-subtitle">Attestra is an import-and-report VAPT evidence platform. Testers run scanners under client authorization; Attestra turns those results into ranked findings, proposed control status, and signed reports.</p>
+        </header>
+        <div class="workflow" aria-label="Attestra workflow steps">
+          <div class="wf-step"><span class="wf-num">1</span><h3>Engage</h3><p>Create tenant &amp; engagement with target frameworks</p></div>
+          <div class="wf-step"><span class="wf-num">2</span><h3>Authorize</h3><p>Record signed authorization; imports blocked without it</p></div>
+          <div class="wf-step"><span class="wf-num">3</span><h3>Scope</h3><p>Add assets with criticality, exposure &amp; PCI CDE flags</p></div>
+          <div class="wf-step"><span class="wf-num">4</span><h3>Import</h3><p>Ingest scanner result files into one finding schema</p></div>
+          <div class="wf-step"><span class="wf-num">5</span><h3>Prioritize</h3><p>Risk-rank, triage, validate, track SLA &amp; retests</p></div>
+          <div class="wf-step"><span class="wf-num">6</span><h3>Map</h3><p>Propose PCI / ISO / SOC 2 status; assessor confirms</p></div>
+          <div class="wf-step"><span class="wf-num">7</span><h3>Report</h3><p>Generate, QA, sign and verify frozen HTML reports</p></div>
+        </div>
+        <p class="note-muted">Attestra does not attack targets on its own. Result files are imported (or produced by scoped runner dispatch under engagement authorization), then treated as evidence.</p>
+      </div>
+    </section>
+
+    <!-- D. Features -->
+    <section class="section section-dark" id="features">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> Features &amp; capabilities</p>
+          <h2 class="section-title">Built for evidence you can defend</h2>
+          <p class="section-subtitle">Capabilities below reflect implemented Attestra functionality — not a wishlist.</p>
+        </header>
+
+        <div class="feature-group">
+          <h3 class="feature-group-title">Engagement &amp; authorization</h3>
+          <div class="card-grid cols-3">
+            <article class="info-card">
+              <h3>Engagements</h3>
+              <p>Tenants and engagements for VA, PT, VAPT, retest or continuous work, with test windows and selected frameworks.</p>
+              <p class="benefit">Benefit: one place for client context and audit cycle scope.</p>
+            </article>
+            <article class="info-card">
+              <h3>Authorization gate</h3>
+              <p>Signed authorization is hashed and stored write-once. Imports are refused when no currently valid authorization exists.</p>
+              <p class="benefit">Benefit: clear proof that testing stayed inside authorized bounds.</p>
+            </article>
+            <article class="info-card">
+              <h3>Scoped assets</h3>
+              <p>Record targets with criticality (1–5), internet/internal exposure, and PCI CDE flags for framework-aware evaluation.</p>
+              <p class="benefit">Benefit: risk and PCI scoping follow the asset, not the spreadsheet.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="feature-group">
+          <h3 class="feature-group-title">Import &amp; findings</h3>
+          <div class="card-grid cols-3">
+            <article class="info-card">
+              <h3>Multi-tool import</h3>
+              <p>OWASP ZAP JSON, Nuclei JSONL, Trivy JSON (vulns &amp; misconfigs), and any SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks and others).</p>
+              <p class="benefit">Benefit: keep the tools your team trusts; Attestra normalizes the output.</p>
+            </article>
+            <article class="info-card">
+              <h3>Fingerprint de-duplication</h3>
+              <p>One finding schema keyed on CWE / CVE / location. Cross-tool and cross-run duplicates merge by fingerprint.</p>
+              <p class="benefit">Benefit: less noise, clearer remediation queues.</p>
+            </article>
+            <article class="info-card">
+              <h3>Risk prioritization</h3>
+              <p>Risk combines CVSS, FIRST EPSS, CISA KEV, asset criticality and exposure. Reports still show CVSS as the severity of record.</p>
+              <p class="benefit">Benefit: work the issues that matter first.</p>
+            </article>
+            <article class="info-card">
+              <h3>Finding lifecycle</h3>
+              <p>Statuses from new through triaged, validated, fixed and retest_passed — plus false_positive and risk_accepted (reason required). Fixed findings that reappear reopen.</p>
+              <p class="benefit">Benefit: remediation progress is explicit and auditable.</p>
+            </article>
+            <article class="info-card">
+              <h3>SLA tracking</h3>
+              <p>Due dates such as critical findings within 30 days (aligned to PCI 6.3.3 expectations), with ageing and SLA breach reporting.</p>
+              <p class="benefit">Benefit: overdue risk is visible before audit day.</p>
+            </article>
+            <article class="info-card">
+              <h3>Evidence store</h3>
+              <p>Uploaded artifacts are masked where needed, SHA-256 hashed, content-addressed and stored write-once.</p>
+              <p class="benefit">Benefit: every claim can point back to a hashed artifact.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="feature-group">
+          <h3 class="feature-group-title">Compliance &amp; reporting</h3>
+          <div class="card-grid cols-3">
+            <article class="info-card">
+              <h3>Hub-and-spoke mapping</h3>
+              <p>Findings map once to a control objective via CWE, then fan out to PCI DSS 4.0.1, ISO/IEC 27001:2022 and SOC 2.</p>
+              <p class="benefit">Benefit: add frameworks through the mapping library, not one-off scripts.</p>
+            </article>
+            <article class="info-card">
+              <h3>Propose, then confirm</h3>
+              <p>The engine proposes control status; a named assessor confirms with rationale. <em>No exceptions</em> is distinct from <em>met</em>.</p>
+              <p class="benefit">Benefit: absence of findings is never mistaken for proof a control is in place.</p>
+            </article>
+            <article class="info-card">
+              <h3>Signed reports</h3>
+              <p>Versioned HTML reports frozen by SHA-256, moved through submit → QA → sign, then signed with Ed25519 (HMAC fallback).</p>
+              <p class="benefit">Benefit: deliverables that can be verified after they leave the platform.</p>
+            </article>
+          </div>
+        </div>
+
+        <div class="feature-group">
+          <h3 class="feature-group-title">Operations &amp; interfaces</h3>
+          <div class="card-grid cols-3">
+            <article class="info-card">
+              <h3>Web, API &amp; CLI</h3>
+              <p>Server-rendered dashboard, REST API with OpenAPI docs, and a CLI that share the same business rules and audit trail.</p>
+              <p class="benefit">Benefit: humans and automation use one trusted path.</p>
+            </article>
+            <article class="info-card">
+              <h3>Hash-chained audit log</h3>
+              <p>Append-only audit events with tamper verification for business writes across the engagement lifecycle.</p>
+              <p class="benefit">Benefit: reconstruct who did what, and prove the chain still holds.</p>
+            </article>
+            <article class="info-card">
+              <h3>Portal &amp; Trust Center</h3>
+              <p>Client portal and auditor views for engagement visibility, plus a public Trust Center surface for controlled external access.</p>
+              <p class="benefit">Benefit: share status without emailing sensitive binders.</p>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- E. Advantages -->
+    <section class="section section-alt" id="advantages">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> Advantages</p>
+          <h2 class="section-title">What customers gain in practice</h2>
+          <p class="section-subtitle">Practical outcomes supported by the product — without promising zero risk or guaranteed certification.</p>
+        </header>
+        <div class="card-grid cols-3">
+          <article class="info-card">
+            <h3>One normalized view</h3>
+            <p>Cross-tool findings land in a single schema with de-duplication, so teams stop reconciling three exports by hand.</p>
+          </article>
+          <article class="info-card">
+            <h3>Clearer prioritization</h3>
+            <p>EPSS, KEV and asset context sit beside CVSS so remediation queues reflect exploitability and business impact.</p>
+          </article>
+          <article class="info-card">
+            <h3>Faster compliance storytelling</h3>
+            <p>Proposed control status with assessor confirmation shortens the path from test evidence to framework evidence packs.</p>
+          </article>
+          <article class="info-card">
+            <h3>Less manual reporting</h3>
+            <p>Technical, executive and compliance deliverables generate from the same engagement data, then freeze and sign.</p>
+          </article>
+          <article class="info-card">
+            <h3>Better handoffs</h3>
+            <p>Testers, reviewers, assessors and client viewers work from role-aware interfaces against the same findings.</p>
+          </article>
+          <article class="info-card">
+            <h3>Defensible integrity</h3>
+            <p>Hashed imports, write-once evidence, four-eyes report workflow and a verifiable audit chain support external scrutiny.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- F. Reports -->
+    <section class="section section-dark" id="reports">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> Deliverables</p>
+          <h2 class="section-title">What customers receive in reports</h2>
+          <p class="section-subtitle">Attestra produces versioned HTML reports (with DOCX/PDF export), letters, and framework packs from live engagement data.</p>
+        </header>
+        <div class="report-grid">
+          <article class="report-card">
+            <span class="tag">Technical</span>
+            <h3>Technical VAPT report</h3>
+            <p class="audience">Audience: security engineers, testers, remediation owners</p>
+            <ul>
+              <li>Scope assets and signed authorization metadata</li>
+              <li>Imported tools, filenames and raw SHA-256 digests</li>
+              <li>Open findings with severity, risk score, CVSS, EPSS, KEV</li>
+              <li>Location, CWE/CVE, tools, validation, recommendations</li>
+              <li>Linked evidence artifacts with hashes</li>
+            </ul>
+          </article>
+          <article class="report-card">
+            <span class="tag">Executive</span>
+            <h3>Executive summary</h3>
+            <p class="audience">Audience: CISOs, business stakeholders, account leads</p>
+            <ul>
+              <li>Open severity counts and top risks</li>
+              <li>Trend vs prior engagement for the same client</li>
+              <li>Compliance readiness roll-up by framework</li>
+              <li>Optional AI-assisted narrative only when human-approved</li>
+            </ul>
+          </article>
+          <article class="report-card">
+            <span class="tag">Compliance</span>
+            <h3>Compliance evidence pack</h3>
+            <p class="audience">Audience: assessors, QSAs, internal audit</p>
+            <ul>
+              <li>Per-control status: met, no exceptions, partial, not met, not assessed</li>
+              <li>Proposed vs assessor-confirmed rationale</li>
+              <li>Finding references and mapping strength</li>
+              <li>Evidence index of authorizations, imports and finding artifacts</li>
+            </ul>
+          </article>
+          <article class="report-card">
+            <span class="tag">Additional</span>
+            <h3>Letters, SoA, ageing &amp; packs</h3>
+            <p class="audience">Audience: closure / attestation stakeholders and auditors</p>
+            <ul>
+              <li>ISO Statement of Applicability report</li>
+              <li>SLA ageing / breach report</li>
+              <li>Closure and attestation letters</li>
+              <li>Framework zip packs with SHA-256 manifest</li>
+              <li>SARIF and OSCAL assessment / POA&amp;M exports</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="report-preview" aria-label="Illustrative executive summary layout">
+          <div class="report-preview-bar">
+            <span class="report-preview-dot" aria-hidden="true"></span>
+            <span class="report-preview-dot" aria-hidden="true"></span>
+            <span class="report-preview-dot" aria-hidden="true"></span>
+            <span>Sample layout · Executive summary structure</span>
+          </div>
+          <div class="report-preview-body">
+            <h4>Executive summary: Q4 VAPT</h4>
+            <p style="margin:0;color:var(--slate-400);font-size:0.9rem;">VAPT engagement · open issues ranked for remediation · control readiness proposed then confirmed</p>
+            <div class="kpi-row">
+              <div class="kpi crit"><b>2</b><span>Critical</span></div>
+              <div class="kpi high"><b>5</b><span>High</span></div>
+              <div class="kpi med"><b>11</b><span>Medium</span></div>
+              <div class="kpi"><b>4</b><span>Low</span></div>
+            </div>
+            <p style="margin:0;font-size:0.88rem;color:var(--slate-500);">Illustrative counts only — not a live customer report. Real reports freeze HTML by SHA-256 and require distinct author, QA and signer before signature.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G. Workflow fit -->
+    <section class="section section-alt" id="workflow">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> How it fits</p>
+          <h2 class="section-title">Where Attestra sits in your workflow</h2>
+          <p class="section-subtitle">Attestra coordinates evidence around testing you already perform — it does not replace remediation owners or the assessor’s judgment.</p>
+        </header>
+        <div class="card-grid">
+          <article class="info-card">
+            <h3>Before testing</h3>
+            <p>Create the engagement, upload the signed authorization, and register in-scope assets (including CDE flags when PCI is in play).</p>
+          </article>
+          <article class="info-card">
+            <h3>During testing</h3>
+            <p>Run scanners under that authorization. Import result files (or use scoped runner dispatch). Enrich with KEV/EPSS and triage findings with named validation.</p>
+          </article>
+          <article class="info-card">
+            <h3>After testing</h3>
+            <p>Evaluate compliance proposals, confirm controls as assessor, generate reports, complete four-eyes QA and signing, then share portal or Trust Center access as needed.</p>
+          </article>
+          <article class="info-card">
+            <h3>Human review stays required</h3>
+            <p>False positives, risk acceptance, control confirmation and report QA/sign-off are deliberate human steps — not silent automation.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- H. Who benefits -->
+    <section class="section section-dark" id="audiences">
+      <div class="container">
+        <header class="section-header">
+          <p class="section-badge"><span aria-hidden="true">✦</span> Who benefits</p>
+          <h2 class="section-title">Built for the people who ship and review security evidence</h2>
+        </header>
+        <div class="audience-list">
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">SE</div>
+            <div>
+              <strong>Security engineers &amp; VAPT testers</strong>
+              <p>Import multi-tool results, de-duplicate, validate findings, attach evidence and drive lifecycle status without rebuilding trackers.</p>
+            </div>
+          </div>
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">AS</div>
+            <div>
+              <strong>Assessors &amp; compliance leads</strong>
+              <p>Review proposed control status, confirm with rationale, and export framework evidence packs tied to hashed artifacts.</p>
+            </div>
+          </div>
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">LD</div>
+            <div>
+              <strong>Security leaders &amp; CISOs</strong>
+              <p>Read executive summaries, severity trends and readiness roll-ups that are grounded in the same data as the technical report.</p>
+            </div>
+          </div>
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">CL</div>
+            <div>
+              <strong>Client viewers &amp; auditors</strong>
+              <p>Use portal and auditor views (and Trust Center access where enabled) to follow engagement status without opaque email threads.</p>
+            </div>
+          </div>
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">DO</div>
+            <div>
+              <strong>DevSecOps &amp; platform teams</strong>
+              <p>Drive imports and checks through the REST API and CLI against the same audited services layer as the dashboard.</p>
+            </div>
+          </div>
+          <div class="audience-item">
+            <div class="audience-mark" aria-hidden="true">QA</div>
+            <div>
+              <strong>Report QA &amp; signatories</strong>
+              <p>Enforce distinct author / QA / signer workflow before Ed25519 (or HMAC) signatures are applied to frozen HTML.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- I. CTA -->
+    <section class="section section-alt" id="contact">
+      <div class="container">
+        <div class="cta-band">
+          <h2>See Attestra on your next engagement</h2>
+          <p>Talk with AntHive Tech about a demo, a pilot engagement, or how Attestra fits your application-security and audit workflow.</p>
+          <div class="cta-actions">
+            <a class="btn btn-primary btn-lg" href="mailto:info@anthive.tech?subject=Attestra%20demo%20request">Request a Demo <span class="arrow" aria-hidden="true">→</span></a>
+            <a class="btn btn-ghost btn-lg" href="https://www.anthive.tech/">Visit anthive.tech</a>
+          </div>
+          <p class="contact-note">
+            General: <a href="mailto:info@anthive.tech">info@anthive.tech</a>
+            · Support: <a href="mailto:support@anthive.tech">support@anthive.tech</a>
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <svg class="logo-svg logo-footer" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 109" width="150" height="auto" aria-hidden="true"><g><polygon fill="#fff" fill-rule="evenodd" points="44.2,37 67.9,37 55.7,15.2"/><polygon fill="#fff" fill-rule="evenodd" points="23.1,76.3 13.5,93 97,93 89.3,76.5 74.3,76.2 76.4,79 35,79 36.7,76.3"/><polygon fill="#fff" points="41.7,40 69.1,40 87.4,74 72.1,74 67.9,65 48.4,65 52.1,58 63.6,58 56,43.2 39.5,74 24.1,74"/></g><text x="119" y="69" fill="#fff" font-family="Work Sans,sans-serif" font-size="43" letter-spacing="9">ANTHIVE</text></svg>
+          <p>Delivering Real Results</p>
+          <p><a href="mailto:info@anthive.tech">info@anthive.tech</a></p>
+        </div>
+        <div class="footer-links">
+          <h3>Product</h3>
+          <ul>
+            <li><a href="#features">Attestra features</a></li>
+            <li><a href="#reports">Reports</a></li>
+            <li><a href="#workflow">Workflow</a></li>
+          </ul>
+        </div>
+        <div class="footer-links">
+          <h3>Company</h3>
+          <ul>
+            <li><a href="https://www.anthive.tech/">Home</a></li>
+            <li><a href="https://www.anthive.tech/#solutions">Solutions</a></li>
+            <li><a href="https://www.anthive.tech/#contact">Contact</a></li>
+          </ul>
+        </div>
+        <div class="footer-links">
+          <h3>Offices</h3>
+          <ul>
+            <li><a href="https://www.anthive.tech/#contact">USA · Minnesota</a></li>
+            <li><a href="https://www.anthive.tech/#contact">India · Bangalore</a></li>
+            <li><a href="https://www.anthive.tech/#contact">Ireland · Dundalk</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2026 ANTHIVE.TECH. All rights reserved.</p>
+        <p>Attestra product page · claims aligned to implemented platform capabilities</p>
+      </div>
+    </div>
+    <div class="footer-gradient-line" aria-hidden="true"></div>
+  </footer>
+
+  <script>
+    (function () {
+      var nav = document.getElementById('nav');
+      var toggle = document.getElementById('navToggle');
+      if (!nav || !toggle) return;
+      toggle.addEventListener('click', function () {
+        var open = nav.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      nav.querySelectorAll('a[href^="#"]').forEach(function (link) {
+        link.addEventListener('click', function () {
+          nav.classList.remove('is-open');
+          toggle.setAttribute('aria-expanded', 'false');
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

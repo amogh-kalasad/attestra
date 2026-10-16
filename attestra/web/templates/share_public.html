@@ -7,9 +7,9 @@
 <title>{{ v.target_name }} · Grade {{ v.grade }}</title>
 <style>
   :root {
-    --bg: #F5F6F8; --card: #fff; --ink: #101828; --quiet: #667085; --rule: #E4E7EC;
-    --accent: #4338CA; --ok: #067647; --bad: #B42318;
-    --font: system-ui, sans-serif; --mono: ui-monospace, Menlo, monospace;
+    --bg: #F8FAFB; --card: #fff; --ink: #0B1220; --quiet: #64748B; --rule: #E8EDF1;
+    --accent: #0F766E; --ok: #15803D; --bad: #B91C1C;
+    --font: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.55 var(--font); color: var(--ink); background: var(--bg); }
@@ -17,7 +17,7 @@
   h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
   h2 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; }
   .grade {
-    display: inline-block; background: #EEF0FF; color: var(--accent);
+    display: inline-block; background: #E8F6F3; color: var(--accent);
     border-radius: 10px; padding: 10px 16px; font-weight: 700; font-size: 22px; margin: 8px 0 16px;
   }
   .card { background: var(--card); border: 1px solid var(--rule); border-radius: 14px; padding: 18px; margin: 12px 0; }
@@ -26,6 +26,12 @@
   th { color: var(--quiet); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   .meta { color: var(--quiet); font-size: 13px; }
   .sev { font-weight: 600; text-transform: capitalize; }
+
+  /* ===== Attestra light design system ===== */
+  body { background: linear-gradient(180deg, #EEF8F6 0, var(--bg) 360px) no-repeat, var(--bg); }
+  .card { box-shadow: 0 1px 2px rgba(15,40,60,.04), 0 1px 3px rgba(15,40,60,.05); border-radius: 12px; }
+  .grade { border: 1px solid #CDEBE5; }
+  th { background: #F7F9FB; }
 </style>
 </head>
 <body>

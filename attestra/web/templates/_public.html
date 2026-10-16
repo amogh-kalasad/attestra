@@ -6,20 +6,14 @@
 <title>{% block title %}Trust Center{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #F5F6F8; --card: #fff; --ink: #101828; --quiet: #667085; --rule: #E4E7EC;
-    --accent: #4338CA; --accent-hover: #3730A3; --accent-ink: #fff;
-    --ok: #067647; --bad: #B42318; --chip: #EEF0FF; --field: #F9FAFB; --placeholder: #667085;
-    --radius: 14px; --font: "Geist", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, Menlo, monospace;
+    --bg: #F8FAFB; --card: #fff; --ink: #0B1220; --quiet: #64748B; --rule: #E8EDF1;
+    --accent: #0F766E; --accent-hover: #115E59; --accent-ink: #fff;
+    --ok: #15803D; --bad: #B91C1C; --chip: #E8F6F3; --field: #F7F9FB; --placeholder: #64748B;
+    --radius: 14px; --font: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
     --control-h: 44px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0C0E12; --card: #161B22; --ink: #F2F4F7; --quiet: #98A2B3; --rule: #2A303C;
-      --accent: #818CF8; --accent-hover: #A5B4FC; --ok: #6CE9A6; --bad: #FDA29B; --chip: #1E1B4B; --field: #0C0E12;
-    }
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.55 var(--font); color: var(--ink); background: var(--bg); min-height: 100vh; -webkit-font-smoothing: antialiased; }
@@ -51,7 +45,7 @@
   }
   textarea { height: auto; min-height: 88px; padding: 12px 14px; max-width: 100%; resize: vertical; }
   input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
-  input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(67,56,202,.15); }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(15,118,110,.18); }
   input[type=checkbox] { width: auto; height: auto; padding: 0; accent-color: var(--accent); }
   button {
     font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink);
@@ -61,6 +55,16 @@
   button:hover { background: var(--accent-hover); }
   footer { border-top: 1px solid var(--rule); margin-top: 40px; padding-top: 16px; color: var(--quiet); font-size: 13px; }
   footer details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+
+  /* ===== Attestra light design system ===== */
+  body { background: linear-gradient(180deg, #EEF8F6 0, var(--bg) 360px) no-repeat, var(--bg); }
+  .trust-top .mark { background: linear-gradient(135deg, #14B8A6, #0F766E); }
+  .card { box-shadow: 0 1px 2px rgba(15,40,60,.04), 0 1px 3px rgba(15,40,60,.05); border-radius: 12px; }
+  .badge { border: 1px solid #CDEBE5; font-weight: 600; }
+  h1 { font-weight: 650; letter-spacing: -.022em; }
+  button { box-shadow: 0 1px 2px rgba(15,118,110,.18); }
+  input, textarea { border-color: #D8E0E6; }
+  code { background: #F3F6F8; border: 1px solid var(--rule); border-radius: 5px; padding: 1px 5px; }
 </style>
 </head>
 <body>

@@ -382,19 +382,18 @@
   </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
   <table>
-    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Tools</th><th>Status</th><th>Fix by</th></tr>
+    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Status</th></tr>
     {% for f in findings %}
     <tr id="f-{{ f.id }}">
       <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
-      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div></td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
-      <td>{{ f.tools|join(", ") }}</td>
       <td>
         <div class="status-cell">
-          <span class="st">{{ f.status|label }}</span>
+          <div class="status-head"><span class="st">{{ f.status|label }}</span><span class="meta fix-by">Fix by {{ f.sla_due or "-" }}</span></div>
           {% set nexts = transitions.get(f.status, []) %}
           {% if nexts and can(prole, "finding.write") %}
           <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="status-move">
@@ -413,9 +412,8 @@
           {% endif %}
         </div>
       </td>
-      <td>{{ f.sla_due or "-" }}</td>
     </tr>
-    {% else %}<tr><td colspan="9">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
   </table>
 </div>
 
