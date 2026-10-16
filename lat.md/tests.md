@@ -203,3 +203,39 @@ Evidence download creates an `evidence.download` audit event.
 ### Feed refresh offline
 
 [[attestra/ops/feeds.py#refresh_feeds]] with fixture files (mocked download) populates catalog dates and enrich counts.
+
+## Feature tests
+
+Test modules for features added on top of the core flow. Each line says what the file checks.
+
+- `tests/test_ai_narratives.py`: AI drafts are off by default, never touch the network unless set up, hide evidence, need tester approval, and can be turned off per tenant.
+- `tests/test_ai_routes.py`: AI draft pages and API return 404 when off, and only approved drafts reach a report.
+- `tests/test_ai_drafts_page.py`: the AI drafts page uses the normal layout, shows a friendly off message, and asks before Reject.
+- `tests/test_c7_c11_mapping_soc2.py`: mapping strength and reason show in compliance output, and SOC 2 Type II sampling is repeatable.
+- `tests/test_c9_c10_pci_iso.py`: ASV import, PCI calendar, segmentation records, ISO SoA, nonconformity and corrective action, and audit sampling.
+- `tests/test_control_libraries.py`: PCI, ISO and SOC 2 crosswalks cover every objective, and OSCAL and SCF control libraries import correctly.
+- `tests/test_iso42001_pack.py`: the ISO/IEC 42001 pack loads with all 38 Annex A items, clauses 4 to 10, and the LLM Top 10 map.
+- `tests/test_phase8_framework_packs.py`: extra framework packs load from YAML, bad packs are refused, and reports render them.
+- `tests/test_findings_library.py`: the findings library (search, add, apply without overwrite) and tenant report templates with a safe sandbox.
+- `tests/test_fingerprint_variant.py`: an empty `variant` keeps the fingerprint exactly the same as before the field existed.
+- `tests/test_phase7_importers.py`: Prowler, kube-bench, testssl.sh, Gitleaks, Checkov and naabu parsers; Gitleaks never keeps the secret.
+- `tests/test_phase7_portal_tickets.py`: CycloneDX and Dependency-Track imports, Jira and GitHub ticket sync, signed webhooks, and the client portal and auditor view.
+- `tests/test_phase7_tuning.py`: per-tenant risk weights, suppression rules that expire, and false-positive rate by tool.
+- `tests/test_postgres_rls.py`: every tenant table has a PostgreSQL row-level security policy; the live cross-tenant check runs only when a test Postgres is set.
+- `tests/test_proof_replay.py`: HTTP request and response proof is redacted and hashed, and replay stays in scope and refuses changed proof.
+- `tests/test_trust_center.py`: the trust center is off by default, publishes only by hand, accepts only signed reports, and gates items behind an NDA.
+- `tests/test_user_management.py`: invites, roles, expiry, one-time tokens, password rules, last admin guard, disabled login and password reset.
+- `tests/test_webhooks.py`: outbound webhooks block private addresses, are signed, retry with backoff, and follow workflow rules.
+- `tests/test_ui_audit_fixes.py`: friendly 403, 404 and 422 pages, nav links by role, sign-in `next=` redirect, and confirm before destructive actions.
+- `tests/runner/test_phase7_adapters.py`: command lines for the extra scanner adapters; network tools use the pinned IP and nothing runs.
+
+## Scan, ownership and sign-off tests
+
+Tests for real scan runs, target ownership, and the report sign-off buttons. Nothing here touches the network or starts Docker.
+
+- `tests/runner/test_scanner_docker_runs.py`: Docker command lines, exit codes, report file checks and timeouts for each queued scanner, with a fake process runner.
+- `tests/jobs/test_queue_scan_worker.py`: a queued scan goes from run to saved and hashed report to import to Done, or fails with a clear reason.
+- `tests/test_ownership_verify.py`: the engagement page shows the ownership token, and Check now works by DNS TXT or the well-known file.
+- `tests/test_ownership_private_confirm.py`: a lead or admin can record the owner's confirmation for a private IP only, and the scan gate then allows it.
+- `tests/test_ui_report_lifecycle.py`: Submit for QA, QA approve or reject, and Approve and sign buttons, with three different people and no self-approval.
+- `tests/test_report_signoff_record.py`: the report view shows the sign-off record, the sealed file stays byte-identical, a changed file is flagged, and `user set-password` works.

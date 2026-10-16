@@ -15,16 +15,37 @@ How a report row and frozen HTML file are created.
 [[attestra/reports/render.py#generate_report]]:
 
 1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]).
-2. Render Jinja templates under [[attestra/reports/templates]].
+2. Render Jinja templates under `attestra/reports/templates`.
 3. Write under `DATA_DIR/tenants/<id>/reports/`.
 4. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
 5. Audit the write.
+
+## Titles
+
+Names shown at the top of each report and in OSCAL output.
+
+- Technical template (`attestra/reports/templates/technical.html.j2`): page title "Technical security testing report", heading "Technical security testing report: <engagement name>".
+- Compliance template (`attestra/reports/templates/compliance.html.j2`): heading "<framework name>: security testing evidence pack", page title "Compliance evidence pack".
+- Executive template (`attestra/reports/templates/executive.html.j2`): "Executive summary: <engagement name>".
+- [[attestra/reports/oscal.py#assessment_results]] names its result "Attestra security testing control roll-up".
+
+The shared footer in `attestra/reports/templates/_base.html.j2` shows who generated the file, when, and the Attestra version. It says QA, approval and signature are not inside the file; they live in the separate sign-off record (see [[reports#Sign-off record]]) and can be checked with `attestra verify-report`.
 
 ## Workflow
 
 Draft reports move through submit → QA → sign, with reject back to draft.
 
 Statuses: `draft` → `submitted` → `qa_approved` → `signed`, or `rejected` (resubmittable). Functions: [[attestra/reports/render.py#submit_report]], [[attestra/reports/render.py#qa_approve]], [[attestra/reports/render.py#qa_reject]], [[attestra/reports/render.py#sign_report]]. Author ≠ QA ≠ signer by user id; sign requires lead/admin. Legacy [[attestra/reports/render.py#approve_report]] remains as a two-person shortcut.
+
+In the web dashboard the reports table has a "Next step" column (`attestra/web/templates/engagement.html`). It shows only the button the current user may press: "Submit for QA" (or "Resubmit for QA" after a reject) for draft or rejected reports, "QA approve" and "QA reject" (a reason is required) for submitted reports, and "Approve and sign" for QA-approved reports. Each button posts to a route in [[attestra/web/ui.py]] ([[attestra/web/ui.py#ui_submit_report]], [[attestra/web/ui.py#ui_qa_approve_report]], [[attestra/web/ui.py#ui_qa_reject_report]], [[attestra/web/ui.py#ui_sign_report]]). All four go through [[attestra/web/ui.py#_report_step]], which checks login, the role permission (`report.submit`, `report.approve`, `report.sign`) and that the report belongs to the engagement, then calls the reports service. The service still enforces status order and separation of duties: the author cannot QA, and the signer must be neither the author nor the QA reviewer. The table hides the QA buttons from the author and the sign button from the author and the QA reviewer, and shows a short "waiting for ..." note instead. Service errors come back as plain messages on the page.
+
+## Sign-off record
+
+A status banner added when a report is viewed in Attestra; the sealed file is never changed.
+
+[[attestra/reports/signoff.py#banner_html]] builds one HTML block from the [[attestra/models.py#Report]] row and the result of [[attestra/reports/render.py#verify_report]]. It shows the status in plain words (draft, in QA, rejected with the QA note, QA approved, or signed by whom and when, with the QA reviewer), who made the report and when, whether the SHA-256 still matches, whether the signature is valid, the full SHA-256, and a link to the sealed file. A hash mismatch turns the banner red with a warning.
+
+[[attestra/reports/signoff.py#inject]] returns a copy of the sealed HTML with the banner placed right after `<body>`. The view route `GET /reports/{rid}` in [[attestra/api.py#download_report]] serves that copy with `Cache-Control: no-store`. `GET /reports/{rid}/sealed` in [[attestra/api.py#download_sealed_report]] returns the file byte for byte, so its hash and signature still verify. Both routes need `report.read`, use [[attestra/api.py#_report_file]] for tenant and data-folder checks, and write a `report.download` audit event (the sealed one is marked `sealed`).
 
 ## Retests
 
