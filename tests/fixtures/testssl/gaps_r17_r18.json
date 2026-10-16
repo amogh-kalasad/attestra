@@ -1,0 +1,30 @@
+[
+  {
+    "id": "cert_signatureAlgorithm",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "SHA224 with RSA"
+  },
+  {
+    "id": "cert_ocspURL",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "--"
+  },
+  {
+    "id": "OCSP_stapling",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "not offered"
+  },
+  {
+    "id": "service",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "HTTP"
+  }
+]

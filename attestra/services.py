@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from attestra import audit, config, importers, scoring
-from attestra.fingerprint import fingerprint
+from attestra.fingerprint import fingerprint, normalize_title
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
@@ -590,6 +590,7 @@ def import_results(
     rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
     known_fps = set(existing)
     for nf, asset in matched:
+        asset_id = asset.id if asset else None
         fp = fingerprint(
             location=nf.location,
             cwe=nf.cwe,
@@ -597,9 +598,28 @@ def import_results(
             title=nf.title,
             param=nf.param,
             package=nf.package,
-            asset_id=asset.id if asset else None,
+            asset_id=asset_id,
+            variant=getattr(nf, "variant", "") or "",
         )
         f = existing.get(fp)
+        # Legacy rows stored before variant existed: same title, old fingerprint (no variant).
+        if f is None and (getattr(nf, "variant", "") or ""):
+            legacy_fp = fingerprint(
+                location=nf.location,
+                cwe=nf.cwe,
+                cves=nf.cves,
+                title=nf.title,
+                param=nf.param,
+                package=nf.package,
+                asset_id=asset_id,
+                variant="",
+            )
+            legacy = existing.get(legacy_fp)
+            if legacy is not None and normalize_title(legacy.title) == normalize_title(nf.title):
+                f = legacy
+                del existing[legacy_fp]
+                f.fingerprint = fp
+                existing[fp] = f
         rule = tuning.first_match(rules, nf) if f is None and rules else None
         if rule is not None:
             # Suppressed (Phase 7.4): not stored; counted on the rule and in the audit event.

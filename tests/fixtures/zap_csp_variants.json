@@ -1,0 +1,48 @@
+{
+  "site": [
+    {
+      "@name": "https://shop.example.com",
+      "alerts": [
+        {
+          "pluginid": "10055",
+          "alertRef": "10055-4",
+          "alert": "CSP: Wildcard Directive",
+          "riskcode": "1",
+          "confidence": "2",
+          "cweid": "693",
+          "desc": "<p>Content Security Policy contains a wildcard directive.</p>",
+          "solution": "<p>Remove wildcard sources from the Content-Security-Policy header.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/", "param": "Content-Security-Policy"}
+          ]
+        },
+        {
+          "pluginid": "10055",
+          "alertRef": "10055-5",
+          "alert": "CSP: script-src unsafe-inline",
+          "riskcode": "1",
+          "confidence": "2",
+          "cweid": "693",
+          "desc": "<p>Content Security Policy allows unsafe-inline in script-src.</p>",
+          "solution": "<p>Avoid unsafe-inline in script-src; use nonces or hashes.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/", "param": "Content-Security-Policy"}
+          ]
+        },
+        {
+          "pluginid": "10055",
+          "alertRef": "10055-6",
+          "alert": "CSP: style-src unsafe-inline",
+          "riskcode": "1",
+          "confidence": "2",
+          "cweid": "693",
+          "desc": "<p>Content Security Policy allows unsafe-inline in style-src.</p>",
+          "solution": "<p>Avoid unsafe-inline in style-src; use nonces or hashes.</p>",
+          "instances": [
+            {"uri": "https://shop.example.com/", "param": "Content-Security-Policy"}
+          ]
+        }
+      ]
+    }
+  ]
+}

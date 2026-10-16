@@ -15,6 +15,8 @@ Synthetic data used by both `attestra/cli.py cmd_demo` and the test suite lives 
 | `semgrep.sarif` | SARIF 2.1 with CWE-89 SQL injection on `services/payments/views.py:42` and CWE-78 on `services/payments/tasks.py:87` |
 | `kev.json` | CISA KEV catalog with CVE-2024-9999 (matches nuclei and trivy) |
 | `epss.csv` | EPSS scores for CVE-2024-9999 (0.97) and CVE-2023-1234 (0.45) |
+| `testssl/gaps_r17_r18.json` | SHA224 `cert_signatureAlgorithm` (INFO) plus OCSP stapling not offered with empty `cert_ocspURL` |
+| `testssl/gaps_r18_ocsp.json` | OCSP stapling not offered with non-empty `cert_ocspURL` |
 
 ## conftest.py
 
@@ -33,6 +35,12 @@ Pure parser tests — no database required.
 Covers [[attestra/importers/zap.py#parse]], [[attestra/importers/nuclei.py#parse]], [[attestra/importers/trivy.py#parse]], [[attestra/importers/sarif.py#parse]], and the dispatch layer [[attestra/importers/__init__.py#parse]].
 
 Key assertions: ZAP confidence-0 items skipped; multi-instance XSS expands to separate findings; nuclei CVEs and CVSS populated; trivy DS002 misconfiguration gets CWE-16; SARIF CWE-89 present; unsupported tool raises `ValueError`.
+
+## test_testssl_gaps.py
+
+R17/R18 detection-gap coverage for [[attestra/importers/testssl.py#parse]] and [[attestra/runner/scanners/testssl.py#_flags]].
+
+SHA224 INFO yields the fixed weak-signature title (Low, CWE-327); OCSP stapling not offered is emitted only when `cert_ocspURL` is set; baseline argv omits `-U` / `--vulnerable`.
 
 ## test_scope.py
 

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "cert_ocspURL",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "http://ocsp.example.com"
+  },
+  {
+    "id": "OCSP_stapling",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "LOW",
+    "finding": "not offered"
+  },
+  {
+    "id": "service",
+    "ip": "shop.example.com/93.184.216.34",
+    "port": "443",
+    "severity": "INFO",
+    "finding": "HTTP"
+  }
+]

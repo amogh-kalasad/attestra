@@ -12,7 +12,7 @@ Targets must match engagement assets and deny ScopeRules before allow-list check
 
 Resolve once, pin IP, re-authorize every redirect.
 
-[[attestra/runner/dns_pin.py#pin_url]] returns [[attestra/runner/dns_pin.py#PinnedTarget]]. [[attestra/runner/http_safe.py#safe_get]] connects only to the pinned IP and refuses out-of-scope redirects with an audit entry.
+[[attestra/runner/dns_pin.py#pin_url]] returns [[attestra/runner/dns_pin.py#PinnedTarget]]. [[attestra/runner/http_safe.py#safe_get]] / [[attestra/runner/http_safe.py#safe_request]] connect only to the pinned IP, use SNI for `pin.host` on HTTPS, and refuse out-of-scope redirects with an audit entry. `follow_redirects=False` returns the redirect response without following.
 
 ## Dispatch gate
 
@@ -25,3 +25,13 @@ Every scan is checked at enqueue and again when a job resumes.
 Adapters build argv without a shell; durable jobs run them and import raw output.
 
 Adapters live under [[attestra/runner/scanners]]. [[attestra/jobs/durable.py#run_one_job]] claims work, re-checks the gate, hashes full raw output, and imports. Kill switch: [[attestra/services.py#halt_engagement]] sets `cancel_requested` and [[attestra/jobs/durable.py#signal_engagement_cancel]]. CLI: `attestra worker`.
+
+### webcheck (passive headers and DNS)
+
+Pure-Python adapter for security headers, HSTS, security.txt, and DNS posture.
+
+[[attestra/runner/scanners/webcheck.py#WebcheckAdapter]] is registered as `webcheck` in [[attestra/runner/scanners/registry.py#_ADAPTERS]] and listed in [[attestra/runner/gate.py#URL_TOOLS]]. It requires `scope`, uses only [[attestra/runner/http_safe.py#safe_get]], writes `webcheck.json`, and merges [[attestra/runner/scanners/webcheck_dns.py#dns_checks]] into the same report. [[attestra/jobs/durable.py#run_one_job]] passes `scope=` for webcheck like zap.
+
+### testssl baseline flags
+
+[[attestra/runner/scanners/testssl.py#_flags]] for `profile=baseline` runs config checks only (`-p -S -P -f -H`) and never passes `-U` / `--vulnerable`. Non-baseline keeps the default full run (includes vulnerability checks).

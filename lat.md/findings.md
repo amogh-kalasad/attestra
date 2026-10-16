@@ -19,6 +19,9 @@ Stable fingerprint so the same issue from two tools or two runs merges.
 - Prefer CVE + package + normalized location
 - Else CWE + location + param
 - Else normalized title + location + param
+- When `variant` is non-empty, append `v=<variant>` (lowercased). Empty variant keeps the exact pre-variant key.
+
+[[attestra/importers/base.py#NormalizedFinding]] carries optional `variant` (for example ZAP `alertRef` when it differs from `pluginid`). [[attestra/services.py#import_results]] passes it into the fingerprint. If a variant key misses but a legacy no-variant fingerprint matches the same normalized title, the row is merged and its fingerprint is updated to the variant key.
 
 Location normalization: [[attestra/fingerprint.py#normalize_location]]. Title: [[attestra/fingerprint.py#normalize_title]].
 

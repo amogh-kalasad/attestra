@@ -162,7 +162,7 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     try:
         if run.tool == "nuclei":
             result = adapter.scan(target, intrusive_allowed=bool(asset.intrusive_allowed), **kwargs)  # type: ignore[call-arg]
-        elif run.tool == "zap":
+        elif run.tool in ("zap", "webcheck"):
             scope = scope_for_engagement(s, run.engagement_id)
             result = adapter.scan(target, scope=scope, **kwargs)  # type: ignore[call-arg]
         else:

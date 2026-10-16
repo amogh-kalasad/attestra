@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import ssl
 from dataclasses import dataclass
 from http.client import HTTPConnection, HTTPSConnection
@@ -40,6 +41,7 @@ def safe_request(
     max_redirects: int = MAX_REDIRECTS,
     max_body: int = MAX_BODY,
     resolver=None,
+    follow_redirects: bool = True,
 ) -> SafeResponse:
     current = url
     pin_fn = (lambda u, sc: pin_url(u, sc, resolver=resolver)) if resolver else pin_url
@@ -64,6 +66,8 @@ def safe_request(
                 raise AuthorizationError("response body exceeds size limit")
             headers = {k.lower(): v for k, v in resp.getheaders()}
             if resp.status in (301, 302, 303, 307, 308) and "location" in headers:
+                if not follow_redirects:
+                    return SafeResponse(status=resp.status, headers=headers, body=body, final_url=current)
                 nxt = resolve_redirect_url(current, headers["location"])
                 try:
                     authorize_target(scope, nxt, "url")
@@ -82,14 +86,22 @@ def safe_get(url: str, **kwargs) -> SafeResponse:
     return safe_request("GET", url, **kwargs)
 
 
+class _PinnedHTTPSConnection(HTTPSConnection):
+    """Connect to ``pin.ip`` but present SNI and verify the cert for ``pin.host``."""
+
+    def __init__(self, pin: PinnedTarget, timeout: float = 30):
+        ctx = ssl.create_default_context()
+        super().__init__(pin.ip, pin.port, context=ctx, timeout=timeout)
+        self._pin = pin
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._pin.ip, self._pin.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self._pin.sni_hostname)
+
+
 def _connect(pin: PinnedTarget):
     if pin.scheme == "https":
-        ctx = ssl.create_default_context()
-        # For loopback fixtures in tests, callers may use http only.
-        conn = HTTPSConnection(pin.ip, pin.port, context=ctx, timeout=30)
-        # SNI via tunnel host header is set on request; store for wrap
-        conn._sni_hostname = pin.sni_hostname  # type: ignore[attr-defined]
-        return conn
+        return _PinnedHTTPSConnection(pin, timeout=30)
     return HTTPConnection(pin.ip, pin.port, timeout=30)
 
 
