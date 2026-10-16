@@ -12,8 +12,16 @@ Tool keys registered in [[attestra/importers/__init__.py#PARSERS]] and their par
 | `nuclei` | [[attestra/importers/nuclei.py#parse]] | Nuclei `-jsonl` |
 | `trivy` | [[attestra/importers/trivy.py#parse]] | Trivy JSON (vulns + misconfigs) |
 | `sarif` | [[attestra/importers/sarif.py#parse]] | SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks, …) |
+| `testssl` | [[attestra/importers/testssl.py#parse]] | testssl.sh `--jsonfile` / pretty JSON |
+| `webcheck` | [[attestra/importers/webcheck.py#parse]] | Attestra webcheck JSON (`findings` list) |
 
 Entry point: [[attestra/importers/__init__.py#parse]].
+
+### testssl keepers (R17 / R18)
+
+Default skip of OK/INFO still applies, with two keepers.
+
+[[attestra/importers/testssl.py#parse]] keeps weak signature hashes (`cert_signatureAlgorithm` + SHA224/SHA1/MD5 → Low, CWE-327) and OCSP stapling not offered (`OCSP_stapling`) only when `cert_ocspURL` is non-empty (Info, CWE-299). `variant` is the testssl `id`.
 
 ## Normalization helpers
 

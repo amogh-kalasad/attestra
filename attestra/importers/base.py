@@ -21,6 +21,7 @@ class NormalizedFinding:
     cvss_vector: str = ""
     param: str = ""
     package: str = ""
+    variant: str = ""
 
 
 _CWE_RE = re.compile(r"cwe[-_/ ]?(\d+)", re.IGNORECASE)

@@ -21,7 +21,7 @@ from attestra.runner.authorization import AuthorizationError, authorize_target, 
 from attestra.runner.dns_pin import PinnedTarget, pin_url
 from attestra.runner.ownership import is_verified
 
-URL_TOOLS = ("zap", "nuclei", "testssl", "naabu")
+URL_TOOLS = ("zap", "nuclei", "testssl", "naabu", "webcheck")
 PATH_TOOLS = ("semgrep", "gitleaks", "checkov")
 # Which target kinds each scanner can test. Tools not listed keep their own argument checks.
 TOOL_ASSET_KINDS: dict[str, tuple[str, ...]] = {

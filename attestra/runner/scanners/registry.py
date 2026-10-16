@@ -12,6 +12,7 @@ from attestra.runner.scanners.prowler import ProwlerAdapter
 from attestra.runner.scanners.semgrep import SemgrepAdapter
 from attestra.runner.scanners.testssl import TlsTestsslAdapter
 from attestra.runner.scanners.trivy import TrivyAdapter
+from attestra.runner.scanners.webcheck import WebcheckAdapter
 from attestra.runner.scanners.zap import ZapAdapter
 
 _ADAPTERS: dict[str, ScannerAdapter] = {
@@ -25,6 +26,7 @@ _ADAPTERS: dict[str, ScannerAdapter] = {
     "gitleaks": GitleaksAdapter(),
     "checkov": CheckovAdapter(),
     "naabu": NaabuAdapter(),
+    "webcheck": WebcheckAdapter(),
 }
 
 

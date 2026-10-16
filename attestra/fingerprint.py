@@ -34,8 +34,14 @@ def fingerprint(
     param: str = "",
     package: str = "",
     asset_id: int | None = None,
+    variant: str = "",
 ) -> str:
-    """Stable fingerprint. Optional ``asset_id`` scopes DAST issues per target."""
+    """Stable fingerprint. Optional ``asset_id`` scopes DAST issues per target.
+
+    When ``variant`` is non-empty it is appended as ``v=<variant>`` so distinct
+    alert subtypes (for example ZAP alertRef) do not collide. Empty variant keeps
+    the exact pre-variant key bytes.
+    """
     loc = normalize_location(location)
     asset_part = str(asset_id) if asset_id is not None else ""
     if cves:
@@ -44,4 +50,6 @@ def fingerprint(
         key = ["cwe", str(cwe), loc, param.lower(), asset_part]
     else:
         key = ["title", normalize_title(title), loc, param.lower(), asset_part]
+    if variant:
+        key.append("v=" + variant.lower())
     return hashlib.sha256("|".join(key).encode()).hexdigest()

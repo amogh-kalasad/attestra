@@ -39,7 +39,11 @@ cwe:
   918: {top10: A10, asvs: "V12.6.1", wstg: "WSTG-BUSL-09"}
   937: {top10: A06, asvs: "V14.2.1", wstg: "WSTG-INFO-02"}
   16: {top10: A05, asvs: "V14.1.1", wstg: "WSTG-CONF-01"}
+  524: {top10: A05, asvs: "V14.4.3", wstg: "WSTG-CONF-07"}
+  525: {top10: A05, asvs: "V14.4.5", wstg: "WSTG-CONF-07"}
+  693: {top10: A05, asvs: "V14.4.3", wstg: "WSTG-CONF-12"}
   778: {top10: A09, asvs: "V7.1.1", wstg: "WSTG-INFO-01"}
+  299: {top10: A02, asvs: "V9.2.2", wstg: "WSTG-CRYP-01"}
 
 # OWASP Top 10 for LLM Applications 2025 (https://genai.owasp.org/llm-top-10/).
 # The 42001 control and CWE mapping lives in packs/iso_42001_2023.yaml (llm_top10).
