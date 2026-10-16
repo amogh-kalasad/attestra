@@ -33,7 +33,7 @@
     <tr><td>{{ a.vendor }}</td><td>{{ a.scan_date }}</td><td>{{ "Yes" if a.passing else "No" }}</td><td>{{ a.source|label }}</td><td>{{ a.item_count }}</td><td>{{ a.failing_count }}</td><td class="mono">{{ a.sha256[:16] }}&hellip;</td></tr>
     {% else %}<tr><td colspan="7">No ASV scans yet. Import the vendor's results below.</td></tr>{% endfor %}
   </table>
-  <form method="post" action="/engagements/{{ e.id }}/asv/import" enctype="multipart/form-data" style="margin-top:12px">
+  <form method="post" action="/engagements/{{ e.id }}/asv/import" enctype="multipart/form-data" class="form-follow">
     <div class="fields">
       <div><label for="asv_file">ASV results (generic CSV or JSON) *</label><input type="file" id="asv_file" name="file" required>
         <div class="hint">Vendor, scan date and pass/fail are read from the file.</div></div>
@@ -49,7 +49,7 @@
     <tr><td>{{ t.boundary }}</td><td>{{ t.source_zone }}</td><td>{{ t.target_zone }}</td><td>{{ t.method }}</td><td class="st">{{ t.result|label }}</td><td>{{ t.tested_on }}</td><td>{{ t.tester }}</td></tr>
     {% else %}<tr><td colspan="7">No segmentation tests yet. Record one below.</td></tr>{% endfor %}
   </table>
-  <form method="post" action="/engagements/{{ e.id }}/pci/segmentation" style="margin-top:12px">
+  <form method="post" action="/engagements/{{ e.id }}/pci/segmentation" class="form-follow">
     <div class="fields">
       <div><label for="seg_boundary">Boundary *</label><input id="seg_boundary" name="boundary" required placeholder="CDE &middot; corporate LAN"></div>
       <div><label for="seg_from">From zone</label><input id="seg_from" name="source_zone" placeholder="corporate LAN"></div>

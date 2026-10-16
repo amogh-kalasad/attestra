@@ -94,7 +94,12 @@
     <tr>
       <td>{{ a.document_name }}</td><td>{{ a.signer }}</td>
       <td>{{ a.signed_on }} to {{ a.expires_on }}<div class="{{ 'st-met' if a.is_valid() else 'st-not_met' }}">{{ "Valid" if a.is_valid() else "Not valid today" }}</div></td>
-      <td>{% for env in a.environments %}<span class="env env-{{ env }}">{{ env }}</span> {% else %}<span class="st-not_met">None</span>{% endfor %}</td>
+      <td>
+        <div class="env-list">
+          {% for env in a.environments %}<span class="env env-{{ env }}">{{ env }}</span>
+          {% else %}<span class="st-not_met">None</span>{% endfor %}
+        </div>
+      </td>
       <td class="meta">{{ a.rules_of_engagement or "-" }}</td>
       <td class="mono">{{ a.sha256[:16] }}&hellip;</td>
     </tr>
@@ -117,7 +122,7 @@
       <div class="flash err" id="env_error" hidden>Tick at least one environment.</div>
       <label for="roe">Rules of engagement (testing hours, exclusions, contacts, intrusive tests allowed?)</label>
       <textarea id="roe" name="rules_of_engagement" placeholder="Testing 10:00-18:00 IST only. No denial-of-service. Production: non-intrusive scans only. Emergency contact: ..."></textarea>
-      <div style="margin-top:10px"><button type="submit">Save authorization</button></div>
+      <div class="form-actions"><button type="submit">Save authorization</button></div>
     </form>
   </details>
 </div>
@@ -212,7 +217,7 @@
       </div>
       <label for="notes">Notes (test accounts, exclusions, allow-listed IPs)</label>
       <textarea id="notes" name="notes" placeholder="Test user provisioned: qa-tester. Exclude /admin/payments/refund."></textarea>
-      <div style="margin-top:10px"><button type="submit">Add target</button></div>
+      <div class="form-actions"><button type="submit">Add target</button></div>
     </form>
   </details>
 </div>
@@ -281,7 +286,7 @@
           <div class="hint" id="profile_hint" hidden>Active needs "Intrusive tests allowed" on the chosen target.</div>
         </div>
       </div>
-      <div style="margin-top:10px"><button type="submit" id="scan_submit" {{ "disabled" if not scan_ready }}>Queue scan</button></div>
+      <div class="form-actions"><button type="submit" id="scan_submit" {{ "disabled" if not scan_ready }}>Queue scan</button></div>
       </fieldset>
     </form>
   </details>
@@ -301,7 +306,7 @@
         </select></div>
       <div style="grid-column: span 2"><label for="rfile">Result file *</label><input type="file" id="rfile" name="file" required></div>
     </div>
-    <button type="submit" {{ "disabled" if not has_auth }}>Import</button>
+    <div class="form-actions"><button type="submit" {{ "disabled" if not has_auth }}>Import</button></div>
     </fieldset>
   </form>
 </div>
@@ -338,16 +343,27 @@
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
       <td>{{ f.tools|join(", ") }}</td>
-      <td><span class="st">{{ f.status|label }}</span>
-        {% set nexts = transitions.get(f.status, []) %}
-        {% if nexts and can(prole, "finding.write") %}
-        <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="row" style="gap:4px;margin-top:4px">
-          <label for="to-{{ f.id }}" class="meta" style="margin:0">Move to</label>
-          <select id="to-{{ f.id }}" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
-          <input name="note" aria-label="Reason" placeholder="Reason (needed for false positive / risk accepted)" style="width:150px">
-          <button type="submit" class="secondary">Save</button>
-        </form>
-        {% endif %}</td>
+      <td>
+        <div class="status-cell">
+          <span class="st">{{ f.status|label }}</span>
+          {% set nexts = transitions.get(f.status, []) %}
+          {% if nexts and can(prole, "finding.write") %}
+          <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="status-move">
+            <div>
+              <label for="to-{{ f.id }}">Move to</label>
+              <select id="to-{{ f.id }}" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
+            </div>
+            <div>
+              <label for="note-{{ f.id }}">Reason</label>
+              <input id="note-{{ f.id }}" name="note" type="text" placeholder="Needed for false positive / risk accepted" autocomplete="off">
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="secondary">Save status</button>
+            </div>
+          </form>
+          {% endif %}
+        </div>
+      </td>
       <td>{{ f.sla_due or "-" }}</td>
     </tr>
     {% else %}<tr><td colspan="9">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
@@ -404,7 +420,7 @@
     {% else %}<tr><td colspan="7">No schedules yet.{% if e.assets %} Add one below.{% endif %}</td></tr>{% endfor %}
   </table>
   {% if e.assets %}
-  <form method="post" action="/engagements/{{ e.id }}/schedules" style="margin-top:12px">
+  <form method="post" action="/engagements/{{ e.id }}/schedules" class="form-follow">
     <div class="fields">
       <div><label for="sch_asset">Target *</label><select id="sch_asset" name="asset_id" required>
         {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>{% endfor %}
@@ -413,14 +429,14 @@
       <div><label for="sch_cadence">Cadence *</label><select id="sch_cadence" name="cadence"><option value="quarterly">Quarterly</option><option value="monthly">Monthly</option></select></div>
       <div><label for="sch_due">First due *</label><input type="date" id="sch_due" name="next_due" value="{{ today }}" required></div>
     </div>
-    <button type="submit">Add schedule</button>
+    <div class="form-actions"><button type="submit">Add schedule</button></div>
   </form>
   {% else %}
   <div class="warn">Add a target in <a href="#targets">2. Targets in scope</a> first, then schedule recurring scans for it.</div>
   {% endif %}
   {% if due_schedules %}
-  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" style="margin-top:8px" onsubmit="return confirm('Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.')">
-    <button type="submit" class="secondary">Queue {{ due_schedules }} due scan(s) now</button>
+  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" class="form-follow" onsubmit="return confirm('Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.')">
+    <div class="form-actions"><button type="submit" class="secondary">Queue {{ due_schedules }} due scan(s) now</button></div>
   </form>
   {% endif %}
 </div>
@@ -483,41 +499,45 @@
         <td>{{ r.qa_by or "-" }}</td>
         <td>{{ r.approved_by or "-" }}{% if r.signed_at %}<div class="meta">{{ r.signed_at|dt }}</div>{% endif %}</td>
         <td>
+        <div class="action-stack">
         {% if r.status in ("draft", "rejected") %}
           {% if can(prole, "report.submit") %}
-          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/submit" style="margin:0">
+          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/submit">
             <button type="submit" class="secondary">{{ "Resubmit for QA" if r.status == "rejected" else "Submit for QA" }}</button>
           </form>
           {% else %}<span class="meta">Waiting for the author to submit it for QA.</span>{% endif %}
         {% elif r.status == "submitted" %}
           {% if can(prole, "report.approve") and (my_uid is none or my_uid != r.generated_by_user_id) %}
-          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-approve" style="margin:0 0 4px 0">
+          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-approve">
             <button type="submit" class="secondary">QA approve</button>
           </form>
-          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-reject" class="row" style="gap:4px;margin:0">
-            <input name="note" required aria-label="Reason for rejecting" placeholder="Reason (needed to reject)" style="width:150px">
+          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-reject" class="row">
+            <input name="note" required aria-label="Reason for rejecting" placeholder="Reason (needed to reject)" style="width:150px;min-width:140px">
             <button type="submit" class="secondary">QA reject</button>
           </form>
           {% elif can(prole, "report.approve") %}<span class="meta">Waiting for QA by someone else. You made this report, so you can't QA it.</span>
           {% else %}<span class="meta">Waiting for QA by a reviewer or lead.</span>{% endif %}
         {% elif r.status == "qa_approved" %}
           {% if can(prole, "report.sign") and (my_uid is none or (my_uid != r.generated_by_user_id and my_uid != r.qa_by_user_id)) %}
-          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/sign" style="margin:0">
+          <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/sign">
             <button type="submit">Approve and sign</button>
           </form>
           {% elif can(prole, "report.sign") %}<span class="meta">Waiting for a lead who didn't make or QA this report to sign it.</span>
           {% else %}<span class="meta">Waiting for a lead to approve and sign it.</span>{% endif %}
         {% elif r.status == "signed" %}<span class="meta">Signed. Nothing more to do.</span>
         {% else %}<span class="meta">-</span>{% endif %}
+        </div>
         </td></tr>{% else %}<tr><td colspan="6">No reports yet. Generate one after QA has reviewed the findings.</td></tr>{% endfor %}
     </table>
     {% if can(prole, "report.generate") %}
-    <form method="post" action="/engagements/{{ e.id }}/reports/generate" style="margin-top:12px">
+    <form method="post" action="/engagements/{{ e.id }}/reports/generate" class="form-follow">
       <div class="fields">
         <div><label for="rep_kind">Report type *</label><select id="rep_kind" name="kind">{% for k in report_kinds %}<option value="{{ k }}">{{ k|label }}</option>{% endfor %}</select></div>
         <div><label for="rep_fw">Framework (compliance reports)</label><select id="rep_fw" name="framework"><option value="">Not needed</option>{% for k in e.frameworks %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ k|fw_name }}</option>{% endfor %}</select></div>
       </div>
-      <button type="submit">Generate report</button>
+      <div class="form-actions">
+        <button type="submit">Generate report</button>
+      </div>
     </form>
     {% endif %}
   </div>

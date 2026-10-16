@@ -46,7 +46,7 @@
         <button type="submit" class="secondary">Save</button></form>{% endif %}</td></tr>
     {% else %}<tr><td colspan="9">No nonconformities yet. Raise one below when an audit finds a gap.</td></tr>{% endfor %}
   </table>
-  <form method="post" action="/engagements/{{ e.id }}/iso/nc" style="margin-top:12px">
+  <form method="post" action="/engagements/{{ e.id }}/iso/nc" class="form-follow">
     <div class="fields">
       <div><label for="nc_control">Control *</label><input id="nc_control" name="control_ref" required placeholder="A.8.8"></div>
       <div><label for="nc_grade">Grade *</label><select id="nc_grade" name="grade">{% for g in nc_grades %}<option value="{{ g }}" {% if g == "minor" %}selected{% endif %}>{{ g|label }}</option>{% endfor %}</select></div>
@@ -66,7 +66,7 @@
     <tr><td>{{ a.id }}</td><td>{{ a.population|label }}</td><td>{{ a.population_size }}</td><td>{{ a.sample_size }}</td><td class="mono">{{ a.seed }}</td><td>{{ a.items|join(", ") }}</td><td>{{ a.created_by }}</td></tr>
     {% else %}<tr><td colspan="7">No samples yet. Draw one below.</td></tr>{% endfor %}
   </table>
-  <form method="post" action="/engagements/{{ e.id }}/iso/sample" style="margin-top:12px">
+  <form method="post" action="/engagements/{{ e.id }}/iso/sample" class="form-follow">
     <div class="fields">
       <div><label for="s_pop">Population *</label><select id="s_pop" name="population"><option value="soa_applicable">Applicable SoA controls</option><option value="findings">Findings</option><option value="nonconformities">Nonconformities</option></select></div>
       <div><label for="s_size">Sample size (blank = default)</label><input id="s_size" name="sample_size" type="number" min="1" placeholder="e.g. 25"></div>

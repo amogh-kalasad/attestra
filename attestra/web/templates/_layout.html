@@ -37,6 +37,14 @@
     --sidebar-w: 248px;
     --topbar-h: 72px;
     --control-h: 44px;
+    /* Spacing scale from D:\attastra design (16 / 24 / 28) */
+    --space-1: 6px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 28px;
+    --space-7: 36px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -135,7 +143,19 @@
 
   main {
     max-width: 1240px; width: 100%; margin: 0 auto;
-    padding: 36px 40px 48px; display: flex; flex-direction: column; gap: 28px;
+    padding: var(--space-7) 40px 48px; display: flex; flex-direction: column; gap: var(--space-6);
+  }
+  /* Stacked cards inside a form (e.g. Client + Engagement) need the same section gap as main */
+  main > form,
+  .stack {
+    display: flex; flex-direction: column; gap: var(--space-5);
+    width: 100%; min-width: 0;
+  }
+  main > form > .row:last-child,
+  .stack > .row:last-child,
+  .form-actions {
+    display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center;
+    margin-top: 0;
   }
   body.is-auth {
     background: var(--bg);
@@ -216,7 +236,7 @@
     display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
     font-size: 17px; font-weight: 600;
   }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); }
 
   .auth-shell { max-width: 440px; margin: 24px auto; }
   .auth-shell .brand-mark { text-align: center; margin-bottom: 20px; }
@@ -276,6 +296,9 @@
   .env-production::before { background: var(--dot-prod); }
   .env-staging::before, .env-uat::before { background: var(--dot-stg); }
   .env-dev::before, .env-demo::before { background: var(--dot-low); }
+  .env-list, .chip-row {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
   .st-met{color:var(--low)} .st-no_exceptions{color:#026AA2} .st-partial{color:var(--med)}
   .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--quiet)}
   .st-queued,.st-running{color:var(--med)} .st-succeeded,.st-completed,.st-done{color:var(--low)}
@@ -308,9 +331,75 @@
   .flash.err { background: var(--err-bg); color: var(--err-ink); border-color: #FDA29B; }
   .warn {
     background: var(--warn-bg); color: var(--warn-ink); border-radius: var(--radius-sm);
-    padding: 12px 14px; font-size: 13px; margin: 8px 0;
+    padding: 12px 14px; font-size: 13px; margin: var(--space-2) 0;
     border: 1px solid #FEDF89;
   }
+  /* Nested forms / submit rows: keep actions clear of tables and messages */
+  .card > form:not(.form-follow):not(.filter-bar):not(.row),
+  details > form:not(.form-follow):not(.row) {
+    margin-top: var(--space-4);
+  }
+  .card > form:first-child,
+  details > form:first-child { margin-top: 0; }
+  .card > table + form,
+  .card > .table-wrap + form,
+  .form-follow,
+  .card > form.form-follow {
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--rule);
+  }
+  .form-follow > .fields:last-child,
+  .card > form > .fields:last-of-type { margin-bottom: var(--space-4); }
+  .form-follow > .form-actions,
+  .card > form > .form-actions { margin-top: 0; }
+  .action-stack {
+    display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start;
+    padding-bottom: var(--space-2);
+  }
+  .action-stack form { margin: 0; width: 100%; }
+  .action-stack .row { gap: var(--space-2); width: 100%; }
+  td .action-stack { min-width: 180px; }
+  /* Reports "Next step" / table action cells: keep buttons clear of row edges */
+  td .action-stack > form > button,
+  td .action-stack > form > .btn {
+    margin-bottom: 0;
+  }
+  #reports table tbody tr:last-child td {
+    padding-bottom: 22px;
+  }
+  #reports .form-follow {
+    margin-top: var(--space-5);
+  }
+
+  /* Findings status: stacked move-to controls instead of a cramped inline row */
+  .status-cell {
+    display: flex; flex-direction: column; gap: 10px; min-width: 220px; max-width: 280px;
+  }
+  .status-move {
+    display: flex; flex-direction: column; gap: 8px;
+    margin: 0; padding: 12px; border: 1px solid var(--rule); border-radius: var(--radius-sm);
+    background: var(--field);
+  }
+  .status-move label {
+    margin: 0; font-size: 12px; font-weight: 500; color: var(--quiet);
+  }
+  .status-move select,
+  .status-move input[type=text],
+  .status-move input:not([type]) {
+    width: 100%; min-width: 0; height: 36px; min-height: 36px; font-size: 13px;
+  }
+  .status-move .form-actions {
+    margin-top: 2px;
+  }
+  .status-move .form-actions button {
+    height: 36px; min-height: 36px; padding: 0 14px; font-size: 13px;
+  }
+  details > form,
+  details > .fields {
+    padding-top: var(--space-3);
+  }
+  details[open] > summary { margin-bottom: var(--space-4); }
 
   input, select, textarea {
     font-family: var(--font); font-size: 14px; font-weight: 400; line-height: 1.4;

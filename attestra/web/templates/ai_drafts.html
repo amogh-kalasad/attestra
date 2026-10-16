@@ -44,14 +44,16 @@
         </select>
         <div class="hint">Findings marked false positive are not listed.</div></div>
     </div>
-    <div class="row">
+    <div class="form-actions">
       <button type="submit" id="ai_create_btn">Create draft</button>
       <span class="hint" style="margin:0">Takes a few seconds. The draft waits below for review.</span>
     </div>
   </form>
 </div>
 
-<h2>Drafts ({{ drafts|length }})</h2>
+<div class="page-head" style="margin-top:0">
+  <div><h2 style="margin:0;padding:0;border:0;font-size:17px">Drafts <span class="count-soft">{{ drafts|length }}</span></h2></div>
+</div>
 {% for d in drafts %}
 <div class="card draft" id="d-{{ d.id }}">
   <div class="draft-head">
@@ -66,7 +68,7 @@
     <label for="t-{{ d.id }}">Draft text (edit before approving)</label>
     <textarea id="t-{{ d.id }}" name="text" rows="12">{{ d.text }}</textarea>
     <div class="hint">Approving puts this text in the next report. Check every statement against the findings first.</div>
-    <div class="actions-split" style="margin-top:10px">
+    <div class="form-actions" style="margin-top:var(--space-4)">
       <button type="submit">Approve (with edits)</button>
       <button type="submit" class="danger" formaction="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/reject" formnovalidate onclick="return confirm('Reject this AI draft? It will not be used in any report.')">Reject</button>
     </div>

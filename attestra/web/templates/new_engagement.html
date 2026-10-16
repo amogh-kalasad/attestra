@@ -24,7 +24,7 @@
 <form method="post" action="/engagements/new">
   <div class="card">
     <h2>Client</h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px">Who the engagement is for.</p>
+    <p class="hint" style="margin-top:0;margin-bottom:14px">Who the engagement is for.</p>
     <div class="fields">
       <div><label for="tenant">Client / company name <span style="color:var(--danger)">*</span></label><input type="text" id="tenant" name="tenant" required placeholder="Example Retail Pvt Ltd"></div>
       <div><label for="industry">Industry</label><input type="text" id="industry" name="industry" placeholder="Retail, BFSI, SaaS…"></div>
@@ -36,7 +36,7 @@
 
   <div class="card">
     <h2>Engagement</h2>
-    <p class="hint" style="margin-top:-8px;margin-bottom:14px">Scope, schedule and the reports this client needs.</p>
+    <p class="hint" style="margin-top:0;margin-bottom:14px">Scope, schedule and the reports this client needs.</p>
     <div class="fields">
       <div><label for="name">Engagement name <span style="color:var(--danger)">*</span></label><input type="text" id="name" name="name" required placeholder="FY27 Q3 pentest: customer portal"></div>
       <div><label for="type">Type of test <span style="color:var(--danger)">*</span></label>
@@ -53,7 +53,7 @@
     <p class="hint">Tick only the frameworks this client asked for; each one adds a compliance report.</p>
   </div>
 
-  <div class="row" style="margin-top:4px">
+  <div class="form-actions">
     <button type="submit">Create engagement</button>
     <a class="btn secondary" href="/">Cancel</a>
   </div>

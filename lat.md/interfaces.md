@@ -65,6 +65,11 @@ Recurring scan schedules and a pass/fail check that CI pipelines can call.
 
 - Schedules: `GET/POST /api/engagements/{eid}/schedules`, `PATCH/DELETE /api/engagements/{eid}/schedules/{sid}`, and `POST /api/engagements/{eid}/schedules/run-due` ([[attestra/api.py#run_due_schedules]]). Cadence is `quarterly` or `monthly` ([[attestra/services.py#update_scan_schedule]]); due schedules are queued by [[attestra/services.py#enqueue_due_schedules]] through the normal scan gate. Managing them needs `scan.start`; listing needs `scan.read`.
 - CI gate: `GET /api/engagements/{eid}/gate` runs [[attestra/services.py#ci_gate]]. It fails when open findings at or above `fail_on` (default `high`) are more than `max_findings` (default 0). `tool` limits the check to one importer. Accepted-risk, fixed and false-positive findings never block. The answer lists counts by severity and up to 50 blocking findings.
+Shared look-and-feel lives in [[attestra/web/templates/_layout.html]] (staff/portal) and [[attestra/web/templates/_public.html]] (Trust Center). Authenticated pages use a light app shell: white sidebar (Work / Library / Ops), sticky top bar, and content workspace. [[attestra/web/templates/login.html]] is a standalone split-screen sign-in (brand panel + form) matching the product login sample; it still posts username/password to [[attestra/web/ui.py#login]]. Visual system uses Geist + Geist Mono and indigo `#4338CA`. Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside forms, QA action stacks, and post-table generate forms consistent with the product UI samples. Page templates (engagements home, engagement detail, new engagement, PCI calendar, users, report templates, library, portal) follow that shell with KPI strips, status pills, breadcrumbs, and stepped progress where the samples define them. Routes, forms, and permissions are unchanged.
+
+## Scheduled scans and CI gates
+
+Scan schedules and a CI policy check share the services layer with the dashboard and API.
 
 [[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates. [[attestra/services.py#ci_gate]] fails a pipeline when open findings at or above `fail_on` exceed `max_findings` (accepted-risk / fixed / false-positive do not block).
 
