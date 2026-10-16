@@ -57,12 +57,13 @@ ENGAGEMENT_TYPE_LABELS = {
 }
 
 # Tools the scan runner and the scheduler accept (one list for both forms).
-SCAN_TOOLS = ("zap", "nuclei", "testssl", "naabu", "trivy", "semgrep", "gitleaks", "checkov")
+SCAN_TOOLS = ("zap", "nuclei", "testssl", "naabu", "webcheck", "trivy", "semgrep", "gitleaks", "checkov")
 SCAN_TOOL_LABELS = {
     "zap": "zap: web app scan (DAST), web targets",
     "nuclei": "nuclei: known issues and misconfigurations, web targets",
     "testssl": "testssl: TLS / SSL configuration, https targets",
     "naabu": "naabu: open ports, web or host targets",
+    "webcheck": "webcheck: security headers, HSTS, security.txt and DNS records (passive), web targets",
     "trivy": "trivy: vulnerable packages, repo or image targets",
     "semgrep": "semgrep: code scan (SAST), repo targets",
     "gitleaks": "gitleaks: hard-coded secrets, repo targets",
@@ -73,6 +74,7 @@ IMPORT_FORMAT_LABELS = {
     "nuclei": "Nuclei (JSONL)",
     "trivy": "Trivy (JSON)",
     "sarif": "SARIF 2.1 (Semgrep, CodeQL, Checkov, Gitleaks...)",
+    "webcheck": "Attestra webcheck (JSON)",
 }
 ROLE_LABELS = {
     "admin": "Admin",

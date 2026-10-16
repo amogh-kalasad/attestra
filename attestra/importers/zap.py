@@ -28,12 +28,16 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             # ZAP flags confidence 0 as "false positive" in its own triage.
             if str(alert.get("confidence", "")) == "0":
                 continue
+            pluginid = str(alert.get("pluginid", ""))
+            alert_ref = alert.get("alertRef")
+            # Distinct alertRef (e.g. 10055-5) keeps CSP subtypes from collapsing.
+            variant = str(alert_ref) if alert_ref is not None and str(alert_ref) != pluginid else ""
             instances = alert.get("instances") or [{"uri": site.get("@name", "")}]
             for inst in instances:
                 out.append(
                     NormalizedFinding(
                         tool="zap",
-                        rule_id=str(alert.get("pluginid", "")),
+                        rule_id=pluginid,
                         title=alert.get("alert") or alert.get("name") or "ZAP alert",
                         severity=severity,
                         location=inst.get("uri", ""),
@@ -41,6 +45,7 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                         description=_text(alert.get("desc")),
                         recommendation=_text(alert.get("solution")),
                         cwe=parse_cwe(alert.get("cweid")),
+                        variant=variant,
                     )
                 )
     return out

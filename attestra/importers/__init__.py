@@ -22,6 +22,7 @@ from attestra.importers import (
     sarif,
     testssl,
     trivy,
+    webcheck,
     zap,
 )
 from attestra.importers.base import NormalizedFinding
@@ -40,6 +41,7 @@ PARSERS: dict[str, Callable[[bytes], list[NormalizedFinding]]] = {
     "gitleaks": gitleaks.parse,
     "checkov": checkov.parse,
     "naabu": naabu.parse,
+    "webcheck": webcheck.parse,
 }
 
 
