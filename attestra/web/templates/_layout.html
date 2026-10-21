@@ -4,9 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Attestra{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   /* Attestra light design system */
   :root {
@@ -582,53 +579,6 @@
   .breadcrumb a:hover { color: var(--accent); }
   .breadcrumb .current { color: var(--ink); font-weight: 500; }
 
-  /* ===== Attestra light design system: presentation-only overrides ===== */
-  body.is-app { background: linear-gradient(180deg, #F3FAF8 0, var(--bg) 320px) no-repeat, var(--bg); }
-  .sidebar { padding: 18px 14px; gap: 22px; }
-  .sidebar-brand .mark, body.is-auth .auth-top a.brand .mark, .auth-shell .brand-mark .logo .mark {
-    background: linear-gradient(135deg, #14B8A6, #0F766E); box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
-  }
-  .nav-label { color: #7B8794; padding: 0 10px 6px; }
-  .sidebar-nav a { padding: 8px 10px; color: var(--quiet-2); font-size: 13.5px; }
-  .sidebar-nav a:hover { background: #F3F6F8; }
-  .sidebar-nav a[aria-current=page] { background: var(--accent-soft); color: var(--accent-hover); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
-  .sidebar-user-card { border-color: var(--rule); background: #FBFCFD; }
-  .sidebar-user-card button.icon-btn:hover { background: #F3F6F8; }
-  .topbar { background: rgba(255,255,255,.82); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); min-height: 64px; padding: 12px 32px; }
-  h1 { font-size: 28px; font-weight: 650; letter-spacing: -.022em; }
-  h2 { font-size: 15.5px; letter-spacing: -.01em; }
-  .eyebrow { font-weight: 600; font-size: 12.5px; }
-  .card, .stat-card, .sev-card, .steps { box-shadow: var(--shadow); border-color: var(--rule); border-radius: 12px; }
-  .card > h2:first-child, .card-head { font-size: 15.5px; padding: 15px 24px; }
-  .stat-strip .stat-card:nth-child(4n+1) { background: linear-gradient(180deg, #F0F9F7, #fff); }
-  .stat-strip .stat-card:nth-child(4n+2) { background: linear-gradient(180deg, #FFF5F5, #fff); }
-  .stat-strip .stat-card:nth-child(4n+3) { background: linear-gradient(180deg, #FFF8F1, #fff); }
-  .stat-strip .stat-card:nth-child(4n+4) { background: linear-gradient(180deg, #F2F6FF, #fff); }
-  .stat-card .value { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  th { background: #F7F9FB; font-size: 11.5px; letter-spacing: .05em; padding: 11px 12px; }
-  td { padding: 14px 12px; }
-  tbody tr:hover { background: #FAFCFC; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; padding: 3px 9px; }
-  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .chip { background: var(--field); border: 1px solid var(--rule); border-radius: 6px; }
-  .chip.done { border-color: #BBF7D0; }
-  .badge { border: 1px solid #FDE68A; }
-  .status-pill { border: 1px solid transparent; }
-  .status-pill.done, .status-pill.passed, .status-pill.active { background: var(--ok-bg); color: var(--ok-ink); border-color: #BBF7D0; }
-  .status-pill.overdue { border-color: #FECACA; } .status-pill.due { border-color: #FDE68A; }
-  .status-pill.disabled, .status-pill.inactive { background: #F8FAFC; border-color: var(--rule-3); color: var(--info); }
-  .role-chip { background: var(--field); border: 1px solid var(--rule); }
-  .kpi { background: #FBFCFD; }
-  .flash.ok { border-color: #BBF7D0; } .flash.err { border-color: #FECACA; }
-  .warn { border-color: #FDE68A; }
-  button, .btn { box-shadow: 0 1px 2px rgba(15, 118, 110, .18), inset 0 1px 0 rgba(255,255,255,.12); }
-  button.secondary, .btn.secondary, button.danger { box-shadow: var(--shadow); }
-  button.danger { border-color: #FECACA; }
-  .steps a .step-num { background: #EEF2F5; }
-  .tabs a[aria-current=page] { color: var(--ink); }
-  .empty-block .icon { background: var(--field); border: 1px solid var(--rule); border-radius: 12px; }
-  pre { background: #F6F8FA; border: 1px solid var(--rule); border-radius: 10px; }
-
   /* ===== Fix 2: opaque sticky header, stacked wide sections, roomy tables ===== */
   .topbar { background: var(--card); backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: 0 1px 0 var(--rule); }
   .grid:has(> #reports), .grid:has(> .card table td .action-stack) { grid-template-columns: minmax(0, 1fr); }
@@ -734,6 +684,8 @@
     #findings td:nth-child(2) .pill { font-size: 11px; padding: 2px 7px; }
   }
 </style>
+<link rel="stylesheet" href="/static/attestra.css?v=4">
+<script src="/static/attestra.js?v=3" defer></script>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">
 {% set role = principal.role if principal else None %}
@@ -747,118 +699,61 @@
 {% endif %}
 
 {% if use_shell %}
-<input type="checkbox" id="navtoggle" aria-label="Toggle navigation">
+{% set more_current = path.startswith('/library') or path.startswith('/tuning') or path.startswith('/users') or path.startswith('/settings') %}
 <div class="app">
-  <div class="sidebar-backdrop" onclick="document.getElementById('navtoggle').checked=false" aria-hidden="true"></div>
-  <aside class="sidebar" aria-label="Primary">
-    <a class="sidebar-brand" href="{% if staff %}/{% else %}/portal{% endif %}">
-      <span class="mark" aria-hidden="true">A</span>
-      <span><span class="name">Attestra</span><span class="sub">v{{ version }}</span></span>
-    </a>
-    <nav class="sidebar-nav" aria-label="Main">
-      {% if staff %}
-      <div class="nav-group">
-        <div class="nav-label">Work</div>
-        <a href="/" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10"/></svg>
-          Engagements
-        </a>
-        <a href="/sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-          Sites
-        </a>
-        {% if can(role, "engagement.create") %}
-        <a href="/engagements/new" {{ 'aria-current=page' if path == '/engagements/new' }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          New engagement
-        </a>
-        {% endif %}
-        <a href="/compliance/pci-calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>
-          PCI calendar
-        </a>
-        {% if can(role, "share.manage") %}
-        <a href="/shares" {{ 'aria-current=page' if path == '/shares' or path.startswith('/shares/') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
-          Share links
-        </a>
-        {% endif %}
-      </div>
-      {% if can(role, "finding.write") %}
-      <div class="nav-group">
-        <div class="nav-label">Library</div>
-        <a href="/library" {{ 'aria-current=page' if path == '/library' or (path.startswith('/library/') and not path.startswith('/library/templates')) }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2z"/><path d="M8 7h6M8 11h6"/></svg>
-          Findings library
-        </a>
-        <a href="/library/templates" {{ 'aria-current=page' if path.startswith('/library/templates') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
-          Report templates
-        </a>
-      </div>
-      {% endif %}
-      <div class="nav-group">
-        <div class="nav-label">Ops</div>
-        <a href="/tuning/false-positives" {{ 'aria-current=page' if path == '/tuning/false-positives' }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-5 3 3 5-7"/></svg>
-          False-positive rates
-        </a>
-        {% if role in ("admin", "lead") %}
-        <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6.5 6.5 0 0 1 3.5 6"/></svg>
-          Users
-        </a>
-        <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>
-          Email alerts
-        </a>
-        {% endif %}
-        <a href="/docs">
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/></svg>
-          API docs
-        </a>
-      </div>
-      {% elif role %}
-      <div class="nav-group">
-        <div class="nav-label">Portal</div>
-        <a href="/portal" {{ 'aria-current=page' if path == '/portal' or path.startswith('/portal/') }}>
-          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/></svg>
-          {{ "Auditor view" if role == "auditor" else "Client portal" }}
-        </a>
-      </div>
-      {% endif %}
-    </nav>
-    <div class="sidebar-foot">
-      <div class="sidebar-user-card">
-        <div class="sidebar-avatar" aria-hidden="true">{{ initials }}</div>
-        <div class="sidebar-user-meta">
-          <strong>{{ actor }}</strong>
-          <span>{% if role %}{{ role_labels.get(role, role) }}{% endif %}</span>
-        </div>
-        <form method="post" action="/logout">
-          <input type="hidden" name="next" value="/login">
-          <button class="icon-btn" type="submit" aria-label="Sign out" title="Sign out">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-          </button>
-        </form>
-      </div>
-    </div>
-  </aside>
   <div class="workspace">
-    <header class="topbar">
-      <label for="navtoggle" class="menu-toggle">Menu</label>
-      <span class="tagline">From findings to signed attestation</span>
-      <div class="topbar-spacer"></div>
-      {% if staff and can(role, "engagement.create") and path != "/engagements/new" %}
-      <a class="btn" href="/engagements/new">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        New engagement
+    <header class="topnav">
+      <a class="brand" href="{% if staff %}/{% else %}/portal{% endif %}">
+        <span class="mark" aria-hidden="true">a</span>attestra<span class="ver">v{{ version }}</span>
       </a>
-      {% endif %}
+      <nav class="topnav-links" aria-label="Main">
+        {% if staff %}
+        <a href="/" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}>Engagements</a>
+        <a href="/sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}>Sites</a>
+        <a href="/compliance/pci-calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}>PCI calendar</a>
+        {% if can(role, "share.manage") %}
+        <a href="/shares" {{ 'aria-current=page' if path == '/shares' or path.startswith('/shares/') }}>Share links</a>
+        {% endif %}
+        <details class="topnav-more{{ ' is-current' if more_current }}">
+          <summary>More</summary>
+          <div class="menu-pop">
+            {% if can(role, "finding.write") %}
+            <div class="menu-label">Library</div>
+            <a href="/library" {{ 'aria-current=page' if path == '/library' or (path.startswith('/library/') and not path.startswith('/library/templates')) }}>Findings library</a>
+            <a href="/library/templates" {{ 'aria-current=page' if path.startswith('/library/templates') }}>Report templates</a>
+            {% endif %}
+            <div class="menu-label">Ops</div>
+            <a href="/tuning/false-positives" {{ 'aria-current=page' if path == '/tuning/false-positives' }}>False-positive rates</a>
+            {% if role in ("admin", "lead") %}
+            <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>Users</a>
+            <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>Email alerts</a>
+            {% endif %}
+            <a href="/docs">API docs</a>
+          </div>
+        </details>
+        {% elif role %}
+        <a href="/portal" {{ 'aria-current=page' if path == '/portal' or path.startswith('/portal/') }}>{{ "Auditor view" if role == "auditor" else "Client portal" }}</a>
+        {% endif %}
+      </nav>
+      <div class="topnav-right">
+        {% if staff and can(role, "engagement.create") and path != "/engagements/new" %}
+        <a class="btn" href="/engagements/new">+ New engagement</a>
+        {% endif %}
+        <details class="topnav-more user-menu">
+          <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">{{ initials }}</span></summary>
+          <div class="menu-pop right">
+            <div class="menu-user"><strong>{{ actor }}</strong><span>{% if role %}{{ role_labels.get(role, role) }}{% endif %}</span></div>
+            <form method="post" action="/logout">
+              <input type="hidden" name="next" value="/login">
+              <button type="submit">Sign out</button>
+            </form>
+          </div>
+        </details>
+      </div>
     </header>
 {% else %}
 <header class="auth-top">
-  <a class="brand" href="/"><span class="mark" aria-hidden="true">A</span> Attestra</a>
+  <a class="brand" href="/"><span class="mark" aria-hidden="true">a</span> attestra</a>
   {% if path != "/login" %}<a href="/login" style="margin-left:auto;font-weight:600;color:var(--accent)">Sign in</a>{% endif %}
 </header>
 {% endif %}

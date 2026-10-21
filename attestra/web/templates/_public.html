@@ -4,9 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Trust Center{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #F8FAFB; --card: #fff; --ink: #0B1220; --quiet: #64748B; --rule: #E8EDF1;
@@ -66,9 +63,11 @@
   input, textarea { border-color: #D8E0E6; }
   code { background: #F3F6F8; border: 1px solid var(--rule); border-radius: 5px; padding: 1px 5px; }
 </style>
+<link rel="stylesheet" href="/static/attestra.css?v=4">
+<script src="/static/attestra.js?v=3" defer></script>
 </head>
-<body>
-<div class="trust-top"><span class="mark" aria-hidden="true">A</span> Trust Center</div>
+<body class="public">
+<div class="trust-top"><span class="mark" aria-hidden="true">a</span> Trust Center</div>
 <main>
 {% block main %}{% endblock %}
 <footer>

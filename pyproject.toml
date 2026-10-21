@@ -44,7 +44,7 @@ attestra = "attestra.cli:main"
 include = ["attestra*"]
 
 [tool.setuptools.package-data]
-attestra = ["compliance/data/*.yaml", "compliance/data/packs/*.yaml", "compliance/data/*.md", "reports/templates/*.j2", "reports/templates/docx/*", "web/templates/*.html"]
+attestra = ["compliance/data/*.yaml", "compliance/data/packs/*.yaml", "compliance/data/*.md", "reports/templates/*.j2", "reports/templates/docx/*", "web/templates/*.html", "web/static/*.css", "web/static/*.js", "web/static/fonts/*.woff2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

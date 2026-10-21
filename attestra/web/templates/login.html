@@ -4,311 +4,60 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in &middot; Attestra</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --ink: #0B1220;
-    --quiet: #64748B;
-    --quiet-2: #475569;
-    --label: #334155;
-    --rule: #E8EDF1;
-    --rule-3: #D8E0E6;
-    --accent: #0F766E;
-    --accent-hover: #115E59;
-    --brand-panel: #F5FAF9;
-    --brand-mark: #0F766E;
-    --brand-muted: #475569;
-    --brand-soft: #64748B;
-    --field-h: 48px;
-    --font: "Inter", system-ui, sans-serif;
-    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: var(--font); color: var(--ink); background: #fff; min-height: 100vh; -webkit-font-smoothing: antialiased; }
-  a { color: var(--accent); text-decoration: none; font-weight: 600; }
-  a:hover { text-decoration: underline; }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
-  }
-
-  .login-shell { display: flex; flex-wrap: wrap; min-height: 100vh; }
-
-  /* —— Brand panel —— */
-  .brand-panel {
-    flex: 1 1 560px; min-width: 0; color: #fff; padding: 48px 56px;
-    display: flex; flex-direction: column; gap: 40px; position: relative; overflow: hidden;
-    background-color: var(--brand-panel);
-    background-image:
-      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
-    background-size: 44px 44px;
-  }
-  .brand-logo { display: flex; align-items: center; gap: 12px; }
-  .brand-logo .mark {
-    width: 36px; height: 36px; border-radius: 10px; background: var(--brand-mark); color: #fff;
-    display: grid; place-items: center; font-weight: 700; font-size: 17px;
-  }
-  .brand-logo .name { font-weight: 600; font-size: 18px; letter-spacing: .01em; }
-  .brand-copy { display: flex; flex-direction: column; gap: 16px; max-width: 520px; }
-  .brand-copy h2 {
-    margin: 0; font-size: clamp(28px, 4vw, 40px); line-height: 1.1; font-weight: 600; letter-spacing: -.025em;
-  }
-  .brand-copy p { margin: 0; font-size: 16px; line-height: 1.6; color: var(--brand-muted); }
-
-  .pipeline { display: flex; flex-direction: column; max-width: 520px; }
-  .pipe-step { display: flex; gap: 16px; align-items: stretch; }
-  .pipe-rail { display: flex; flex-direction: column; align-items: center; }
-  .pipe-num {
-    width: 28px; height: 28px; flex: none; border-radius: 50%;
-    display: grid; place-items: center; font-size: 12px; font-weight: 600;
-    border: 1.5px solid rgba(255,255,255,.35); color: #fff; background: transparent;
-  }
-  .pipe-step.is-active .pipe-num { background: var(--brand-mark); border-color: var(--brand-mark); }
-  .pipe-line { width: 2px; flex-grow: 1; min-height: 14px; background: rgba(255,255,255,.18); }
-  .pipe-step:last-child .pipe-line { background: transparent; min-height: 0; }
-  .pipe-body { padding: 3px 0 16px; display: flex; flex-direction: column; gap: 2px; }
-  .pipe-body strong { font-size: 15px; font-weight: 600; }
-  .pipe-body span { font-size: 13px; color: var(--brand-soft); line-height: 1.45; }
-
-  .attest-card {
-    max-width: 520px; margin-top: auto;
-    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16);
-    border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
-  }
-  .attest-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .attest-kicker { font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--brand-soft); }
-  .attest-ok {
-    display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
-    background: #0F5132; color: #B7F5D2; font-size: 12px; font-weight: 600;
-  }
-  .attest-title { font-size: 16px; font-weight: 600; }
-  .attest-tags { display: flex; flex-wrap: wrap; gap: 6px; }
-  .attest-tags span {
-    padding: 3px 9px; border-radius: 6px; background: rgba(255,255,255,.1);
-    font-size: 12px; font-weight: 500; color: #E4E6FB;
-  }
-  .attest-hash {
-    display: flex; align-items: center; gap: 10px;
-    border-top: 1px dashed rgba(255,255,255,.2); padding-top: 12px;
-    font-family: var(--mono); font-size: 12px; color: var(--brand-soft);
-  }
-
-  /* —— Form panel —— */
-  .form-panel {
-    flex: 1 1 480px; min-width: 0; padding: 48px 56px;
-    display: flex; flex-direction: column; background: #fff;
-  }
-  .form-top {
-    display: flex; justify-content: flex-end; font-size: 13px; color: var(--quiet); gap: 6px; font-weight: 400;
-  }
-  .form-top a { font-weight: 600; }
-  .form-center {
-    flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 32px 0;
-  }
-  .form-box {
-    width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 22px;
-  }
-  .form-box h1 {
-    margin: 0; font-size: 32px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15;
-  }
-  .form-box .sub { margin: 0; font-size: 15px; line-height: 1.55; color: var(--quiet-2); }
-  .form-head { display: flex; flex-direction: column; gap: 8px; }
-
-  .field-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--label); }
-  .field-label-row { display: flex; justify-content: space-between; align-items: center; }
-  .field {
-    height: var(--field-h); border: 1px solid var(--rule-3); border-radius: 10px;
-    padding: 0 14px; font-family: inherit; font-size: 15px; background: #fff; color: var(--ink); width: 100%;
-  }
-  .field::placeholder { color: #98A2B3; opacity: 1; }
-  .field:focus { outline: 2px solid #A7DDD3; border-color: var(--accent); }
-  .show-pw {
-    border: 0; background: transparent; color: var(--accent); font-weight: 600; font-size: 13px;
-    font-family: inherit; cursor: pointer; min-height: 32px; padding: 0;
-  }
-  .show-pw:hover { text-decoration: underline; }
-
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-    min-height: 48px; width: 100%; border-radius: 10px; font-weight: 600; font-size: 15px;
-    font-family: inherit; cursor: pointer; box-sizing: border-box; text-decoration: none;
-  }
-  .btn-primary { background: var(--accent); color: #fff; border: 0; }
-  .btn-primary:hover { background: var(--accent-hover); text-decoration: none; color: #fff; }
-  .btn-ghost { background: #fff; color: var(--label); border: 1px solid var(--rule-3); }
-  .btn-ghost:hover { background: #F9FAFB; text-decoration: none; color: var(--ink); }
-  .btn-ghost:disabled { opacity: .55; cursor: not-allowed; }
-
-  .or-row {
-    display: flex; align-items: center; gap: 12px; color: #98A2B3; font-size: 12px; font-weight: 500;
-  }
-  .or-row span.line { flex: 1; height: 1px; background: var(--rule); }
-
-  .hint-box {
-    display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px;
-    background: #F3FAF8; border: 1px solid #CDEBE5; font-size: 13px; line-height: 1.5; color: var(--quiet-2);
-  }
-  .hint-box svg { flex: none; margin-top: 2px; }
-
-  .flash {
-    border-radius: 10px; padding: 12px 14px; font-size: 14px; border: 1px solid transparent;
-  }
-  .flash.err { background: #FEF3F2; color: #B42318; border-color: #FDA29B; }
-  .flash.ok { background: #ECFDF3; color: #067647; border-color: #ABEFC6; }
-
-  .form-foot {
-    display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between;
-    font-size: 12.5px; color: var(--quiet);
-  }
-
-  @media (max-width: 900px) {
-    .brand-panel { padding: 32px 24px; gap: 28px; }
-    .form-panel { padding: 28px 24px 36px; }
-    .attest-card { display: none; }
-    .pipeline { display: none; }
-    .brand-copy h2 { font-size: 28px; }
-  }
-
-  /* ===== Attestra light design system: light brand panel ===== */
-  .brand-panel {
-    color: #0B1220; border-right: 1px solid var(--rule);
-    background-image:
-      radial-gradient(900px 500px at -10% -10%, #D5F2EC 0, transparent 60%),
-      radial-gradient(700px 500px at 110% 110%, #E3EBFF 0, transparent 60%);
-    background-size: auto;
-  }
-  .brand-logo .mark { background: linear-gradient(135deg, #14B8A6, #0F766E); }
-  .brand-copy h2 { font-weight: 650; letter-spacing: -.03em; }
-  .pipe-num { border-color: #99D8CE; color: #0F766E; background: #fff; }
-  .pipe-step.is-active .pipe-num { color: #fff; }
-  .pipe-line { background: #CDEBE5; }
-  .pipe-body strong { color: #0B1220; }
-  .attest-card { background: rgba(255,255,255,.8); border-color: #E1E8EC; box-shadow: 0 4px 16px rgba(15,40,60,.06); }
-  .attest-ok { background: #ECFDF3; color: #15803D; border: 1px solid #BBF7D0; }
-  .attest-tags span { background: #F3F6F8; border: 1px solid var(--rule); color: #334155; }
-  .attest-hash { border-top-color: #D8E0E6; }
-  .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(15,118,110,.18); }
-  .btn-primary { box-shadow: 0 1px 2px rgba(15,118,110,.2); }
-  .hint-box { background: #EFF4FF; border-color: #C7D7FE; color: #1E3A8A; }
-</style>
+<link rel="stylesheet" href="/static/attestra.css?v=4">
+<script src="/static/attestra.js?v=3" defer></script>
 </head>
-<body>
-<div class="login-shell">
-
-  <section class="brand-panel" aria-label="About Attestra">
-    <div class="brand-logo">
-      <div class="mark" aria-hidden="true">A</div>
-      <span class="name">Attestra</span>
+<body class="is-auth">
+<div class="login-c">
+  <section class="story" aria-label="About Attestra">
+    <div class="brand"><span class="mark" aria-hidden="true">a</span>attestra</div>
+    <h2>From findings<br>to signed attestation.</h2>
+    <p>One workspace for each client test or audit cycle: authorization, scope, results, validated findings, compliance status and signed reports.</p>
+    <div class="flow" aria-label="How an engagement flows">
+      <div><b>01</b><span>Signed authorization</span></div>
+      <div><b>02</b><span>Targets in scope</span></div>
+      <div><b>03</b><span>Test plan</span></div>
+      <div><b>04</b><span>Automated scans</span></div>
+      <div><b>05</b><span>Results imported</span></div>
+      <div><b>06</b><span>Signed reports</span></div>
     </div>
-
-    <div class="brand-copy">
-      <h2>From findings to signed attestation.</h2>
-      <p>One workspace for each client test or audit cycle: authorization, scope, results, validated findings, compliance status and signed reports.</p>
-    </div>
-
-    <div class="pipeline" aria-label="How an engagement flows">
-      <div class="pipe-step is-active">
-        <div class="pipe-rail"><div class="pipe-num">1</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Signed authorization</strong><span>The client approves the environments and rules of engagement.</span></div>
-      </div>
-      <div class="pipe-step">
-        <div class="pipe-rail"><div class="pipe-num">2</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Targets in scope</strong><span>Every site, API, host and cloud account, with planned tests.</span></div>
-      </div>
-      <div class="pipe-step">
-        <div class="pipe-rail"><div class="pipe-num">3</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Test plan</strong><span>What gets tested, where, and how intrusively.</span></div>
-      </div>
-      <div class="pipe-step">
-        <div class="pipe-rail"><div class="pipe-num">4</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Automated scans</strong><span>Run scans against authorized targets only.</span></div>
-      </div>
-      <div class="pipe-step">
-        <div class="pipe-rail"><div class="pipe-num">5</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Results imported</strong><span>Tool output is matched, deduplicated and risk-ranked.</span></div>
-      </div>
-      <div class="pipe-step">
-        <div class="pipe-rail"><div class="pipe-num">6</div><div class="pipe-line"></div></div>
-        <div class="pipe-body"><strong>Reports</strong><span>Validated findings and compliance status, ready to sign.</span></div>
-      </div>
-    </div>
-
-    <div class="attest-card" aria-hidden="true">
-      <div class="attest-top">
-        <span class="attest-kicker">SIGNED ATTESTATION · SAMPLE</span>
-        <span class="attest-ok">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>
-          Verified
-        </span>
-      </div>
-      <div class="attest-title">FY27 Q3 VA + PT: e-commerce platform</div>
-      <div class="attest-tags">
-        <span>PCI DSS v4.0.1</span>
-        <span>ISO/IEC 27001:2022</span>
-        <span>SOC 2</span>
-      </div>
-      <div class="attest-hash">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-        SHA-256 d9b20b64cd3e41…
-      </div>
-    </div>
+    <div class="foot">PCI DSS v4.0.1 &middot; ISO/IEC 27001:2022 &middot; SOC 2 &middot; SHA-256 sealed reports</div>
   </section>
 
-  <section class="form-panel">
-    <div class="form-top">
-      <span>API client?</span>
-      <a href="/docs">Use an API key</a>
-    </div>
+  <section class="formside">
+    <div class="top">API client? <a href="/docs">Use an API key</a></div>
+    <div class="formbox" role="group" aria-label="Sign in">
+      <div>
+        <h1>Welcome back</h1>
+        <p class="sub">Sign in with your Attestra username and password.</p>
+      </div>
 
-    <div class="form-center">
-      <div class="form-box" role="group" aria-label="Sign in">
-        <div class="form-head">
-          <h1>Welcome back</h1>
-          <p class="sub">Sign in with your Attestra username and password.</p>
+      {% if error %}<div class="flash err" role="alert">{{ error }}</div>{% endif %}
+      {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+
+      <form method="post" action="/login" id="login-form">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <label for="username">Username
+            <input class="field" id="username" name="username" type="text" required autocomplete="username" autofocus placeholder="e.g. priya.lead">
+          </label>
+          <label for="password">
+            <span class="row-between"><span>Password</span><button type="button" class="linkbtn show-pw" id="toggle-pw" aria-pressed="false">Show</button></span>
+            <input class="field" id="password" name="password" type="password" required autocomplete="current-password" placeholder="Enter your password">
+          </label>
+          <input type="hidden" name="next" value="{{ next_url or '/' }}">
+          <button type="submit" class="primary">Sign in</button>
         </div>
+      </form>
 
-        {% if error %}<div class="flash err" role="alert">{{ error }}</div>{% endif %}
-        {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+      <div class="or" aria-hidden="true">or</div>
+      <button type="button" class="ghost" disabled title="SSO sign-in is not configured for this deployment yet">Continue with SSO</button>
 
-        <button type="button" class="btn btn-ghost" disabled title="SSO sign-in is not configured for this deployment yet">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.2 7.8 8 9 4.8-1.2 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
-          Continue with SSO
-        </button>
-
-        <div class="or-row" aria-hidden="true"><span class="line"></span>OR<span class="line"></span></div>
-
-        <form method="post" action="/login" id="login-form">
-          <div style="display:flex;flex-direction:column;gap:18px">
-            <label class="field-label" for="username">Username
-              <input class="field" id="username" name="username" type="text" required autocomplete="username" autofocus placeholder="e.g. priya.lead">
-            </label>
-
-            <label class="field-label" for="password">
-              <span class="field-label-row">
-                <span>Password</span>
-                <button type="button" class="show-pw" id="toggle-pw" aria-pressed="false">Show</button>
-              </span>
-              <input class="field" id="password" name="password" type="password" required autocomplete="current-password" placeholder="Enter your password">
-            </label>
-
-            <input type="hidden" name="next" value="{{ next_url or '/' }}">
-            <button type="submit" class="btn btn-primary">Sign in</button>
-          </div>
-        </form>
-
-        <div class="hint-box">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F766E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
-          <span>There is no open sign-up. Ask a lead to send you an invite link.</span>
-        </div>
+      <div class="note">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2F5D50" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:2px"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <span>There is no open sign-up. Ask a lead to send you an invite link.</span>
       </div>
     </div>
-
-    <div class="form-foot">
-      <span>Attestra v{{ version }}</span>
-      <span>From findings to signed attestation</span>
-    </div>
+    <div class="bottom"><span>Attestra v{{ version }}</span><span>From findings to signed attestation</span></div>
   </section>
 </div>
 

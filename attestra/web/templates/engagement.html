@@ -3,6 +3,8 @@
 {% block main %}
 {% set prole = principal.role if principal else "" %}
 {% set has_auth = authorized_envs|length > 0 %}
+{% set plan_done = plan and plan|selectattr('findings')|list %}
+<div class="eng" style="display:flex;flex-direction:column;gap:22px">
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="/">Engagements</a>
   <span aria-hidden="true">/</span>
@@ -11,10 +13,9 @@
 
 <div class="page-head">
   <div>
-    <h1>{{ e.name }}</h1>
-    <p class="lede">{{ e.tenant.name }}{% if e.tenant.industry %} &middot; {{ e.tenant.industry }}{% endif %} &middot; {{ type_label }} &middot;
-      {% if e.window_start or e.window_end %}test window {{ e.window_start or "not set" }} to {{ e.window_end or "not set" }}{% else %}No test window set (<a href="#edit">edit</a>){% endif %}
-      &middot; status <span class="st st-{{ e.status }}">{{ e.status|label }}</span></p>
+    <div class="meta-row"><span class="id-tag">ENG-{{ e.id }}</span><span class="sep">&middot;</span><span>{{ e.tenant.name }}{% if e.tenant.industry %} &middot; {{ e.tenant.industry }}{% endif %}</span><span class="sep">&middot;</span><span>{{ type_label }}</span><span class="sep">&middot;</span>
+      <span>{% if e.window_start or e.window_end %}test window {{ e.window_start or "not set" }} to {{ e.window_end or "not set" }}{% else %}No test window set (<a href="#edit">edit</a>){% endif %}</span></div>
+    <div class="title-row"><h1>{{ e.name }}</h1><span class="status-chip st-{{ e.status }}">status {{ e.status|label }}</span></div>
   </div>
   <div class="actions">
     {% if can(prole, "engagement.write") %}<a class="btn secondary" href="#edit">Edit engagement</a>{% endif %}
@@ -22,20 +23,26 @@
   </div>
 </div>
 
-<nav class="tabs" aria-label="Engagement sections">
+<nav class="subnav" aria-label="Engagement sections">
   <a href="/engagements/{{ e.id }}" aria-current="page">Overview</a>
   {% if has_pci %}<a href="/engagements/{{ e.id }}/pci">PCI DSS</a>{% endif %}
   {% if has_iso %}<a href="/engagements/{{ e.id }}/iso">ISO 27001</a>{% endif %}
   {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} <span class="chip">off</span>{% endif %}</a>{% endif %}
 </nav>
 
+{% set nx = namespace(found=false) %}
 <div class="steps" aria-label="Progress">
-  <a href="#scope" class="{{ 'done' if has_auth }}"><span class="step-row"><span class="step-num">1</span>Signed authorization</span><span class="step-meta">{{ "Complete" if has_auth else "Pending" }}</span></a>
-  <a href="#targets" class="{{ 'done' if e.assets }}"><span class="step-row"><span class="step-num">2</span>Targets in scope</span><span class="step-meta">{{ e.assets|length }} target{{ "s" if e.assets|length != 1 }}</span></a>
-  <a href="#plan" class="{{ 'done' if plan and plan|selectattr('findings')|list }}"><span class="step-row"><span class="step-num">3</span>Test plan</span><span class="step-meta">{{ "Complete" if plan and plan|selectattr('findings')|list else "Pending" }}</span></a>
-  <a href="#scans" class="{{ 'done' if scans }}"><span class="step-row"><span class="step-num">4</span>Automated scans</span><span class="step-meta">{{ scans|length }} run</span></a>
-  <a href="#import" class="{{ 'done' if imports }}"><span class="step-row"><span class="step-num">5</span>Results imported</span><span class="step-meta">{{ imports|length }} file{{ "s" if imports|length != 1 }}</span></a>
-  <a href="#reports" class="{{ 'done' if reports }}"><span class="step-row"><span class="step-num">6</span>Reports</span><span class="step-meta">{{ reports|length }} generated</span></a>
+  {% for href, done, title, meta in [
+      ("#scope", has_auth, "Signed authorization", "Complete" if has_auth else "Pending"),
+      ("#targets", e.assets, "Targets in scope", (e.assets|length ~ " target" ~ ("s" if e.assets|length != 1 else ""))),
+      ("#plan", plan_done, "Test plan", "Complete" if plan_done else "Pending"),
+      ("#scans", scans, "Automated scans", (scans|length ~ " run")),
+      ("#import", imports, "Results imported", (imports|length ~ " file" ~ ("s" if imports|length != 1 else ""))),
+      ("#reports", reports, "Reports", (reports|length ~ " generated")),
+  ] %}
+  {% set is_next = (not done) and (not nx.found) %}{% if is_next %}{% set nx.found = true %}{% endif %}
+  <a href="{{ href }}" class="{{ 'done' if done }}{{ ' next' if is_next }}"><span class="step-num">{{ loop.index }}</span><span class="step-text"><span class="step-row">{{ title }}</span><span class="step-meta">{{ meta }}</span></span></a>
+  {% endfor %}
 </div>
 
 <div class="sev-strip" aria-label="Open findings by severity">
@@ -47,6 +54,66 @@
   {% endfor %}
 </div>
 
+<nav class="tabs eng-tabs" aria-label="Engagement workspace">
+  <a href="#p-findings">Findings <span class="n">{{ findings|length }}</span></a>
+  <a href="#p-overview">Overview</a>
+  <a href="#p-scope">Authorization &amp; targets <span class="n">{{ e.assets|length }}</span></a>
+  <a href="#p-plan">Test plan</a>
+  <a href="#p-scans">Scans &amp; imports <span class="n">{{ scans|length }}</span></a>
+  <a href="#p-compliance">Compliance</a>
+  <a href="#p-reports">Reports <span class="n">{{ reports|length }}</span></a>
+</nav>
+<div class="tab-panels">
+<section class="tp tp-default" id="p-findings">
+<!-- ============================================================ FINDINGS -->
+<div class="card" id="findings">
+  <h2>Findings (ranked by risk)</h2>
+  <div class="row" style="margin-bottom:12px">
+    {% if can(prole, "finding.read") %}
+    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Export findings CSV</a>
+    {% endif %}
+  </div>
+  {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
+  <table>
+    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Status</th></tr>
+    {% for f in findings %}
+    <tr id="f-{{ f.id }}">
+      <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
+      <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
+      <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
+      <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
+      <td>
+        <div class="status-cell">
+          <div class="status-head"><span class="st fs fs-{{ f.status }}">{{ f.status|label }}</span><span class="meta fix-by">Fix by {{ f.sla_due or "-" }}</span></div>
+          {% set nexts = transitions.get(f.status, []) %}
+          {% if nexts and can(prole, "finding.write") %}
+          <details class="status-details">
+          <summary>Change status</summary>
+          <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="status-move">
+            <div>
+              <label for="to-{{ f.id }}">Move to</label>
+              <select id="to-{{ f.id }}" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
+            </div>
+            <div>
+              <label for="note-{{ f.id }}">Reason</label>
+              <input id="note-{{ f.id }}" name="note" type="text" placeholder="Needed for false positive" autocomplete="off">
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="secondary">Save status</button>
+            </div>
+          </form>
+          </details>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="7">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
+  </table>
+</div>
+</section>
+<section class="tp" id="p-overview">
 <div class="grid">
   <div class="card">
     <h2>{{ fw_names[fw] }}</h2>
@@ -85,10 +152,11 @@
     {% endif %}
   </div>
 </div>
-
+</section>
+<section class="tp" id="p-scope">
 <!-- ============================================================ SCOPE -->
 <div class="card" id="scope">
-  <h2>1. Signed authorization</h2>
+  <h2>Signed authorization</h2>
   <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Scans and imports are only allowed for targets in an authorized environment.</p>
   <table>
     <tr><th>Document</th><th>Signed by</th><th>Valid</th><th>Environments approved</th><th>Rules of engagement</th><th>SHA-256</th></tr>
@@ -130,7 +198,7 @@
 </div>
 
 <div class="card" id="targets">
-  <h2>2. Targets in scope</h2>
+  <h2>Targets in scope</h2>
   <p class="meta">Each website, API, host, repository, image, cloud account or app the client wants tested, its environment, and which tests are planned for it.</p>
   <table>
     <tr><th>Target</th><th>Environment</th><th>Kind</th><th>Planned tests</th><th>Risk profile</th><th>Ownership</th><th>Owner / notes</th><th></th></tr>
@@ -256,10 +324,11 @@
     {% endif %}
   </div>
 </div>
-
+</section>
+<section class="tp" id="p-plan">
 <!-- ============================================================ TEST PLAN -->
 <div class="card" id="plan">
-  <h2>3. Test plan and coverage</h2>
+  <h2>Test plan and coverage</h2>
   <p class="meta">What is planned against each target, which tool results to import as evidence, and what has arrived so far.</p>
   <table>
     <tr><th>Target</th><th>Environment</th><th>Test</th><th>Standard</th><th>Import results from</th><th>Status</th></tr>
@@ -277,10 +346,11 @@
     {% else %}<tr><td colspan="6">No test plan yet. <a href="#targets">Add a target in scope</a> to build it.</td></tr>{% endfor %}
   </table>
 </div>
-
+</section>
+<section class="tp" id="p-scans">
 <!-- ============================================================ SCANS -->
 <div class="card" id="scans">
-  <h2>4. Automated scans</h2>
+  <h2>Automated scans</h2>
   <p class="meta">Run a scanner against one target in scope. A scan needs a valid signed authorization for the target's environment, the test window, verified ownership and, for the active profile, intrusive tests allowed on the target.</p>
   <div class="row" style="margin-bottom:10px">
     {% if e.status != 'halted' %}<form method="post" action="/engagements/{{ e.id }}/halt" onsubmit="return confirm('Halt all jobs for this engagement? Running and queued scans stop until you resume.')"><button type="submit" class="danger">Halt engagement</button></form>{% endif %}
@@ -309,9 +379,9 @@
   <details {{ "open" if not e.assets or not has_auth }}>
     <summary>+ Queue a scan</summary>
     {% if not e.assets %}
-    <div class="warn" id="scan_no_targets">No targets in scope yet. Add a target in <a href="#targets">2. Targets in scope</a> first, then queue a scan here.</div>
+    <div class="warn" id="scan_no_targets">No targets in scope yet. Add a target in <a href="#targets">Targets in scope</a> first, then queue a scan here.</div>
     {% endif %}
-    {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">1. Signed authorization</a> first; scans are blocked until then.</div>{% endif %}
+    {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">Signed authorization</a> first; scans are blocked until then.</div>{% endif %}
     {% set scan_ready = e.assets and has_auth %}
     <form method="post" action="/engagements/{{ e.id }}/scans">
       <fieldset {{ "disabled" if not scan_ready }}>
@@ -338,9 +408,9 @@
 
 <!-- ============================================================ IMPORT -->
 <div class="card" id="import">
-  <h2>5. Import results</h2>
+  <h2>Import results</h2>
   <p class="meta">Upload result files from the tools your testers ran under this authorization. Findings are matched to targets by URL, host or path, deduplicated and risk-ranked.</p>
-  {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">1. Signed authorization</a> first; imports are blocked until then.</div>{% endif %}
+  {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">Signed authorization</a> first; imports are blocked until then.</div>{% endif %}
   <form method="post" action="/engagements/{{ e.id }}/imports" enctype="multipart/form-data">
     <fieldset {{ "disabled" if not has_auth }}>
     <div class="fields">
@@ -353,84 +423,6 @@
     <div class="form-actions"><button type="submit" {{ "disabled" if not has_auth }}>Import</button></div>
     </fieldset>
   </form>
-</div>
-
-<!-- ============================================================ PASSED CHECKS (C5) -->
-<div class="card" id="passed-checks">
-  <h2>Passed checks</h2>
-  <p class="meta">Green rows are checks that ran and passed. Failed rows match findings from the same scan or import. Skipped means the check was not run for this target.</p>
-  <table>
-    <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
-    {% for c in passed_checks %}
-    <tr>
-      <td>{{ c.name }}</td>
-      <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
-      <td>{{ c.source }}</td>
-      <td class="mono">{{ c.evidence or "—" }}</td>
-    </tr>
-    {% else %}<tr><td colspan="4">No check list yet. Import a ZAP or webcheck report, or run a scan that writes checks.</td></tr>{% endfor %}
-  </table>
-</div>
-
-<!-- ============================================================ FINDINGS -->
-<div class="card" id="findings">
-  <h2>Findings (ranked by risk)</h2>
-  <div class="row" style="margin-bottom:12px">
-    {% if can(prole, "finding.read") %}
-    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Export findings CSV</a>
-    {% endif %}
-  </div>
-  {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
-  <table>
-    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Status</th></tr>
-    {% for f in findings %}
-    <tr id="f-{{ f.id }}">
-      <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
-      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
-      <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
-      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
-      <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
-      <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
-      <td>
-        <div class="status-cell">
-          <div class="status-head"><span class="st">{{ f.status|label }}</span><span class="meta fix-by">Fix by {{ f.sla_due or "-" }}</span></div>
-          {% set nexts = transitions.get(f.status, []) %}
-          {% if nexts and can(prole, "finding.write") %}
-          <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status" class="status-move">
-            <div>
-              <label for="to-{{ f.id }}">Move to</label>
-              <select id="to-{{ f.id }}" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
-            </div>
-            <div>
-              <label for="note-{{ f.id }}">Reason</label>
-              <input id="note-{{ f.id }}" name="note" type="text" placeholder="Needed for false positive" autocomplete="off">
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="secondary">Save status</button>
-            </div>
-          </form>
-          {% endif %}
-        </div>
-      </td>
-    </tr>
-    {% else %}<tr><td colspan="7">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
-  </table>
-</div>
-
-<div class="card">
-  <h2>{{ fw_names[fw] }}: control status</h2>
-  <table>
-    <tr><th>Ref</th><th>Requirement</th><th>Status</th><th>Basis</th><th>Findings</th></tr>
-    {% for r in results %}
-    <tr>
-      <td><b>{{ r.ref }}</b></td><td>{{ r.title }}</td>
-      <td><span class="st st-{{ r.status }}">{{ r.status|label }}</span><div class="meta">{{ "Confirmed: " ~ r.assessor if r.confirmed else "Proposed" }}</div></td>
-      <td>{{ r.rationale if r.confirmed else r.reason }}</td>
-      <td>{% for fid in r.finding_ids %}<a href="#f-{{ fid }}">F-{{ fid }}</a> {% endfor %}</td>
-    </tr>
-    {% else %}<tr><td colspan="5">No controls for this framework yet. Pick another framework above, or import results to map findings.</td></tr>
-    {% endfor %}
-  </table>
 </div>
 
 <div class="card" id="schedules">
@@ -479,13 +471,47 @@
     <div class="form-actions"><button type="submit">Add schedule</button></div>
   </form>
   {% else %}
-  <div class="warn">Add a target in <a href="#targets">2. Targets in scope</a> first, then schedule recurring scans for it.</div>
+  <div class="warn">Add a target in <a href="#targets">Targets in scope</a> first, then schedule recurring scans for it.</div>
   {% endif %}
   {% if due_schedules %}
   <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" class="form-follow" onsubmit="return confirm('Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.')">
     <div class="form-actions"><button type="submit" class="secondary">Queue {{ due_schedules }} due scan(s) now</button></div>
   </form>
   {% endif %}
+</div>
+</section>
+<section class="tp" id="p-compliance">
+<div class="card">
+  <h2>{{ fw_names[fw] }}: control status</h2>
+  <table>
+    <tr><th>Ref</th><th>Requirement</th><th>Status</th><th>Basis</th><th>Findings</th></tr>
+    {% for r in results %}
+    <tr>
+      <td><b>{{ r.ref }}</b></td><td>{{ r.title }}</td>
+      <td><span class="st st-{{ r.status }}">{{ r.status|label }}</span><div class="meta">{{ "Confirmed: " ~ r.assessor if r.confirmed else "Proposed" }}</div></td>
+      <td>{{ r.rationale if r.confirmed else r.reason }}</td>
+      <td>{% for fid in r.finding_ids %}<a href="#f-{{ fid }}">F-{{ fid }}</a> {% endfor %}</td>
+    </tr>
+    {% else %}<tr><td colspan="5">No controls for this framework yet. Pick another framework above, or import results to map findings.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<!-- ============================================================ PASSED CHECKS (C5) -->
+<div class="card" id="passed-checks">
+  <h2>Passed checks</h2>
+  <p class="meta">Green rows are checks that ran and passed. Failed rows match findings from the same scan or import. Skipped means the check was not run for this target.</p>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
+    {% for c in passed_checks %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
+      <td>{{ c.source }}</td>
+      <td class="mono">{{ c.evidence or "—" }}</td>
+    </tr>
+    {% else %}<tr><td colspan="4">No check list yet. Import a ZAP or webcheck report, or run a scan that writes checks.</td></tr>{% endfor %}
+  </table>
 </div>
 
 {% if has_pci or asv_scans or segmentation_tests %}
@@ -527,7 +553,8 @@
   </table>
 </div>
 {% endif %}
-
+</section>
+<section class="tp" id="p-reports">
 <div class="grid">
   <div class="card">
     <h2>Imported results</h2>
@@ -537,7 +564,7 @@
     </table>
   </div>
   <div class="card" id="reports">
-    <h2>6. Reports</h2>
+    <h2>Reports</h2>
     <table>
       <tr><th>#</th><th>Report</th><th>Status</th><th>QA by</th><th>Approved by</th><th>Next step</th></tr>
       {% set my_uid = principal.user_id if principal else None %}
@@ -588,6 +615,9 @@
     </form>
     {% endif %}
   </div>
+</div>
+</section>
+</div>
 </div>
 
 <script>

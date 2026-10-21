@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
@@ -261,6 +261,26 @@ def logout(next: str = Form("/")):
 
 
 # ---------------------------------------------------------------- home and new engagement
+
+
+_STATIC_DIR = Path(__file__).parent / "static"
+_STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".woff2": "font/woff2"}
+_STATIC_FILES = {
+    "attestra.css": _STATIC_DIR / "attestra.css",
+    "attestra.js": _STATIC_DIR / "attestra.js",
+    "fonts/Inter.woff2": _STATIC_DIR / "fonts" / "Inter.woff2",
+    "fonts/Fraunces.woff2": _STATIC_DIR / "fonts" / "Fraunces.woff2",
+    "fonts/JetBrainsMono.woff2": _STATIC_DIR / "fonts" / "JetBrainsMono.woff2",
+}
+
+
+@router.get("/static/{name:path}", include_in_schema=False)
+def static_asset(name: str):
+    """Serve the UI stylesheet and self-hosted fonts (fixed allow-list, same origin for the CSP)."""
+    path = _STATIC_FILES.get(name)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type=_STATIC_TYPES[path.suffix], headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/", response_class=HTMLResponse)
