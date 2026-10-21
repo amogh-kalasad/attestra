@@ -96,7 +96,7 @@ Capabilities intentionally left for later phases (see `docs/GAP_ANALYSIS_CURRENT
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
 
-[[attestra/observability.py#MetricsMiddleware]] counts requests by route template and records latency into [[attestra/observability.py#REGISTRY]], served by [[attestra/api.py#metrics]] (optional `ATTESTRA_METRICS_TOKEN`). [[attestra/observability.py#setup_otel]] activates only with `ATTESTRA_OTEL_ENABLED` and the `observability` extra. [[attestra/observability.py#JsonLogFormatter]] is enabled by `ATTESTRA_LOG_JSON`. Grafana, Prometheus and Promtail stubs live in `deploy/observability/`.
+[[attestra/observability.py#MetricsMiddleware]] counts requests by route template and records latency into [[attestra/observability.py#REGISTRY]], served by [[attestra/api.py#metrics]]. Anonymous `/metrics` is denied by default; scrapers must send `ATTESTRA_METRICS_TOKEN`, or operators may set `ATTESTRA_METRICS_ALLOW_ANON` for trusted networks, or use an admin session. [[attestra/observability.py#setup_otel]] activates only with `ATTESTRA_OTEL_ENABLED` and the `observability` extra. [[attestra/observability.py#JsonLogFormatter]] is enabled by `ATTESTRA_LOG_JSON`. Grafana, Prometheus and Promtail stubs live in `deploy/observability/`.
 
 ## Added modules
 

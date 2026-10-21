@@ -47,10 +47,11 @@
     </div>
     <label id="fw_label">Compliance frameworks to report against</label>
     <div class="checks label-chips" role="group" aria-labelledby="fw_label">
-      <label><input type="checkbox" id="fw_all"> Select all</label>
+      <label><input type="checkbox" id="fw_all" class="fw-all"> Select all</label>
+      <button type="button" id="fw_clear" class="secondary" style="margin-left:8px">Clear</button>
       {% for k, n in frameworks.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" class="fw"> {{ n }}</label>{% endfor %}
     </div>
-    <p class="hint">Tick only the frameworks this client asked for; each one adds a compliance report.</p>
+    <p class="hint">Tick only the frameworks this client asked for; each one adds a compliance report. Use Select all for all {{ frameworks|length }} frameworks.</p>
   </div>
 
   <div class="form-actions">
@@ -59,9 +60,34 @@
   </div>
 </form>
 <script>
-  const all = document.getElementById('fw_all');
-  all.addEventListener('change', () => document.querySelectorAll('input.fw').forEach(cb => { cb.checked = all.checked; }));
-  const ws = document.getElementById('window_start'), we = document.getElementById('window_end');
-  ws.addEventListener('change', () => { we.min = ws.value; });
+(function () {
+  function fwBoxes() { return Array.from(document.querySelectorAll('input.fw[name="frameworks"]')); }
+  var all = document.getElementById('fw_all');
+  var clearBtn = document.getElementById('fw_clear');
+  function syncAll() {
+    var boxes = fwBoxes();
+    if (!all || !boxes.length) return;
+    all.checked = boxes.every(function (cb) { return cb.checked; });
+  }
+  if (all) {
+    all.addEventListener('change', function () {
+      fwBoxes().forEach(function (cb) { cb.checked = all.checked; });
+    });
+    all.addEventListener('click', function () {
+      // Some browsers only toggle the master; force children on click too (P1-5).
+      var on = all.checked;
+      fwBoxes().forEach(function (cb) { cb.checked = on; });
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      fwBoxes().forEach(function (cb) { cb.checked = false; });
+      if (all) all.checked = false;
+    });
+  }
+  fwBoxes().forEach(function (cb) { cb.addEventListener('change', syncAll); });
+  var ws = document.getElementById('window_start'), we = document.getElementById('window_end');
+  if (ws && we) ws.addEventListener('change', function () { we.min = ws.value; });
+})();
 </script>
 {% endblock %}

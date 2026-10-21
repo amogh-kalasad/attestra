@@ -688,6 +688,46 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 
 Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip (including sealed-path rebuild), executive trend SVG, signature verify.
 
+## Phase 1 stability
+
+Medium export bugs and UX fixes from the Gap Implementation Plan.
+
+### Report re-export succeeds
+
+Exporting the same report to DOCX/PDF twice succeeds; the sealed HTML hash is unchanged.
+
+### CSV target column filled
+
+Findings CSV includes the linked asset identifier (for example shop.example.com) in the target column.
+
+## Phase 0 integrity
+
+Critical integrity and security fixes from the Gap Implementation Plan (auditor confirm ownership, open-finding met block, risk-acceptance record, share untested grade, metrics auth, risk-acceptance partial evidence).
+
+### Auditor ownership of confirmations
+
+Lead role cannot confirm or overwrite; auditor can confirm. Refused attempts are audited.
+
+### Block met with open findings
+
+Confirming `met` with open mapped findings raises unless an explicit override is passed; override rationale is stored.
+
+### Risk acceptance record required
+
+Bare `transition` to `risk_accepted` is refused; [[attestra/services.py#accept_risk]] creates the record and status together.
+
+### Share untested grade
+
+A public share for a target with no scan or findings shows "Not yet tested" with no letter grade on the page and badge.
+
+### Metrics require auth
+
+Unauthenticated `GET /metrics` returns 401 unless a bearer token or anon opt-in is configured.
+
+### Risk acceptance is partial evidence
+
+A single risk acceptance does not propose SOC 2 CC3.2 or DORA Art.6 as `met`.
+
 ## Report coverage enhancements
 
 Stored-not-rendered DOCX Phase 1 fields, retest report kind, nine-framework load, and template metadata.

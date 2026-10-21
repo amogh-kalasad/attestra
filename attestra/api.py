@@ -150,6 +150,7 @@ class ConfirmIn(BaseModel):
     ref: str
     status: str
     rationale: str
+    allow_open_findings_override: bool = False
 
 
 class ReportIn(BaseModel):
@@ -595,7 +596,13 @@ def compliance(
 def confirm(eid: int, body: ConfirmIn, principal: Principal = Depends(require("compliance.confirm"))):
     def fn(s):
         services.get_engagement(s, eid, principal)
-        return services.confirm_control(s, eid, **body.model_dump(), assessor=principal.actor)
+        return services.confirm_control(
+            s,
+            eid,
+            **body.model_dump(),
+            assessor=principal.actor,
+            role=principal.role,
+        )
 
     a = _run(fn)
     return {"id": a.id, "status": a.status}

@@ -7,10 +7,13 @@ import logging
 from attestra import observability as obs
 
 
-def test_metrics_endpoint_exposes_request_counters(client):
+def test_metrics_endpoint_exposes_request_counters(client, monkeypatch):
+    # P0-5: anonymous scrape denied by default; use token for the suite.
+    monkeypatch.setattr(obs, "METRICS_TOKEN", "test-metrics")
+    monkeypatch.setattr(obs, "METRICS_ALLOW_ANON", False)
     obs.REGISTRY.reset()
     assert client.get("/api/health").status_code == 200
-    r = client.get("/metrics")
+    r = client.get("/metrics", headers={"Authorization": "Bearer test-metrics"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/plain")
     body = r.text
@@ -20,17 +23,25 @@ def test_metrics_endpoint_exposes_request_counters(client):
     assert 'le="+Inf"' in body
 
 
-def test_metrics_uses_route_template_not_raw_path(client):
+def test_metrics_uses_route_template_not_raw_path(client, monkeypatch):
+    monkeypatch.setattr(obs, "METRICS_TOKEN", "test-metrics")
     obs.REGISTRY.reset()
     client.get("/api/engagements/999999")
-    body = client.get("/metrics").text
+    body = client.get("/metrics", headers={"Authorization": "Bearer test-metrics"}).text
     assert "/api/engagements/999999" not in body
 
 
 def test_metrics_token_enforced(client, monkeypatch):
     monkeypatch.setattr(obs, "METRICS_TOKEN", "s3cret")
+    monkeypatch.setattr(obs, "METRICS_ALLOW_ANON", False)
     assert client.get("/metrics").status_code == 401
     assert client.get("/metrics", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def test_metrics_anon_denied_by_default(client, monkeypatch):
+    monkeypatch.setattr(obs, "METRICS_TOKEN", "")
+    monkeypatch.setattr(obs, "METRICS_ALLOW_ANON", False)
+    assert client.get("/metrics").status_code == 401
 
 
 def test_registry_render_and_events():

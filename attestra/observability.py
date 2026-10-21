@@ -25,8 +25,10 @@ log = logging.getLogger("attestra.observability")
 OTEL_ENABLED = os.environ.get("ATTESTRA_OTEL_ENABLED", "").lower() in ("1", "true", "yes")
 OTEL_SERVICE_NAME = os.environ.get("ATTESTRA_OTEL_SERVICE_NAME", "attestra-api")
 METRICS_ENABLED = os.environ.get("ATTESTRA_METRICS_ENABLED", "true").lower() in ("1", "true", "yes")
-# Optional bearer token for /metrics; empty means open (scrape inside the cluster only).
+# Bearer token for /metrics scrapers. When empty, anonymous scrape is denied unless
+# ATTESTRA_METRICS_ALLOW_ANON=true (cluster-internal opt-in) or an admin session is used.
 METRICS_TOKEN = os.environ.get("ATTESTRA_METRICS_TOKEN", "")
+METRICS_ALLOW_ANON = os.environ.get("ATTESTRA_METRICS_ALLOW_ANON", "").lower() in ("1", "true", "yes")
 
 BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
@@ -125,11 +127,31 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             REGISTRY.observe("attestra_http_request_duration_seconds", time.perf_counter() - start, labels)
 
 
+def _metrics_admin_session(request: Request) -> bool:
+    """True when the request carries an active admin session cookie (P0-5)."""
+    try:
+        from attestra.auth.session import COOKIE_NAME, read_session
+        from attestra.db import session as db_session
+        from attestra.models import User
+
+        data = read_session(request.cookies.get(COOKIE_NAME))
+        if not data or not data.get("uid"):
+            return False
+        with db_session() as s:
+            user = s.get(User, int(data["uid"]))
+            return bool(user and user.active and user.role == "admin")
+    except Exception:
+        return False
+
+
 def metrics_response(request: Request) -> Response:
+    """Serve Prometheus text. Requires token, admin session, or explicit anon opt-in."""
+    auth = request.headers.get("authorization") or ""
     if METRICS_TOKEN:
-        auth = request.headers.get("authorization") or ""
         if auth != f"Bearer {METRICS_TOKEN}":
             return Response("unauthorized\n", status_code=401, media_type="text/plain")
+    elif not METRICS_ALLOW_ANON and not _metrics_admin_session(request):
+        return Response("unauthorized\n", status_code=401, media_type="text/plain")
     return Response(REGISTRY.render(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 

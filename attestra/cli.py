@@ -513,6 +513,7 @@ def cmd_demo(args) -> None:
         services.confirm_control(
             s, e.id, framework="pci_dss_4", ref="11.4.1", status="met", assessor=assessor,
             rationale="Methodology follows OWASP WSTG and covers application and network layers; reviewed.",
+            role="auditor",
         )
         from sqlalchemy import select
 

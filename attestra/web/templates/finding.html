@@ -89,15 +89,33 @@
         <select id="to" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
       </div>
       <div style="grid-column:span 2"><label for="note">Reason</label>
-        <input id="note" name="note" type="text" placeholder="Needed for false positive / risk accepted" autocomplete="off">
+        <input id="note" name="note" type="text" placeholder="Needed for false positive" autocomplete="off">
       </div>
     </div>
+    <p class="meta">Choosing <b>Risk accepted</b> opens the risk-acceptance form (owner, expiry, rationale) instead of a bare status change.</p>
     <div class="form-actions"><button type="submit">Save status</button></div>
   </form>
   {% else %}
   <p class="meta">No further status moves from {{ f.status|label }}.</p>
   {% endif %}
 </div>
+{% if show_accept_risk or "risk_accepted" in transitions.get(f.status, []) %}
+<div class="card" id="accept-risk">
+  <h2>Risk acceptance</h2>
+  <p class="meta">Creates a risk-acceptance record and moves the finding to risk accepted in one step.</p>
+  <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/accept-risk">
+    <div class="fields">
+      <div><label for="expires_on">Expires on *</label>
+        <input id="expires_on" name="expires_on" type="date" required>
+      </div>
+      <div style="grid-column:span 2"><label for="rationale">Rationale *</label>
+        <input id="rationale" name="rationale" type="text" required maxlength="2000" placeholder="Why this risk is accepted and by whom" autocomplete="off">
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Accept risk</button></div>
+  </form>
+</div>
+{% endif %}
 {% endif %}
 
 <div class="card" id="evidence">

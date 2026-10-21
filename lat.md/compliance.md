@@ -35,7 +35,7 @@ Builds [[attestra/compliance/engine.py#ControlResult]] per control ref:
 - **Finding objectives** — open findings drive `not_met` / `partial` / `no_exceptions` via [[attestra/compliance/engine.py#_finding_status]]
 - **Process objectives** — engagement evidence via [[attestra/compliance/engine.py#_process_status]] (`has_imports`, `has_valid_authorization`, `has_validated_pt`, `no_open_high_after_retest`, `asv_passing_scan`, `segmentation_tested`, `internal_scan_quarterly`, `has_risk_assessment`)
 
-Weakest claim wins when several objectives feed one control ref.
+Weakest claim wins when several objectives feed one control ref. `has_risk_assessment` treats risk-acceptance rows as at most `partial` evidence (not `met`); full credit needs assessor confirmation.
 
 ## PCI / ISO records
 
@@ -52,7 +52,7 @@ ASV attestations, segmentation tests, risk acceptances, scan schedules, and nonc
 
 Named assessor override of the engine proposal.
 
-[[attestra/services.py#confirm_control]] persists [[attestra/models.py#ControlAssessment]]. Confirmed status overrides the proposal ([[attestra/compliance/engine.py#ControlResult#status]]).
+[[attestra/services.py#confirm_control]] persists [[attestra/models.py#ControlAssessment]]. Confirmed status overrides the proposal ([[attestra/compliance/engine.py#ControlResult#status]]). Only `auditor` and `admin` may confirm (`compliance.confirm`). Confirming `met` while open mapped findings remain is refused unless `allow_open_findings_override` is set with rationale.
 
 Service entry: [[attestra/services.py#compliance]].
 

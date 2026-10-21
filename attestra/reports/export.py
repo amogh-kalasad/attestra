@@ -97,6 +97,26 @@ def _minimal_pdf(text: str) -> bytes:
     return bytes(out)
 
 
+def _atomic_write_readonly(path: Path, data: bytes) -> None:
+    """Write export bytes atomically, replacing a prior read-only file (P1-1)."""
+    import os
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    if path.exists():
+        try:
+            path.chmod(0o666)
+        except OSError:
+            pass
+        try:
+            path.unlink()
+        except OSError:
+            # Windows may still hold a handle; fall through to replace.
+            pass
+    os.replace(tmp, path)
+    path.chmod(0o444)
+
+
 def to_docx(report: Report) -> tuple[Path, str]:
     html = Path(report.path).read_text(encoding="utf-8", errors="replace")
     text = _html_to_text(html)
@@ -109,8 +129,7 @@ def to_docx(report: Report) -> tuple[Path, str]:
         data = _minimal_docx(text)
     sha = hashlib.sha256(data).hexdigest()
     out = Path(report.path).with_suffix(".docx")
-    out.write_bytes(data)
-    out.chmod(0o444)
+    _atomic_write_readonly(out, data)
     report.docx_path, report.docx_sha256 = str(out), sha
     return out, sha
 
@@ -128,8 +147,7 @@ def to_pdf(report: Report) -> tuple[Path, str]:
         data = _minimal_pdf(_html_to_text(html))
     sha = hashlib.sha256(data).hexdigest()
     out = Path(report.path).with_suffix(".pdf")
-    out.write_bytes(data)
-    out.chmod(0o444)
+    _atomic_write_readonly(out, data)
     report.pdf_path, report.pdf_sha256 = str(out), sha
     return out, sha
 

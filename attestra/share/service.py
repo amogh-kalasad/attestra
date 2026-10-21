@@ -245,25 +245,48 @@ def public_view(s: Session, raw: str, *, ip: str = "") -> dict | None:
             )
         )
     )
-    grade_info = score_from_findings(findings_orm)
-    target_name = (asset.name or "").strip() or (asset.identifier or "target")
+    # P0-4: no completed scan and no findings → "Not yet tested", not A+/100.
+    from attestra.models import ScanRun
 
-    payload = {
-        "target_name": target_name,
-        "grade": grade_info["grade"],
-        "score": grade_info["score"],
-        "breakdown": [
-            {
-                "check": r["check"],
-                "result": r["result"],
-                "points": r["points"],
-                "reason": r["reason"],
-            }
-            for r in grade_info["breakdown"]
-        ],
-        "findings": _public_findings(s, asset),
-        "kind": row.kind,
-    }
+    has_scan = s.scalar(
+        select(ScanRun.id).where(
+            ScanRun.asset_id == asset.id,
+            ScanRun.status.in_(("done", "succeeded", "completed")),
+        ).limit(1)
+    )
+    tested = bool(findings_orm) or has_scan is not None
+    target_name = (asset.name or "").strip() or (asset.identifier or "target")
+    if not tested:
+        payload = {
+            "target_name": target_name,
+            "grade": None,
+            "score": None,
+            "tested": False,
+            "untested": True,
+            "breakdown": [],
+            "findings": [],
+            "kind": row.kind,
+        }
+    else:
+        grade_info = score_from_findings(findings_orm)
+        payload = {
+            "target_name": target_name,
+            "grade": grade_info["grade"],
+            "score": grade_info["score"],
+            "tested": True,
+            "untested": False,
+            "breakdown": [
+                {
+                    "check": r["check"],
+                    "result": r["result"],
+                    "points": r["points"],
+                    "reason": r["reason"],
+                }
+                for r in grade_info["breakdown"]
+            ],
+            "findings": _public_findings(s, asset),
+            "kind": row.kind,
+        }
     if row.kind == "scan" and row.scan_run_id:
         scan = s.get(ScanRun, row.scan_run_id)
         if scan:
@@ -304,28 +327,34 @@ def badge_svg(s: Session, raw: str, *, ip: str = "") -> str | None:
     view = public_view(s, raw, ip=ip)
     if view is None:
         return None
-    grade = xml_escape(str(view["grade"]))
-    score = xml_escape(str(view["score"]))
-    label = xml_escape(f"Grade {view['grade']} · {view['score']}")
+    if view.get("untested") or view.get("grade") is None:
+        label = xml_escape("Attestra · Not yet tested")
+        right = "Not tested"
+        fill = "#64748B"
+    else:
+        label = xml_escape(f"Grade {view['grade']} · {view['score']}")
+        right = f"{view['grade']} · {view['score']}"
+        fill = "#4338CA"
+    right_esc = xml_escape(right)
     # Fixed template: no external fonts or scripts; grade/score escaped.
     return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="20" role="img" '
+        '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="20" role="img" '
         f'aria-label="{label}">'
         '<title>' + label + '</title>'
         '<linearGradient id="s" x2="0" y2="100%">'
         '<stop offset="0" stop-color="#bbb" stop-opacity=".1"/>'
         '<stop offset="1" stop-opacity=".1"/>'
         "</linearGradient>"
-        '<mask id="m"><rect width="160" height="20" rx="3" fill="#fff"/></mask>'
+        '<mask id="m"><rect width="180" height="20" rx="3" fill="#fff"/></mask>'
         '<g mask="url(#m)">'
         '<rect width="70" height="20" fill="#555"/>'
-        '<rect x="70" width="90" height="20" fill="#4338CA"/>'
-        '<rect width="160" height="20" fill="url(#s)"/>'
+        f'<rect x="70" width="110" height="20" fill="{fill}"/>'
+        '<rect width="180" height="20" fill="url(#s)"/>'
         "</g>"
         '<g fill="#fff" text-anchor="middle" '
         'font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">'
         '<text x="35" y="14">Attestra</text>'
-        f'<text x="114" y="14">{grade} · {score}</text>'
+        f'<text x="125" y="14">{right_esc}</text>'
         "</g>"
         "</svg>"
     )

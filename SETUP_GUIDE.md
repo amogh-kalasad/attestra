@@ -49,3 +49,4 @@ cd E:\attestra
 - "Port 8000 in use": stop the old process (step 4) or use `--port 8001`.
 - Disk full errors during install: make sure TEMP/TMP and PIP_CACHE_DIR point to E: (step 2).
 - Logs (when started in background): `E:\attestra\data\serve.out.log`, `serve.err.log`.
+- `/metrics` returns 401: set `ATTESTRA_METRICS_TOKEN` for Prometheus scrapers (recommended). Do not leave metrics open on a public host; `ATTESTRA_METRICS_ALLOW_ANON=true` is only for trusted private networks.

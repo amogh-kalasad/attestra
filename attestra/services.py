@@ -1007,22 +1007,38 @@ def tls_summaries(s: Session, engagement_id: int) -> list[dict]:
 
 
 def list_findings(s: Session, engagement_id: int, status: str | None = None, severity: str | None = None) -> list[Finding]:
-    q = select(Finding).where(Finding.engagement_id == engagement_id)
+    from sqlalchemy.orm import joinedload
+
+    q = select(Finding).options(joinedload(Finding.asset)).where(Finding.engagement_id == engagement_id)
     if status:
         q = q.where(Finding.status == status)
     if severity:
         q = q.where(Finding.severity == severity)
-    return list(s.scalars(q.order_by(Finding.risk_score.desc(), Finding.id)))
+    return list(s.scalars(q.order_by(Finding.risk_score.desc(), Finding.id)).unique())
 
 
-def transition(s: Session, finding_id: int, *, to: str, actor: str, note: str = "") -> Finding:
+def transition(
+    s: Session,
+    finding_id: int,
+    *,
+    to: str,
+    actor: str,
+    note: str = "",
+    _from_accept_risk: bool = False,
+) -> Finding:
     f = s.get(Finding, finding_id)
     if not f:
         raise LookupError(f"finding {finding_id} not found")
     allowed = TRANSITIONS.get(f.status, set())
     if to not in allowed:
         raise ServiceError(f"cannot move finding from '{f.status}' to '{to}'; allowed: {sorted(allowed) or 'none'}")
-    if to in ("false_positive", "risk_accepted") and not note.strip():
+    # P0-3: risk_accepted requires a RiskAcceptance row via accept_risk(), not a bare status flip.
+    if to == "risk_accepted" and not _from_accept_risk:
+        raise ServiceError(
+            "risk_accepted requires a risk-acceptance record (owner, expiry, rationale); "
+            "use accept-risk / POST /risk-acceptances instead of a bare status change"
+        )
+    if to == "false_positive" and not note.strip():
         raise ServiceError(f"a reason is required to mark a finding {to}")
     if to == "validated":
         f.validated_by = actor
@@ -1082,15 +1098,53 @@ def compliance(s: Session, engagement_id: int, framework: str):
 
 
 def confirm_control(
-    s: Session, engagement_id: int, *, framework: str, ref: str, status: str, assessor: str, rationale: str
+    s: Session,
+    engagement_id: int,
+    *,
+    framework: str,
+    ref: str,
+    status: str,
+    assessor: str,
+    rationale: str,
+    role: str | None = None,
+    allow_open_findings_override: bool = False,
 ) -> ControlAssessment:
+    """Confirm a control status. P0-1/P0-2: auditor/admin only; block 'met' with open findings."""
+    from attestra.auth.roles import has_permission
+
+    if role is not None and not has_permission(role, "compliance.confirm"):
+        audit.record(
+            s, assessor, "control.confirm_refused", "engagement", engagement_id,
+            framework=framework, ref=ref, status=status, reason="role not allowed",
+        )
+        raise ServiceError("not allowed: only an auditor or admin may confirm controls")
     if status not in ("met", "partial", "not_met", "not_applicable"):
         raise ServiceError("status must be met | partial | not_met | not_applicable")
     if not rationale.strip():
         raise ServiceError("a rationale is required when confirming a control")
-    refs = {r.ref for r in compliance(s, engagement_id, framework)}
-    if ref not in refs:
+    results = compliance(s, engagement_id, framework)
+    by_ref = {r.ref: r for r in results}
+    if ref not in by_ref:
         raise ServiceError(f"control '{ref}' is not in the {framework} library")
+    ctrl = by_ref[ref]
+    open_ids = list(ctrl.finding_ids or [])
+    if status == "met" and open_ids and not allow_open_findings_override:
+        audit.record(
+            s, assessor, "control.confirm_refused", "engagement", engagement_id,
+            framework=framework, ref=ref, status=status, open_finding_ids=open_ids,
+        )
+        raise ServiceError(
+            f"not allowed: cannot confirm '{ref}' as met while open findings remain: "
+            f"{', '.join(f'F-{i}' for i in open_ids)}. "
+            "Close, retest-pass, false-positive, or risk-accept them first, "
+            "or pass allow_open_findings_override with rationale."
+        )
+    if status == "met" and open_ids and allow_open_findings_override:
+        rationale = (
+            f"{rationale.strip()} [override: open findings "
+            f"{', '.join(f'F-{i}' for i in open_ids)}]"
+        )
+
     a = s.scalar(
         select(ControlAssessment).where(
             ControlAssessment.engagement_id == engagement_id,
@@ -1098,10 +1152,21 @@ def confirm_control(
             ControlAssessment.control_ref == ref,
         )
     )
+    # P0-1: if an auditor already confirmed, a non-auditor/admin cannot overwrite
+    # (permission check above covers this; keep explicit refuse + audit for clarity).
+    if a is not None and role is not None and role not in ("auditor", "admin"):
+        audit.record(
+            s, assessor, "control.confirm_refused", "control_assessment", a.id,
+            framework=framework, ref=ref, reason="overwrite not allowed",
+        )
+        raise ServiceError("not allowed: cannot overwrite an auditor's control confirmation")
     if a is None:
-        a = ControlAssessment(engagement_id=engagement_id, framework=framework, control_ref=ref, status=status, assessor=assessor)
+        a = ControlAssessment(
+            engagement_id=engagement_id, framework=framework, control_ref=ref,
+            status=status, assessor=assessor,
+        )
         s.add(a)
-    a.status, a.assessor, a.rationale, a.updated_at = status, assessor, rationale, utcnow()
+    a.status, a.assessor, a.rationale, a.updated_at = status, assessor, rationale.strip(), utcnow()
     s.flush()
     audit.record(s, assessor, "control.confirm", "control_assessment", a.id, framework=framework, ref=ref, status=status)
     return a
@@ -1127,7 +1192,9 @@ def accept_risk(
         transition(s, finding_id, to="triaged", actor=actor, note="auto-triage for risk acceptance")
         s.refresh(f)
     if f.status != "risk_accepted":
-        transition(s, finding_id, to="risk_accepted", actor=actor, note=rationale)
+        transition(
+            s, finding_id, to="risk_accepted", actor=actor, note=rationale, _from_accept_risk=True
+        )
     row = RiskAcceptance(
         engagement_id=f.engagement_id,
         finding_id=f.id,

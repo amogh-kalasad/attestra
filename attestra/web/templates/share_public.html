@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>{{ v.target_name }} · Grade {{ v.grade }}</title>
+<title>{{ v.target_name }} · {% if v.untested %}Not yet tested{% else %}Grade {{ v.grade }}{% endif %}</title>
 <style>
   :root {
     --bg: #F8FAFB; --card: #fff; --ink: #0B1220; --quiet: #64748B; --rule: #E8EDF1;
@@ -38,6 +38,10 @@
 <main>
   <p class="meta">Shared security grade</p>
   <h1>{{ v.target_name }}</h1>
+  {% if v.untested %}
+  <div class="grade" style="background:#F1F5F9;color:#475569;border-color:#CBD5E1">Not yet tested</div>
+  <p class="meta">No completed scan or imported results for this target. Absence of a grade is not evidence that the target is secure.</p>
+  {% else %}
   <div class="grade">{{ v.grade }} · {{ v.score }}</div>
   {% if v.kind == "scan" and v.scan_tool %}
   <p class="meta">Scan tool: {{ v.scan_tool }}{% if v.scan_status %} ({{ v.scan_status }}){% endif %}</p>
@@ -80,6 +84,7 @@
     <p class="meta">No findings for this target.</p>
     {% endif %}
   </section>
+  {% endif %}
 </main>
 </body>
 </html>

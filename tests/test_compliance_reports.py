@@ -94,6 +94,8 @@ def test_assessor_confirm_override(loaded):
             status="met",
             assessor="assessor@example.com",
             rationale="Reviewed methodology; documentation satisfactory.",
+            role="auditor",
+            allow_open_findings_override=True,
         )
     assert a.status == "met"
 
@@ -118,7 +120,7 @@ def test_confirm_invalid_status_raises(loaded):
         with pytest.raises(ServiceError, match="status"):
             services.confirm_control(
                 s, loaded, framework="pci_dss_4", ref=ref,
-                status="invalid_status", assessor="a", rationale="x",
+                status="invalid_status", assessor="a", rationale="x", role="auditor",
             )
 
 
@@ -134,7 +136,7 @@ def test_confirm_requires_rationale(loaded):
         with pytest.raises(ServiceError, match="rationale"):
             services.confirm_control(
                 s, loaded, framework="pci_dss_4", ref=ref,
-                status="met", assessor="a", rationale="",
+                status="met", assessor="a", rationale="", role="auditor",
             )
 
 
@@ -146,7 +148,7 @@ def test_confirm_unknown_ref_raises(loaded):
         with pytest.raises(ServiceError, match="not in the pci_dss_4 library"):
             services.confirm_control(
                 s, loaded, framework="pci_dss_4", ref="99.99.99",
-                status="met", assessor="a", rationale="some reason",
+                status="met", assessor="a", rationale="some reason", role="auditor",
             )
 
 

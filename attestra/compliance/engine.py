@@ -246,13 +246,16 @@ def _process_status(rule: str, eng: Engagement, findings: list[Finding], import_
                 return "partial", "Internal scans present; quarter not yet marked clean of high/critical."
         return "not_assessed", "No quarterly internal scan schedule or imports."
     if rule == "has_risk_assessment":
+        # P0-6: a risk-acceptance record alone is supporting evidence at most "partial".
+        # "met" requires assessor confirmation (propose-then-confirm), not a single acceptance.
         acceptances = list(getattr(eng, "risk_acceptances", None) or [])
-        # Engagement-level risk analysis evidenced by at least one risk acceptance or assessor note.
-        # Also met when any ControlAssessment exists for 12.3.1 / Clause 6.1.2 (handled by confirm).
-        if acceptances:
-            return "met", f"{len(acceptances)} risk acceptance record(s) on file."
-        # Presence of any confirmed control assessment on this engagement counts as assessment activity.
         assessments = list(getattr(eng, "control_assessments", None) or [])
+        if acceptances:
+            return (
+                "partial",
+                f"{len(acceptances)} risk acceptance record(s) on file; "
+                "assessor must confirm the risk-assessment process for full credit.",
+            )
         if assessments:
             return "partial", "Control assessments present; document targeted risk analysis for full credit."
         return "not_assessed", "No risk acceptance or control assessment records yet."

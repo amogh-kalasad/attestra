@@ -1168,6 +1168,7 @@ def finding_page(request: Request, eid: int, fid: int):
             "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
             "comments": comments,
             "can_add_comment": can_add_comment(principal.role),
+            "show_accept_risk": request.query_params.get("accept_risk") == "1",
         })
 
 
@@ -1229,6 +1230,13 @@ def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(.
         return redirect
     if not has_permission(principal.role, "finding.write"):
         return _back(url, error="Your role can't change finding status.", anchor="#findings")
+    # P0-3: risk acceptance needs owner/expiry/rationale — send the user to that form.
+    if to == "risk_accepted":
+        from fastapi.responses import RedirectResponse
+
+        return RedirectResponse(
+            f"/engagements/{eid}/findings/{fid}?accept_risk=1", status_code=303
+        )
     try:
         with db.session() as s:
             services.get_engagement(s, eid, principal)
@@ -1242,6 +1250,45 @@ def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(.
         return _back(url, error=str(e), anchor=f"#f-{fid}" if url == list_url else "#status")
     return _back(url, msg=f"F-{fid} moved to {label(to).lower()}.",
                  anchor=f"#f-{fid}" if url == list_url else "#status")
+
+
+@router.post("/engagements/{eid}/findings/{fid}/accept-risk")
+def ui_accept_risk(
+    request: Request,
+    eid: int,
+    fid: int,
+    expires_on: str = Form(...),
+    rationale: str = Form(...),
+):
+    """P0-3: create RiskAcceptance and move finding to risk_accepted in one step."""
+    from datetime import date as date_cls
+
+    url = f"/engagements/{eid}/findings/{fid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.write"):
+        return _back(url, error="Your role can't accept risk.", anchor="#status")
+    try:
+        exp = date_cls.fromisoformat(expires_on.strip())
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            from attestra.models import Finding
+
+            f = s.get(Finding, fid)
+            if not f or f.engagement_id != eid:
+                raise LookupError(f"finding F-{fid} is not in this engagement")
+            services.accept_risk(
+                s,
+                fid,
+                expires_on=exp,
+                rationale=rationale,
+                actor=principal.actor,
+                owner_user_id=principal.user_id,
+            )
+    except (services.ServiceError, LookupError, ValueError) as e:
+        return _back(url, error=str(e), anchor="#accept-risk")
+    return _back(url, msg=f"F-{fid} risk-accepted with record.", anchor="#status")
 
 
 @router.post("/engagements/{eid}/reports/generate")

@@ -58,9 +58,10 @@ def findings_to_rows(findings: list[Finding]) -> list[list[str]]:
     """Map finding rows to guarded CSV cells (no evidence / notes / comments)."""
     rows: list[list[str]] = []
     for f in findings:
+        # Prefer identifier (URL/host) so the target column is never blank when linked (P1-3).
         target = ""
         if f.asset is not None:
-            target = f.asset.name or f.asset.identifier or ""
+            target = (f.asset.identifier or f.asset.name or "").strip()
         tools = ", ".join(str(t) for t in (f.tools or []))
         rows.append(
             [

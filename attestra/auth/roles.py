@@ -20,7 +20,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "engagement.halt": frozenset({"admin", "lead"}),
     "engagement.resume": frozenset({"admin", "lead"}),
     "compliance.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
-    "compliance.confirm": frozenset({"admin", "lead", "reviewer", "auditor"}),
+    # P0-1: only auditor (and admin break-glass) may confirm or overwrite control status.
+    "compliance.confirm": frozenset({"admin", "auditor"}),
     "report.generate": frozenset({"admin", "lead", "tester"}),
     "report.submit": frozenset({"admin", "lead", "tester"}),
     "report.approve": frozenset({"admin", "lead", "reviewer"}),
