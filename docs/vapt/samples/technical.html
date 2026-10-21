@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technical security testing report · Sample Corp (synthetic)</title>
+<style>
+  :root { --ink:#16181d; --quiet:#5b6170; --rule:#e3e5ea; --accent:#2457d6;
+          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: var(--ink); background:#fff;
+         max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; counter-reset: page; }
+  h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 36px 0 10px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  .meta { color: var(--quiet); font-size: 13px; }
+  .brand { font-weight: 700; letter-spacing: .02em; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--quiet); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  .sev { display:inline-block; padding: 1px 8px; border-radius: 10px; color:#fff; font-size: 12px; font-weight:600; text-transform: capitalize; }
+  .sev-critical{background:var(--crit)} .sev-high{background:var(--high)} .sev-medium{background:var(--med)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
+  .st { font-weight: 600; text-transform: capitalize; }
+  .st-met{color:var(--low)} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .kpis { display:flex; gap:12px; flex-wrap: wrap; margin: 12px 0; }
+  .kpi { border:1px solid var(--rule); border-radius: 8px; padding: 10px 14px; min-width: 110px; }
+  .kpi b { display:block; font-size: 22px; }
+  .finding { border:1px solid var(--rule); border-radius: 8px; padding: 12px 16px; margin: 12px 0; page-break-inside: avoid; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .note { background:#f5f7fb; border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; }
+  .cover { min-height: 42vh; display:flex; flex-direction:column; justify-content:center;
+           border-bottom: 2px solid var(--accent); margin: 0 0 28px; padding-bottom: 28px; page-break-after: always; }
+  .cover img { max-height: 88px; max-width: 260px; margin-bottom: 20px; }
+  .cover h1 { font-size: 30px; margin: 8px 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc li { margin: 4px 0; }
+  .evidence-img { max-width: 100%; max-height: 360px; border: 1px solid var(--rule); margin: 8px 0; }
+  .fig-caption { color: var(--quiet); font-size: 12px; margin: 0 0 12px; }
+  .draft-mark { position: fixed; top: 40%; left: 10%; font-size: 72px; color: rgba(161,22,27,.12);
+                transform: rotate(-28deg); pointer-events: none; z-index: 0; font-weight: 800; letter-spacing: .08em; }
+  footer { margin-top: 48px; color: var(--quiet); font-size: 12px; border-top:1px solid var(--rule); padding-top: 10px; }
+  @media print {
+    body { padding: 0; }
+    h2 { page-break-after: avoid; }
+    .draft-mark { position: fixed; }
+    @page { margin: 18mm 14mm 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 10px; color: #5b6170; } }
+  }
+</style>
+</head>
+<body>
+<div class="draft-mark" aria-hidden="true">DRAFT</div><section class="cover" id="cover">
+  <div class="meta"><span class="brand">ATTESTRA</span> · Sample Corp (synthetic)</div>
+  <h1>Technical security testing report</h1>
+  <p>Sample VAPT coverage engagement</p>
+  <p class="meta">Client: Sample Corp (synthetic)</p>
+  <p class="meta">Assessment type: VA + PT · Date: 2026-10-21 · Document version 1</p>
+  <p class="meta">Engagement #5 · Window: 2026-10-14 to 2026-10-28</p>
+</section>
+<nav class="toc" id="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#document-control">Document control</a></li>
+    <li><a href="#scope">Scope and authorization</a></li>
+    <li><a href="#methodology">Methodology and data sources</a></li>
+    <li><a href="#standards">Standards and test types</a></li>
+    <li><a href="#risk-legend">Risk rating legend</a></li>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#findings-overview">Findings overview</a></li>
+    <li><a href="#passed-checks">Passed checks</a></li>
+    <li><a href="#site-grades">Site grades</a></li>
+    <li><a href="#tls">TLS summary</a></li>
+    <li><a href="#findings">Detailed findings</a></li>
+    <li><a href="#disclaimer">Assumptions, limitations and confidentiality</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+  </ol>
+</nav>
+
+<h2 id="document-control">1. Document control</h2>
+<table>
+  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th><th>SHA-256</th></tr>
+  <tr>
+    <td>v1</td>
+    <td>draft (this generation)</td>
+    <td>2026-10-21</td>
+    <td>sample-generator</td>
+    <td>—</td>
+    <td>—</td>
+    <td class="mono">pending freeze</td>
+  </tr>
+</table>
+
+<h2 id="scope">2. Scope and authorization</h2>
+<div class="meta">Type: VA + PT · Window: 2026-10-14 to 2026-10-28 · Frameworks: pci_dss_4, iso_27001_2022, soc2, cert_in_2022, nist_csf_2</div>
+<table>
+  <tr><th>Asset</th><th>Kind</th><th>Environment</th><th>Criticality</th><th>Exposure</th><th>PCI CDE</th><th>Test types</th></tr>
+  <tr>
+    <td class="mono">https://shop.example.com</td>
+    <td>web_app</td>
+    <td>production</td>
+    <td>5/5</td>
+    <td>internet</td>
+    <td>Yes</td>
+    <td>web_dast, manual_pt, tls</td>
+  </tr>
+</table>
+<table>
+  <tr><th>Authorization document</th><th>Signer</th><th>Valid</th><th>Environments</th><th>SHA-256</th></tr>
+  <tr>
+    <td>authorization.txt</td>
+    <td>Sample CISO</td>
+    <td>2026-10-16 to 2026-11-20</td>
+    <td>production</td>
+    <td class="mono">d9b20b64cd3e412d057c43641f8e455e67a7f3eb94bedf2886f76992d3c1b1b5</td>
+  </tr>
+</table>
+
+<h2 id="methodology">3. Methodology and data sources</h2>
+<ol>
+  <li>Planning and authorization</li>
+  <li>Discovery and enumeration</li>
+  <li>Vulnerability identification</li>
+  <li>Manual validation / exploitation (within authorized scope)</li>
+  <li>Risk ranking and reporting</li>
+  <li>Remediation guidance and retest (when in scope)</li>
+</ol>
+<p>Automated assessment results were imported from the tools below, normalized to a common schema, de-duplicated by fingerprint
+and ranked by risk (CVSS × (1 + EPSS) × KEV × asset criticality × exposure). Manual validation follows the OWASP Web Security
+Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named tester confirms it with evidence.</p>
+<table>
+  <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
+  <tr><td>17</td><td>zap</td><td>zap.json</td><td>2026-10-21 by sample-generator</td><td>4 / 0</td><td class="mono">e1d590aedb36c36e362a4b965a401b7f59b2220b24e9b83eebc30e61a613f232</td></tr>
+  <tr><td>18</td><td>nuclei</td><td>nuclei.jsonl</td><td>2026-10-21 by sample-generator</td><td>3 / 0</td><td class="mono">a8d1823c82e6423cdccfc6a5c756b71b9436550c42c91aa54ac8cf809118d88f</td></tr>
+  <tr><td>19</td><td>trivy</td><td>trivy.json</td><td>2026-10-21 by sample-generator</td><td>3 / 0</td><td class="mono">0ca137790553dd8eb27257907cbebb929fb03c36e5f2501bb415da5d68e38b79</td></tr>
+  <tr><td>20</td><td>sarif</td><td>semgrep.sarif</td><td>2026-10-21 by sample-generator</td><td>2 / 0</td><td class="mono">17793587f8cb62e8612a1a4065b12959d93056a44762ff50deab4cf2c3bb7a04</td></tr>
+</table>
+
+<h2 id="standards">4. Standards and test types</h2>
+<table>
+  <tr><th>Test type</th><th>Label</th><th>Standard</th></tr>
+  <tr><td class="mono">web_dast</td><td>Web app scan (DAST)</td><td>OWASP Top 10</td></tr>
+  <tr><td class="mono">manual_pt</td><td>Manual penetration test</td><td>OWASP WSTG / ASVS</td></tr>
+  <tr><td class="mono">tls</td><td>TLS / SSL configuration</td><td>PCI DSS 4.2.1</td></tr>
+</table>
+<p><b>Standards referenced:</b> OWASP Top 10; OWASP WSTG / ASVS; PCI DSS 4.2.1</p>
+
+<h2 id="risk-legend">5. Risk rating legend</h2>
+<table>
+  <tr><th>Severity</th><th>CVSS range</th><th>Open count</th></tr>
+  <tr>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>9.0 – 10.0</td>
+    <td>3</td>
+  </tr>
+  <tr>
+    <td><span class="sev sev-high">high</span></td>
+    <td>7.0 – 8.9</td>
+    <td>6</td>
+  </tr>
+  <tr>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>4.0 – 6.9</td>
+    <td>2</td>
+  </tr>
+  <tr>
+    <td><span class="sev sev-low">low</span></td>
+    <td>0.1 – 3.9</td>
+    <td>1</td>
+  </tr>
+  <tr>
+    <td><span class="sev sev-info">info</span></td>
+    <td>0.0 (informational)</td>
+    <td>0</td>
+  </tr>
+</table>
+<p class="meta">Risk score also factors EPSS, CISA KEV, asset criticality and exposure. CVSS vector strings appear on individual findings when available.</p>
+
+<h2 id="summary">6. Summary</h2>
+<div class="kpis">
+<div class="kpi"><span class="sev sev-critical">critical</span><b>3</b>open</div><div class="kpi"><span class="sev sev-high">high</span><b>6</b>open</div><div class="kpi"><span class="sev sev-medium">medium</span><b>2</b>open</div><div class="kpi"><span class="sev sev-low">low</span><b>1</b>open</div><div class="kpi"><span class="sev sev-info">info</span><b>0</b>open</div>  <div class="kpi">False positives<b>0</b>excluded</div>
+</div>
+<div><svg xmlns="http://www.w3.org/2000/svg" width="320" height="144" role="img" aria-label="Findings by severity trend"><rect x="8" y="60" width="54" height="60" fill="#b91c1c" /><text x="8" y="134" font-size="9" fill="#334155">crit</text><rect x="70" y="0" width="54" height="120" fill="#c2410c" /><text x="70" y="134" font-size="9" fill="#334155">high</text><rect x="132" y="80" width="54" height="40" fill="#a16207" /><text x="132" y="134" font-size="9" fill="#334155">medi</text><rect x="194" y="100" width="54" height="20" fill="#15803d" /><text x="194" y="134" font-size="9" fill="#334155">low</text><rect x="256" y="120" width="54" height="0" fill="#475569" /><text x="256" y="134" font-size="9" fill="#334155">info</text></svg></div>
+
+<h2 id="findings-overview">7. Findings overview</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Retest result</th><th>Asset</th></tr>
+  <tr>
+    <td class="mono">F-53</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-49</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-50</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-54</td>
+    <td>SQL Injection in Login Endpoint</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-56</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-51</td>
+    <td>Absence of Anti-CSRF Tokens</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-55</td>
+    <td>Weak TLS Cipher Suite Supported</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+  <tr>
+    <td class="mono">F-60</td>
+    <td>Subprocess with shell=True and user input</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-59</td>
+    <td>SQL Injection via string concatenation</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-58</td>
+    <td>Image user should not be root</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-57</td>
+    <td>OpenSSL memory corruption</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-52</td>
+    <td>X-Content-Type-Options Header Missing</td>
+    <td><span class="sev sev-low">low</span></td>
+    <td>new</td>
+    <td>—</td>
+    <td class="mono">https://shop.example.com</td>
+  </tr>
+</table>
+
+<h2 id="passed-checks">8. Passed checks</h2>
+<p class="meta">Checks that ran clean (green) sit next to checks that failed. Skipped means the check was not run for this target.</p>
+<table>
+  <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
+  <tr>
+    <td>Absence of Anti-CSRF Tokens</td>
+    <td><span style="color:#b91c1c;font-weight:600">Failed</span></td>
+    <td>zap</td>
+    <td class="mono">Absence of Anti-CSRF Tokens</td>
+  </tr>
+  <tr>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span style="color:#b91c1c;font-weight:600">Failed</span></td>
+    <td>zap</td>
+    <td class="mono">Cross Site Scripting (Reflected)</td>
+  </tr>
+  <tr>
+    <td>False Positive — Should Be Skipped</td>
+    <td><span style="color:#b91c1c;font-weight:600">Failed</span></td>
+    <td>zap</td>
+    <td class="mono">False Positive — Should Be Skipped</td>
+  </tr>
+  <tr>
+    <td>X-Content-Type-Options header</td>
+    <td><span style="color:#b91c1c;font-weight:600">Failed</span></td>
+    <td>zap</td>
+    <td class="mono">X-Content-Type-Options Header Missing</td>
+  </tr>
+  <tr>
+    <td>Cache-control directives</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Character set / Content-Type</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Content-Security-Policy directives</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Content-Security-Policy header</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Cookie HttpOnly flag</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Cookie SameSite attribute</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Cookie Secure flag</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Cross-Origin isolation headers (COEP/COOP/CORP)</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Cross-domain misconfiguration</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Modern Web Application</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Permissions-Policy / Feature-Policy</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Storable and cacheable content</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>Strict-Transport-Security (HSTS)</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>X-Frame-Options header</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+  <tr>
+    <td>X-XSS-Protection header</td>
+    <td><span style="color:#15803d;font-weight:600">Passed</span></td>
+    <td>zap</td>
+    <td class="mono">—</td>
+  </tr>
+</table>
+
+<h2 id="site-grades">9. Site grades</h2>
+<p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>
+  <h3>https://shop.example.com — <b>A</b> (score 95)</h3>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    <tr>
+      <td class="mono">csp_missing</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Missing Content-Security-Policy (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">csp_unsafe_inline</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>CSP present but script-src allows unsafe-inline (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">csp_strong</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Strong CSP (bonus only if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">hsts_missing</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Missing Strict-Transport-Security (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">hsts_short</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>HSTS max-age under 6 months (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">hsts_preload</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>HSTS with preload and includeSubDomains (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">xcto_missing</td>
+      <td>fail</td>
+      <td>-5</td>
+      <td>Missing X-Content-Type-Options</td>
+    </tr>
+    <tr>
+      <td class="mono">clickjacking</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Missing X-Frame-Options and no CSP frame-ancestors (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">referrer_missing</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Missing Referrer-Policy (info only) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">referrer_good</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Good Referrer-Policy (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">cookie_secure</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Cookie without Secure on HTTPS (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">cookie_httponly</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Session cookie without HttpOnly (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">cookie_samesite</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>SameSite set on cookies (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">tls_legacy</td>
+      <td>pass</td>
+      <td>0</td>
+      <td>TLS 1.0 or 1.1 enabled</td>
+    </tr>
+    <tr>
+      <td class="mono">tls_weak_cipher</td>
+      <td>pass</td>
+      <td>0</td>
+      <td>Weak TLS cipher</td>
+    </tr>
+    <tr>
+      <td class="mono">cert_expired</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Certificate expired or invalid — grade capped at F (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">cert_expires_soon</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Certificate expires in under 14 days (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">http_no_https_redirect</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>http:// does not redirect to https:// on the same host (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">csp_strong</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Strong CSP (bonus only if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">hsts_preload</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>HSTS with preload and includeSubDomains (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">referrer_good</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>Good Referrer-Policy (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+    <tr>
+      <td class="mono">cookie_samesite</td>
+      <td>not_tested</td>
+      <td>0</td>
+      <td>SameSite set on cookies (bonus if score &gt;= 90) (not tested)</td>
+    </tr>
+  </table>
+
+<h2 id="tls">10. TLS summary</h2>
+<p class="meta">Protocols, ciphers, certificate and OCSP from the latest testssl result for each target.</p>
+  <p><b>—:</b> not scanned</p>
+
+<h2 id="findings">11. Detailed findings</h2>
+<div class="finding" id="finding-53">
+  <h3>F-53 · Critical RCE in example-lib</h3>
+  <div><span class="sev sev-critical">critical</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 17.8
+&nbsp;· CVSS 9.8&nbsp;· <span class="mono">CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N</span>&nbsp;· Fix by 2026-11-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/api/v1/deserialize</td></tr>
+<tr><th>CWE</th><td>CWE-94</td></tr><tr><th>CVE</th><td>CVE-2024-9999</td></tr><tr><th>OWASP Top 10</th><td>A03:2021</td></tr><tr><th>ASVS</th><td>V5.1.1</td></tr><tr><th>WSTG</th><td>WSTG-INPV-05</td></tr>    <tr><th>Detected by</th><td>nuclei (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>patching, secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> Remote code execution via deserialization in example-lib before 2.1.0.</p><p><b>Recommendation.</b> Upgrade example-lib to 2.1.0 or later.</p></div>
+<div class="finding" id="finding-49">
+  <h3>F-49 · Cross Site Scripting (Reflected)</h3>
+  <div><span class="sev sev-high">high</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 13.7
+&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/search [param: q]</td></tr>
+<tr><th>CWE</th><td>CWE-79</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.2.1</td></tr><tr><th>WSTG</th><td>WSTG-INPV-01</td></tr>    <tr><th>Detected by</th><td>zap (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> Cross-site scripting vulnerability allows attackers to inject client-side scripts.</p><p><b>Recommendation.</b> Phase: Architecture and Design. Use a vetted library or framework. Filter all input.</p></div>
+<div class="finding" id="finding-50">
+  <h3>F-50 · Cross Site Scripting (Reflected)</h3>
+  <div><span class="sev sev-high">high</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 13.7
+&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/product [param: name]</td></tr>
+<tr><th>CWE</th><td>CWE-79</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.2.1</td></tr><tr><th>WSTG</th><td>WSTG-INPV-01</td></tr>    <tr><th>Detected by</th><td>zap (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> Cross-site scripting vulnerability allows attackers to inject client-side scripts.</p><p><b>Recommendation.</b> Phase: Architecture and Design. Use a vetted library or framework. Filter all input.</p></div>
+<div class="finding" id="finding-54">
+  <h3>F-54 · SQL Injection in Login Endpoint</h3>
+  <div><span class="sev sev-high">high</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 13.7
+&nbsp;· CVSS 7.5&nbsp;· <span class="mono">CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N</span>&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/login</td></tr>
+<tr><th>CWE</th><td>CWE-89</td></tr><tr><th>CVE</th><td>CVE-2023-1234</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.3.4</td></tr><tr><th>WSTG</th><td>WSTG-INPV-05</td></tr>    <tr><th>Detected by</th><td>nuclei (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>patching, secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> SQL injection vulnerability allows authentication bypass.</p><p><b>Recommendation.</b> Use prepared statements and parameterized queries.</p></div>
+<div class="finding" id="finding-56">
+  <h3>F-56 · Critical RCE in example-lib</h3>
+  <div><span class="sev sev-critical">critical</span>
+    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 9.8
+&nbsp;· CVSS 9.8&nbsp;· <span class="mono">CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H</span>&nbsp;· Fix by 2026-11-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">registry.example.com/shop/api::registry.example.com/shop/api (alpine 3.18)</td></tr>
+<tr><th>CWE</th><td>CWE-94</td></tr><tr><th>CVE</th><td>CVE-2024-9999</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.2.1</td></tr><tr><th>WSTG</th><td>WSTG-INPV-11</td></tr>    <tr><th>Detected by</th><td>trivy (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>patching, secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> Remote code execution via unsafe deserialization in example-lib before 2.1.0.</p><p><b>Recommendation.</b> Upgrade example-lib to 2.1.0 or later.</p></div>
+<div class="finding" id="finding-51">
+  <h3>F-51 · Absence of Anti-CSRF Tokens</h3>
+  <div><span class="sev sev-medium">medium</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 9.1
+&nbsp;· Fix by 2027-01-19  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/checkout</td></tr>
+<tr><th>CWE</th><td>CWE-352</td></tr><tr><th>OWASP Top 10</th><td>A01: Broken Access Control</td></tr><tr><th>ASVS</th><td>V4.2.2</td></tr><tr><th>WSTG</th><td>WSTG-SESS-05</td></tr>    <tr><th>Detected by</th><td>zap (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> No anti-CSRF tokens found in a HTML submission form.</p><p><b>Recommendation.</b> Phase: Architecture and Design. Use a vetted library or framework that provides CSRF protection.</p></div>
+<div class="finding" id="finding-55">
+  <h3>F-55 · Weak TLS Cipher Suite Supported</h3>
+  <div><span class="sev sev-medium">medium</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 9.1
+&nbsp;· Fix by 2027-01-19  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com</td></tr>
+<tr><th>CWE</th><td>CWE-326</td></tr><tr><th>OWASP Top 10</th><td>A02: Cryptographic Failures</td></tr><tr><th>ASVS</th><td>V6.2.2</td></tr><tr><th>WSTG</th><td>WSTG-CRYP-01</td></tr>    <tr><th>Detected by</th><td>nuclei (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>crypto_in_transit, vuln_identification</td></tr>
+  </table>
+<p><b>Description.</b> Server accepts cipher suites below 128-bit key strength.</p><p><b>Recommendation.</b> Disable weak ciphers in TLS configuration.</p></div>
+<div class="finding" id="finding-60">
+  <h3>F-60 · Subprocess with shell=True and user input</h3>
+  <div><span class="sev sev-critical">critical</span>
+    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 9.0
+&nbsp;· CVSS 9.0&nbsp;· Fix by 2026-11-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">services/payments/tasks.py:87</td></tr>
+<tr><th>CWE</th><td>CWE-78</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.3.1</td></tr><tr><th>WSTG</th><td>WSTG-INPV-11</td></tr>    <tr><th>Detected by</th><td>semgrep (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> shell=True with user-controlled input enables OS command injection.</p><p><b>Recommendation.</b> Avoid shell=True with user-controlled input; use subprocess.run with a list of arguments.</p></div>
+<div class="finding" id="finding-59">
+  <h3>F-59 · SQL Injection via string concatenation</h3>
+  <div><span class="sev sev-high">high</span>
+    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 8.0
+&nbsp;· CVSS 8.0&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">services/payments/views.py:42</td></tr>
+<tr><th>CWE</th><td>CWE-89</td></tr><tr><th>OWASP Top 10</th><td>A03: Injection</td></tr><tr><th>ASVS</th><td>V5.3.4</td></tr><tr><th>WSTG</th><td>WSTG-INPV-05</td></tr>    <tr><th>Detected by</th><td>semgrep (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_coding, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> User-controlled input from request.GET reaches a raw SQL query. This allows SQL injection attacks.</p><p><b>Recommendation.</b> Use parameterized queries or an ORM to prevent SQL injection. Never interpolate user input into raw SQL.</p></div>
+<div class="finding" id="finding-58">
+  <h3>F-58 · Image user should not be root</h3>
+  <div><span class="sev sev-high">high</span>
+    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 7.5
+&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">registry.example.com/shop/api (alpine 3.18) [param: DS002]</td></tr>
+<tr><th>CWE</th><td>CWE-16</td></tr><tr><th>OWASP Top 10</th><td>A05: Security Misconfiguration</td></tr><tr><th>ASVS</th><td>V14.1.1</td></tr><tr><th>WSTG</th><td>WSTG-CONF-01</td></tr>    <tr><th>Detected by</th><td>trivy (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_config, vuln_identification</td></tr>
+  </table>
+<p><b>Description.</b> Running containers as root is a security risk.</p><p><b>Recommendation.</b> Specify a non-root user in the Dockerfile using USER directive.</p></div>
+<div class="finding" id="finding-57">
+  <h3>F-57 · OpenSSL memory corruption</h3>
+  <div><span class="sev sev-high">high</span>
+    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 7.4
+&nbsp;· CVSS 7.4&nbsp;· <span class="mono">CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N</span>&nbsp;· Fix by 2026-12-20  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">registry.example.com/shop/api::registry.example.com/shop/api (alpine 3.18)</td></tr>
+<tr><th>CWE</th><td>CWE-119</td></tr><tr><th>CVE</th><td>CVE-2023-5678</td></tr>    <tr><th>Detected by</th><td>trivy (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>patching, vuln_identification</td></tr>
+  </table>
+<p><b>Description.</b> Memory corruption in OpenSSL 1.1.1 before 1.1.1u.</p><p><b>Recommendation.</b> Upgrade libssl to 1.1.1u or later.</p></div>
+<div class="finding" id="finding-52">
+  <h3>F-52 · X-Content-Type-Options Header Missing</h3>
+  <div><span class="sev sev-low">low</span>
+&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>    &nbsp;Status: <b>new</b>
+    &nbsp;· Risk 5.5
+&nbsp;· Fix by 2027-04-19  </div>
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">https://shop.example.com/</td></tr>
+<tr><th>CWE</th><td>CWE-693</td></tr><tr><th>OWASP Top 10</th><td>A05: Security Misconfiguration</td></tr><tr><th>ASVS</th><td>V14.4.3</td></tr><tr><th>WSTG</th><td>WSTG-CONF-12</td></tr>    <tr><th>Detected by</th><td>zap (1 observation)</td></tr>
+    <tr><th>Control objectives</th><td>secure_config, vuln_identification, web_app_protection</td></tr>
+  </table>
+<p><b>Description.</b> The Anti-MIME-Sniffing header X-Content-Type-Options was not set to &#39;nosniff&#39;.</p><p><b>Recommendation.</b> Ensure that the application/web server sets the Content-Type header appropriately.</p>  <p><b>How to fix.</b>
+Importance: Medium. Effort: Easy.  </p>
+<p style="white-space:pre-wrap">Send X-Content-Type-Options: nosniff on all responses.
+Keep Content-Type accurate so nosniff does not break downloads.
+Verify with a single response header check.</p>  <p><b>nginx config.</b></p>
+  <pre class="mono" style="white-space:pre-wrap">add_header X-Content-Type-Options &#34;nosniff&#34; always;</pre>
+  <p><b>apache config.</b></p>
+  <pre class="mono" style="white-space:pre-wrap">Header always set X-Content-Type-Options &#34;nosniff&#34;</pre>
+</div>
+
+<h2 id="disclaimer">12. Assumptions, limitations and confidentiality</h2>
+<p>This report documents security testing performed under a signed client authorization for the stated scope, window and environments. It is not a certification, audit opinion or attestation of compliance unless a separate signed attestation letter is issued. Absence of findings does not prove that controls are effective. Findings mapped to framework controls indicate technical evidence relevant to those controls; control status requires assessor confirmation. This document is confidential and intended only for the named client and authorized recipients.</p>
+<p class="meta">Copyright and distribution: this report is confidential to Sample Corp (synthetic) and authorized recipients. Do not redistribute without client approval.</p>
+
+<h2 id="conclusion">13. Conclusion</h2>
+<p>This VA + PT engagement identified 12 reportable findings
+(3 critical, 6 high, 2 medium, 1 low, 0 info open at generation time; 0 false positives excluded).
+Remediate critical and high issues first, then retest. Control statuses in any compliance pack remain proposals until a named assessor confirms them.</p>
+<footer>
+  Generated 2026-10-21 05:58 UTC by sample-generator with Attestra 1.0.0.
+  QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
+  shown when you open this report in Attestra; check the SHA-256 and signature with
+  <span class="mono">attestra verify-report</span>. Confidential.
+  <br>Page numbers appear when printed or exported to PDF (Page X of Y).
+</footer>
+</body>
+</html>

@@ -6,7 +6,13 @@ Produces versioned HTML reports (plus letters), freezes them by SHA-256, runs a 
 
 Supported report kinds for [[attestra/reports/render.py#generate_report]].
 
-[[attestra/reports/render.py#KINDS]]: `technical`, `executive`, `compliance`, `iso_soa`, `ageing`, `closure_letter`, `attestation_letter`. Framework required for compliance; defaulted for iso_soa.
+[[attestra/reports/render.py#KINDS]]: `technical`, `executive`, `compliance`, `iso_soa`, `ageing`, `closure_letter`, `attestation_letter`, `retest`. Framework required for compliance; defaulted for iso_soa. The `retest` kind renders remediation verification from [[attestra/models.py#Retest]] rows without overwriting historical evidence.
+
+## Template configuration
+
+Metadata-driven section lists, CVSS legend, methodology phases, and disclaimer for built-in reports.
+
+[[attestra/reports/template_config.py#load_template_config]] reads `attestra/reports/data/template_config.yaml` (assessment types, nine frameworks, per-kind sections, export formats). Helpers: [[attestra/reports/template_config.py#kind_config]], [[attestra/reports/template_config.py#cvss_legend]], [[attestra/reports/template_config.py#methodology_phases]], [[attestra/reports/template_config.py#disclaimer_text]].
 
 ## Generation
 
@@ -14,8 +20,8 @@ How a report row and frozen HTML file are created.
 
 [[attestra/reports/render.py#generate_report]]:
 
-1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]). Finding comments are omitted unless `include_comments=True` (default off); see [[findings#Comments]].
-2. Render Jinja templates under `attestra/reports/templates`.
+1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]). Finding comments are omitted unless `include_comments=True` (default off); see [[findings#Comments]]. Context also includes test types/standards, report history, retests, screenshot data-URI embeds (hash-verified), tenant branding, scan history, and template-config fields.
+2. Render Jinja templates under `attestra/reports/templates` (built-in cover, TOC, document control, risk legend, disclaimer on technical; dedicated `retest.html.j2` for retests). Tenant sandbox templates still win when enabled.
 3. Write under `DATA_DIR/tenants/<id>/reports/`.
 4. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
 5. Audit the write.
@@ -24,14 +30,15 @@ How a report row and frozen HTML file are created.
 
 Names shown at the top of each report and in OSCAL output.
 
-- Technical template (`attestra/reports/templates/technical.html.j2`): page title "Technical security testing report", heading "Technical security testing report: <engagement name>".
+- Technical template (`attestra/reports/templates/technical.html.j2`): cover via `_base`, TOC, document control, scope with environment, methodology phases, standards, risk legend, findings overview with retest column, CVSS vector / OWASP / ASVS / WSTG when set, embedded screenshots, disclaimer, conclusion.
+- Retest template (`attestra/reports/templates/retest.html.j2`): retest results, asset-reached flag, unresolved risks, evidence register.
 - Compliance template (`attestra/reports/templates/compliance.html.j2`): heading "<framework name>: security testing evidence pack", page title "Compliance evidence pack".
 - Executive template (`attestra/reports/templates/executive.html.j2`): "Executive summary: <engagement name>".
 - [[attestra/reports/oscal.py#assessment_results]] names its result "Attestra security testing control roll-up".
 
 Report context includes `type_label` from [[attestra/models.py#engagement_type_label]] (for key `vapt`, that is `VA + PT`). Built-in templates print that label instead of `eng.type|upper`, so generated report pages do not contain the legacy acronym.
 
-The shared footer in `attestra/reports/templates/_base.html.j2` shows who generated the file, when, and the Attestra version. It says QA, approval and signature are not inside the file; they live in the separate sign-off record (see [[reports#Sign-off record]]) and can be checked with `attestra verify-report`.
+The shared base template (`attestra/reports/templates/_base.html.j2`) adds a cover (logo/title when configured), DRAFT watermark for generated drafts, and print CSS for Page X of Y. The footer shows who generated the file, when, and the Attestra version. QA, approval and signature remain in the separate sign-off record (see [[reports#Sign-off record]]) and can be checked with `attestra verify-report`.
 
 ## Workflow
 

@@ -1,9 +1,12 @@
 """Render reports from finding and control data, then freeze them by hash and signature."""
 # @lat: [[reports]]
+# @lat: [[reports#Template configuration]]
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import mimetypes
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -17,13 +20,23 @@ from attestra.compliance import load_library, objectives_for
 from attestra.models import (
     OPEN_STATUSES,
     SEVERITIES,
+    TEST_TYPES,
     Engagement,
     ImportRun,
     Report,
+    Retest,
+    ScanRun,
     engagement_type_label,
     utcnow,
 )
 from attestra.reports import signing
+from attestra.reports.template_config import (
+    cvss_legend,
+    disclaimer_text,
+    kind_config,
+    load_template_config,
+    methodology_phases,
+)
 
 KINDS = (
     "technical",
@@ -33,6 +46,7 @@ KINDS = (
     "ageing",
     "closure_letter",
     "attestation_letter",
+    "retest",
 )
 _env = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "templates"),
@@ -63,7 +77,114 @@ def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
     return Counter(f.severity for f in open_f)
 
 
-def _context(s: Session, engagement_id: int, framework: str = "", *, include_comments: bool = False) -> dict:
+def _report_history(s: Session, engagement_id: int, kind: str = "", framework: str = "") -> list[Report]:
+    """Prior report rows for document-control tables (newest first, capped)."""
+    q = select(Report).where(Report.engagement_id == engagement_id)
+    if kind:
+        q = q.where(Report.kind == kind)
+    if framework:
+        q = q.where(Report.framework == framework)
+    return list(s.scalars(q.order_by(Report.id.desc()).limit(20)))
+
+
+def _test_types_and_standards(eng: Engagement) -> tuple[list[dict], list[str]]:
+    """Unique authorized test types and standards across engagement assets."""
+    seen: dict[str, dict] = {}
+    standards: list[str] = []
+    for asset in eng.assets or []:
+        for key in asset.test_types or []:
+            meta = TEST_TYPES.get(key)
+            if not meta or key in seen:
+                continue
+            seen[key] = {"key": key, "label": meta["label"], "standard": meta.get("standard", "")}
+            std = meta.get("standard") or ""
+            if std and std not in standards:
+                standards.append(std)
+    return list(seen.values()), standards
+
+
+def _retests_for_engagement(s: Session, engagement_id: int, findings: list) -> dict[int, list[Retest]]:
+    ids = [f.id for f in findings]
+    if not ids:
+        return {}
+    rows = list(
+        s.scalars(select(Retest).where(Retest.finding_id.in_(ids)).order_by(Retest.id.desc()))
+    )
+    out: dict[int, list[Retest]] = {}
+    for row in rows:
+        out.setdefault(row.finding_id, []).append(row)
+    return out
+
+
+def _latest_retest(retests_by_finding: dict[int, list[Retest]], finding_id: int) -> Retest | None:
+    rows = retests_by_finding.get(finding_id) or []
+    return rows[0] if rows else None
+
+
+def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
+    """Embed screenshot evidence as data URIs when the file is present and hash-matches."""
+    out: dict[int, list[dict]] = {}
+    for f in findings:
+        embeds: list[dict] = []
+        for e in f.evidence or []:
+            if e.kind != "screenshot":
+                continue
+            path = Path(e.path)
+            if not path.is_file():
+                embeds.append(
+                    {
+                        "id": e.id,
+                        "filename": e.filename,
+                        "sha256": e.sha256,
+                        "note": e.note or "",
+                        "data_uri": "",
+                        "missing": True,
+                    }
+                )
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            if hashlib.sha256(data).hexdigest() != e.sha256:
+                continue
+            mime = mimetypes.guess_type(e.filename)[0] or "image/png"
+            if not mime.startswith("image/"):
+                mime = "image/png"
+            embeds.append(
+                {
+                    "id": e.id,
+                    "filename": e.filename,
+                    "sha256": e.sha256,
+                    "note": e.note or "",
+                    "data_uri": f"data:{mime};base64," + base64.b64encode(data).decode("ascii"),
+                    "missing": False,
+                }
+            )
+        if embeds:
+            out[f.id] = embeds
+    return out
+
+
+def _branding(s: Session, tenant_id: int | None, kind: str) -> dict:
+    """Cover title and logo from the tenant report template when configured."""
+    if tenant_id is None:
+        return {"cover_title": "", "logo": ""}
+    from attestra.library.templates import _pick
+
+    t = _pick(s, tenant_id, kind)
+    if t is None:
+        return {"cover_title": "", "logo": ""}
+    return {"cover_title": t.cover_title or "", "logo": t.logo or ""}
+
+
+def _scan_history(s: Session, engagement_id: int) -> list[ScanRun]:
+    return list(
+        s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id.desc()).limit(50))
+    )
+
+
+def _context(s: Session, engagement_id: int, framework: str = "", *, include_comments: bool = False, kind: str = "") -> dict:
     eng = services.get_engagement(s, engagement_id)
     findings = services.list_findings(s, engagement_id)
     reportable = [f for f in findings if f.status != "false_positive"]
@@ -93,6 +214,10 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     from attestra.library import service as library_service
 
     fix_ctx = library_service.fix_context_for_engagement(s, reportable)
+    test_types, standards = _test_types_and_standards(eng)
+    retests_by_finding = _retests_for_engagement(s, engagement_id, reportable)
+    branding = _branding(s, eng.tenant_id, kind or "technical")
+    tmpl_cfg = load_template_config()
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -123,6 +248,21 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "fix_by_id": fix_ctx["fix_by_id"],
         "report_snippets_by_id": fix_ctx["report_snippets_by_id"],
         "server_type": fix_ctx["server_type"],
+        "test_types": test_types,
+        "standards": standards,
+        "retests_by_finding": retests_by_finding,
+        "latest_retest": lambda fid: _latest_retest(retests_by_finding, fid),
+        "evidence_embeds": _evidence_embeds(reportable),
+        "cover_title": branding["cover_title"],
+        "logo": branding["logo"],
+        "cvss_legend": cvss_legend(),
+        "methodology_phases": methodology_phases(),
+        "disclaimer": disclaimer_text(),
+        "kind_meta": kind_config(kind) if kind else {},
+        "template_config": tmpl_cfg,
+        "scan_history": _scan_history(s, engagement_id),
+        "contact_name": eng.tenant.contact_name or "",
+        "contact_email": eng.tenant.contact_email or "",
         **_ai_context(engagement_id, eng.tenant_id),
     }
 
@@ -176,7 +316,8 @@ def generate_report(
         )
         or 0
     ) + 1
-    ctx = _context(s, engagement_id, framework, include_comments=include_comments)
+    ctx = _context(s, engagement_id, framework, include_comments=include_comments, kind=kind)
+    ctx["report_history"] = _report_history(s, engagement_id, kind=kind, framework=framework)
     if kind == "iso_soa":
         fw = framework or "iso_27001_2022"
         ctx["soa_results"] = services.compliance(s, engagement_id, fw)
@@ -184,7 +325,15 @@ def generate_report(
         ctx["soa_framework"] = fw
     if kind == "ageing":
         ctx["sla_breaches"] = services.sla_breaches(s, engagement_id)
-    ctx.update(kind=kind, version=version, generated_by=actor, generated_at=utcnow())
+    if kind == "retest":
+        flat = [r for rows in ctx["retests_by_finding"].values() for r in rows]
+        ctx["all_retests"] = sorted(flat, key=lambda r: r.id, reverse=True)
+        ctx["unresolved"] = [
+            f for f in ctx["findings"] if f.status in OPEN_STATUSES or f.status in ("validated", "fixed")
+        ]
+        ctx["findings_by_id"] = {f.id: f for f in ctx["findings"]}
+    # Generated files are always draft until the separate sign-off workflow completes.
+    ctx.update(kind=kind, version=version, generated_by=actor, generated_at=utcnow(), is_draft=True)
     from attestra.library.templates import render_custom  # tenant template, else built-in
 
     custom = render_custom(s, eng.tenant_id, kind, ctx)

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance evidence pack · Sample Corp (synthetic)</title>
+<style>
+  :root { --ink:#16181d; --quiet:#5b6170; --rule:#e3e5ea; --accent:#2457d6;
+          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: var(--ink); background:#fff;
+         max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; counter-reset: page; }
+  h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 36px 0 10px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  .meta { color: var(--quiet); font-size: 13px; }
+  .brand { font-weight: 700; letter-spacing: .02em; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--quiet); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  .sev { display:inline-block; padding: 1px 8px; border-radius: 10px; color:#fff; font-size: 12px; font-weight:600; text-transform: capitalize; }
+  .sev-critical{background:var(--crit)} .sev-high{background:var(--high)} .sev-medium{background:var(--med)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
+  .st { font-weight: 600; text-transform: capitalize; }
+  .st-met{color:var(--low)} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .kpis { display:flex; gap:12px; flex-wrap: wrap; margin: 12px 0; }
+  .kpi { border:1px solid var(--rule); border-radius: 8px; padding: 10px 14px; min-width: 110px; }
+  .kpi b { display:block; font-size: 22px; }
+  .finding { border:1px solid var(--rule); border-radius: 8px; padding: 12px 16px; margin: 12px 0; page-break-inside: avoid; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .note { background:#f5f7fb; border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; }
+  .cover { min-height: 42vh; display:flex; flex-direction:column; justify-content:center;
+           border-bottom: 2px solid var(--accent); margin: 0 0 28px; padding-bottom: 28px; page-break-after: always; }
+  .cover img { max-height: 88px; max-width: 260px; margin-bottom: 20px; }
+  .cover h1 { font-size: 30px; margin: 8px 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc li { margin: 4px 0; }
+  .evidence-img { max-width: 100%; max-height: 360px; border: 1px solid var(--rule); margin: 8px 0; }
+  .fig-caption { color: var(--quiet); font-size: 12px; margin: 0 0 12px; }
+  .draft-mark { position: fixed; top: 40%; left: 10%; font-size: 72px; color: rgba(161,22,27,.12);
+                transform: rotate(-28deg); pointer-events: none; z-index: 0; font-weight: 800; letter-spacing: .08em; }
+  footer { margin-top: 48px; color: var(--quiet); font-size: 12px; border-top:1px solid var(--rule); padding-top: 10px; }
+  @media print {
+    body { padding: 0; }
+    h2 { page-break-after: avoid; }
+    .draft-mark { position: fixed; }
+    @page { margin: 18mm 14mm 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 10px; color: #5b6170; } }
+  }
+</style>
+</head>
+<body>
+<div class="draft-mark" aria-hidden="true">DRAFT</div><section class="cover" id="cover">
+  <div class="meta"><span class="brand">ATTESTRA</span> · Sample Corp (synthetic)</div>
+  <h1>Compliance evidence pack</h1>
+  <p>Sample VAPT coverage engagement</p>
+  <p class="meta">Client: Sample Corp (synthetic)</p>
+  <p class="meta">Assessment type: VA + PT · Date: 2026-10-21 · Document version 1</p>
+  <p class="meta">Engagement #5 · Window: 2026-10-14 to 2026-10-28</p>
+</section>
+<h1>PCI DSS v4.0.1: security testing evidence pack</h1>
+<div class="meta">Sample VAPT coverage engagement · VA + PT · 2026-10-14 to 2026-10-28</div>
+
+<p class="note">This pack indexes the vulnerability-management and security-testing evidence produced in this engagement against
+PCI DSS v4.0.1. Each status is proposed from findings and engagement records; a status marked <b>confirmed</b> was reviewed by the
+named assessor. It supports, and does not replace, the assessor's or auditor's own testing (QSA, and the Approved Scanning Vendor for external scans under 11.3.2).</p>
+
+<div class="kpis">
+<div class="kpi"><span class="st st-met">met</span><b>1</b>controls</div><div class="kpi"><span class="st st-no_exceptions">no exceptions</span><b>12</b>controls</div><div class="kpi"><span class="st st-partial">partial</span><b>5</b>controls</div><div class="kpi"><span class="st st-not_met">not met</span><b>7</b>controls</div><div class="kpi"><span class="st st-not_assessed">not assessed</span><b>4</b>controls</div></div>
+
+<table>
+  <tr><th style="width:90px">Ref</th><th>Requirement</th><th style="width:110px">Status</th><th>Basis</th><th style="width:150px">Mapping</th><th style="width:110px">Findings</th></tr>
+  <tr>
+    <td><b>1.2.1</b></td>
+    <td>Network security control configuration standards are defined and maintained</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Isolate networks and verify segmentation controls] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>1.3.1</b></td>
+    <td>Inbound traffic to the cardholder data environment is restricted to what is needed</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Isolate networks and verify segmentation controls] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>2.2.1</b></td>
+    <td>Configuration standards are developed, implemented and maintained</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Maintain secure configuration baselines] 2 open finding(s); worst is high.</td>
+    <td><b>full</b><br><span class="meta">CWE-16 (full): Misconfiguration CWEs map to secure configuration baselines. CWE-693 (full): Misconfiguration CWEs map to secure configuration baselines.</span></td>
+    <td>F-52, F-58</td>
+  </tr>
+  <tr>
+    <td><b>3.5.1</b></td>
+    <td>Stored PAN is rendered unreadable wherever it is kept</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Prevent leakage of sensitive data] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>4.2.1</b></td>
+    <td>Strong cryptography protects PAN during transmission over open, public networks</td>
+    <td><span class="st st-partial">partial</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Use strong cryptography for data in transit] 1 open finding(s); worst is medium.</td>
+    <td><b>full</b><br><span class="meta">CWE-326 (full): Weak or missing transport crypto maps to cryptography controls.</span></td>
+    <td>F-55</td>
+  </tr>
+  <tr>
+    <td><b>6.2.4</b></td>
+    <td>Software engineering techniques prevent or mitigate common software attacks</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Develop software to prevent common attacks] 8 open finding(s); worst is critical. [Neutralise untrusted input before it reaches an LLM prompt] Testing found no exceptions; the assessor must confirm the control with its own evidence. [Verify the integrity and provenance of AI data and models] Testing found no exceptions; the assessor must confirm the control with its own evidence. [Limit AI resource use (request rate, size and cost)] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><b>full</b><br><span class="meta">CWE-78 (full): Injection and unsafe coding patterns map to secure development controls. CWE-79 (full): Injection and unsafe coding patterns map to secure development controls. CWE-89 (full): Injection and unsafe coding patterns map to secure development controls. CWE-94 (full): Injection and unsafe coding patterns map to secure development controls. CWE-352 (full): Injection and unsafe coding patterns map to secure development controls.</span></td>
+    <td>F-49, F-50, F-51, F-53, F-54, F-56, F-59, F-60</td>
+  </tr>
+  <tr>
+    <td><b>6.3.1</b></td>
+    <td>Security vulnerabilities are identified and managed</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Identify and risk-rank security vulnerabilities] 12 open finding(s); worst is critical.</td>
+    <td><span class="meta">process control</span></td>
+    <td>F-59, F-55, F-54, F-57, F-52, F-60, F-50, F-53, F-58, F-51, F-49, F-56</td>
+  </tr>
+  <tr>
+    <td><b>6.3.2</b></td>
+    <td>An inventory of bespoke and custom software and third-party components is maintained</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Manage third-party and open-source component risk] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>6.3.3</b></td>
+    <td>Components are protected from known vulnerabilities by installing patches</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Apply security patches within defined timeframes] 4 open finding(s); worst is critical.</td>
+    <td><span class="meta">process control</span></td>
+    <td>F-54, F-57, F-53, F-56</td>
+  </tr>
+  <tr>
+    <td><b>6.4.1</b></td>
+    <td>Public-facing web applications are protected against attacks</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Protect public-facing web applications against attacks] 9 open finding(s); worst is critical.</td>
+    <td><b>full</b><br><span class="meta">CWE-78 (full): Injection and unsafe coding patterns map to secure development controls. CWE-79 (full): Injection and unsafe coding patterns map to secure development controls. CWE-89 (full): Injection and unsafe coding patterns map to secure development controls. CWE-94 (full): Injection and unsafe coding patterns map to secure development controls. CWE-352 (full): Injection and unsafe coding patterns map to secure development controls. CWE-693 (full): Misconfiguration CWEs map to secure configuration baselines.</span></td>
+    <td>F-59, F-54, F-52, F-60, F-50, F-53, F-51, F-49, F-56</td>
+  </tr>
+  <tr>
+    <td><b>6.4.2</b></td>
+    <td>An automated technical solution detects and prevents web-based attacks</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Control changes that affect security] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>6.5.1</b></td>
+    <td>Changes to system components follow documented change procedures</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Control changes that affect security] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>7.2.1</b></td>
+    <td>An access control model is defined</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Restrict access by business need to know] Testing found no exceptions; the assessor must confirm the control with its own evidence. [Limit the permissions and autonomy of AI agents and tools] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>8.3.1</b></td>
+    <td>User access is authenticated</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Authenticate users and protect credentials] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>8.4.2</b></td>
+    <td>Multi-factor authentication is used for all access into the cardholder data environment</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Authenticate users and protect credentials] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>8.6.2</b></td>
+    <td>Passwords for application and system accounts are not hard coded in scripts, files or source code</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Keep credentials out of source code and configuration] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>10.2.1</b></td>
+    <td>Audit logs are enabled and active</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Log and monitor security events] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>10.4.1</b></td>
+    <td>Audit logs are reviewed at least daily to spot anomalies or suspicious activity</td>
+    <td><span class="st st-no_exceptions">no exceptions</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Log and monitor security events] Testing found no exceptions; the assessor must confirm the control with its own evidence.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.3.1</b></td>
+    <td>Internal vulnerability scans are performed</td>
+    <td><span class="st st-partial">partial</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Perform regular internal vulnerability scans] 4 scan result file(s) imported for this engagement. [Internal vulnerability scans are performed at least quarterly] Internal scans present; quarter not yet marked clean of high/critical.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.3.1.1</b></td>
+    <td>All other applicable vulnerabilities are managed</td>
+    <td><span class="st st-met">met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Perform regular internal vulnerability scans] 4 scan result file(s) imported for this engagement.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.3.1.2</b></td>
+    <td>Internal vulnerability scans address all high-risk and critical vulnerabilities</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Resolve high/critical internal scan findings or document exceptions] 9 critical/high finding(s) still open.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.3.2</b></td>
+    <td>External vulnerability scans are performed by a PCI SSC Approved Scanning Vendor</td>
+    <td><span class="st st-not_assessed">not assessed</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[External ASV vulnerability scans pass quarterly] No ASV scan attestation recorded.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.1</b></td>
+    <td>A penetration testing methodology is defined and implemented</td>
+    <td><span class="st st-partial">partial</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Perform penetration testing to a defined methodology] PT engagement recorded but no tester validation yet.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.2</b></td>
+    <td>Internal penetration testing is performed</td>
+    <td><span class="st st-partial">partial</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Perform penetration testing to a defined methodology] PT engagement recorded but no tester validation yet.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.3</b></td>
+    <td>External penetration testing is performed</td>
+    <td><span class="st st-partial">partial</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[External penetration testing of the CDE perimeter] PT engagement recorded but no tester validation yet.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.4</b></td>
+    <td>Exploitable vulnerabilities found in penetration testing are corrected and retested</td>
+    <td><span class="st st-not_met">not met</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Correct exploitable findings and retest] 9 critical/high finding(s) still open.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.5</b></td>
+    <td>Segmentation controls are verified by penetration testing</td>
+    <td><span class="st st-not_assessed">not assessed</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Segmentation controls are tested] No segmentation test recorded.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>11.4.6</b></td>
+    <td>Segmentation controls are verified at least every six months and after changes</td>
+    <td><span class="st st-not_assessed">not assessed</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Segmentation controls are tested] No segmentation test recorded.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+  <tr>
+    <td><b>12.3.1</b></td>
+    <td>A targeted risk analysis is documented and performed</td>
+    <td><span class="st st-not_assessed">not assessed</span><br>
+        <span class="meta">proposed</span></td>
+    <td>[Information security risk assessment is performed] No risk acceptance or control assessment records yet.</td>
+    <td><span class="meta">process control</span></td>
+    <td>-</td>
+  </tr>
+</table>
+
+<h2>Evidence index</h2>
+<table>
+  <tr><th>Evidence</th><th>Detail</th><th>SHA-256</th></tr>
+<tr><td>Signed authorization</td><td>authorization.txt (Sample CISO, 2026-10-16 to 2026-11-20)</td><td class="mono">d9b20b64cd3e412d057c43641f8e455e67a7f3eb94bedf2886f76992d3c1b1b5</td></tr><tr><td>Scan results #17</td><td>zap · zap.json · 2026-10-21</td><td class="mono">e1d590aedb36c36e362a4b965a401b7f59b2220b24e9b83eebc30e61a613f232</td></tr><tr><td>Scan results #18</td><td>nuclei · nuclei.jsonl · 2026-10-21</td><td class="mono">a8d1823c82e6423cdccfc6a5c756b71b9436550c42c91aa54ac8cf809118d88f</td></tr><tr><td>Scan results #19</td><td>trivy · trivy.json · 2026-10-21</td><td class="mono">0ca137790553dd8eb27257907cbebb929fb03c36e5f2501bb415da5d68e38b79</td></tr><tr><td>Scan results #20</td><td>sarif · semgrep.sarif · 2026-10-21</td><td class="mono">17793587f8cb62e8612a1a4065b12959d93056a44762ff50deab4cf2c3bb7a04</td></tr></table>
+<footer>
+  Generated 2026-10-21 05:58 UTC by sample-generator with Attestra 1.0.0.
+  QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
+  shown when you open this report in Attestra; check the SHA-256 and signature with
+  <span class="mono">attestra verify-report</span>. Confidential.
+  <br>Page numbers appear when printed or exported to PDF (Page X of Y).
+</footer>
+</body>
+</html>

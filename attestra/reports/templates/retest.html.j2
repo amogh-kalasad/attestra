@@ -1,0 +1,108 @@
+{% extends "_base.html.j2" %}
+{% block title %}Retest and remediation verification report{% endblock %}
+{% block body %}
+<h1>Retest and remediation verification: {{ eng.name }}</h1>
+<div class="meta">Type: {{ type_label }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</div>
+
+<h2 id="document-control">1. Document control</h2>
+<table>
+  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th></tr>
+  <tr>
+    <td>v{{ version }}</td>
+    <td>draft (this generation)</td>
+    <td>{{ generated_at.strftime('%Y-%m-%d') }}</td>
+    <td>{{ generated_by }}</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  {% for r in report_history %}
+  <tr>
+    <td>v{{ r.version }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.generated_at.strftime('%Y-%m-%d') if r.generated_at else "—" }}</td>
+    <td>{{ r.generated_by }}</td>
+    <td>{{ r.qa_by or "—" }}</td>
+    <td>{{ r.approved_by or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2 id="scope">2. Scope</h2>
+<table>
+  <tr><th>Asset</th><th>Kind</th><th>Environment</th><th>Exposure</th></tr>
+  {% for a in eng.assets %}
+  <tr><td class="mono">{{ a.identifier }}</td><td>{{ a.kind }}</td><td>{{ a.environment }}</td><td>{{ a.exposure }}</td></tr>
+  {% else %}<tr><td colspan="4">No assets recorded.</td></tr>{% endfor %}
+</table>
+
+<h2 id="overview">3. Findings overview with retest status</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Current status</th><th>Retest result</th><th>Asset reached</th><th>Retest date</th></tr>
+  {% for f in findings %}
+  {% set rt = latest_retest(f.id) %}
+  <tr>
+    <td class="mono">F-{{ f.id }}</td>
+    <td>{{ f.title }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.status|replace("_", " ") }}</td>
+    <td>{% if rt %}{{ rt.result or "requested" }}{% else %}not retested{% endif %}</td>
+    <td>{% if rt %}{{ "Yes" if rt.asset_reached else "No / n/a" }}{% else %}—{% endif %}</td>
+    <td>{% if rt and rt.finalized_at %}{{ rt.finalized_at.strftime('%Y-%m-%d') }}{% elif rt %}open{% else %}—{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7">No findings.</td></tr>{% endfor %}
+</table>
+
+<h2 id="retest-results">4. Retest results and evidence</h2>
+{% if all_retests %}
+{% for rt in all_retests %}
+{% set f = findings_by_id.get(rt.finding_id) %}
+<div class="finding">
+  <h3>Retest #{{ rt.id }} · Finding F-{{ rt.finding_id }}{% if f %} · {{ f.title }}{% endif %}</h3>
+  <table>
+    <tr><th style="width:160px">Result</th><td><b>{{ rt.result or "requested" }}</b></td></tr>
+    <tr><th>Requested by</th><td>{{ rt.requested_by }}</td></tr>
+    <tr><th>Finalized by</th><td>{{ rt.finalized_by or "—" }}</td></tr>
+    <tr><th>Finalized at</th><td>{{ rt.finalized_at.strftime('%Y-%m-%d %H:%M UTC') if rt.finalized_at else "—" }}</td></tr>
+    <tr><th>Scan run</th><td>{% if rt.scan_run_id %}#{{ rt.scan_run_id }}{% else %}none linked{% endif %}</td></tr>
+    <tr><th>Asset reached</th><td>{{ "Yes" if rt.asset_reached else "No" }}</td></tr>
+    {% if rt.note %}<tr><th>Note</th><td>{{ rt.note }}</td></tr>{% endif %}
+  </table>
+  {% if f %}
+  <p class="meta">Original status retained in finding history. Current status: {{ f.status|replace("_", " ") }}. Historical evidence is not overwritten by retest.</p>
+  {% set embeds = evidence_embeds.get(f.id, []) %}
+  {% if embeds %}
+  <p><b>Evidence linked to finding.</b></p>
+  {% for e in embeds %}
+  <figure>
+    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.filename }}">{% endif %}
+    <figcaption class="fig-caption">{{ e.note or e.filename }} · sha256 {{ e.sha256 }}</figcaption>
+  </figure>
+  {% endfor %}
+  {% endif %}
+  {% if f.evidence %}
+  <ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span></li>{% endfor %}</ul>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p>No retest records for this engagement yet.</p>
+{% endif %}
+
+<h2 id="unresolved">5. Unresolved risks</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th></tr>
+  {% for f in unresolved %}
+  <tr>
+    <td class="mono">F-{{ f.id }}</td>
+    <td>{{ f.title }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.status|replace("_", " ") }}</td>
+  </tr>
+  {% else %}<tr><td colspan="4">No unresolved open or pending findings.</td></tr>{% endfor %}
+</table>
+
+<h2 id="disclaimer">6. Assumptions and limitations</h2>
+<p>{{ disclaimer }}</p>
+<p class="meta">A retest result of <em>inconclusive</em> means the scan did not reach the asset or evidence was insufficient; it is never treated as remediated.</p>
+{% endblock %}

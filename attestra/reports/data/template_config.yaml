@@ -1,0 +1,134 @@
+# Metadata-driven report template configuration.
+# Sections are rendered when the assessment has the required data; omit otherwise.
+# Export formats follow attestra/reports/export.py capabilities.
+
+version: "1.0"
+template_id: attestra_builtin
+
+supported_assessment_types:
+  - va
+  - pt
+  - vapt
+  - retest
+  - continuous
+
+supported_frameworks:
+  - pci_dss_4
+  - iso_27001_2022
+  - soc2
+  - iso_42001_2023
+  - cert_in_2022
+  - nist_csf_2
+  - rbi_csf_2016
+  - sebi_cscrf_2024
+  - dora_2022
+
+export_formats:
+  - html
+  - docx
+  - pdf
+  - sarif
+  - oscal
+  - csv
+
+severity_order:
+  - critical
+  - high
+  - medium
+  - low
+  - info
+
+cvss_legend:
+  critical: "9.0 – 10.0"
+  high: "7.0 – 8.9"
+  medium: "4.0 – 6.9"
+  low: "0.1 – 3.9"
+  info: "0.0 (informational)"
+
+kinds:
+  technical:
+    label: Technical security testing report
+    assessment_types: [va, pt, vapt, continuous]
+    sections:
+      - cover
+      - document_control
+      - toc
+      - scope
+      - methodology
+      - standards
+      - risk_legend
+      - summary
+      - findings_overview
+      - passed_checks
+      - site_grades
+      - tls_summary
+      - findings_detail
+      - disclaimer
+      - conclusion
+  retest:
+    label: Retest and remediation verification report
+    assessment_types: [retest, vapt, va, pt]
+    sections:
+      - cover
+      - document_control
+      - scope
+      - findings_overview
+      - retest_results
+      - unresolved
+      - disclaimer
+  executive:
+    label: Executive summary
+    assessment_types: [va, pt, vapt, continuous]
+    sections:
+      - cover
+      - summary
+      - top_risks
+      - disclaimer
+  compliance:
+    label: Compliance evidence pack
+    assessment_types: [va, pt, vapt, continuous, retest]
+    sections:
+      - cover
+      - framework_rollup
+      - control_results
+      - disclaimer
+  iso_soa:
+    label: ISO Statement of Applicability
+    assessment_types: [va, pt, vapt]
+    sections:
+      - cover
+      - soa
+  ageing:
+    label: Ageing and SLA report
+    assessment_types: [va, pt, vapt, continuous]
+    sections:
+      - cover
+      - sla
+  closure_letter:
+    label: Closure letter
+    assessment_types: [va, pt, vapt, retest]
+    sections:
+      - letter
+  attestation_letter:
+    label: Attestation letter
+    assessment_types: [va, pt, vapt, retest]
+    sections:
+      - letter
+
+methodology_phases:
+  - Planning and authorization
+  - Discovery and enumeration
+  - Vulnerability identification
+  - Manual validation / exploitation (within authorized scope)
+  - Risk ranking and reporting
+  - Remediation guidance and retest (when in scope)
+
+disclaimer: >
+  This report documents security testing performed under a signed client
+  authorization for the stated scope, window and environments. It is not a
+  certification, audit opinion or attestation of compliance unless a separate
+  signed attestation letter is issued. Absence of findings does not prove that
+  controls are effective. Findings mapped to framework controls indicate
+  technical evidence relevant to those controls; control status requires
+  assessor confirmation. This document is confidential and intended only for
+  the named client and authorized recipients.

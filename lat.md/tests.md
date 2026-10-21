@@ -688,6 +688,26 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 
 Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip (including sealed-path rebuild), executive trend SVG, signature verify.
 
+## Report coverage enhancements
+
+Stored-not-rendered DOCX Phase 1 fields, retest report kind, nine-framework load, and template metadata.
+
+### Stored fields rendered in technical report
+
+Technical HTML includes document control, environment, test types/standards, CVSS vector, OWASP/ASVS/WSTG, findings overview, disclaimer, conclusion, and DRAFT mark when those fields are populated.
+
+### Retest report kind
+
+`retest` is a registered kind; a finalized retest appears with result and unresolved-risk section without claiming historical evidence was overwritten.
+
+### Nine frameworks load
+
+`load_library()` exposes the three built-ins plus six packs (ISO 42001, CERT-In, NIST CSF 2, RBI, SEBI, DORA); each can render a compliance report.
+
+### Template config metadata
+
+[[attestra/reports/template_config.py#load_template_config]] lists all five assessment types and nine frameworks and defines the `retest` kind sections.
+
 ## Phase 5 evidence hardening
 
 Masking corpus, storage immutability, retention purge, append-only audit, backup manifests, and offline feed refresh.

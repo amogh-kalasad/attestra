@@ -9,7 +9,7 @@
           --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; }
   * { box-sizing: border-box; }
   body { font: 14px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: var(--ink); background:#fff;
-         max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+         max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; counter-reset: page; }
   h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 36px 0 10px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
   h3 { font-size: 15px; margin: 22px 0 6px; }
   .meta { color: var(--quiet); font-size: 13px; }
@@ -27,18 +27,49 @@
   .finding { border:1px solid var(--rule); border-radius: 8px; padding: 12px 16px; margin: 12px 0; page-break-inside: avoid; }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
   .note { background:#f5f7fb; border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; }
+  .cover { min-height: 42vh; display:flex; flex-direction:column; justify-content:center;
+           border-bottom: 2px solid var(--accent); margin: 0 0 28px; padding-bottom: 28px; page-break-after: always; }
+  .cover img { max-height: 88px; max-width: 260px; margin-bottom: 20px; }
+  .cover h1 { font-size: 30px; margin: 8px 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc li { margin: 4px 0; }
+  .evidence-img { max-width: 100%; max-height: 360px; border: 1px solid var(--rule); margin: 8px 0; }
+  .fig-caption { color: var(--quiet); font-size: 12px; margin: 0 0 12px; }
+  .draft-mark { position: fixed; top: 40%; left: 10%; font-size: 72px; color: rgba(161,22,27,.12);
+                transform: rotate(-28deg); pointer-events: none; z-index: 0; font-weight: 800; letter-spacing: .08em; }
   footer { margin-top: 48px; color: var(--quiet); font-size: 12px; border-top:1px solid var(--rule); padding-top: 10px; }
-  @media print { body { padding: 0; } h2 { page-break-after: avoid; } }
+  @media print {
+    body { padding: 0; }
+    h2 { page-break-after: avoid; }
+    .draft-mark { position: fixed; }
+    @page { margin: 18mm 14mm 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 10px; color: #5b6170; } }
+  }
 </style>
 </head>
 <body>
+{% if kind not in ("closure_letter", "attestation_letter") %}
+{% if is_draft|default(true) %}<div class="draft-mark" aria-hidden="true">DRAFT</div>{% endif %}
+<section class="cover" id="cover">
+  {% if logo %}<img src="{{ logo }}" alt="{{ tenant }} logo">{% endif %}
+  <div class="meta"><span class="brand">ATTESTRA</span> · {{ tenant }}</div>
+  <h1>{{ cover_title or (kind_meta.label if kind_meta and kind_meta.label else (kind|replace("_", " ")|title ~ " report")) }}</h1>
+  <p>{{ eng.name }}</p>
+  <p class="meta">Client: {{ tenant }}{% if contact_name %} · {{ contact_name }}{% endif %}{% if contact_email %} &lt;{{ contact_email }}&gt;{% endif %}</p>
+  <p class="meta">Assessment type: {{ type_label }} · Date: {{ today }} · Document version {{ version }}</p>
+  <p class="meta">Engagement #{{ eng.id }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
+</section>
+{% else %}
 <div class="meta"><span class="brand">ATTESTRA</span> · {{ tenant }} · Engagement #{{ eng.id }} · {{ kind|capitalize }} report v{{ version }}</div>
+{% endif %}
 {% block body %}{% endblock %}
 <footer>
   Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }} by {{ generated_by }} with Attestra {{ version_str }}.
   QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
   shown when you open this report in Attestra; check the SHA-256 and signature with
   <span class="mono">attestra verify-report</span>. Confidential.
+  {% if kind not in ("closure_letter", "attestation_letter") %}
+  <br>Page numbers appear when printed or exported to PDF (Page X of Y).
+  {% endif %}
 </footer>
 </body>
 </html>

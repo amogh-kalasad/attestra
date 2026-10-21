@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retest and remediation verification report · Sample Corp (synthetic)</title>
+<style>
+  :root { --ink:#16181d; --quiet:#5b6170; --rule:#e3e5ea; --accent:#2457d6;
+          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#3b7d4f; --info:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: var(--ink); background:#fff;
+         max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; counter-reset: page; }
+  h1 { font-size: 26px; margin: 0 0 4px; } h2 { font-size: 19px; margin: 36px 0 10px; border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+  .meta { color: var(--quiet); font-size: 13px; }
+  .brand { font-weight: 700; letter-spacing: .02em; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--quiet); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  .sev { display:inline-block; padding: 1px 8px; border-radius: 10px; color:#fff; font-size: 12px; font-weight:600; text-transform: capitalize; }
+  .sev-critical{background:var(--crit)} .sev-high{background:var(--high)} .sev-medium{background:var(--med)} .sev-low{background:var(--low)} .sev-info{background:var(--info)}
+  .st { font-weight: 600; text-transform: capitalize; }
+  .st-met{color:var(--low)} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)} .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .kpis { display:flex; gap:12px; flex-wrap: wrap; margin: 12px 0; }
+  .kpi { border:1px solid var(--rule); border-radius: 8px; padding: 10px 14px; min-width: 110px; }
+  .kpi b { display:block; font-size: 22px; }
+  .finding { border:1px solid var(--rule); border-radius: 8px; padding: 12px 16px; margin: 12px 0; page-break-inside: avoid; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .note { background:#f5f7fb; border-left: 3px solid var(--accent); padding: 10px 14px; font-size: 13px; }
+  .cover { min-height: 42vh; display:flex; flex-direction:column; justify-content:center;
+           border-bottom: 2px solid var(--accent); margin: 0 0 28px; padding-bottom: 28px; page-break-after: always; }
+  .cover img { max-height: 88px; max-width: 260px; margin-bottom: 20px; }
+  .cover h1 { font-size: 30px; margin: 8px 0; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc li { margin: 4px 0; }
+  .evidence-img { max-width: 100%; max-height: 360px; border: 1px solid var(--rule); margin: 8px 0; }
+  .fig-caption { color: var(--quiet); font-size: 12px; margin: 0 0 12px; }
+  .draft-mark { position: fixed; top: 40%; left: 10%; font-size: 72px; color: rgba(161,22,27,.12);
+                transform: rotate(-28deg); pointer-events: none; z-index: 0; font-weight: 800; letter-spacing: .08em; }
+  footer { margin-top: 48px; color: var(--quiet); font-size: 12px; border-top:1px solid var(--rule); padding-top: 10px; }
+  @media print {
+    body { padding: 0; }
+    h2 { page-break-after: avoid; }
+    .draft-mark { position: fixed; }
+    @page { margin: 18mm 14mm 20mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 10px; color: #5b6170; } }
+  }
+</style>
+</head>
+<body>
+<div class="draft-mark" aria-hidden="true">DRAFT</div><section class="cover" id="cover">
+  <div class="meta"><span class="brand">ATTESTRA</span> · Sample Corp (synthetic)</div>
+  <h1>Retest and remediation verification report</h1>
+  <p>Sample VAPT coverage engagement</p>
+  <p class="meta">Client: Sample Corp (synthetic)</p>
+  <p class="meta">Assessment type: VA + PT · Date: 2026-10-21 · Document version 1</p>
+  <p class="meta">Engagement #5 · Window: 2026-10-14 to 2026-10-28</p>
+</section>
+<h1>Retest and remediation verification: Sample VAPT coverage engagement</h1>
+<div class="meta">Type: VA + PT · Window: 2026-10-14 to 2026-10-28</div>
+
+<h2 id="document-control">1. Document control</h2>
+<table>
+  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th></tr>
+  <tr>
+    <td>v1</td>
+    <td>draft (this generation)</td>
+    <td>2026-10-21</td>
+    <td>sample-generator</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h2 id="scope">2. Scope</h2>
+<table>
+  <tr><th>Asset</th><th>Kind</th><th>Environment</th><th>Exposure</th></tr>
+  <tr><td class="mono">https://shop.example.com</td><td>web_app</td><td>production</td><td>internet</td></tr>
+</table>
+
+<h2 id="overview">3. Findings overview with retest status</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Current status</th><th>Retest result</th><th>Asset reached</th><th>Retest date</th></tr>
+  <tr>
+    <td class="mono">F-53</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-49</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-50</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-54</td>
+    <td>SQL Injection in Login Endpoint</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-56</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-51</td>
+    <td>Absence of Anti-CSRF Tokens</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-55</td>
+    <td>Weak TLS Cipher Suite Supported</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-60</td>
+    <td>Subprocess with shell=True and user input</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-59</td>
+    <td>SQL Injection via string concatenation</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-58</td>
+    <td>Image user should not be root</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-57</td>
+    <td>OpenSSL memory corruption</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td class="mono">F-52</td>
+    <td>X-Content-Type-Options Header Missing</td>
+    <td><span class="sev sev-low">low</span></td>
+    <td>new</td>
+    <td>not retested</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h2 id="retest-results">4. Retest results and evidence</h2>
+<p>No retest records for this engagement yet.</p>
+
+<h2 id="unresolved">5. Unresolved risks</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th></tr>
+  <tr>
+    <td class="mono">F-53</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-49</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-50</td>
+    <td>Cross Site Scripting (Reflected)</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-54</td>
+    <td>SQL Injection in Login Endpoint</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-56</td>
+    <td>Critical RCE in example-lib</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-51</td>
+    <td>Absence of Anti-CSRF Tokens</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-55</td>
+    <td>Weak TLS Cipher Suite Supported</td>
+    <td><span class="sev sev-medium">medium</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-60</td>
+    <td>Subprocess with shell=True and user input</td>
+    <td><span class="sev sev-critical">critical</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-59</td>
+    <td>SQL Injection via string concatenation</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-58</td>
+    <td>Image user should not be root</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-57</td>
+    <td>OpenSSL memory corruption</td>
+    <td><span class="sev sev-high">high</span></td>
+    <td>new</td>
+  </tr>
+  <tr>
+    <td class="mono">F-52</td>
+    <td>X-Content-Type-Options Header Missing</td>
+    <td><span class="sev sev-low">low</span></td>
+    <td>new</td>
+  </tr>
+</table>
+
+<h2 id="disclaimer">6. Assumptions and limitations</h2>
+<p>This report documents security testing performed under a signed client authorization for the stated scope, window and environments. It is not a certification, audit opinion or attestation of compliance unless a separate signed attestation letter is issued. Absence of findings does not prove that controls are effective. Findings mapped to framework controls indicate technical evidence relevant to those controls; control status requires assessor confirmation. This document is confidential and intended only for the named client and authorized recipients.</p>
+<p class="meta">A retest result of <em>inconclusive</em> means the scan did not reach the asset or evidence was insufficient; it is never treated as remediated.</p>
+<footer>
+  Generated 2026-10-21 05:58 UTC by sample-generator with Attestra 1.0.0.
+  QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
+  shown when you open this report in Attestra; check the SHA-256 and signature with
+  <span class="mono">attestra verify-report</span>. Confidential.
+  <br>Page numbers appear when printed or exported to PDF (Page X of Y).
+</footer>
+</body>
+</html>
