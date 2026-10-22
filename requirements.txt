@@ -1,0 +1,34 @@
+# Attestra runtime requirements.
+# These match the "dependencies" list in pyproject.toml.
+# Install with:  pip install -r requirements.txt
+# For development, install the package itself instead:  pip install -e ".[dev]"
+
+fastapi>=0.110
+uvicorn>=0.29
+sqlalchemy>=2.0
+pydantic>=2.6
+jinja2>=3.1
+pyyaml>=6.0
+python-multipart>=0.0.9
+alembic>=1.13
+cryptography>=42
+dnspython>=2.6
+defusedxml>=0.7
+
+# Development and tests (also in the "dev" extra)
+pytest>=8
+httpx>=0.27
+ruff>=0.5
+
+# Optional extras. Uncomment only what you use, or install with pip install -e ".[name]".
+# psycopg[binary]>=3.1        # postgres: PostgreSQL database
+# authlib>=1.3                # oidc: single sign-on
+# docxtpl>=0.16               # docs: Word report output
+# weasyprint>=61              # docs: PDF report output
+# boto3>=1.34                 # s3: evidence storage in S3
+# temporalio>=1.7             # temporal: Temporal workflow engine
+# opentelemetry-api>=1.24     # observability: tracing
+# opentelemetry-sdk>=1.24
+# opentelemetry-instrumentation-fastapi>=0.45b0
+# opentelemetry-instrumentation-sqlalchemy>=0.45b0
+# opentelemetry-exporter-otlp-proto-http>=1.24
