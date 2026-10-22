@@ -136,6 +136,10 @@ class AssetIn(BaseModel):
     notes: str = ""
 
 
+class AssignIn(BaseModel):
+    assignee: str = Field(..., min_length=1, max_length=100)
+
+
 class TransitionIn(BaseModel):
     to: str
     note: str = ""
@@ -529,6 +533,57 @@ def transition(fid: int, body: TransitionIn, principal: Principal = Depends(requ
 
         f = services.transition(s, fid, to=body.to, note=body.note, actor=principal.actor)
         return _finding_dict(f, lib.finding_api_fix_fields(s, f))
+
+    return _run(fn)
+
+
+@app.post("/api/findings/{fid}/assign")
+def assign_finding_api(fid: int, body: AssignIn, principal: Principal = Depends(require("finding.write"))):
+    """Assign a finding to a tenant username (audited)."""
+    from attestra.assignments import assign_finding, current_assignee
+    from attestra.models import Finding
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        row = assign_finding(
+            s, fid, assignee=body.assignee, actor=principal.actor, user_id=principal.user_id
+        )
+        return {"id": fid, "assignee": row.assignee, "current": current_assignee(s, fid)}
+
+    return _run(fn)
+
+
+@app.post("/api/findings/{fid}/unassign")
+def unassign_finding_api(fid: int, principal: Principal = Depends(require("finding.write"))):
+    """Clear the current finding assignee (audited)."""
+    from attestra.assignments import current_assignee, unassign_finding
+    from attestra.models import Finding
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        unassign_finding(s, fid, actor=principal.actor)
+        return {"id": fid, "assignee": None, "current": current_assignee(s, fid)}
+
+    return _run(fn)
+
+
+@app.get("/api/findings/{fid}/assignee")
+def get_finding_assignee(fid: int, principal: Principal = Depends(require("finding.read"))):
+    from attestra.assignments import current_assignee
+    from attestra.models import Finding
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        return {"id": fid, "assignee": current_assignee(s, fid)}
 
     return _run(fn)
 

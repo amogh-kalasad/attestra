@@ -626,6 +626,9 @@ def sign_report(
     from attestra.webhooks.service import safe_emit_report
 
     safe_emit_report(s, r, actor=actor)
+    from attestra.integrations.grc import safe_push_grc_report
+
+    safe_push_grc_report(s, r.id, actor=actor)
     return r
 
 
@@ -660,6 +663,9 @@ def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | Non
     from attestra.webhooks.service import safe_emit_report
 
     safe_emit_report(s, r, actor=actor)
+    from attestra.integrations.grc import safe_push_grc_report
+
+    safe_push_grc_report(s, r.id, actor=actor)
     return r
 
 

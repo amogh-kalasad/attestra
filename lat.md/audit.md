@@ -36,6 +36,8 @@ Audit actions written by target ownership, scan requests and user accounts.
 
 - `asset.ownership_verified` and `asset.ownership_check_failed`: result of a DNS TXT or well-known file check.
 - `asset.ownership_confirmed`: a lead or admin recorded the owner's confirmation for a private IP.
+- `asset.ownership_token_set`: token set or reused; details include `token_suffix` (last four chars) only.
+- `report.grc_pushed`: signed report metadata pushed to an optional GRC webhook ([[architecture#GRC evidence push]]).
 - `scan.request` and `scan.refused`: a scan was queued, or the gate refused it with a reason.
 - `scan.cancelled`: a queued or running scan was cancelled ([[attestra/services.py#cancel_scan]]); details include tool and profile.
 - `user.invite`, `user.invite_accept`, `user.invite_revoke`, `user.role_change`, `user.enable` and `user.disable`: user account changes.

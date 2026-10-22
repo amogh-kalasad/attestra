@@ -22,7 +22,7 @@
     <span class="meta"> · {{ asset.ownership_verified_at|dt }}</span></p>
   {% else %}
   <p class="st-not_met">Not verified</p>
-  <p class="meta">Ask the client to publish one of these proofs, then run Check now from the engagement targets table.</p>
+  <p class="meta">Ask the client to publish one of these proofs, then click Verify now. Changing the token clears verification.</p>
   {% endif %}
   <p style="margin:10px 0 4px"><b>DNS TXT value</b></p>
   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
@@ -41,6 +41,22 @@
     <button type="button" class="secondary" data-copy="{{ oi.file_url }}">Copy</button>
   </div>
   <p class="meta">File contents must be exactly the token above.</p>
+  {% if can(prole, "asset.verify_ownership") %}
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/ownership-token" style="margin-top:12px">
+    <label for="reuse-token">Set or reuse token</label>
+    <p class="meta">Paste a token from another target in this engagement to reuse the same DNS TXT or well-known file.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <input type="text" id="reuse-token" name="token" required minlength="16" maxlength="64" pattern="[A-Za-z0-9_\-]{16,64}" placeholder="Paste ownership token" value="" autocomplete="off" style="min-width:240px;flex:1">
+      <button type="submit">Save token</button>
+    </div>
+  </form>
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/verify-ownership-now" style="margin-top:10px">
+    <button type="submit">Verify now</button>
+  </form>
+  <p class="meta">Verify now only looks up the DNS record and opens that one file. It does not scan the site.</p>
+  {% else %}
+  <p class="meta" style="margin-top:10px">Only a lead or admin can set the token or run Verify now.</p>
+  {% endif %}
   {% if oi.private_confirm and not asset.ownership_verified_at %}
   <p class="meta" style="margin-top:10px">This is a private address: a lead or admin can confirm ownership from the engagement page (Option C).</p>
   {% endif %}

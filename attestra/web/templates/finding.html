@@ -161,11 +161,30 @@
       <div><span class="k">Tools</span><span class="v">{{ f.tools|join(", ") or "-" }}</span></div>
       <div><span class="k">CWE / CVE</span><span class="v">{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</span></div>
       <div><span class="k">Fix by</span><span class="v">{{ f.sla_due or "-" }}</span></div>
+      <div><span class="k">Assignee</span><span class="v">{{ assignee or "—" }}</span></div>
       <div><span class="k">First / last seen</span><span class="v">{{ f.first_seen|dt }} &middot; {{ f.last_seen|dt }}</span></div>
       {% if f.asset %}<div><span class="k">Target</span><span class="v">{{ f.asset.name or f.asset.identifier }}</span></div>{% endif %}
     </div>
   </div>
 {% if can(prole, "finding.write") %}
+  <div class="card" id="assign">
+    <h2>Assign</h2>
+    <p class="meta">Assign this finding to a teammate in the tenant. Every change is audited.</p>
+    <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/assign">
+      <div class="fields">
+        <div style="grid-column:span 2">
+          <label for="assignee">Assignee</label>
+          <select id="assignee" name="assignee" data-native>
+            <option value="">— Unassigned —</option>
+            {% for u in assignable_users or [] %}
+            <option value="{{ u }}" {{ "selected" if assignee == u }}>{{ u }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit">Save assignee</button></div>
+    </form>
+  </div>
   <div class="card" id="status">
     <h2>Change status</h2>
     {% set nexts = transitions.get(f.status, []) %}

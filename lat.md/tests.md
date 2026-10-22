@@ -886,6 +886,118 @@ Technical reports include distribution, sign-off placeholders, and an appendix; 
 
 Distribution rows come from [[attestra/reports/render.py#_distribution_list]] (tenant contact plus authorized recipients). The in-report sign-off table has Author/QA/Approved placeholders; live status remains the Attestra sign-off banner. The appendix lists tool imports and scan runs.
 
+## Phase 5 workflow
+
+Finding assignment, ticket two-way sync, outbound webhooks, AI key hygiene, ownership token reuse, and optional GRC push ([[tests/test_phase5_assignment.py]], [[tests/test_phase5_tickets.py]], [[tests/test_phase5_webhooks.py]], [[tests/test_phase5_ai.py]], [[tests/test_phase5_ownership.py]], [[tests/test_phase5_grc.py]]).
+
+### Assign and audit
+
+[[attestra/assignments.py#assign_finding]] inserts a [[attestra/models.py#FindingAssignment]] and writes a `finding.assigned` audit row with the assignee.
+
+### Unassign and audit
+
+[[attestra/assignments.py#unassign_finding]] clears the current assignee (`assignee=""`) and writes `finding.unassigned`; [[attestra/assignments.py#current_assignee]] then returns `None`.
+
+### Assigned-to-me filter
+
+[[attestra/assignments.py#findings_assigned_to]] returns only findings whose current assignee matches the username (unassigned and other assignees excluded).
+
+### Reject cross-tenant or unknown user
+
+Assign rejects unknown usernames and users outside the finding tenant; platform `admin` and same-tenant memberships are allowed.
+
+### AI key never in drafts or errors
+
+With OpenAI provider enabled via env, the API key is sent only in the Authorization header and never appears in draft JSON, logs, `repr()`, or scrubbed exception messages.
+
+### AI defaults to ollama when unset
+
+When `ATTESTRA_AI_NARRATIVES=on` and `ATTESTRA_AI_PROVIDER` is unset, [[attestra/ai_narratives.py#provider_from_env]] builds Ollama; the feature stays off unless narratives are explicitly on.
+
+### Ownership token set clears verification
+
+[[attestra/services.py#set_ownership_token]] changes the token, clears `ownership_verified_at`, and audits `asset.ownership_token_set` with a four-character suffix only.
+
+### Ownership token format rejected
+
+Empty, short, or non-urlsafe tokens raise [[attestra/services.py#ServiceError]].
+
+### Ownership reuse same token no clear
+
+Saving the same token again leaves `ownership_verified_at` unchanged.
+
+### Ownership target page routes
+
+Target page shows set-token and Verify now forms; POSTs redirect back to the target with flash messages.
+
+### Jira create via mock HTTP
+
+[[attestra/integrations/tickets.py#client_from_env]] builds a Jira client; [[attestra/integrations/tickets.py#sync_ticket]] posts once and stores `jira:<key>`.
+
+### GitHub create via mock HTTP
+
+GitHub Issues create via injected HTTP mock stores `github:<repo>#<number>` on the finding.
+
+### Webhook closed fixes and requests retest
+
+When a closed webhook successfully transitions a validated finding to `fixed`, [[attestra/integrations/tickets.py#apply_ticket_state]] ensures a pending [[attestra/retest.py#request_retest]] and audits `finding.ticket_retest`.
+
+### Disallowed transition stays audit only
+
+A closed ticket on a `new` finding is audit-only (`finding.ticket_state`, `applied=False`); status and retests stay unchanged.
+
+### Webhook signature still required
+
+`POST /api/integrations/tickets/{backend}/webhook` returns 404 without `ATTESTRA_TICKETS_WEBHOOK_SECRET`, 401 on bad HMAC, and 200 when the signature matches.
+
+### Unknown backend and disabled stay safe
+
+Empty `ATTESTRA_TICKETS_BACKEND` disables sync; unknown backend names raise [[attestra/integrations/tickets.py#TicketError]]; unknown webhook paths return 404.
+
+### ServiceNow and Azure DevOps stubs
+
+`servicenow` and `azure_devops` are registered in [[attestra/integrations/tickets.py#BACKENDS]]; `from_env` raises until required env vars are set, then minimal `create()` works behind HTTPS mocks.
+
+### Existing open retest is not duplicated
+
+If an unfinalized retest already exists, a successful ticket→`fixed` transition does not create another.
+
+### GRC off by default
+
+[[attestra/integrations/grc.py#connector_from_env]] returns None when `ATTESTRA_GRC_BACKEND` is unset.
+
+### GRC push signed metadata
+
+Enabled connector POSTs report id/sha256/kind/signed_at/download hint with HMAC signature; secret never logged or audited in full.
+
+### GRC safe push no-op when off
+
+[[attestra/integrations/grc.py#safe_push_grc_report]] returns None without auditing when the backend is unset.
+
+### GRC rejects unsigned
+
+Push raises when the report is not signed or the backend name is unknown.
+
+### GRC connector names
+
+Vanta, Drata, and Sprinto factories share [[attestra/integrations/grc.py#WebhookGrcConnector]]; `repr` hides the secret.
+
+### Successful signed delivery
+
+[[attestra/webhooks/service.py#deliver]] marks status `delivered`, sends `X-Attestra-Signature` / `X-Attestra-Timestamp`, and [[attestra/webhooks/formats.py#verify]] accepts the body.
+
+### Retry backoff then failed
+
+A non-2xx response keeps status `pending`, sets `next_attempt_at` from [[attestra/webhooks/service.py#BACKOFF_SECONDS]], and increments attempts; after [[attestra/webhooks/service.py#MAX_ATTEMPTS]] the delivery is `failed`.
+
+### Inactive endpoint fails cleanly
+
+Private destination URLs are refused at create time; a deactivated endpoint fails delivery with `endpoint inactive` and never calls the sender.
+
+### Verify rejects bad signature and expired timestamp
+
+[[attestra/webhooks/formats.py#verify]] returns false for a wrong MAC, wrong secret, mutated body, non-digit timestamp, or timestamp outside the tolerance window.
+
 ## Phase 5 evidence hardening
 
 Masking corpus, storage immutability, retention purge, append-only audit, backup manifests, and offline feed refresh.
@@ -947,6 +1059,9 @@ Rendered technical, executive, compliance, closure, and attestation reports for 
 Test modules for features added on top of the core flow. Each line says what the file checks.
 
 - `tests/test_ai_narratives.py`: AI drafts are off by default, never touch the network unless set up, hide evidence, need tester approval, and can be turned off per tenant.
+- `tests/test_phase5_ai.py`: OpenAI API key never appears in drafts, logs, or errors; default provider is Ollama when unset; feature still off unless narratives are on.
+- `tests/test_phase5_ownership.py`: set/reuse ownership token clears verification, audits suffix only, and target-page Verify now routes work.
+- `tests/test_phase5_grc.py`: GRC webhook push is off by default, posts signed report metadata only, and never logs the webhook secret.
 - `tests/test_ai_routes.py`: AI draft pages and API return 404 when off, and only approved drafts reach a report.
 - `tests/test_ai_drafts_page.py`: the AI drafts page uses the normal layout, shows a friendly off message, and asks before Reject.
 - `tests/test_c7_c11_mapping_soc2.py`: mapping strength and reason show in compliance output, and SOC 2 Type II sampling is repeatable.
@@ -958,6 +1073,7 @@ Test modules for features added on top of the core flow. Each line says what the
 - `tests/test_fix_snippets.py`: header/TLS/cookie/CSP library entries carry importance, effort, fix steps and four server snippets; finding page, report and API show them; empty fields still render.
 - `tests/test_fingerprint_variant.py`: an empty `variant` keeps the fingerprint exactly the same as before the field existed.
 - `tests/test_phase7_importers.py`: Prowler, kube-bench, testssl.sh, Gitleaks, Checkov and naabu parsers; Gitleaks never keeps the secret.
+- `tests/test_phase5_tickets.py`: Jira/GitHub mock create, closed webhook → fixed + pending retest, signature gate, ServiceNow/Azure DevOps stubs, unknown/disabled backends.
 - `tests/test_phase7_portal_tickets.py`: CycloneDX and Dependency-Track imports, Jira and GitHub ticket sync, signed webhooks, and the client portal and auditor view.
 - `tests/test_phase7_tuning.py`: per-tenant risk weights, suppression rules that expire, and false-positive rate by tool.
 - `tests/test_postgres_rls.py`: every tenant table has a PostgreSQL row-level security policy; the live cross-tenant check runs only when a test Postgres is set.
@@ -965,6 +1081,7 @@ Test modules for features added on top of the core flow. Each line says what the
 - `tests/test_trust_center.py`: the trust center is off by default, publishes only by hand, accepts only signed reports, and gates items behind an NDA.
 - `tests/test_user_management.py`: invites, roles, expiry, one-time tokens, password rules, last admin guard, disabled login and password reset.
 - `tests/test_webhooks.py`: outbound webhooks block private addresses, are signed, retry with backoff, and follow workflow rules.
+- `tests/test_phase5_webhooks.py`: fake-sender delivery marks delivered with verifiable signatures; non-2xx retries then fails; bad/inactive endpoints fail cleanly; verify rejects bad or expired signatures.
 - `tests/test_phase2_bugs.py`: known alert emails skip revoked/used invites; iso_soa uses framework display name; PDF times use `ATTESTRA_DISPLAY_TZ`; workflow rule DELETE/POST deactivate sets `active=False`.
 - `tests/test_email_alerts.py`: SMTP off skips quietly; grouped Critical/High email; header before/after; SLA once; password never logged; settings role checks; unrestricted lead default tenant; HarmonyPM live header compare on a DB copy.
 - `tests/test_ui_audit_fixes.py`: friendly 403, 404 and 422 pages, nav links by role, sign-in `next=` redirect, confirm before destructive actions, and `_back` flash query joining.

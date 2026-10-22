@@ -1,7 +1,7 @@
-"""Ticket sync for ``Finding.ticket_ref`` (Jira, GitHub Issues).
+"""Ticket sync for ``Finding.ticket_ref`` (Jira, GitHub, ServiceNow, Azure DevOps).
 
 Off by default: nothing leaves the box until ``ATTESTRA_TICKETS_BACKEND`` is
-set to ``jira`` or ``github`` and the matching credentials are configured.
+set to a registered backend and the matching credentials are configured.
 ``ticket_ref`` is stored as ``<backend>:<key>`` (``jira:SEC-12``,
 ``github:acme/app#34``) so status webhooks can find the finding again.
 """
@@ -22,9 +22,10 @@ from sqlalchemy.orm import Session
 from attestra import audit
 from attestra.models import TRANSITIONS, Finding
 
-BACKENDS = ("jira", "github")
+BACKENDS = ("jira", "github", "servicenow", "azure_devops")
 # Called as http(method, url, headers, body) -> parsed JSON response.
-HttpCall = Callable[[str, str, dict[str, str], dict[str, Any] | None], dict[str, Any]]
+# Body may be a dict or a list (Azure DevOps JSON Patch).
+HttpCall = Callable[[str, str, dict[str, str], dict[str, Any] | list[Any] | None], dict[str, Any]]
 
 
 class TicketError(RuntimeError):
@@ -37,7 +38,14 @@ class TicketClient(Protocol):
     def create(self, finding: Finding) -> str: ...
 
 
-def http_json(method: str, url: str, headers: dict[str, str], body: dict[str, Any] | None, *, timeout: float = 10.0) -> dict[str, Any]:
+def http_json(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any] | list[Any] | None,
+    *,
+    timeout: float = 10.0,
+) -> dict[str, Any]:
     if not url.startswith("https://"):
         raise TicketError("ticket backends must use https")
     data = json.dumps(body).encode() if body is not None else None
@@ -81,6 +89,14 @@ def client_from_env(env: dict[str, str] | None = None, *, http: HttpCall | None 
         from attestra.integrations.github import GitHubIssuesClient
 
         return GitHubIssuesClient.from_env(env, http=http)
+    if backend == "servicenow":
+        from attestra.integrations.servicenow import ServiceNowClient
+
+        return ServiceNowClient.from_env(env, http=http)
+    if backend == "azure_devops":
+        from attestra.integrations.azure_devops import AzureDevOpsClient
+
+        return AzureDevOpsClient.from_env(env, http=http)
     raise TicketError(f"unknown ticket backend '{backend}'; supported: {', '.join(BACKENDS)}")
 
 
@@ -106,7 +122,11 @@ _STATE_TARGET = {"closed": "fixed", "done": "fixed", "resolved": "fixed", "reope
 
 def apply_ticket_state(s: Session, ticket_ref: str, state: str, *, actor: str) -> Finding | None:
     """Back-sync from a tracker webhook. Never skips the workflow: if the move
-    is not an allowed transition the event is only audited."""
+    is not an allowed transition the event is only audited.
+
+    When a closed/done/resolved event successfully moves the finding to ``fixed``,
+    ensure a pending (unfinalized) retest via ``request_retest`` exists.
+    """
     f = s.scalars(select(Finding).where(Finding.ticket_ref == ticket_ref)).first()
     if not f:
         return None
@@ -115,6 +135,26 @@ def apply_ticket_state(s: Session, ticket_ref: str, state: str, *, actor: str) -
         prev = f.status
         f.status = target
         audit.record(s, actor, "finding.transition", "finding", f.id, frm=prev, to=target, note=f"ticket {ticket_ref} {state}")
+        if target == "fixed" and (prev == "validated" or f.status == "fixed"):
+            from attestra.retest import open_retests, request_retest
+
+            if not open_retests(s, f.id):
+                rt = request_retest(
+                    s,
+                    f.id,
+                    actor=actor,
+                    note=f"pending retest after ticket {ticket_ref} {state}",
+                )
+                audit.record(
+                    s,
+                    actor,
+                    "finding.ticket_retest",
+                    "finding",
+                    f.id,
+                    ticket_ref=ticket_ref,
+                    state=state,
+                    retest_id=rt.id,
+                )
     else:
         audit.record(s, actor, "finding.ticket_state", "finding", f.id, ticket_ref=ticket_ref, state=state, applied=False)
     return f

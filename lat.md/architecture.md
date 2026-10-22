@@ -106,9 +106,20 @@ Packages added after the core flow. Each one calls the shared services and recor
 - [[attestra/library/service.py]]: findings library and tenant report templates.
 - [[attestra/proof/replay.py]]: redacted HTTP proof and in-scope replay for retests.
 - [[attestra/trust/service.py]]: opt-in trust center for signed reports.
-- [[attestra/webhooks/service.py]] and [[attestra/integrations/tickets.py]]: signed outbound webhooks and Jira or GitHub ticket sync.
+- [[attestra/webhooks/service.py]] and [[attestra/integrations/tickets.py]]: signed outbound webhooks and pluggable ticket sync (Jira, GitHub, ServiceNow, Azure DevOps); closed/done/resolved back-sync to `fixed` also requests a pending retest when none is open.
 - [[attestra/alerts/service.py]]: tenant email alerts for new Critical/High findings, security header changes, and missed SLA (SMTP off by default).
 - [[attestra/ai_narratives.py]]: AI draft text, off by default, used only after tester approval.
 - [[attestra/tuning.py]] and [[attestra/rls.py]]: per-tenant risk weights and suppression, and PostgreSQL row-level security.
-- [[attestra/runner/ownership.py]]: target ownership check by DNS TXT, well-known file, or owner confirmation for a private IP.
+- [[attestra/runner/ownership.py]]: target ownership check by DNS TXT, well-known file, or owner confirmation for a private IP; [[attestra/runner/ownership.py#set_token]] reuses a token from another target.
+- [[attestra/integrations/grc.py]]: optional GRC evidence push (Vanta/Drata/Sprinto webhook), off by default.
 - [[attestra/reports/signoff.py]]: builds the sign-off banner ([[attestra/reports/signoff.py#banner_html]]) and adds it only to the viewed page ([[attestra/reports/signoff.py#inject]]); the sealed file is never changed.
+
+## AI drafts
+
+Optional narratives via [[attestra/ai_narratives.py]], off unless `ATTESTRA_AI_NARRATIVES=on`. Keys never appear in drafts, logs, or errors.
+
+Default provider is local Ollama when `ATTESTRA_AI_PROVIDER` is unset. OpenAI-compatible needs a key from the secret store or `ATTESTRA_AI_API_KEY`. Tester (or lead/admin) approval is required before any draft reaches a report.
+
+## GRC evidence push
+
+[[attestra/integrations/grc.py#connector_from_env]] returns None until `ATTESTRA_GRC_BACKEND` is `vanta`, `drata`, `sprinto`, or `webhook` with HTTPS URL and secret. [[attestra/integrations/grc.py#push_signed_report]] POSTs signed report metadata (id, sha256, kind, signed_at, download hint) only; [[attestra/integrations/grc.py#safe_push_grc_report]] catches errors so signing is never broken.

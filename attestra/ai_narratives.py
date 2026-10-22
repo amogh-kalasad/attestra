@@ -122,11 +122,20 @@ class OpenAICompatProvider:
             raise AINarrativesError("AI API key missing (secret 'ai_api_key' or ATTESTRA_AI_API_KEY)")
         self.url = _check_url(base_url) + "/chat/completions"
         self.model = model
+        self._api_key = api_key
         self._headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
         self._post = http_post or _http_post
 
     def __repr__(self) -> str:  # never show the key
         return f"OpenAICompatProvider(url={self.url!r}, model={self.model!r})"
+
+    def _scrub(self, text: str) -> str:
+        key = self._api_key
+        out = str(text or "")
+        if key:
+            out = out.replace(key, "[redacted]")
+            out = out.replace(f"Bearer {key}", "Bearer [redacted]")
+        return out
 
     def complete(self, system: str, prompt: str) -> str:
         body = {
@@ -134,7 +143,10 @@ class OpenAICompatProvider:
             "temperature": 0.2,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         }
-        doc = self._post(self.url, dict(self._headers), body)
+        try:
+            doc = self._post(self.url, dict(self._headers), body)
+        except Exception as exc:  # noqa: BLE001 - scrub key from any transport error text
+            raise AINarrativesError(self._scrub(str(exc)) or "AI provider request failed") from None
         choices = (doc or {}).get("choices") or [{}]
         return str((choices[0].get("message") or {}).get("content", "")).strip()
 

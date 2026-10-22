@@ -471,6 +471,32 @@ def _ct_apexes_for(s, eid: int) -> list[str]:
         return []
 
 
+def _finding_assignees_map(s, eid: int) -> dict[int, str]:
+    from attestra.assignments import assignees_for_engagement
+
+    return assignees_for_engagement(s, eid)
+
+
+def _tenant_usernames(s, tenant_id: int) -> list[str]:
+    """Active usernames that can be assigned findings in this tenant (plus platform admins)."""
+    from attestra.models import TenantMembership, User
+
+    members = {
+        m.user_id
+        for m in s.scalars(select(TenantMembership).where(TenantMembership.tenant_id == tenant_id))
+    }
+    users = list(
+        s.scalars(
+            select(User).where(User.active.is_(True)).order_by(User.username)
+        )
+    )
+    names: list[str] = []
+    for u in users:
+        if u.role == "admin" or u.tenant_id == tenant_id or u.id in members:
+            names.append(u.username)
+    return names
+
+
 def _engagement_ctx(
     request: Request,
     s,
@@ -557,7 +583,10 @@ def _engagement_ctx(
             "status": request.query_params.get("status", ""),
             "tool": request.query_params.get("tool", ""),
             "asset": request.query_params.get("asset", ""),
+            "assigned": request.query_params.get("assigned", ""),
         },
+        "finding_assignees": _finding_assignees_map(s, eid),
+        "me_username": (principal.username or "").strip().lower() if principal else "",
     }
 
 
@@ -858,6 +887,58 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
                      anchor="#targets")
     msg = "Not verified yet. " + result.message
     return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
+
+
+@router.post("/engagements/{eid}/targets/{aid}/ownership-token")
+def set_target_ownership_token(request: Request, eid: int, aid: int, token: str = Form(...)):
+    """Lead/admin: set or reuse an ownership token on the target page."""
+    url = f"/engagements/{eid}/targets/{aid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can set the ownership token.", anchor="#ownership")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            a = services.set_ownership_token(s, eid, aid, token, actor=principal.actor)
+            ident = a.identifier
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#ownership")
+    return _back(
+        url,
+        msg=f"Ownership token saved for {ident}. Publish the new value, then click Verify now.",
+        anchor="#ownership",
+    )
+
+
+@router.post("/engagements/{eid}/targets/{aid}/verify-ownership-now")
+def verify_target_ownership_now(request: Request, eid: int, aid: int):
+    """Verify now from the target page: same check as engagement Check now, returns to the target."""
+    url = f"/engagements/{eid}/targets/{aid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can check target ownership.", anchor="#ownership")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
+            from attestra.models import Asset
+
+            ident = s.get(Asset, aid).identifier
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#ownership")
+    except Exception:  # noqa: BLE001 - the check must never end in a 500 page
+        return _back(url, error="The ownership check could not run just now. Try again in a minute.",
+                     anchor="#ownership")
+    if result.ok:
+        how = {"dns": "the DNS TXT record", "file": "the verification file",
+               "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
+        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
+                     anchor="#ownership")
+    return _back(url, error="Not verified yet. " + result.message, anchor="#ownership")
 
 
 @router.post("/engagements/{eid}/targets/{aid}/confirm-ownership")
@@ -1323,6 +1404,8 @@ def finding_page(request: Request, eid: int, fid: int):
             c["can_delete"] = can_delete_comment(
                 principal.role, author_user_id=c["author_user_id"], actor_user_id=principal.user_id
             )
+        from attestra.assignments import current_assignee
+
         return _render(request, "finding.html", {
             "e": e,
             "f": f,
@@ -1332,6 +1415,8 @@ def finding_page(request: Request, eid: int, fid: int):
             "can_add_comment": can_add_comment(principal.role),
             "show_accept_risk": request.query_params.get("accept_risk") == "1",
             "latest_replay": latest_replay,
+            "assignee": current_assignee(s, fid),
+            "assignable_users": _tenant_usernames(s, e.tenant_id),
         })
 
 
@@ -1414,6 +1499,40 @@ def ui_delete_finding_comment(request: Request, eid: int, fid: int, cid: int):
     except (services.ServiceError, LookupError) as e:
         return _back(detail, error=str(e), anchor="#comments")
     return _back(detail, msg="Comment deleted.", anchor="#comments")
+
+
+@router.post("/engagements/{eid}/findings/{fid}/assign")
+def ui_assign_finding(request: Request, eid: int, fid: int, assignee: str = Form("")):
+    """Assign or clear a finding assignee from the finding detail page."""
+    from attestra.assignments import assign_finding, unassign_finding
+    from attestra.models import Finding
+
+    detail = f"/engagements/{eid}/findings/{fid}"
+    principal, redirect = _require_login(request, detail)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.write"):
+        return _back(detail, error="Your role can't assign findings.")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            f = s.get(Finding, fid)
+            if not f or f.engagement_id != eid:
+                raise LookupError("finding not found")
+            name = (assignee or "").strip()
+            if not name:
+                unassign_finding(s, fid, actor=principal.actor)
+                msg = "Assignee cleared."
+            else:
+                assign_finding(
+                    s, fid, assignee=name, actor=principal.actor, user_id=principal.user_id
+                )
+                msg = f"Assigned to {name}."
+    except LookupError as e:
+        return _back(detail, error=str(e))
+    except services.ServiceError as e:
+        return _back(detail, error=str(e))
+    return _back(detail, msg=msg)
 
 
 @router.post("/engagements/{eid}/findings/{fid}/status")

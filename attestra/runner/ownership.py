@@ -26,6 +26,12 @@ TXT_PREFIX = "attestra-verify="
 CHECK_TIMEOUT = 5  # seconds, for both the DNS lookup and the file fetch
 MAX_FILE_BYTES = 4096
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
+# urlsafe tokens from issue_token; allow reuse of another asset's token of the same shape
+_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+
+class OwnershipError(ValueError):
+    """Invalid ownership token or proof input."""
 
 
 def issue_token(asset: Asset) -> str:
@@ -37,6 +43,38 @@ def issue_token(asset: Asset) -> str:
 def ensure_token(asset: Asset) -> str:
     """Return the target's ownership token, issuing one the first time it is needed."""
     return asset.ownership_token or issue_token(asset)
+
+
+def validate_token(token: str) -> str:
+    """Normalize and accept a non-empty urlsafe ownership token (16–64 chars)."""
+    cleaned = (token or "").strip()
+    if not cleaned:
+        raise OwnershipError("Ownership token is required.")
+    if len(cleaned) > 64:
+        raise OwnershipError("Ownership token is too long (64 characters at most).")
+    if not _TOKEN_RE.fullmatch(cleaned):
+        raise OwnershipError(
+            "Ownership token must be 16–64 characters of letters, digits, underscore or hyphen."
+        )
+    return cleaned
+
+
+def set_token(asset: Asset, token: str, *, actor: str = "") -> str:
+    """Set or reuse an ownership token. Clears verification when the value changes.
+
+    ``actor`` is accepted for call-site clarity; auditing belongs in the service layer.
+    """
+    cleaned = validate_token(token)
+    if cleaned != (asset.ownership_token or ""):
+        asset.ownership_verified_at = None
+    asset.ownership_token = cleaned
+    return cleaned
+
+
+def token_fingerprint(token: str) -> str:
+    """Short suffix for audit details — never the full token."""
+    cleaned = (token or "").strip()
+    return cleaned[-4:] if cleaned else ""
 
 
 def is_verified(asset: Asset) -> bool:

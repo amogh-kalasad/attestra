@@ -416,6 +416,43 @@ def ensure_ownership_tokens(eng: Engagement) -> None:
             ownership.ensure_token(a)
 
 
+def set_ownership_token(
+    s: Session, engagement_id: int, asset_id: int, token: str, *, actor: str
+) -> Asset:
+    """Set or reuse an ownership token on a target (lead/admin enforced in the UI).
+
+    Validates token format, clears ``ownership_verified_at`` when the value changes
+    (must re-verify), and audits ``asset.ownership_token_set`` with a suffix only.
+    """
+    from attestra.runner import ownership
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    get_engagement(s, engagement_id)
+    a = s.get(Asset, asset_id)
+    if not a or a.engagement_id != engagement_id:
+        raise LookupError(f"target {asset_id} is not in this engagement")
+    if a.kind not in OWNERSHIP_KINDS:
+        raise ServiceError(f"{ASSET_KINDS.get(a.kind, a.kind)} targets do not need ownership proof")
+    try:
+        previous = a.ownership_token or ""
+        cleaned = ownership.set_token(a, token, actor=actor)
+    except ownership.OwnershipError as exc:
+        raise ServiceError(str(exc)) from exc
+    changed = cleaned != previous
+    audit.record(
+        s,
+        actor,
+        "asset.ownership_token_set",
+        "asset",
+        a.id,
+        engagement_id=engagement_id,
+        identifier=a.identifier,
+        token_suffix=ownership.token_fingerprint(cleaned),
+        changed=changed,
+    )
+    return a
+
+
 def ownership_methods(s: Session, asset_ids: list[int]) -> dict[int, str]:
     """Method ('dns' | 'file' | 'owner_confirmed') of the latest successful ownership proof per target.
 

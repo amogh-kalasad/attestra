@@ -110,6 +110,14 @@
         <option value="none" {{ "selected" if ff.asset == "none" }}>Unmatched</option>
       </select>
     </div>
+    <div>
+      <label for="ff-assigned" class="meta" style="display:block;margin:0 0 2px">Assignee</label>
+      <select id="ff-assigned" data-native>
+        <option value="">All</option>
+        <option value="me" {{ "selected" if ff.assigned == "me" }}>Assigned to me</option>
+        <option value="none" {{ "selected" if ff.assigned == "none" }}>Unassigned</option>
+      </select>
+    </div>
     <span class="meta" id="ff-count" style="align-self:center"></span>
     {% if can(prole, "finding.read") %}
     <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export" style="margin-left:auto">Export findings CSV</a>
@@ -117,19 +125,23 @@
   </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
   <table id="findings-table">
-    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Status</th></tr>
+    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Assignee</th><th>Status</th></tr>
     {% for f in findings %}
+    {% set asg = (finding_assignees or {}).get(f.id, "") %}
     <tr id="f-{{ f.id }}" class="finding-row"
         data-severity="{{ f.severity }}"
         data-status="{{ f.status }}"
         data-tools="{{ (f.tools or [])|join(',') }}"
-        data-asset="{{ f.asset_id or 'none' }}">
+        data-asset="{{ f.asset_id or 'none' }}"
+        data-assignee="{{ asg }}"
+        data-assigned-to-me="{{ '1' if asg and me_username and asg|lower == me_username else '0' }}">
       <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
+      <td class="meta">{{ asg or "—" }}</td>
       <td>
         <div class="status-cell">
           <div class="status-head"><span class="st fs fs-{{ f.status }}">{{ f.status|label }}</span><span class="meta fix-by">Fix by {{ f.sla_due or "-" }}</span></div>
@@ -747,9 +759,10 @@
     const st = document.getElementById('ff-status');
     const tool = document.getElementById('ff-tool');
     const asset = document.getElementById('ff-asset');
+    const assigned = document.getElementById('ff-assigned');
     const count = document.getElementById('ff-count');
     const emptyFilter = document.getElementById('findings-empty-filter');
-    if (!sev || !st || !tool || !asset) return;
+    if (!sev || !st || !tool || !asset || !assigned) return;
     function apply() {
       const rows = document.querySelectorAll('#findings-table tr.finding-row');
       let shown = 0;
@@ -759,21 +772,24 @@
         const tools = (row.dataset.tools || '').split(',').filter(Boolean);
         const okTool = !tool.value || tools.indexOf(tool.value) >= 0;
         const okAsset = !asset.value || row.dataset.asset === asset.value;
-        const show = okSev && okSt && okTool && okAsset;
+        let okAssigned = true;
+        if (assigned.value === 'me') okAssigned = row.dataset.assignedToMe === '1';
+        else if (assigned.value === 'none') okAssigned = !(row.dataset.assignee || '');
+        const show = okSev && okSt && okTool && okAsset && okAssigned;
         row.hidden = !show;
         if (show) shown += 1;
       });
       if (count) count.textContent = rows.length ? (shown + ' shown') : '';
       if (emptyFilter) emptyFilter.hidden = !(rows.length && shown === 0);
       const params = new URLSearchParams(window.location.search);
-      [['severity', sev.value], ['status', st.value], ['tool', tool.value], ['asset', asset.value]].forEach(([k, v]) => {
+      [['severity', sev.value], ['status', st.value], ['tool', tool.value], ['asset', asset.value], ['assigned', assigned.value]].forEach(([k, v]) => {
         if (v) params.set(k, v); else params.delete(k);
       });
       const qs = params.toString();
       const url = window.location.pathname + (qs ? '?' + qs : '') + '#findings';
       if (history.replaceState) history.replaceState(null, '', url);
     }
-    [sev, st, tool, asset].forEach(el => el.addEventListener('change', apply));
+    [sev, st, tool, asset, assigned].forEach(el => el.addEventListener('change', apply));
     apply();
   })();
   // Active profile only for targets that allow intrusive tests.

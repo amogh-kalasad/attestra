@@ -117,3 +117,9 @@ Plain-text discussion thread on each finding; soft-deleted; never in share links
 Threaded notes on a finding with soft-delete and role checks.
 
 [[attestra/comments.py#list_comments]], [[attestra/comments.py#add_comment]], and [[attestra/comments.py#delete_comment]] keep comments on [[attestra/models.py#FindingComment]]. Writers and client viewers may add; authors or lead/admin may soft-delete. Public share payloads use [[attestra/comments.py#finding_fields_for_share]] and never include comment bodies.
+
+## Assignment
+
+Human and workflow-rule assignee history on a finding, audited on every change.
+
+[[attestra/models.py#FindingAssignment]] stores `assignee` (username string), optional `rule_id`, and `assigned_by`. [[attestra/assignments.py#assign_finding]] resolves the username to an active [[attestra/models.py#User]] in the finding's engagement tenant (home tenant or [[attestra/models.py#TenantMembership]]), or a platform `admin`, then inserts a row and audits `finding.assigned`. [[attestra/assignments.py#unassign_finding]] inserts `assignee=""` and audits `finding.unassigned`. [[attestra/assignments.py#current_assignee]] returns the latest non-empty assignee (or `None` after unassign). [[attestra/assignments.py#findings_assigned_to]] filters an engagement for the "assigned to me" view. Workflow rules in [[attestra/webhooks/service.py]] still insert `FindingAssignment` rows directly.

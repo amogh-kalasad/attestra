@@ -80,3 +80,9 @@ Private network addresses have no DNS name and the file check refuses non-global
 [[attestra/web/ui.py#confirm_target_ownership]] calls [[attestra/services.py#confirm_private_ownership]]. It is allowed only when [[attestra/runner/authorization.py#owner_confirm_host]] returns a host: a literal IP inside [[attestra/runner/authorization.py#OWNER_CONFIRM_CIDRS]] (10/8, 172.16/12, 192.168/16, loopback, fc00::/7) or `localhost`. Public IPs, domain names, IP ranges and [[attestra/runner/authorization.py#BLOCKED_CIDRS]] never qualify. The target's environment must be in a valid signed authorization, the user must tick the confirm box, and must type who is confirming (name and role, at most 200 characters). No network call is made.
 
 The confirmation sets `ownership_verified_at` and is audited as `asset.ownership_confirmed` with method [[attestra/runner/authorization.py#OWNER_CONFIRMED]] and the `confirmed_by` text. [[attestra/services.py#ownership_methods]] reads the audit log to show which method verified each target. There is no REST API route for these checks; they are in the web UI only.
+
+### Set or reuse token
+
+A lead or admin can paste another target's token on the target page so several hosts share one DNS TXT or well-known file.
+
+[[attestra/web/ui.py#set_target_ownership_token]] calls [[attestra/services.py#set_ownership_token]], which validates format via [[attestra/runner/ownership.py#set_token]] (16–64 urlsafe characters). Changing the token clears `ownership_verified_at` so the proof must be checked again. Audit `asset.ownership_token_set` stores only a four-character suffix, never the full token. [[attestra/web/ui.py#verify_target_ownership_now]] runs the same check as engagement Check now and returns to the target page.

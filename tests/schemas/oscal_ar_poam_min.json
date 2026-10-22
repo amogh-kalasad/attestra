@@ -1,6 +1,7 @@
 {
   "description": "Minimal Attestra OSCAL Assessment Results / POA&M structure checks (not full NIST schema).",
   "required_top_level_ar": ["assessment-results"],
+  "required_top_level_poam": ["plan-of-action-and-milestones"],
   "required_nested": {
     "assessment-results": ["uuid", "metadata", "results"],
     "plan-of-action-and-milestones": ["uuid", "metadata", "poam-items"]
