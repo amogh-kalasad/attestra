@@ -75,6 +75,7 @@ DOCX/PDF, framework packs, SARIF, and OSCAL.
 - [[attestra/reports/export.py#to_docx]] / [[attestra/reports/export.py#to_pdf]] (WeasyPrint optional; minimal PDF/DOCX always)
 - [[attestra/reports/packs.py#build_framework_pack]] — zip + MANIFEST.sha256
 - [[attestra/reports/sarif.py#findings_to_sarif]], [[attestra/reports/oscal.py#assessment_results]], [[attestra/reports/oscal.py#poam]]
+- PDF/Word display: [[attestra/reports/pdf.py#_human_times]] formats timestamps in `ATTESTRA_DISPLAY_TZ` (same approach as [[attestra/web/ui.py#_display_tz]]); [[attestra/reports/pdf.py#_framework_names]] swaps raw framework keys for library display names. Iso SoA sets `soa_framework` to the library name in [[attestra/reports/render.py#generate_report]].
 
 ## Framework packs
 

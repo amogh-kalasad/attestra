@@ -15,8 +15,9 @@ The caller falls back to a plain-text PDF when both are missing.
 from __future__ import annotations
 
 import base64
+import os
 import re
-from datetime import UTC
+from datetime import UTC, datetime, timedelta, timezone
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -426,11 +427,22 @@ def _framework_names(html: str) -> str:
 _TS = re.compile(r"\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?(?:\s*UTC)?")
 
 
-def _human_times(html: str) -> str:
-    """Render ISO timestamps as '21 Oct 2026, 11:06 IST' (Asia/Kolkata)."""
-    from datetime import datetime, timedelta, timezone
+def _display_tz():
+    """Same display zone as the web UI ([[attestra/web/ui.py#_display_tz]])."""
+    name = os.environ.get("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
+    try:
+        from zoneinfo import ZoneInfo
 
-    ist = timezone(timedelta(hours=5, minutes=30))
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 - no tz database on this host
+        if name == "Asia/Kolkata":
+            return timezone(timedelta(hours=5, minutes=30), "IST")
+        return UTC
+
+
+def _human_times(html: str) -> str:
+    """Render ISO timestamps as '21 Oct 2026, 11:06 IST' in ATTESTRA_DISPLAY_TZ."""
+    display = _display_tz()
 
     def fix(m: re.Match) -> str:
         try:
@@ -440,7 +452,9 @@ def _human_times(html: str) -> str:
                 dt = dt.replace(tzinfo=UTC)
             else:
                 dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}{tz}")
-            return dt.astimezone(ist).strftime("%d %b %Y, %H:%M IST").lstrip("0")
+            local = dt.astimezone(display)
+            label = local.strftime("%Z") or "UTC"
+            return f"{local.strftime('%d %b %Y, %H:%M').lstrip('0')} {label}"
         except Exception:
             return m.group(0)
 

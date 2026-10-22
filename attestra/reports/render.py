@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from attestra import __version__, audit, config, services
 from attestra.compliance import load_library, objectives_for
 from attestra.models import (
+    DISPLAY_LABELS,
     OPEN_STATUSES,
     SEVERITIES,
     TEST_TYPES,
@@ -236,7 +237,12 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "imports": imports,
         "authorizations": eng.authorizations,
         "frameworks": frameworks,
-        "objectives_for": lambda f: objectives_for(f, lib),
+        "objectives_for": lambda f: [
+            DISPLAY_LABELS.get(k)
+            or (lib.objectives.get(k) or {}).get("name")
+            or k.replace("_", " ").strip().title()
+            for k in objectives_for(f, lib)
+        ],
         "top": sorted(open_f, key=lambda f: -f.risk_score)[:5],
         "kev_open": [f for f in open_f if f.kev],
         "today": date.today(),
@@ -322,7 +328,8 @@ def generate_report(
         fw = framework or "iso_27001_2022"
         ctx["soa_results"] = services.compliance(s, engagement_id, fw)
         ctx["nonconformities"] = list(eng.nonconformities)
-        ctx["soa_framework"] = fw
+        meta = load_library().frameworks.get(fw) or {}
+        ctx["soa_framework"] = (meta.get("name") if isinstance(meta, dict) else None) or fw
     if kind == "ageing":
         ctx["sla_breaches"] = services.sla_breaches(s, engagement_id)
     if kind == "retest":

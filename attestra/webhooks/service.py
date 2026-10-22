@@ -111,6 +111,16 @@ def create_rule(
     return rule
 
 
+def deactivate_rule(s: Session, rule_id: int, *, actor: str) -> WorkflowRule:
+    """Soft-deactivate a workflow rule (sets active=False; does not delete the row)."""
+    rule = s.get(WorkflowRule, rule_id)
+    if not rule:
+        raise LookupError(f"rule {rule_id} not found")
+    rule.active = False
+    audit.record(s, actor, "workflow_rule.deactivate", "workflow_rule", rule.id)
+    return rule
+
+
 def rule_matches(rule: WorkflowRule, event: str, finding: Finding) -> bool:
     if not rule.active or (rule.event and rule.event != event):
         return False

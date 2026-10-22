@@ -4,16 +4,16 @@ A Type II auditor tests a control over a period by picking a sample from the ful
 population of occurrences. This module builds that population from engagement
 records, picks a reproducible seeded sample, and exports both as CSV or JSON.
 
-Sample sizes follow a documented population-size table (SAMPLE_SIZE_TABLE), in line
-with common Type II practice. The auditor may override the size. The same
+Sample sizes and seed normalization come from [[attestra/compliance/sampling.py]]
+(documented Type II practice). The auditor may override the size. The same
 engagement, population, period and seed always yield the same sample.
 """
 # @lat: [[compliance]]
+# @lat: [[compliance#Shared audit sampling]]
 
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import random
 from datetime import date
@@ -22,19 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import services
+from attestra.compliance.sampling import (
+    SAMPLE_SIZE_TABLE,
+    resolve_seed,
+    sample_size_for,
+)
 from attestra.models import OPEN_STATUSES, Finding
 
 METHOD = "simple random sampling without replacement (Python random.Random(seed).sample over population sorted by id)"
-
-# (max population size inclusive, sample size). None means sample the whole population.
-SAMPLE_SIZE_TABLE: tuple[tuple[int, int | None], ...] = (
-    (2, None),  # tiny populations: test every item
-    (4, 2),  # quarterly-type frequency
-    (12, 2),  # monthly-type frequency
-    (52, 5),  # weekly-type frequency
-    (250, 25),  # daily-type frequency
-    (10**12, 40),  # many times per day
-)
 
 POPULATIONS = {
     "findings": "Every reportable finding identified in the engagement (false positives excluded). Supports CC7.1/CC4.1.",
@@ -44,19 +39,11 @@ POPULATIONS = {
 FIELDS = ["id", "title", "severity", "status", "cwe", "first_seen", "last_seen", "sla_due", "ticket_ref", "validated_by"]
 
 
-def sample_size_for(population_size: int) -> int:
-    """Documented sample size for a population of this size (see SAMPLE_SIZE_TABLE)."""
-    if population_size <= 0:
-        return 0
-    for limit, size in SAMPLE_SIZE_TABLE:
-        if population_size <= limit:
-            return population_size if size is None else min(size, population_size)
-    return population_size
-
-
 def default_seed(engagement_id: int, population: str, period_start: date | None, period_end: date | None) -> int:
-    raw = f"attestra-soc2:{engagement_id}:{population}:{period_start or ''}:{period_end or ''}"
-    return int(hashlib.sha256(raw.encode()).hexdigest()[:12], 16)
+    return resolve_seed(
+        None,
+        context=f"attestra-soc2:{engagement_id}:{population}:{period_start or ''}:{period_end or ''}",
+    )
 
 
 def _row(f: Finding) -> dict:
@@ -104,7 +91,10 @@ def build_sample(
     seed: int | None = None, size: int | None = None,
 ) -> dict:
     pop = build_population(s, engagement_id, population, period_start, period_end)
-    seed = default_seed(engagement_id, population, period_start, period_end) if seed is None else int(seed)
+    seed = resolve_seed(
+        seed,
+        context=f"attestra-soc2:{engagement_id}:{population}:{period_start or ''}:{period_end or ''}",
+    )
     documented = sample_size_for(len(pop))
     if size is not None and size < 0:
         raise services.ServiceError("size must be zero or more")

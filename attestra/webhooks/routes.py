@@ -145,14 +145,24 @@ def create_rule(body: RuleIn, principal=Depends(_require("webhook.manage"))):
     return _call(fn)
 
 
-@router.delete("/api/workflow-rules/{rid}")
-def delete_rule(rid: int, principal=Depends(_require("webhook.manage"))):
+def _deactivate_rule(rid: int, principal):
     def fn(s):
         r = s.get(WorkflowRule, rid)
         if not r:
             raise LookupError(f"rule {rid} not found")
         _tenant_ok(s, principal, r.tenant_id)
-        r.active = False
-        return _rule_out(r)
+        return _rule_out(wh.deactivate_rule(s, rid, actor=principal.actor))
 
     return _call(fn)
+
+
+@router.delete("/api/workflow-rules/{rid}", summary="Deactivate a workflow rule")
+def deactivate_rule_delete(rid: int, principal=Depends(_require("webhook.manage"))):
+    """Soft-deactivate (active=False). Kept as DELETE for backward compatibility."""
+    return _deactivate_rule(rid, principal)
+
+
+@router.post("/api/workflow-rules/{rid}/deactivate", summary="Deactivate a workflow rule")
+def deactivate_rule(rid: int, principal=Depends(_require("webhook.manage"))):
+    """Soft-deactivate a workflow rule (same as DELETE; preferred name)."""
+    return _deactivate_rule(rid, principal)

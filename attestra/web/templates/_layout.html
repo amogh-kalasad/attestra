@@ -685,7 +685,26 @@
   }
 </style>
 <link rel="stylesheet" href="/static/attestra.css?v=4">
-<script src="/static/attestra.js?v=3" defer></script>
+<script src="/static/attestra.js?v=4" defer></script>
+<style>
+  /* Shared confirm dialog (P1-13) */
+  .confirm-backdrop {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(11, 18, 32, .45);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .confirm-backdrop[hidden] { display: none !important; }
+  .confirm-dialog {
+    background: var(--card); color: var(--ink);
+    border-radius: var(--radius); box-shadow: 0 16px 48px rgba(15,40,60,.18);
+    max-width: 440px; width: 100%; padding: 24px;
+    border: 1px solid var(--rule);
+  }
+  .confirm-dialog h2 { margin: 0 0 8px; font-size: 18px; font-weight: 650; }
+  .confirm-dialog p { margin: 0 0 20px; color: var(--ink-2); line-height: 1.5; }
+  .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+</style>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">
 {% set role = principal.role if principal else None %}
@@ -768,5 +787,15 @@
   </div>
 </div>
 {% endif %}
+<div id="confirm-backdrop" class="confirm-backdrop" hidden>
+  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h2 id="confirm-title">Please confirm</h2>
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button type="button" class="secondary" id="confirm-cancel">Cancel</button>
+      <button type="button" class="danger" id="confirm-ok">Confirm</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

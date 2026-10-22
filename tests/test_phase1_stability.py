@@ -38,3 +38,19 @@ def test_findings_csv_target_column(loaded):
     assert data_rows
     # At least one imported finding should show the shop target identifier.
     assert any("shop.example.com" in row for row in data_rows)
+
+
+# @lat: [[tests#Phase 1 stability#Shared ISO and SOC 2 sample sizes]]
+def test_shared_sample_size_rules():
+    """ISO default_sample_size and SOC 2 sample_size_for use the same table."""
+    from attestra import services
+    from attestra.compliance.sampling import sample_size_for
+    from attestra.reports import soc2_sampling
+
+    for n in (0, 1, 2, 3, 4, 12, 13, 52, 53, 100, 250, 251, 5000):
+        shared = sample_size_for(n)
+        assert services.default_sample_size(n) == shared
+        assert soc2_sampling.sample_size_for(n) == shared
+    assert sample_size_for(3) == 2
+    assert sample_size_for(10) == 2
+    assert sample_size_for(100) == 25

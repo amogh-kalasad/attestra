@@ -652,6 +652,26 @@ Parametrized role permissions plus cross-tenant get/list returning 404 for clien
 
 Asserts CSP / X-Frame-Options headers and that [[attestra/api_security.py#RateLimiter]] / [[attestra/api_security.py#RateLimitMiddleware]] return 429 after the limit.
 
+## Phase 2 bug fixes
+
+Regression coverage for invite email hints, SoA/PDF display, and workflow-rule soft-deactivate (tests/test_phase2_bugs.py).
+
+### Known emails skip revoked used invites
+
+[[attestra/alerts/service.py#known_tenant_emails]] returns only unused, non-revoked invite emails for a tenant.
+
+### iso_soa framework display name
+
+Generated iso_soa HTML shows the library framework display name, not the raw key `iso_27001_2022`.
+
+### PDF human times use display TZ
+
+[[attestra/reports/pdf.py#_human_times]] formats timestamps in `ATTESTRA_DISPLAY_TZ` including the zone abbreviation.
+
+### Workflow rule deactivate
+
+`DELETE /api/workflow-rules/{id}` and `POST /api/workflow-rules/{id}/deactivate` both set `active=False`; [[attestra/webhooks/service.py#rule_matches]] then returns false.
+
 ## CLI key and user admin
 
 Local CLI coverage for API key list/revoke and lead-scoped user disable.
@@ -700,21 +720,25 @@ Exporting the same report to DOCX/PDF twice succeeds; the sealed HTML hash is un
 
 Findings CSV includes the linked asset identifier (for example shop.example.com) in the target column.
 
+### Shared ISO and SOC 2 sample sizes
+
+[[attestra/services.py#default_sample_size]] and the SOC 2 path both match [[attestra/compliance/sampling.py#sample_size_for]] for representative population sizes.
+
 ## Phase 0 integrity
 
 Critical integrity and security fixes from the Gap Implementation Plan (auditor confirm ownership, open-finding met block, risk-acceptance record, share untested grade, metrics auth, risk-acceptance partial evidence).
 
 ### Auditor ownership of confirmations
 
-Lead role cannot confirm or overwrite; auditor can confirm. Refused attempts are audited.
+Lead role cannot confirm or overwrite; auditor can confirm. Refused attempts are audited as `control.confirm_refused` (API returns 403).
 
 ### Block met with open findings
 
-Confirming `met` with open mapped findings raises unless an explicit override is passed; override rationale is stored.
+Confirming `met` with open mapped critical/high/medium findings raises and names those findings unless an explicit override is passed; low/info alone do not block; override rationale is stored.
 
 ### Risk acceptance record required
 
-Bare `transition` to `risk_accepted` is refused; [[attestra/services.py#accept_risk]] creates the record and status together.
+Bare `transition` to `risk_accepted` is refused; [[attestra/services.py#accept_risk]] creates the record and status together (API, UI, and CLI `accept-risk`).
 
 ### Share untested grade
 
@@ -827,6 +851,7 @@ Test modules for features added on top of the core flow. Each line says what the
 - `tests/test_trust_center.py`: the trust center is off by default, publishes only by hand, accepts only signed reports, and gates items behind an NDA.
 - `tests/test_user_management.py`: invites, roles, expiry, one-time tokens, password rules, last admin guard, disabled login and password reset.
 - `tests/test_webhooks.py`: outbound webhooks block private addresses, are signed, retry with backoff, and follow workflow rules.
+- `tests/test_phase2_bugs.py`: known alert emails skip revoked/used invites; iso_soa uses framework display name; PDF times use `ATTESTRA_DISPLAY_TZ`; workflow rule DELETE/POST deactivate sets `active=False`.
 - `tests/test_email_alerts.py`: SMTP off skips quietly; grouped Critical/High email; header before/after; SLA once; password never logged; settings role checks; unrestricted lead default tenant; HarmonyPM live header compare on a DB copy.
 - `tests/test_ui_audit_fixes.py`: friendly 403, 404 and 422 pages, nav links by role, sign-in `next=` redirect, confirm before destructive actions, and `_back` flash query joining.
 - `tests/runner/test_phase7_adapters.py`: command lines for the extra scanner adapters; network tools use the pinned IP and nothing runs.

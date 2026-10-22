@@ -156,11 +156,17 @@ def update_settings(
 
 
 def known_tenant_emails(s: Session, tenant_id: int) -> list[str]:
-    """Invite emails for this tenant (users do not store email after accept)."""
+    """Open invite emails for this tenant (users do not store email after accept).
+
+    Matches [[attestra/users/service.py#list_invites]]: only unused, non-revoked invites.
+    """
+    # @lat: [[interfaces#Email alerts]]
     rows = s.scalars(
         select(UserInvite.email).where(
             UserInvite.tenant_id == tenant_id,
             UserInvite.email != "",
+            UserInvite.used_at.is_(None),
+            UserInvite.revoked_at.is_(None),
         )
     )
     return sorted({e.strip().lower() for e in rows if e and _EMAIL_RE.match(e.strip())})

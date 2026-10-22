@@ -72,7 +72,7 @@ Remediation due dates by severity, including PCI 6.3.3 critical window.
 
 Allowed status transitions and how they are applied.
 
-Allowed transitions: [[attestra/models.py#TRANSITIONS]]. Applied by [[attestra/services.py#transition]] with actor + optional note (required for `false_positive`). Moving to `risk_accepted` is refused unless called from [[attestra/services.py#accept_risk]], which creates the [[attestra/models.py#RiskAcceptance]] row (expiry + rationale). Every transition is audited.
+Allowed transitions: [[attestra/models.py#TRANSITIONS]]. Applied by [[attestra/services.py#transition]] with actor + optional note (required for `false_positive`). Moving to `risk_accepted` is refused unless called from [[attestra/services.py#accept_risk]], which creates the [[attestra/models.py#RiskAcceptance]] row (expiry + rationale + owner/approver). Enforced in API (`POST /risk-acceptances`), UI (accept-risk form), and CLI (`attestra accept-risk`). Every transition is audited.
 
 Open statuses for compliance roll-up: [[attestra/models.py#OPEN_STATUSES]].
 

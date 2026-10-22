@@ -223,9 +223,91 @@
     });
   });
 
+  /* data-confirm: intercept submit/click and show the shared modal instead of window.confirm. */
+  var pendingConfirm = null;
+  function confirmEl() {
+    return {
+      backdrop: document.getElementById("confirm-backdrop"),
+      title: document.getElementById("confirm-title"),
+      message: document.getElementById("confirm-message"),
+      ok: document.getElementById("confirm-ok"),
+      cancel: document.getElementById("confirm-cancel"),
+    };
+  }
+  function openConfirm(message, onOk) {
+    var el = confirmEl();
+    if (!el.backdrop || !el.message) {
+      if (window.confirm(message)) onOk();
+      return;
+    }
+    pendingConfirm = onOk;
+    el.message.textContent = message;
+    el.backdrop.hidden = false;
+    (el.cancel || el.ok).focus();
+  }
+  function closeConfirm() {
+    var el = confirmEl();
+    pendingConfirm = null;
+    if (el.backdrop) el.backdrop.hidden = true;
+  }
+  function bindConfirmUi() {
+    var el = confirmEl();
+    if (!el.backdrop) return;
+    if (el.cancel) el.cancel.addEventListener("click", function () { closeConfirm(); });
+    if (el.ok) el.ok.addEventListener("click", function () {
+      var fn = pendingConfirm;
+      closeConfirm();
+      if (fn) fn();
+    });
+    el.backdrop.addEventListener("click", function (e) {
+      if (e.target === el.backdrop) closeConfirm();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && el.backdrop && !el.backdrop.hidden) {
+        e.preventDefault();
+        closeConfirm();
+      }
+    });
+  }
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form || !form.getAttribute) return;
+    var msg = form.getAttribute("data-confirm");
+    if (!msg) return;
+    if (form.dataset.confirmProceed === "1") {
+      delete form.dataset.confirmProceed;
+      return;
+    }
+    e.preventDefault();
+    openConfirm(msg, function () {
+      form.dataset.confirmProceed = "1";
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
+      else form.submit();
+    });
+  }, true);
+  document.addEventListener("click", function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest("[data-confirm]") : null;
+    if (!btn || btn.tagName === "FORM") return;
+    if (btn.tagName !== "BUTTON" && btn.tagName !== "INPUT") return;
+    if (btn.form && btn.form.getAttribute("data-confirm")) return;
+    var msg = btn.getAttribute("data-confirm");
+    if (!msg) return;
+    if (btn.dataset.confirmProceed === "1") {
+      delete btn.dataset.confirmProceed;
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    openConfirm(msg, function () {
+      btn.dataset.confirmProceed = "1";
+      btn.click();
+    });
+  }, true);
+
   function init() {
     document.documentElement.classList.add("js-asel");
     enhance(document);
+    bindConfirmUi();
     new MutationObserver(function (muts) {
       muts.forEach(function (m) {
         Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1 && !n.closest(".asel")) enhance(n); });

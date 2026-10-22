@@ -8,7 +8,7 @@
   {% include "library_fields.html" %}
   <div class="actions-split">
     <button type="submit" name="action" value="save">Save</button>
-    <button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Delete this writeup? Findings that already used it keep their text.')">Delete writeup</button>
+    <button type="submit" name="action" value="delete" class="danger" data-confirm="Delete this writeup? Findings that already used it keep their text.">Delete writeup</button>
   </div>
 </form>
 </div>

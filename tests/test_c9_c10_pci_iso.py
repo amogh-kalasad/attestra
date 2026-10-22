@@ -142,9 +142,10 @@ def test_nonconformity_corrective_action_workflow(engagement):
 
 
 def test_default_sample_size():
-    assert services.default_sample_size(3) == 3
-    assert services.default_sample_size(10) == 5
-    assert services.default_sample_size(100) == 10
+    # Shared Type II table (same as SOC 2 / compliance.sampling).
+    assert services.default_sample_size(3) == 2
+    assert services.default_sample_size(10) == 2
+    assert services.default_sample_size(100) == 25
 
 
 def test_audit_sample_is_reproducible_from_seed(engagement):

@@ -404,6 +404,30 @@ def cmd_expire_risk(args) -> None:
     print(f"expired {n} risk acceptance(s)")
 
 
+def cmd_accept_risk(args) -> None:
+    """P0-3: create a risk-acceptance record and move the finding to risk_accepted."""
+    from datetime import date as date_cls
+
+    from attestra.models import Finding
+
+    actor, user_id = _resolve_actor(args)
+    expires_on = date_cls.fromisoformat(args.expires_on)
+    with db.session() as s:
+        row = services.accept_risk(
+            s,
+            args.finding,
+            expires_on=expires_on,
+            rationale=args.rationale,
+            actor=actor,
+            owner_user_id=user_id,
+        )
+        f = s.get(Finding, args.finding)
+        print(
+            f"risk acceptance #{row.id}: F-{row.finding_id} -> "
+            f"{f.status if f else 'risk_accepted'} (expires {row.expires_on})"
+        )
+
+
 def cmd_library_import(args) -> None:
     from attestra.compliance.libraries import import_oscal_catalog, import_scf_csv, install_pack, write_pack
 
@@ -698,6 +722,15 @@ def main(argv: list[str] | None = None) -> None:
     sp.set_defaults(fn=cmd_report)
 
     sub.add_parser("expire-risk", help="reopen findings with expired risk acceptances").set_defaults(fn=cmd_expire_risk)
+
+    sp = sub.add_parser(
+        "accept-risk",
+        help="accept residual risk on a finding (creates record: rationale + expiry + approver)",
+    )
+    sp.add_argument("finding", type=int)
+    sp.add_argument("--expires-on", required=True, help="YYYY-MM-DD expiry date")
+    sp.add_argument("--rationale", required=True, help="reason for accepting residual risk")
+    sp.set_defaults(fn=cmd_accept_risk)
 
     sp = sub.add_parser("compliance-export", help="export control library CSV for external review")
     sp.add_argument("-o", "--output", default="")

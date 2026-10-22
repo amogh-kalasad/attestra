@@ -70,7 +70,7 @@
     <div class="hint">Approving puts this text in the next report. Check every statement against the findings first.</div>
     <div class="form-actions" style="margin-top:var(--space-4)">
       <button type="submit">Approve (with edits)</button>
-      <button type="submit" class="danger" formaction="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/reject" formnovalidate onclick="return confirm('Reject this AI draft? It will not be used in any report.')">Reject</button>
+      <button type="submit" class="danger" formaction="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/reject" formnovalidate data-confirm="Reject this AI draft? It will not be used in any report.">Reject</button>
     </div>
   </form>
   {% else %}

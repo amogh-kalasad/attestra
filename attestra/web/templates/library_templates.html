@@ -53,7 +53,7 @@
   </div>
   <div class="actions-split">
     <button type="submit" name="action" value="save">Save template</button>
-    {% if t %}<button type="submit" name="action" value="delete" class="danger" onclick="return confirm('Remove this template and use the built-in one?')">Remove template</button>{% endif %}
+    {% if t %}<button type="submit" name="action" value="delete" class="danger" data-confirm="Remove this template and use the built-in one?">Remove template</button>{% endif %}
   </div>
 </form>
 </div>

@@ -1006,7 +1006,16 @@ def tls_summaries(s: Session, engagement_id: int) -> list[dict]:
     return list(by_host.values())
 
 
-def list_findings(s: Session, engagement_id: int, status: str | None = None, severity: str | None = None) -> list[Finding]:
+def list_findings(
+    s: Session,
+    engagement_id: int,
+    status: str | None = None,
+    severity: str | None = None,
+    *,
+    tool: str | None = None,
+    asset_id: int | None = None,
+) -> list[Finding]:
+    """List findings for an engagement, optionally filtered by status/severity/tool/target."""
     from sqlalchemy.orm import joinedload
 
     q = select(Finding).options(joinedload(Finding.asset)).where(Finding.engagement_id == engagement_id)
@@ -1014,7 +1023,13 @@ def list_findings(s: Session, engagement_id: int, status: str | None = None, sev
         q = q.where(Finding.status == status)
     if severity:
         q = q.where(Finding.severity == severity)
-    return list(s.scalars(q.order_by(Finding.risk_score.desc(), Finding.id)).unique())
+    if asset_id is not None:
+        q = q.where(Finding.asset_id == asset_id)
+    rows = list(s.scalars(q.order_by(Finding.risk_score.desc(), Finding.id)).unique())
+    if tool:
+        needle = tool.strip().lower()
+        rows = [f for f in rows if any(str(t).lower() == needle for t in (f.tools or []))]
+    return rows
 
 
 def transition(
@@ -1127,15 +1142,26 @@ def confirm_control(
     if ref not in by_ref:
         raise ServiceError(f"control '{ref}' is not in the {framework} library")
     ctrl = by_ref[ref]
-    open_ids = list(ctrl.finding_ids or [])
+    # P0-2: only critical/high/medium open findings block "met" (low/info may remain).
+    blocking = []
+    for fid in ctrl.finding_ids or []:
+        f = s.get(Finding, fid)
+        if f is None or f.status not in OPEN_STATUSES:
+            continue
+        if _rank(f.severity) >= 2:  # medium or worse
+            blocking.append(f)
+    open_ids = [f.id for f in blocking]
     if status == "met" and open_ids and not allow_open_findings_override:
+        named = ", ".join(
+            f"F-{f.id} ({f.severity}: {f.title[:60]})" for f in blocking
+        )
         audit.record(
             s, assessor, "control.confirm_refused", "engagement", engagement_id,
             framework=framework, ref=ref, status=status, open_finding_ids=open_ids,
         )
         raise ServiceError(
             f"not allowed: cannot confirm '{ref}' as met while open findings remain: "
-            f"{', '.join(f'F-{i}' for i in open_ids)}. "
+            f"{named}. "
             "Close, retest-pass, false-positive, or risk-accept them first, "
             "or pass allow_open_findings_override with rationale."
         )
@@ -2115,12 +2141,10 @@ def update_nonconformity(
 
 
 def default_sample_size(population: int) -> int:
-    """Simple audit-sampling rule: all if <= 5, else max(5, ceil(sqrt(n)))."""
-    import math
+    """Documented sample size (shared ISO / SOC 2 table). See compliance.sampling."""
+    from attestra.compliance.sampling import sample_size_for
 
-    if population <= 5:
-        return population
-    return min(population, max(5, math.ceil(math.sqrt(population))))
+    return sample_size_for(population)
 
 
 def draw_audit_sample(
@@ -2131,6 +2155,7 @@ def draw_audit_sample(
     import random
     import secrets
 
+    from attestra.compliance.sampling import seed_to_int
     from attestra.models import AuditSample
 
     eng = get_engagement(s, engagement_id)
@@ -2150,7 +2175,7 @@ def draw_audit_sample(
     if n < 1 or n > len(items):
         raise ServiceError(f"sample size must be between 1 and {len(items)}")
     seed = seed.strip() or secrets.token_hex(8)
-    picked = sorted(random.Random(f"{engagement_id}:{population}:{seed}").sample(sorted(items), n))
+    picked = sorted(random.Random(seed_to_int(seed)).sample(sorted(items), n))
     row = AuditSample(
         engagement_id=engagement_id, clause="9.2", population=population, population_size=len(items),
         sample_size=n, seed=seed, items=picked, created_by=actor,

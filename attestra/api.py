@@ -427,13 +427,17 @@ def findings(
     eid: int,
     status: str | None = None,
     severity: str | None = None,
+    tool: str | None = None,
+    asset_id: int | None = Query(None, description="limit to one target"),
     principal: Principal = Depends(require("finding.read")),
 ):
     def fn(s):
         from attestra.library import service as lib
 
         services.get_engagement(s, eid, principal)
-        rows = services.list_findings(s, eid, status, severity)
+        rows = services.list_findings(
+            s, eid, status, severity, tool=tool, asset_id=asset_id,
+        )
         return [_finding_dict(f, lib.finding_api_fix_fields(s, f)) for f in rows]
 
     return _run(fn)
@@ -593,19 +597,39 @@ def compliance(
 
 
 @app.post("/api/engagements/{eid}/compliance/confirm")
-def confirm(eid: int, body: ConfirmIn, principal: Principal = Depends(require("compliance.confirm"))):
-    def fn(s):
-        services.get_engagement(s, eid, principal)
-        return services.confirm_control(
-            s,
-            eid,
-            **body.model_dump(),
-            assessor=principal.actor,
-            role=principal.role,
-        )
+def confirm(eid: int, body: ConfirmIn, principal: Principal = Depends(get_principal)):
+    """Confirm a control. Auth required; P0-1 permission + audit live in confirm_control.
 
-    a = _run(fn)
-    return {"id": a.id, "status": a.status}
+    Refusals are caught inside the unit of work so ``control.confirm_refused`` commits
+    before the 403 is returned (same pattern as refused scans).
+    """
+    refused: str | None = None
+    result: dict | None = None
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            try:
+                a = services.confirm_control(
+                    s,
+                    eid,
+                    **body.model_dump(),
+                    assessor=principal.actor,
+                    role=principal.role,
+                )
+                result = {"id": a.id, "status": a.status}
+            except services.ServiceError as e:
+                msg = str(e)
+                if "not allowed" in msg:
+                    refused = msg
+                else:
+                    raise
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except services.ServiceError as e:
+        raise HTTPException(409, str(e)) from e
+    if refused:
+        raise HTTPException(403, refused)
+    return result
 
 
 class RiskAcceptIn(BaseModel):
@@ -644,7 +668,7 @@ async def add_asv(
     scan_date: date = Form(...),
     passing: bool = Form(False),
     file: UploadFile = File(...),
-    principal: Principal = Depends(require("compliance.confirm")),
+    principal: Principal = Depends(require("import.create")),
 ):
     data = await file.read()
 
@@ -667,7 +691,7 @@ class SegIn(BaseModel):
 
 
 @app.post("/api/engagements/{eid}/segmentation", status_code=201)
-def add_segmentation(eid: int, body: SegIn, principal: Principal = Depends(require("compliance.confirm"))):
+def add_segmentation(eid: int, body: SegIn, principal: Principal = Depends(require("engagement.write"))):
     def fn(s):
         services.get_engagement(s, eid, principal)
         return services.add_segmentation_test(s, eid, **body.model_dump(), actor=principal.actor)
@@ -1202,7 +1226,7 @@ def pci_calendar(eid: int, principal: Principal = Depends(require("finding.read"
 async def import_asv(
     eid: int,
     file: UploadFile = File(...),
-    principal: Principal = Depends(require("compliance.confirm")),
+    principal: Principal = Depends(require("import.create")),
 ):
     data = await file.read()
 
@@ -1227,7 +1251,7 @@ def iso_soa(eid: int, principal: Principal = Depends(require("finding.read"))):
 
 
 @app.post("/api/engagements/{eid}/iso/soa/generate")
-def iso_soa_generate(eid: int, principal: Principal = Depends(require("compliance.confirm"))):
+def iso_soa_generate(eid: int, principal: Principal = Depends(require("engagement.write"))):
     def fn(s):
         services.get_engagement(s, eid, principal)
         return {"added": services.generate_soa(s, eid, actor=principal.actor)}
@@ -1242,7 +1266,7 @@ class AuditSampleIn(BaseModel):
 
 
 @app.post("/api/engagements/{eid}/iso/samples", status_code=201)
-def iso_sample(eid: int, body: AuditSampleIn, principal: Principal = Depends(require("compliance.confirm"))):
+def iso_sample(eid: int, body: AuditSampleIn, principal: Principal = Depends(require("engagement.write"))):
     def fn(s):
         services.get_engagement(s, eid, principal)
         row = services.draw_audit_sample(s, eid, actor=principal.actor, **body.model_dump())

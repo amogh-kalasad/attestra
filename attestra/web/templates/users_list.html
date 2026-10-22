@@ -69,14 +69,14 @@
       <td class="meta">{{ u.last_login_at|dt if u.last_login_at else "-" }}</td>
       {% if is_admin %}
       <td>
-        <form method="post" action="/users/{{ u.id }}/role" style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-bottom:4px" onsubmit="return confirm({{ ('Change the role of ' ~ u.username ~ '? Their access changes immediately.')|tojson|forceescape }})">
+        <form method="post" action="/users/{{ u.id }}/role" style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-bottom:4px" data-confirm="Change the role of {{ u.username }}? Their access changes immediately.">
           <select name="role" aria-label="Role for {{ u.username }}">{% for r in all_roles %}<option value="{{ r }}" {% if r == u.role %}selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}</select>
           <button class="secondary" type="submit">Set role</button>
         </form>
         {% if u.status == "active" %}
-        <form method="post" action="/users/{{ u.id }}/disable" style="display:inline" onsubmit="return confirm({{ ('Disable ' ~ u.username ~ '? They are signed out and cannot sign in until enabled again.')|tojson|forceescape }})"><button class="danger" type="submit">Disable</button></form>
+        <form method="post" action="/users/{{ u.id }}/disable" style="display:inline" data-confirm="Disable {{ u.username }}? They are signed out and cannot sign in until enabled again."><button class="danger" type="submit">Disable</button></form>
         {% if u.source == "local" %}
-        <form method="post" action="/users/{{ u.id }}/reset" style="display:inline" onsubmit="return confirm({{ ('Create a password reset link for ' ~ u.username ~ '?')|tojson|forceescape }})"><button class="secondary" type="submit">Reset password</button></form>
+        <form method="post" action="/users/{{ u.id }}/reset" style="display:inline" data-confirm="Create a password reset link for {{ u.username }}?"><button class="secondary" type="submit">Reset password</button></form>
         {% endif %}
         {% else %}
         <form method="post" action="/users/{{ u.id }}/enable" style="display:inline"><button class="secondary" type="submit">Enable</button></form>
@@ -108,7 +108,7 @@
       <td>{{ i.purpose|label }}</td><td>{{ i.email or ("user #" ~ i.user_id) }}</td><td>{{ role_labels.get(i.role, i.role) }}</td>
       <td class="meta">{{ i.expires_at|dt }}{% if i.expired %} (expired){% endif %}</td>
       <td>{{ i.created_by }}</td>
-      <td><form method="post" action="/users/invites/{{ i.id }}/revoke" onsubmit="return confirm('Revoke this link? It stops working immediately.')"><button class="danger" type="submit">Revoke</button></form></td>
+      <td><form method="post" action="/users/invites/{{ i.id }}/revoke" data-confirm="Revoke this link? It stops working immediately."><button class="danger" type="submit">Revoke</button></form></td>
     </tr>
     {% endfor %}
     </tbody>

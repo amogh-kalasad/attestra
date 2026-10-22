@@ -12,7 +12,7 @@
   </div>
   {% if can_cancel %}
   <form method="post" action="/engagements/{{ e.id }}/scans/{{ run.id }}/cancel"
-        onsubmit="return confirm('Cancel this scan? Queued scans never start; a running scan stops and keeps any results already saved.')">
+        data-confirm="Cancel this scan? Queued scans never start; a running scan stops and keeps any results already saved.">
     <button type="submit" class="danger">Cancel scan</button>
   </form>
   {% endif %}

@@ -35,7 +35,7 @@ Events are queued as `pending` deliveries. `POST /api/webhooks/dispatch` sends d
 
 ## Workflow rules
 
-`POST /api/workflow-rules` with `tenant_id`, `action` and optional filters `event`, `min_severity` (default `info`), `status`. `GET /api/workflow-rules` lists them, `DELETE /api/workflow-rules/{id}` deactivates one. Rules run on finding events only:
+`POST /api/workflow-rules` with `tenant_id`, `action` and optional filters `event`, `min_severity` (default `info`), `status`. `GET /api/workflow-rules` lists them. Soft-deactivate with `POST /api/workflow-rules/{id}/deactivate` or `DELETE /api/workflow-rules/{id}` (both set `active=False`; rows are not hard-deleted). Rules run on finding events only:
 
 - `notify`: send to `endpoint_id` (must belong to the same tenant), even if that endpoint is not subscribed to the event.
 - `assign`: record a `FindingAssignment` to `assignee` (audited as `finding.assigned`).

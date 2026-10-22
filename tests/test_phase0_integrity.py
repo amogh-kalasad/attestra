@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
+from sqlalchemy import func, select
 
 
 # @lat: [[tests#Phase 0 integrity#Auditor ownership of confirmations]]
 def test_lead_cannot_confirm_control(loaded):
     from attestra import db, services
+    from attestra.models import AuditEvent
     from attestra.services import ServiceError
 
     with db.session() as s:
@@ -21,6 +23,11 @@ def test_lead_cannot_confirm_control(loaded):
                 s, loaded, framework="pci_dss_4", ref=ref, status="partial",
                 assessor="priya.lead", rationale="lead trying to confirm", role="lead",
             )
+        refused = list(
+            s.scalars(select(AuditEvent).where(AuditEvent.action == "control.confirm_refused"))
+        )
+        assert refused, "lead confirm attempt must write control.confirm_refused"
+        assert any(e.actor == "priya.lead" for e in refused)
 
 
 def test_auditor_can_confirm_and_lead_cannot_overwrite(loaded):
@@ -49,6 +56,41 @@ def test_auditor_can_confirm_and_lead_cannot_overwrite(loaded):
         assert row.assessor == "rahul.qsa"
 
 
+def test_lead_api_confirm_returns_403(client, loaded):
+    """Lead Bearer POST to compliance/confirm returns 403 and commits the refuse audit."""
+    from attestra import db, services
+    from attestra.models import AuditEvent
+
+    with db.session() as s:
+        results = services.compliance(s, loaded, "pci_dss_4")
+        ref = next((r.ref for r in results if not r.finding_ids), results[0].ref)
+        before = s.scalar(
+            select(func.count()).select_from(AuditEvent).where(
+                AuditEvent.action == "control.confirm_refused"
+            )
+        ) or 0
+
+    r = client.post(
+        f"/api/engagements/{loaded}/compliance/confirm",
+        json={
+            "framework": "pci_dss_4",
+            "ref": ref,
+            "status": "partial",
+            "rationale": "lead API confirm attempt",
+        },
+    )
+    assert r.status_code == 403
+    assert "not allowed" in r.json()["detail"]
+
+    with db.session() as s:
+        after = s.scalar(
+            select(func.count()).select_from(AuditEvent).where(
+                AuditEvent.action == "control.confirm_refused"
+            )
+        ) or 0
+        assert after > before, "API lead confirm must commit control.confirm_refused"
+
+
 # @lat: [[tests#Phase 0 integrity#Block met with open findings]]
 def test_met_refused_while_open_findings(loaded):
     from attestra import db, services
@@ -63,11 +105,12 @@ def test_met_refused_while_open_findings(loaded):
         assert with_open, "fixture should map open findings to at least one control"
         ref = with_open[0].ref
         fw = with_open[0].framework
-        with pytest.raises(ServiceError, match="open findings"):
+        with pytest.raises(ServiceError, match=r"open findings.*F-\d+") as ei:
             services.confirm_control(
                 s, loaded, framework=fw, ref=ref, status="met",
                 assessor="rahul.qsa", rationale="should fail", role="auditor",
             )
+        assert "(" in str(ei.value) and ":" in str(ei.value)
         # Override allowed when explicitly requested.
         a = services.confirm_control(
             s, loaded, framework=fw, ref=ref, status="met",
@@ -76,6 +119,30 @@ def test_met_refused_while_open_findings(loaded):
         )
         assert a.status == "met"
         assert "override" in a.rationale
+
+
+def test_met_allowed_when_only_low_or_info_open(loaded):
+    """P0-2: low/info open mapped findings alone do not block confirming met."""
+    from attestra import db, services
+    from attestra.models import Finding
+
+    with db.session() as s:
+        results = services.compliance(s, loaded, "pci_dss_4")
+        with_open = [r for r in results if r.finding_ids]
+        if not with_open:
+            pytest.skip("fixture has no control with mapped open findings")
+        ctrl = with_open[0]
+        for fid in ctrl.finding_ids:
+            f = s.get(Finding, fid)
+            if f is not None and f.status in ("new", "triaged", "validated"):
+                f.severity = "low"
+        s.flush()
+        a = services.confirm_control(
+            s, loaded, framework=ctrl.framework, ref=ctrl.ref, status="met",
+            assessor="rahul.qsa", rationale="only low residual findings",
+            role="auditor",
+        )
+        assert a.status == "met"
 
 
 # @lat: [[tests#Phase 0 integrity#Risk acceptance record required]]
@@ -104,6 +171,42 @@ def test_accept_risk_creates_record_and_status(loaded):
         assert f.status == "risk_accepted"
         assert row.finding_id == f.id
         assert row.rationale.startswith("Compensating")
+
+
+def test_cli_accept_risk_and_transition_still_refuses(loaded, capsys):
+    """CLI accept-risk wires to services.accept_risk; bare transition still refused."""
+    from attestra import cli, db, services
+    from attestra.models import Finding
+
+    with db.session() as s:
+        f = next(x for x in services.list_findings(s, loaded) if x.status in ("new", "triaged", "validated"))
+        fid = f.id
+        if f.status == "new":
+            services.transition(s, fid, to="triaged", actor="tester")
+
+    with pytest.raises(SystemExit) as ei:
+        cli.main(["transition", str(fid), "risk_accepted", "--note", "bare flip"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "risk-acceptance record" in err
+
+    expires = (date.today() + timedelta(days=30)).isoformat()
+    cli.main(
+        [
+            "accept-risk",
+            str(fid),
+            "--expires-on",
+            expires,
+            "--rationale",
+            "CLI compensating control",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert f"F-{fid}" in out
+    assert "risk_accepted" in out
+
+    with db.session() as s:
+        assert s.get(Finding, fid).status == "risk_accepted"
 
 
 # @lat: [[tests#Phase 0 integrity#Share untested grade]]

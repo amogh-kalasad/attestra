@@ -167,11 +167,16 @@ def test_docx_is_styled_word_document(loaded):
         assert "DRAFT" not in z.read("word/header1.xml").decode()
 
 
-def test_pdf_display_fixes():
-    from attestra.reports.pdf import _human_times, _register_badge_font, prepare_html
+def test_pdf_display_fixes(monkeypatch):
+    from datetime import datetime, timezone
 
+    from attestra.reports.pdf import _display_tz, _human_times, _register_badge_font, prepare_html
+
+    monkeypatch.setenv("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
     out = _human_times("<html><body>on 2026-10-22 07:35:54.475008+00:00.</body></html>")
-    assert "22 Oct 2026, 13:05 IST" in out
+    expected = datetime(2026, 10, 22, 7, 35, 54, tzinfo=timezone.utc).astimezone(_display_tz())
+    label = expected.strftime("%Z") or "UTC"
+    assert f"{expected.strftime('%d %b %Y, %H:%M').lstrip('0')} {label}" in out
     assert _register_badge_font() == "Inter-Bold"
     html = '<html><head><style></style></head><body><h1>x</h1><svg width="100" height="40"><rect width="10" height="10"/></svg></body></html>'
     assert "data:image/svg+xml" in prepare_html(html, kind="executive", draft=False)

@@ -73,7 +73,7 @@ ASSET_KINDS = {
 # Test types a client can authorize per target: label, OWASP / standard reference,
 # and which result formats Attestra imports as evidence for it.
 TEST_TYPES = {
-    "web_dast": {"label": "Web app scan (DAST)", "standard": "OWASP Top 10", "imports": ["zap", "nuclei"]},
+    "web_dast": {"label": "Web application scan", "standard": "OWASP Top 10", "imports": ["zap", "nuclei"]},
     "api_dast": {"label": "API security scan", "standard": "OWASP API Security Top 10", "imports": ["zap", "nuclei"]},
     "manual_pt": {"label": "Manual penetration test", "standard": "OWASP WSTG / ASVS", "imports": ["evidence"]},
     "tls": {"label": "TLS / SSL configuration", "standard": "PCI DSS 4.2.1", "imports": ["nuclei", "testssl"]},
@@ -82,6 +82,35 @@ TEST_TYPES = {
     "sast": {"label": "Source code and secrets (SAST)", "standard": "OWASP ASVS", "imports": ["sarif", "gitleaks"]},
     "iac_cloud": {"label": "Cloud / IaC configuration", "standard": "CIS Benchmarks", "imports": ["trivy", "sarif", "checkov", "prowler", "kube_bench"]},
     "mobile": {"label": "Mobile app assessment", "standard": "OWASP MASVS", "imports": ["sarif"]},
+}
+
+# Short display names for common snake_case keys in UI chips and reports.
+DISPLAY_LABELS = {
+    "web_dast": "Web application scan",
+    "api_dast": "API security scan",
+    "manual_pt": "Manual penetration test",
+    "network_va": "Network / host vulnerability assessment",
+    "sca_container": "Dependencies and container images (SCA)",
+    "iac_cloud": "Cloud / IaC configuration",
+    "secure_config": "Secure configuration",
+    "secure_coding": "Secure coding",
+    "web_app_protection": "Web application protection",
+    "vuln_identification": "Vulnerability identification",
+    "crypto_in_transit": "Cryptography in transit",
+    "access_control": "Access control",
+    "data_protection": "Data protection",
+    "secrets_management": "Secrets management",
+    "supply_chain": "Supply chain",
+    "ai_excessive_agency": "AI excessive agency",
+    "ai_data_integrity": "AI data integrity",
+    "ai_resource_limits": "AI resource limits",
+    "ai_prompt_injection": "AI prompt injection",
+    "risk_accepted": "Risk accepted",
+    "false_positive": "False positive",
+    "retest_passed": "Retest passed",
+    "not_assessed": "Not assessed",
+    "not_met": "Not met",
+    "no_exceptions": "No exceptions",
 }
 
 # Sensible defaults when a target is added without explicit test types.

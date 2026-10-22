@@ -43,7 +43,7 @@ ASV attestations, segmentation tests, risk acceptances, scan schedules, and nonc
 
 - ASV: [[attestra/services.py#add_asv_scan]] → [[attestra/models.py#AsvScan]] (PCI 11.3.2)
 - Segmentation: [[attestra/services.py#add_segmentation_test]]
-- Risk acceptance + expiry: [[attestra/services.py#accept_risk]], [[attestra/services.py#expire_risk_acceptances]] (CLI `attestra expire-risk`)
+- Risk acceptance + expiry: [[attestra/services.py#accept_risk]], [[attestra/services.py#expire_risk_acceptances]] (CLI `attestra accept-risk` / `attestra expire-risk`)
 - Quarterly calendar: [[attestra/services.py#enqueue_due_schedules]] (worker loop)
 - SLA breaches: [[attestra/services.py#sla_breaches]]; reports `iso_soa` / `ageing`
 - External review log: `attestra/compliance/data/REVIEW.md`; export via [[attestra/services.py#export_compliance_library_csv]]
@@ -52,7 +52,7 @@ ASV attestations, segmentation tests, risk acceptances, scan schedules, and nonc
 
 Named assessor override of the engine proposal.
 
-[[attestra/services.py#confirm_control]] persists [[attestra/models.py#ControlAssessment]]. Confirmed status overrides the proposal ([[attestra/compliance/engine.py#ControlResult#status]]). Only `auditor` and `admin` may confirm (`compliance.confirm`). Confirming `met` while open mapped findings remain is refused unless `allow_open_findings_override` is set with rationale.
+[[attestra/services.py#confirm_control]] persists [[attestra/models.py#ControlAssessment]]. Confirmed status overrides the proposal ([[attestra/compliance/engine.py#ControlResult#status]]). Only `auditor` and `admin` may confirm (`compliance.confirm`); refused attempts (including lead overwrite) are audited as `control.confirm_refused` and the API returns 403. Confirming `met` while open mapped critical/high/medium findings remain is refused with those findings named in the error, unless `allow_open_findings_override` is set with rationale. Low/info open findings alone do not block `met`. The engagement UI shows the confirming assessor next to each confirmed control.
 
 Service entry: [[attestra/services.py#compliance]].
 
@@ -73,6 +73,12 @@ Meaning of each status string used in proposals and confirmations.
 CWE-driven OWASP Top 10, ASVS, and WSTG labels on findings.
 
 [[attestra/compliance/owasp.py#map_finding_to_owasp]] reads `attestra/compliance/data/owasp.yaml` and populates finding OWASP columns at import/enrich time.
+
+## Shared audit sampling
+
+ISO 9.2 and SOC 2 Type II use one sample-size table and the same seed-to-int rules.
+
+[[attestra/compliance/sampling.py]] holds [[attestra/compliance/sampling.py#SAMPLE_SIZE_TABLE]], [[attestra/compliance/sampling.py#sample_size_for]], and seed helpers ([[attestra/compliance/sampling.py#seed_to_int]], [[attestra/compliance/sampling.py#resolve_seed]], [[attestra/compliance/sampling.py#seed_from_context]]). [[attestra/services.py#default_sample_size]] delegates to `sample_size_for`. [[attestra/services.py#draw_audit_sample]] keeps a string seed on [[attestra/models.py#AuditSample]] (auto `token_hex` when blank) and feeds `random.Random(seed_to_int(seed))`. [[attestra/reports/soc2_sampling.py#build_sample]] uses the same table and `resolve_seed` (context hash when seed is omitted). Populations stay framework-specific (ISO: soa_applicable/findings/nonconformities; SOC 2: findings/remediations).
 
 ## Caveat
 

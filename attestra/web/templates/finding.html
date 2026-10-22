@@ -45,11 +45,28 @@
   {% if f.evidence %}
   <div class="ev-grid">
     {% for ev in f.evidence %}
+    {% set replay = (latest_replay or {}).get(ev.id) %}
     <div class="ev">
       <span class="chip" style="align-self:flex-start">{{ ev.kind|label }}</span>
       <span class="mono" title="{{ ev.filename }}">{{ ev.filename }}</span>
       <span style="font-size:13.5px">{{ ev.note or "-" }}</span>
       <span class="meta">{{ ev.captured_by }} &middot; {{ ev.captured_at|dt }}</span>
+      {% if can(prole, "finding.read") %}
+      <a class="btn secondary" href="/engagements/{{ e.id }}/evidence/{{ ev.id }}/download" style="align-self:flex-start">Download</a>
+      {% endif %}
+      {% if replay %}
+      <div class="meta" style="margin-top:4px">
+        Replay:
+        {% if replay.confirmed_result %}
+          <span class="st fs">confirmed {{ replay.confirmed_result|label }}</span>
+        {% elif replay.suggested %}
+          <span class="st fs">suggested {{ replay.suggested|label }}</span>
+        {% else %}
+          <span class="meta">recorded</span>
+        {% endif %}
+        {% if replay.reason %}<div class="meta">{{ replay.reason }}</div>{% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>

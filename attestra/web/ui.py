@@ -25,6 +25,7 @@ from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
+    DISPLAY_LABELS,
     ENGAGEMENT_TYPE_LABELS,
     ENVIRONMENTS,
     OPEN_STATUSES,
@@ -123,11 +124,16 @@ def format_dt(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
 
 
 def label(value) -> str:
-    """snake_case value -> 'Sentence case' for display."""
+    """snake_case value -> curated or sentence-case display label."""
     if value is None:
         return ""
-    text = str(value).replace("_", " ").strip()
-    return text[:1].upper() + text[1:]
+    key = str(value).strip()
+    if key in DISPLAY_LABELS:
+        return DISPLAY_LABELS[key]
+    if key in TEST_TYPES:
+        return TEST_TYPES[key]["label"]
+    text = key.replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else ""
 
 
 def fw_name(key) -> str:
@@ -543,6 +549,15 @@ def _engagement_ctx(
         "ct_apexes": _ct_apexes_for(s, eid),
         "ct_suggestions": ct_suggestions or [],
         "ct_apex": ct_apex,
+        "auth_open": request.query_params.get("auth") == "1" or (
+            bool(request.query_params.get("error")) and "environment" in (request.query_params.get("error") or "").lower()
+        ),
+        "findings_filter": {
+            "severity": request.query_params.get("severity", ""),
+            "status": request.query_params.get("status", ""),
+            "tool": request.query_params.get("tool", ""),
+            "asset": request.query_params.get("asset", ""),
+        },
     }
 
 
@@ -701,8 +716,11 @@ async def add_authorization(
     rules_of_engagement: str = Form(""),
 ):
     if not [env for env in environments if env.strip()]:
-        return _back(f"/engagements/{eid}", error="Tick at least one environment the client authorizes for testing.",
-                     anchor="#scope")
+        return _back(
+            f"/engagements/{eid}?auth=1",
+            error="Tick at least one environment the client authorizes for testing.",
+            anchor="#scope",
+        )
     data = await document.read()
     return _do(
         request, f"/engagements/{eid}", "#scope", "Signed authorization recorded.",
@@ -728,8 +746,12 @@ def target_page(request: Request, eid: int, aid: int):
         history = services.asset_scan_history(s, aid, principal)
         site_grade = services.asset_site_grade(s, aid, principal)
         from attestra.cert_expiry import asset_cert_status
+        from attestra.runner import ownership
+        from attestra.runner.policy import OWNERSHIP_KINDS
 
+        services.ensure_ownership_tokens(e)
         cert_status = asset_cert_status(s, aid)
+        needs_ownership = asset.kind in OWNERSHIP_KINDS
         return _render(
             request,
             "asset.html",
@@ -739,6 +761,9 @@ def target_page(request: Request, eid: int, aid: int):
                 "history": history,
                 "site_grade": site_grade,
                 "cert_status": cert_status,
+                "ownership_kinds": OWNERSHIP_KINDS,
+                "ownership_info": ownership.instructions(asset) if needs_ownership else None,
+                "ownership_method": services.ownership_methods(s, [asset.id]).get(asset.id, ""),
             },
         )
 
@@ -1241,7 +1266,7 @@ def finding_page(request: Request, eid: int, fid: int):
             raise HTTPException(404, "engagement not found") from None
         from attestra.comments import can_add_comment, can_delete_comment, list_comments
         from attestra.library import service as lib
-        from attestra.models import Finding
+        from attestra.models import Finding, ProofReplay
 
         f = s.get(Finding, fid)
         if not f or f.engagement_id != eid:
@@ -1249,6 +1274,17 @@ def finding_page(request: Request, eid: int, fid: int):
         # Touch relationships while the session is open.
         _ = list(f.evidence)
         _ = f.asset
+        replays = list(
+            s.scalars(
+                select(ProofReplay)
+                .where(ProofReplay.finding_id == fid)
+                .order_by(ProofReplay.id.desc())
+            )
+        )
+        # Latest replay per evidence id (first hit wins — ordered newest first).
+        latest_replay: dict[int, ProofReplay] = {}
+        for r in replays:
+            latest_replay.setdefault(r.evidence_id, r)
         comments = list_comments(s, fid, principal)
         for c in comments:
             c["can_delete"] = can_delete_comment(
@@ -1262,7 +1298,43 @@ def finding_page(request: Request, eid: int, fid: int):
             "comments": comments,
             "can_add_comment": can_add_comment(principal.role),
             "show_accept_risk": request.query_params.get("accept_risk") == "1",
+            "latest_replay": latest_replay,
         })
+
+
+@router.get("/engagements/{eid}/evidence/{evid}/download")
+def ui_download_evidence(request: Request, eid: int, evid: int):
+    """Session-auth download of one evidence file (same path checks as the API)."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.read"):
+        raise HTTPException(403, "not allowed")
+    from attestra import config as cfg
+    from attestra.models import Evidence, Finding
+
+    with db.session() as s:
+        try:
+            eng = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "evidence not found") from None
+        ev = s.get(Evidence, evid)
+        if not ev:
+            raise HTTPException(404, "evidence not found")
+        f = s.get(Finding, ev.finding_id)
+        if not f or f.engagement_id != eid:
+            raise HTTPException(404, "evidence not found")
+        path = Path(ev.path).resolve()
+        allowed_roots = [
+            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
+            cfg.DATA_DIR.resolve(),
+        ]
+        if not any(str(path).startswith(str(root)) for root in allowed_roots):
+            raise HTTPException(404, "evidence not found")
+        if not path.is_file():
+            raise HTTPException(404, "evidence not found")
+        audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
+        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
 
 
 @router.post("/engagements/{eid}/findings/{fid}/comments")

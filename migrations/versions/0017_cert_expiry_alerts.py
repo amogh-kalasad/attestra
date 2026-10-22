@@ -41,7 +41,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         expr = "tenant_id = NULLIF(current_setting('attestra.tenant_id', true), '')::int"
-        op.execute(f"ALTER TABLE cert_expiry_alerts ENABLE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE cert_expiry_alerts ENABLE ROW LEVEL SECURITY")
         op.execute(
             f"CREATE POLICY {POLICY_NAME} ON cert_expiry_alerts "
             f"FOR ALL USING ({expr}) WITH CHECK ({expr})"

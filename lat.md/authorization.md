@@ -47,7 +47,7 @@ Optional Keycloak OIDC sits behind `ATTESTRA_OIDC_ENABLED` ([[attestra/auth/oidc
 
 Queries and storage are scoped per tenant for non-admin principals.
 
-[[attestra/services.py#scoped]] and [[attestra/services.py#tenant_ids_for]] filter engagement access. Evidence/imports/reports land under `DATA_DIR/tenants/<id>/` via [[attestra/services.py#_store]]. Rate limits and security headers: [[attestra/api_security.py#RateLimitMiddleware]], [[attestra/api_security.py#SecurityHeadersMiddleware]]. Webhook and workflow-rule creates ([[attestra/webhooks/routes.py#_tenant_ok]]) require the tenant row to exist — `tenant_ids_for` returning `None` (unrestricted lead/admin) means all tenants, not skip existence; missing ids return 404.
+[[attestra/services.py#scoped]] and [[attestra/services.py#tenant_ids_for]] filter engagement access. Evidence/imports/reports land under `DATA_DIR/tenants/<id>/` via [[attestra/services.py#_store]]. Rate limits and security headers: [[attestra/api_security.py#RateLimitMiddleware]], [[attestra/api_security.py#SecurityHeadersMiddleware]]. Webhook and workflow-rule creates ([[attestra/webhooks/routes.py#_tenant_ok]]) require the tenant row to exist — `tenant_ids_for` returning `None` (unrestricted lead/admin) means all tenants, not skip existence; missing ids return 404. Workflow rules are soft-deactivated via [[attestra/webhooks/service.py#deactivate_rule]] (`POST …/deactivate` or `DELETE`; `active=False`, no hard delete).
 
 ## Runner scope
 
