@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, db, services
+from attestra import __version__, ai_narratives, audit, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -585,6 +585,79 @@ def export_findings_ui(request: Request, eid: int, asset_id: int | None = None):
     return PlainTextResponse(
         body,
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+_EXPORT_TYPES = {
+    "pdf": ("application/pdf", "pdf_path"),
+    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx_path"),
+}
+
+
+@router.get("/engagements/{eid}/reports/{rid}/export/{fmt}")
+def export_report_ui(request: Request, eid: int, rid: int, fmt: str):
+    """Page button: build (or rebuild) the PDF / Word copy of a sealed report and download it."""
+    from attestra.api import _report_file
+    from attestra.reports.export import export_report_formats
+
+    if fmt not in _EXPORT_TYPES:
+        raise HTTPException(404, "unknown export format")
+    principal, redirect = _require_login(request, f"/engagements/{eid}")
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "report.read"):
+        raise HTTPException(403, "permission denied: report.read")
+    media, key = _EXPORT_TYPES[fmt]
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            r, html_path = _report_file(s, rid, principal)
+            if r.engagement_id != eid:
+                raise LookupError(f"report #{rid} is not in this engagement")
+            out = export_report_formats(r, html_path)
+            audit.record(s, principal.actor, "report.exported", "report", r.id, format=fmt)
+            name = f"eng{eid}-{r.kind}{'-' + r.framework if r.framework else ''}-v{r.version}.{fmt}"
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except services.ServiceError as e:
+        raise HTTPException(409, str(e)) from e
+    return FileResponse(out[key], media_type=media, filename=name, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/engagements/{eid}/export/{fmt}")
+def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = ""):
+    """Page buttons: SARIF findings log, OSCAL assessment results (per framework) or OSCAL POA&M."""
+    import json
+
+    from attestra.reports.oscal import assessment_results, poam
+    from attestra.reports.sarif import findings_to_sarif
+
+    perms = {"sarif": "finding.read", "oscal": "report.read", "oscal-poam": "report.read"}
+    if fmt not in perms:
+        raise HTTPException(404, "unknown export format")
+    principal, redirect = _require_login(request, f"/engagements/{eid}")
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, perms[fmt]):
+        raise HTTPException(403, f"permission denied: {perms[fmt]}")
+    try:
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            if fmt == "sarif":
+                doc, name = findings_to_sarif(s, eid), f"eng{eid}-findings.sarif"
+            elif fmt == "oscal":
+                if framework not in (eng.frameworks or []):
+                    raise LookupError("choose one of this engagement's frameworks")
+                doc, name = assessment_results(s, eid, framework), f"eng{eid}-{framework}-oscal-ar.json"
+            else:
+                doc, name = poam(s, eid), f"eng{eid}-oscal-poam.json"
+            audit.record(s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework)
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    return PlainTextResponse(
+        json.dumps(doc, indent=2, default=str),
+        media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
 

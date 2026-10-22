@@ -756,13 +756,24 @@ def report_export(rid: int, principal: Principal = Depends(require("report.read"
     from attestra.reports.export import export_report_formats
 
     def fn(s):
-        from attestra.models import Report
+        r, html_path = _report_file(s, rid, principal)
+        return export_report_formats(r, html_path)
 
-        r = s.get(Report, rid)
-        if not r:
-            raise LookupError(f"report {rid} not found")
-        services.get_engagement(s, r.engagement_id, principal)
-        return export_report_formats(r)
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/export/oscal")
+def export_oscal(eid: int, framework: str = "", principal: Principal = Depends(require("report.read"))):
+    """OSCAL assessment results for one framework, or the POA&M when no framework is given."""
+    from attestra.reports.oscal import assessment_results, poam
+
+    def fn(s):
+        eng = services.get_engagement(s, eid, principal)
+        if not framework:
+            return poam(s, eid)
+        if framework not in (eng.frameworks or []):
+            raise LookupError("framework is not part of this engagement")
+        return assessment_results(s, eid, framework)
 
     return _run(fn)
 

@@ -565,10 +565,21 @@
   </div>
   <div class="card" id="reports">
     <h2>Reports</h2>
+    <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
+      {% if can(prole, "finding.read") %}
+      <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Findings CSV</a>
+      <a class="btn secondary" href="/engagements/{{ e.id }}/export/sarif">SARIF</a>
+      {% endif %}
+      {% if can(prole, "report.read") %}
+      <a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal-poam">OSCAL POA&amp;M</a>
+      {% for k in e.frameworks %}<a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal?framework={{ k|urlencode }}">OSCAL results &middot; {{ k|fw_name }}</a>{% endfor %}
+      {% endif %}
+    </div>
     <table>
       <tr><th>#</th><th>Report</th><th>Status</th><th>QA by</th><th>Approved by</th><th>Next step</th></tr>
       {% set my_uid = principal.user_id if principal else None %}
-      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a></td>
+      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a>
+          {% if can(prole, "report.read") %}<div class="row export-links" style="margin-top:4px;gap:6px"><a class="btn secondary" href="/engagements/{{ e.id }}/reports/{{ r.id }}/export/pdf" download title="Download a styled PDF{{ '' if r.status == 'signed' else ' (marked DRAFT until signed)' }}">PDF</a><a class="btn secondary" href="/engagements/{{ e.id }}/reports/{{ r.id }}/export/docx" download>Word</a></div>{% endif %}</td>
         <td><span class="st">{{ "In QA" if r.status == "submitted" else "QA approved" if r.status == "qa_approved" else r.status|label }}</span>{% if r.status == "rejected" and r.rejection_note %}<div class="meta">QA note: {{ r.rejection_note }}</div>{% endif %}</td>
         <td>{{ r.qa_by or "-" }}</td>
         <td>{{ r.approved_by or "-" }}{% if r.signed_at %}<div class="meta">{{ r.signed_at|dt }}</div>{% endif %}</td>

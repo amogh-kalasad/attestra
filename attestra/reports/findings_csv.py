@@ -62,6 +62,9 @@ def findings_to_rows(findings: list[Finding]) -> list[list[str]]:
         target = ""
         if f.asset is not None:
             target = (f.asset.identifier or f.asset.name or "").strip()
+        if not target:
+            # Unlinked findings (e.g. imported for a URL not in scope): fall back to where it was seen.
+            target = (f.location or "").strip()
         tools = ", ".join(str(t) for t in (f.tools or []))
         rows.append(
             [
