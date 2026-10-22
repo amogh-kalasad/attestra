@@ -237,7 +237,17 @@ def metrics(request: Request):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": __version__}
+    """Liveness plus PDF engine probe for ops/admin (clear message when engines are missing)."""
+    from attestra.reports.pdf import pdf_engine_status
+
+    pdf = pdf_engine_status()
+    return {
+        "status": "ok",
+        "version": __version__,
+        "pdf": pdf,
+        "pdf_engine": pdf["engine"],
+        "pdf_message": pdf["message"],
+    }
 
 
 @app.get("/api/catalog")
@@ -813,6 +823,37 @@ def export_sarif(eid: int, principal: Principal = Depends(require("finding.read"
     def fn(s):
         services.get_engagement(s, eid, principal)
         return findings_to_sarif(s, eid)
+
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/export/xlsx")
+def export_xlsx(eid: int, principal: Principal = Depends(require("finding.read"))):
+    """Excel workbook: Findings, Controls, and Evidence metadata sheets."""
+    from fastapi.responses import Response
+
+    from attestra.reports.xlsx_export import export_engagement_xlsx
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return export_engagement_xlsx(s, eid, actor=principal.actor)
+
+    data = _run(fn)
+    return Response(
+        data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="eng{eid}-export.xlsx"'},
+    )
+
+
+@app.get("/api/engagements/{eid}/export/json")
+def export_engagement_json_api(eid: int, principal: Principal = Depends(require("finding.read"))):
+    """Full engagement JSON (findings, controls, evidence metadata, reports) with version fields."""
+    from attestra.reports.engagement_export import export_engagement_json
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return export_engagement_json(s, eid, actor=principal.actor)
 
     return _run(fn)
 

@@ -23,6 +23,7 @@ dependencies = [
   # Pure-Python PDF engine so report PDFs work on a fresh install (Windows included).
   "xhtml2pdf>=0.2.11",
   "python-docx>=1.1",
+  "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

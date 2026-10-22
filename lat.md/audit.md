@@ -46,4 +46,5 @@ Audit actions written by target ownership, scan requests and user accounts.
 - `api_key.revoke`: an API key was revoked ([[attestra/auth/keys.py#revoke_api_key]]); details include `user_id` and `prefix`.
 - `report.download`: a report download; the sealed file download adds `sealed=True`.
 - `findings.exported`: a findings CSV download ([[attestra/reports/findings_csv.py#export_findings_csv]]); details include optional `asset_id` and `row_count`.
+- `engagement.exported`: an engagement-level export (SARIF/OSCAL UI buttons, JSON via [[attestra/reports/engagement_export.py#export_engagement_json]], or Excel via [[attestra/reports/xlsx_export.py#export_engagement_xlsx]]); details include `format` (e.g. `json`, `xlsx`) and optional counts/`framework`.
 - `scope.suggestions.fetched`: a CT subdomain suggestion lookup ([[attestra/runner/ct_suggestions.py#suggestions_for_engagement]]); details include `apex`, `count` and `requests`.

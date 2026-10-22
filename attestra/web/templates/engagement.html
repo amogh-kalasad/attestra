@@ -625,6 +625,8 @@
     <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
       {% if can(prole, "finding.read") %}
       <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Findings CSV</a>
+      <a class="btn secondary" href="/engagements/{{ e.id }}/export/xlsx" download>Excel</a>
+      <a class="btn secondary" href="/engagements/{{ e.id }}/export/json" download>JSON export</a>
       <a class="btn secondary" href="/engagements/{{ e.id }}/export/sarif">SARIF</a>
       {% endif %}
       {% if can(prole, "report.read") %}

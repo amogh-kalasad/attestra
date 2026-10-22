@@ -12,7 +12,7 @@ Notable routes:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/health` | Liveness |
+| GET | `/api/health` | Liveness plus PDF engine probe (`pdf` / `pdf_engine` / `pdf_message`) |
 | GET | `/api/catalog` | Asset kinds + test types |
 | POST/GET | `/api/engagements` | Create / list |
 | POST | `/api/engagements/{eid}/authorizations` | Upload signed auth |
@@ -20,6 +20,8 @@ Notable routes:
 | POST | `/api/engagements/{eid}/imports` | Import scanner file |
 | GET | `/api/engagements/{eid}/findings` | List findings |
 | GET | `/api/engagements/{eid}/findings/export` | Findings CSV (formula-safe); optional `asset_id` |
+| GET | `/api/engagements/{eid}/export/xlsx` | Excel Findings/Controls/Evidence workbook |
+| GET | `/api/engagements/{eid}/export/json` | Full engagement JSON (`version` + `export_schema_version`) |
 | GET | `/api/engagements/{eid}/scope/suggestions` | Which apexes may run CT suggestions |
 | POST | `/api/engagements/{eid}/scope/suggestions` | One CT lookup; suggestions only |
 | POST | `/api/findings/{fid}/transition` | Lifecycle change |

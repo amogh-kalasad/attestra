@@ -91,7 +91,12 @@ def findings_csv(s: Session, engagement_id: int) -> str:
 
 
 def validate_oscal_structure(doc: dict[str, Any], schema: dict[str, Any]) -> list[str]:
-    """Lightweight required-key validation against a local schema fragment."""
+    """Lightweight required-key validation against a local schema fragment.
+
+    ``schema["required_top_level"]`` lists top-level keys to require. Callers
+    validating POA&M should set that from ``required_top_level_poam`` (via
+    ``schema_for_oscal_kind``).
+    """
     errors: list[str] = []
     required = schema.get("required_top_level") or []
     for key in required:
@@ -107,6 +112,18 @@ def validate_oscal_structure(doc: dict[str, Any], schema: dict[str, Any]) -> lis
             if nk not in node:
                 errors.append(f"missing {key}.{nk}")
     return errors
+
+
+def schema_for_oscal_kind(schema: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Return a validate_oscal_structure schema for assessment-results or poam."""
+    if kind in ("poam", "plan-of-action-and-milestones"):
+        top = schema.get("required_top_level_poam") or ["plan-of-action-and-milestones"]
+    else:
+        top = schema.get("required_top_level_ar") or schema.get("required_top_level") or ["assessment-results"]
+    return {
+        "required_top_level": list(top),
+        "required_nested": dict(schema.get("required_nested") or {}),
+    }
 
 
 def load_oscal_schema(path: str | None = None) -> dict[str, Any]:

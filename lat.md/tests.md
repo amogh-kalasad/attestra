@@ -708,6 +708,58 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 
 Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip (including sealed-path rebuild), executive trend SVG, signature verify.
 
+## Phase 4 market exports
+
+PDF engine probe, OSCAL AR/POA&M validation, Word re-export, JSON engagement export, and XLSX sheets ([[tests/test_phase4_market_exports.py]]).
+
+### PDF engine status probe
+
+[[attestra/reports/pdf.py#pdf_engine_status]] returns `available`, `engine` (`weasyprint`|`xhtml2pdf`|`none`), and a clear install message when neither engine loads.
+
+### Health PDF engine fields
+
+`GET /api/health` includes `pdf`, `pdf_engine`, and `pdf_message` from [[attestra/reports/pdf.py#pdf_engine_status]] so admins see a clear missing-engine message.
+
+### API and UI Excel JSON routes
+
+`GET /api/engagements/{eid}/export/xlsx` and `/export/json` return the workbook and JSON payload; engagement page links and UI routes download the same formats.
+
+### OSCAL AR and POA&M schema validation
+
+Min schema plus [[attestra/reports/oscal.py#schema_for_oscal_kind]] validates assessment-results and POA&M exports; deliberately broken docs yield nested-key errors.
+
+### Word re-export twice every kind
+
+Calling [[attestra/reports/export.py#export_report_formats]] twice for every [[attestra/reports/render.py#KINDS]] yields DOCX bytes starting with `PK` without error.
+
+### JSON engagement export shape
+
+[[attestra/reports/engagement_export.py#export_engagement_json]] includes version fields, engagement (VA + PT label), findings, controls, evidence, and reports; audits `engagement.exported` with `format=json`.
+
+### JSON engagement export evidence metadata only
+
+Evidence rows expose only kind/filename/sha256/note/finding_id — never body, path, bytes, or content keys.
+
+### JSON engagement export formula and secret absence
+
+Secrets from evidence bodies do not appear in the JSON dump; formula-like finding titles stay plain strings (no CSV quote-prefix).
+
+### XLSX three sheets
+
+[[attestra/reports/xlsx_export.py#export_engagement_xlsx]] workbook has Findings, Controls, and Evidence sheets with expected headers, freeze panes, and auto-filter.
+
+### XLSX formula guard
+
+A finding title of `=cmd()` is prefixed with a single quote in the Findings sheet so Excel does not treat it as a formula.
+
+### XLSX evidence metadata only
+
+Evidence sheet lists metadata only; evidence body bytes and secrets never appear in the workbook.
+
+### XLSX export audit
+
+[[attestra/reports/xlsx_export.py#export_engagement_xlsx]] records `engagement.exported` with `format=xlsx`.
+
 ## Phase 1 stability
 
 Medium export bugs and UX fixes from the Gap Implementation Plan.

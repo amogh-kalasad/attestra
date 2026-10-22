@@ -569,6 +569,42 @@ def _xhtml2pdf(html: str) -> bytes | None:
     return buf.getvalue() or None
 
 
+def pdf_engine_status() -> dict:
+    """Probe which PDF engine can be imported/loaded (no secrets).
+
+    Intended for ``/api/health`` and admin UI. Expected shape::
+
+        {"available": bool, "engine": "weasyprint"|"xhtml2pdf"|"none", "message": str}
+
+    Preference matches ``render_pdf``: weasyprint first, then xhtml2pdf.
+    """
+    try:
+        from weasyprint import HTML  # noqa: F401
+
+        return {
+            "available": True,
+            "engine": "weasyprint",
+            "message": "PDF engine available: weasyprint.",
+        }
+    except Exception:
+        pass
+    try:
+        from xhtml2pdf import pisa  # noqa: F401
+
+        return {
+            "available": True,
+            "engine": "xhtml2pdf",
+            "message": "PDF engine available: xhtml2pdf.",
+        }
+    except Exception:
+        pass
+    return {
+        "available": False,
+        "engine": "none",
+        "message": "PDF engine missing: install xhtml2pdf (core) or weasyprint (docs extra).",
+    }
+
+
 def render_pdf(html: str, *, kind: str, draft: bool, base_url: str = "") -> tuple[bytes | None, str]:
     """Render the report HTML to PDF bytes. Returns (data, engine) or (None, "")."""
     data = _weasyprint(prepare_html(html, kind=kind, draft=draft, for_engine="weasyprint"), base_url)

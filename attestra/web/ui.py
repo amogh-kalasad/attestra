@@ -642,13 +642,23 @@ def export_report_ui(request: Request, eid: int, rid: int, fmt: str):
 
 @router.get("/engagements/{eid}/export/{fmt}")
 def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = ""):
-    """Page buttons: SARIF findings log, OSCAL assessment results (per framework) or OSCAL POA&M."""
+    """Page buttons: SARIF, OSCAL, Excel workbook, or full engagement JSON."""
     import json
 
+    from fastapi.responses import Response
+
+    from attestra.reports.engagement_export import export_engagement_json
     from attestra.reports.oscal import assessment_results, poam
     from attestra.reports.sarif import findings_to_sarif
+    from attestra.reports.xlsx_export import export_engagement_xlsx
 
-    perms = {"sarif": "finding.read", "oscal": "report.read", "oscal-poam": "report.read"}
+    perms = {
+        "sarif": "finding.read",
+        "oscal": "report.read",
+        "oscal-poam": "report.read",
+        "xlsx": "finding.read",
+        "json": "finding.read",
+    }
     if fmt not in perms:
         raise HTTPException(404, "unknown export format")
     principal, redirect = _require_login(request, f"/engagements/{eid}")
@@ -659,15 +669,38 @@ def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = 
     try:
         with db.session() as s:
             eng = services.get_engagement(s, eid, principal)
-            if fmt == "sarif":
+            if fmt == "xlsx":
+                # export_engagement_xlsx audits engagement.exported itself
+                data = export_engagement_xlsx(s, eid, actor=principal.actor)
+                return Response(
+                    data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="eng{eid}-export.xlsx"',
+                        "Cache-Control": "no-store",
+                    },
+                )
+            if fmt == "json":
+                # export_engagement_json audits engagement.exported itself
+                doc = export_engagement_json(s, eid, actor=principal.actor)
+                name = f"eng{eid}-export.json"
+            elif fmt == "sarif":
                 doc, name = findings_to_sarif(s, eid), f"eng{eid}-findings.sarif"
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
             elif fmt == "oscal":
                 if framework not in (eng.frameworks or []):
                     raise LookupError("choose one of this engagement's frameworks")
                 doc, name = assessment_results(s, eid, framework), f"eng{eid}-{framework}-oscal-ar.json"
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
             else:
                 doc, name = poam(s, eid), f"eng{eid}-oscal-poam.json"
-            audit.record(s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework)
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     return PlainTextResponse(

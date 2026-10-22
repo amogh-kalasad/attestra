@@ -71,13 +71,22 @@ Ed25519 signatures verifiable with the published public key; HMAC still accepted
 
 ## Exports
 
-DOCX/PDF, framework packs, SARIF, and OSCAL.
+DOCX/PDF, framework packs, SARIF, OSCAL, and full-engagement JSON.
 
 - [[attestra/reports/export.py#to_docx]] / [[attestra/reports/export.py#to_pdf]] (WeasyPrint optional; minimal PDF/DOCX always)
+- [[attestra/reports/pdf.py#pdf_engine_status]] probes weasyprint then xhtml2pdf for `/api/health` / admin UI: `{"available": bool, "engine": "weasyprint"|"xhtml2pdf"|"none", "message": str}` with an actionable install hint when none load
 - [[attestra/reports/packs.py#build_framework_pack]] — zip + MANIFEST.sha256
-- [[attestra/reports/sarif.py#findings_to_sarif]], [[attestra/reports/oscal.py#assessment_results]], [[attestra/reports/oscal.py#poam]]
+- [[attestra/reports/sarif.py#findings_to_sarif]], [[attestra/reports/oscal.py#assessment_results]], [[attestra/reports/oscal.py#poam]]; structure checks via [[attestra/reports/oscal.py#validate_oscal_structure]] and [[attestra/reports/oscal.py#schema_for_oscal_kind]] against `tests/schemas/oscal_ar_poam_min.json` (`required_top_level_ar` / `required_top_level_poam`)
+- [[attestra/reports/engagement_export.py#export_engagement_json]] — full engagement JSON data export (see [[reports#Exports#JSON engagement export]]); API `GET /api/engagements/{eid}/export/json` and UI `/engagements/{eid}/export/json`
+- [[attestra/reports/xlsx_export.py#export_engagement_xlsx]] — Excel workbook with Findings, Controls, and Evidence sheets (frozen header, auto-filter, formula-guarded); API `GET /api/engagements/{eid}/export/xlsx` and UI `/engagements/{eid}/export/xlsx`
 - PDF/Word display: [[attestra/reports/pdf.py#_human_times]] formats timestamps in `ATTESTRA_DISPLAY_TZ` (same approach as [[attestra/web/ui.py#_display_tz]]); [[attestra/reports/pdf.py#_framework_names]] swaps raw framework keys for library display names. Iso SoA sets `soa_framework` to the library name in [[attestra/reports/render.py#generate_report]].
 - Word TOC note tells readers to right-click / References › Update Table (or Update Field); [[attestra/reports/docx_export.py#_ensure_risk_legend]] injects a CVSS risk legend when the HTML lacks one (executive path), matching PDF behaviour.
+
+### JSON engagement export
+
+Full engagement JSON via [[attestra/reports/engagement_export.py#export_engagement_json]]: findings, controls, evidence metadata, and report metadata only (no sealed HTML, evidence bodies, or secrets); audited as `engagement.exported`.
+
+Payload includes `version` ([[attestra/__init__.py#__version__]]), `export_schema_version` ([[attestra/reports/engagement_export.py#EXPORT_SCHEMA_VERSION]], currently 1), engagement metadata (`id`, `name`, `type`, `type_label` via [[attestra/models.py#engagement_type_label]] so `vapt` shows as `VA + PT`, `frameworks`, window dates, tenant name), findings (API-aligned fields including impact, affected_urls, references, cvss_vector, location — self-contained, no import from `api.py`), `controls` keyed by framework from [[attestra/services.py#compliance]], evidence metadata only (`kind`, `filename`, `sha256`, `note`, `finding_id`), and report metadata (`id`, `kind`, `framework`, `version`, `status`, `sha256`, `generated_at`, `generated_by`). Audited as `engagement.exported` with `format=json`.
 
 ## Framework packs
 
