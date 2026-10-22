@@ -12,7 +12,7 @@ Supported report kinds for [[attestra/reports/render.py#generate_report]].
 
 Metadata-driven section lists, CVSS legend, methodology phases, and disclaimer for built-in reports.
 
-[[attestra/reports/template_config.py#load_template_config]] reads `attestra/reports/data/template_config.yaml` (assessment types, nine frameworks, per-kind sections, export formats). Helpers: [[attestra/reports/template_config.py#kind_config]], [[attestra/reports/template_config.py#cvss_legend]], [[attestra/reports/template_config.py#methodology_phases]], [[attestra/reports/template_config.py#disclaimer_text]].
+[[attestra/reports/template_config.py#load_template_config]] reads `attestra/reports/data/template_config.yaml` (assessment types, nine frameworks, per-kind sections, export formats). Helpers: [[attestra/reports/template_config.py#kind_config]], [[attestra/reports/template_config.py#cvss_legend]], [[attestra/reports/template_config.py#methodology_phases]], [[attestra/reports/template_config.py#disclaimer_text]]. Tenant [[attestra/models.py#ReportTemplate]] may set `disclaimer` (migration `0021_finding_fields_disclaimer`); [[attestra/reports/render.py#_branding]] prefers a non-empty template disclaimer, else [[attestra/reports/template_config.py#disclaimer_text]]. Empty Jinja `source` keeps the built-in kind template so cover, logo and disclaimer still apply.
 
 ## Generation
 
@@ -20,18 +20,19 @@ How a report row and frozen HTML file are created.
 
 [[attestra/reports/render.py#generate_report]]:
 
-1. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]). Finding comments are omitted unless `include_comments=True` (default off); see [[findings#Comments]]. Context also includes test types/standards, report history, retests, screenshot data-URI embeds (hash-verified), tenant branding, scan history, and template-config fields.
-2. Render Jinja templates under `attestra/reports/templates` (built-in cover, TOC, document control, risk legend, disclaimer on technical; dedicated `retest.html.j2` for retests). Tenant sandbox templates still win when enabled.
-3. Write under `DATA_DIR/tenants/<id>/reports/`.
-4. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
-5. Audit the write.
+1. Refuse when the engagement has `window_start` and today is before that date ([[attestra/reports/render.py#_assert_not_before_window]]); a missing window start does not block. The same check runs on [[attestra/reports/render.py#submit_report]] and [[attestra/reports/render.py#sign_report]].
+2. Build context from findings, imports, authorizations, compliance, and prior-engagement trend ([[attestra/reports/render.py#_context]]). Finding comments are omitted unless `include_comments=True` (default off); see [[findings#Comments]]. Context also includes test types/standards, report history with `change` labels ([[attestra/reports/render.py#_report_history]]), retests, screenshot data-URI embeds (hash-verified), list-of-figures rows ([[attestra/reports/render.py#_figures_list]]), pretty-printed `http_pair` evidence ([[attestra/reports/render.py#_http_pair_embeds]]), tenant branding (logo/cover/disclaimer override), distribution rows ([[attestra/reports/render.py#_distribution_list]]), scan history, and template-config fields.
+3. Render Jinja templates under `attestra/reports/templates` (built-in cover, TOC, document control with Change column, distribution list, list of figures, risk legend, disclaimer, sign-off placeholders, appendix on technical; dedicated `retest.html.j2` for retests). Tenant sandbox Jinja wins only when `source` is non-empty; empty source keeps the built-in kind template.
+4. Write under `DATA_DIR/tenants/<id>/reports/`.
+5. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
+6. Audit the write.
 
 ## Titles
 
 Names shown at the top of each report and in OSCAL output.
 
-- Technical template (`attestra/reports/templates/technical.html.j2`): cover via `_base`, TOC, document control, scope with environment, methodology phases, standards, risk legend, findings overview with retest column, CVSS vector / OWASP / ASVS / WSTG when set, embedded screenshots, disclaimer, conclusion.
-- Retest template (`attestra/reports/templates/retest.html.j2`): retest results, asset-reached flag, unresolved risks, evidence register.
+- Technical template (`attestra/reports/templates/technical.html.j2`): cover via `_base`, TOC, document control (Change column), distribution list from tenant contact ([[attestra/reports/render.py#_distribution_list]]), list of figures, scope with environment, methodology phases, standards, risk legend, findings overview with retest column, CVSS vector / OWASP / ASVS / WSTG when set, Impact / Affected URLs / References when set on the finding, embedded screenshots with Fig. captions, pretty-printed HTTP request/response pairs, disclaimer (branding override wins over template-config default), conclusion, in-report sign-off placeholders (live status stays in [[reports#Sign-off record]]), appendix of tool imports and scan runs.
+- Retest template (`attestra/reports/templates/retest.html.j2`): document control with Change column, retest results, asset-reached flag, unresolved risks, evidence register.
 - Compliance template (`attestra/reports/templates/compliance.html.j2`): heading "<framework name>: security testing evidence pack", page title "Compliance evidence pack".
 - Executive template (`attestra/reports/templates/executive.html.j2`): "Executive summary: <engagement name>".
 - [[attestra/reports/oscal.py#assessment_results]] names its result "Attestra security testing control roll-up".
@@ -76,6 +77,7 @@ DOCX/PDF, framework packs, SARIF, and OSCAL.
 - [[attestra/reports/packs.py#build_framework_pack]] — zip + MANIFEST.sha256
 - [[attestra/reports/sarif.py#findings_to_sarif]], [[attestra/reports/oscal.py#assessment_results]], [[attestra/reports/oscal.py#poam]]
 - PDF/Word display: [[attestra/reports/pdf.py#_human_times]] formats timestamps in `ATTESTRA_DISPLAY_TZ` (same approach as [[attestra/web/ui.py#_display_tz]]); [[attestra/reports/pdf.py#_framework_names]] swaps raw framework keys for library display names. Iso SoA sets `soa_framework` to the library name in [[attestra/reports/render.py#generate_report]].
+- Word TOC note tells readers to right-click / References › Update Table (or Update Field); [[attestra/reports/docx_export.py#_ensure_risk_legend]] injects a CVSS risk legend when the HTML lacks one (executive path), matching PDF behaviour.
 
 ## Framework packs
 

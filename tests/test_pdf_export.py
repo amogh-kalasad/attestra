@@ -168,13 +168,13 @@ def test_docx_is_styled_word_document(loaded):
 
 
 def test_pdf_display_fixes(monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from attestra.reports.pdf import _display_tz, _human_times, _register_badge_font, prepare_html
 
     monkeypatch.setenv("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
     out = _human_times("<html><body>on 2026-10-22 07:35:54.475008+00:00.</body></html>")
-    expected = datetime(2026, 10, 22, 7, 35, 54, tzinfo=timezone.utc).astimezone(_display_tz())
+    expected = datetime(2026, 10, 22, 7, 35, 54, tzinfo=UTC).astimezone(_display_tz())
     label = expected.strftime("%Z") or "UTC"
     assert f"{expected.strftime('%d %b %Y, %H:%M').lstrip('0')} {label}" in out
     assert _register_badge_font() == "Inter-Bold"

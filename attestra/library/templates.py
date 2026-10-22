@@ -72,9 +72,16 @@ table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e3e5ea;
 {% elif section == "scope" %}
 <section><h2>Scope and sources</h2><ul>{% for i in imports %}<li>{{ i.tool }}: {{ i.filename }}</li>{% endfor %}</ul></section>
 {% elif section == "appendix" %}
-<section><h2>Appendix</h2><p>Attestra {{ version_str }}.</p></section>
+<section id="appendix"><h2>Appendix</h2>
+<p class="meta">Tool imports that contributed evidence.</p>
+<table><tr><th>Tool</th><th>File</th><th>SHA-256</th></tr>
+{% for i in imports %}<tr><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td class="mono">{{ i.sha256 }}</td></tr>
+{% else %}<tr><td colspan="3">No results imported.</td></tr>{% endfor %}
+</table>
+<p>Attestra {{ version_str }}.</p></section>
 {% endif %}
 {% endfor %}
+{% if disclaimer %}<section id="disclaimer"><h2>Assumptions, limitations and confidentiality</h2><p>{{ disclaimer }}</p></section>{% endif %}
 </body></html>
 """
 
@@ -190,8 +197,8 @@ def list_templates(s: Session, tenant_id: int) -> list[ReportTemplate]:
 
 def template_dict(t: ReportTemplate) -> dict:
     return {"id": t.id, "tenant_id": t.tenant_id, "kind": t.kind, "source": t.source, "cover_title": t.cover_title,
-            "has_logo": bool(t.logo), "sections": list(t.sections or []), "enabled": t.enabled,
-            "updated_by": t.updated_by, "updated_at": t.updated_at}
+            "disclaimer": t.disclaimer or "", "has_logo": bool(t.logo), "sections": list(t.sections or []),
+            "enabled": t.enabled, "updated_by": t.updated_by, "updated_at": t.updated_at}
 
 
 def _check_kind(kind: str) -> str:
@@ -204,17 +211,23 @@ def _check_kind(kind: str) -> str:
 
 def save_template(
     s: Session, tenant_id: int, kind: str, *, actor: str, source: str | None = None, cover_title: str | None = None,
-    sections=None, enabled: bool | None = None, logo: bytes | None = None, clear_logo: bool = False,
+    disclaimer: str | None = None, sections=None, enabled: bool | None = None, logo: bytes | None = None,
+    clear_logo: bool = False,
 ) -> ReportTemplate:
     _check_kind(kind)
     t = get_template(s, tenant_id, kind)
     if t is None:
-        t = ReportTemplate(tenant_id=tenant_id, kind=kind, source="", cover_title="", logo="", sections=list(SECTIONS), enabled=True)
+        t = ReportTemplate(
+            tenant_id=tenant_id, kind=kind, source="", cover_title="", disclaimer="", logo="",
+            sections=list(SECTIONS), enabled=True,
+        )
         s.add(t)
     if source is not None:
         t.source = source.replace("\r\n", "\n").strip()
     if cover_title is not None:
         t.cover_title = cover_title.strip()[:300]
+    if disclaimer is not None:
+        t.disclaimer = disclaimer.replace("\r\n", "\n").strip()
     if sections is not None:
         t.sections = clean_sections(sections)
     if enabled is not None:
@@ -248,11 +261,21 @@ def _pick(s: Session, tenant_id: int | None, kind: str) -> ReportTemplate | None
 
 
 def render_custom(s: Session, tenant_id: int | None, kind: str, ctx: dict) -> str | None:
-    """Return HTML from the tenant's template, or ``None`` to use the built-in one."""
+    """Return HTML from the tenant's Jinja source, or ``None`` to use the built-in kind template.
+
+    Empty ``source`` keeps the built-in layout so cover title, logo and disclaimer from the
+    same ReportTemplate still apply via branding context.
+    """
     t = _pick(s, tenant_id, kind)
-    if t is None:
+    if t is None or not (t.source or "").strip():
         return None
-    data = {**safe_context(ctx), "cover_title": t.cover_title, "logo": t.logo, "sections": list(t.sections or SECTIONS)}
+    data = {
+        **safe_context(ctx),
+        "cover_title": t.cover_title,
+        "logo": t.logo,
+        "sections": list(t.sections or SECTIONS),
+        "disclaimer": ctx.get("disclaimer", ""),
+    }
     try:
         return render_source(t.source, data)
     except Exception as e:  # never block a report: fall back to the built-in template

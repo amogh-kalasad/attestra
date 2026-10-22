@@ -78,14 +78,76 @@ def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
     return Counter(f.severity for f in open_f)
 
 
-def _report_history(s: Session, engagement_id: int, kind: str = "", framework: str = "") -> list[Report]:
+_HISTORY_CHANGE = {
+    "draft": "Draft generated",
+    "submitted": "Submitted for QA",
+    "qa_approved": "QA approved",
+    "signed": "Signed",
+    "rejected": "Rejected to draft",
+}
+
+
+def report_change_label(status: str) -> str:
+    """Human-readable change column for document-control history rows."""
+    return _HISTORY_CHANGE.get(status, (status or "").replace("_", " ").title() or "—")
+
+
+def _report_history(s: Session, engagement_id: int, kind: str = "", framework: str = "") -> list[dict]:
     """Prior report rows for document-control tables (newest first, capped)."""
     q = select(Report).where(Report.engagement_id == engagement_id)
     if kind:
         q = q.where(Report.kind == kind)
     if framework:
         q = q.where(Report.framework == framework)
-    return list(s.scalars(q.order_by(Report.id.desc()).limit(20)))
+    rows = list(s.scalars(q.order_by(Report.id.desc()).limit(20)))
+    return [
+        {
+            "id": r.id,
+            "version": r.version,
+            "status": r.status,
+            "change": report_change_label(r.status),
+            "generated_at": r.generated_at,
+            "generated_by": r.generated_by,
+            "qa_by": r.qa_by,
+            "approved_by": r.approved_by,
+            "sha256": r.sha256,
+        }
+        for r in rows
+    ]
+
+
+def _assert_not_before_window(eng: Engagement) -> None:
+    """Refuse report generate/submit/sign when today is before the test window start."""
+    if eng.window_start is not None and date.today() < eng.window_start:
+        raise services.ServiceError(
+            f"report date is before the test window start ({eng.window_start.isoformat()}); "
+            "wait until the engagement window opens"
+        )
+
+
+def _distribution_list(eng: Engagement) -> list[dict]:
+    """Default distribution rows for front matter (client contact + confidentiality note)."""
+    rows: list[dict] = []
+    name = (eng.tenant.contact_name or "").strip()
+    email = (eng.tenant.contact_email or "").strip()
+    if name or email:
+        rows.append(
+            {
+                "role": "Client contact",
+                "name": name or "—",
+                "email": email or "—",
+                "copies": "1",
+            }
+        )
+    rows.append(
+        {
+            "role": "Authorized recipients",
+            "name": eng.tenant.name,
+            "email": "—",
+            "copies": "as authorized",
+        }
+    )
+    return rows
 
 
 def _test_types_and_standards(eng: Engagement) -> tuple[list[dict], list[str]]:
@@ -167,16 +229,117 @@ def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
     return out
 
 
+_HTTP_BODY_CAP = 4096
+
+
+def _figures_list(evidence_embeds: dict[int, list[dict]]) -> list[dict]:
+    """List-of-figures rows from screenshot embeds (caption + finding id)."""
+    figures: list[dict] = []
+    for fid, embeds in evidence_embeds.items():
+        for i, e in enumerate(embeds, 1):
+            figures.append(
+                {
+                    "id": f"F-{fid}-{i}",
+                    "caption": e.get("note") or e.get("filename") or "screenshot",
+                    "finding_id": fid,
+                }
+            )
+    return figures
+
+
+def _trim_http_body(text: str, cap: int = _HTTP_BODY_CAP) -> str:
+    text = text or ""
+    if len(text) <= cap:
+        return text
+    return text[:cap] + f"\n… truncated ({len(text)} bytes total)"
+
+
+def _format_http_pair_display(doc: dict) -> str:
+    """Pretty-print a stored http_pair JSON dict for report HTML (already redacted at store)."""
+    method = str(doc.get("method") or "GET").upper()
+    url = str(doc.get("url") or "")
+    status = doc.get("status")
+    status_s = str(status) if status not in (None, "") else "—"
+    req_body = _trim_http_body(str(doc.get("request_body") or ""))
+    resp_body = _trim_http_body(str(doc.get("response_body") or ""))
+    req_h = doc.get("request_headers") or {}
+    resp_h = doc.get("response_headers") or {}
+    req_h_lines = "\n".join(f"{k}: {v}" for k, v in req_h.items()) if isinstance(req_h, dict) else ""
+    resp_h_lines = "\n".join(f"{k}: {v}" for k, v in resp_h.items()) if isinstance(resp_h, dict) else ""
+    parts = [
+        f"{method} {url}",
+        f"Status: {status_s}",
+        "",
+        "— Request —",
+        req_h_lines or "(no headers)",
+        "",
+        req_body or "(empty body)",
+        "",
+        "— Response —",
+        resp_h_lines or "(no headers)",
+        "",
+        resp_body or "(empty body)",
+    ]
+    return "\n".join(parts)
+
+
+def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
+    """Load http_pair evidence (hash-verified), defensive re-mask, for report display."""
+    import json
+
+    from attestra.evidence.mask import mask_bytes
+
+    out: dict[int, list[dict]] = {}
+    for f in findings:
+        pairs: list[dict] = []
+        for e in f.evidence or []:
+            if e.kind != "http_pair":
+                continue
+            path = Path(e.path)
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            if hashlib.sha256(raw).hexdigest() != e.sha256:
+                continue
+            masked, _ = mask_bytes(raw, content_type="application/json")
+            try:
+                doc = json.loads(masked.decode("utf-8", "replace"))
+            except (ValueError, UnicodeError):
+                continue
+            if not isinstance(doc, dict):
+                continue
+            pairs.append(
+                {
+                    "id": e.id,
+                    "filename": e.filename,
+                    "sha256": e.sha256,
+                    "note": e.note or "",
+                    "display": _format_http_pair_display(doc),
+                }
+            )
+        if pairs:
+            out[f.id] = pairs
+    return out
+
+
 def _branding(s: Session, tenant_id: int | None, kind: str) -> dict:
-    """Cover title and logo from the tenant report template when configured."""
+    """Cover title, logo and optional disclaimer from the tenant report template."""
+    empty = {"cover_title": "", "logo": "", "disclaimer": ""}
     if tenant_id is None:
-        return {"cover_title": "", "logo": ""}
+        return empty
     from attestra.library.templates import _pick
 
     t = _pick(s, tenant_id, kind)
     if t is None:
-        return {"cover_title": "", "logo": ""}
-    return {"cover_title": t.cover_title or "", "logo": t.logo or ""}
+        return empty
+    return {
+        "cover_title": t.cover_title or "",
+        "logo": t.logo or "",
+        "disclaimer": (getattr(t, "disclaimer", None) or "").strip(),
+    }
 
 
 def _scan_history(s: Session, engagement_id: int) -> list[ScanRun]:
@@ -219,6 +382,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     retests_by_finding = _retests_for_engagement(s, engagement_id, reportable)
     branding = _branding(s, eng.tenant_id, kind or "technical")
     tmpl_cfg = load_template_config()
+    embeds = _evidence_embeds(reportable)
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -258,17 +422,20 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "standards": standards,
         "retests_by_finding": retests_by_finding,
         "latest_retest": lambda fid: _latest_retest(retests_by_finding, fid),
-        "evidence_embeds": _evidence_embeds(reportable),
+        "evidence_embeds": embeds,
+        "figures": _figures_list(embeds),
+        "http_pairs": _http_pair_embeds(reportable),
         "cover_title": branding["cover_title"],
         "logo": branding["logo"],
         "cvss_legend": cvss_legend(),
         "methodology_phases": methodology_phases(),
-        "disclaimer": disclaimer_text(),
+        "disclaimer": branding["disclaimer"] or disclaimer_text(),
         "kind_meta": kind_config(kind) if kind else {},
         "template_config": tmpl_cfg,
         "scan_history": _scan_history(s, engagement_id),
         "contact_name": eng.tenant.contact_name or "",
         "contact_email": eng.tenant.contact_email or "",
+        "distribution": _distribution_list(eng),
         **_ai_context(engagement_id, eng.tenant_id),
     }
 
@@ -302,6 +469,7 @@ def generate_report(
     if kind not in KINDS:
         raise services.ServiceError(f"kind must be one of {KINDS}")
     eng = services.get_engagement(s, engagement_id)
+    _assert_not_before_window(eng)
     if kind == "compliance":
         if not framework:
             raise services.ServiceError("framework is required for a compliance report")
@@ -389,6 +557,7 @@ def submit_report(s: Session, report_id: int, *, actor: str, user_id: int | None
     r = _get_report(s, report_id)
     if r.status not in ("draft", "rejected"):
         raise services.ServiceError(f"cannot submit report in status '{r.status}'")
+    _assert_not_before_window(services.get_engagement(s, r.engagement_id))
     _assert_hash(r)
     r.status = "submitted"
     r.rejection_note = ""
@@ -448,6 +617,7 @@ def sign_report(
         )
     ):
         raise services.ServiceError("four-eyes rule: signer must differ from author and QA")
+    _assert_not_before_window(services.get_engagement(s, r.engagement_id))
     _assert_hash(r)
     r.signature = signing.sign(r.sha256)
     r.algorithm = signing.algorithm_of(r.signature)

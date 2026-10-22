@@ -372,6 +372,9 @@ class Finding(Base):
     title: Mapped[str] = mapped_column(String(500))
     description: Mapped[str] = mapped_column(Text, default="")
     recommendation: Mapped[str] = mapped_column(Text, default="")
+    impact: Mapped[str] = mapped_column(Text, default="")
+    affected_urls: Mapped[list] = mapped_column(JSON, default=list)
+    references: Mapped[list] = mapped_column(JSON, default=list)
     tools: Mapped[list] = mapped_column(JSON, default=list)
     rule_ids: Mapped[list] = mapped_column(JSON, default=list)
     cwe: Mapped[int | None] = mapped_column(Integer)
@@ -749,6 +752,7 @@ class ReportTemplate(Base):
     source: Mapped[str] = mapped_column(Text, default="")  # empty = built-in library layout
     cover_title: Mapped[str] = mapped_column(String(300), default="")
     logo: Mapped[str] = mapped_column(Text, default="")  # data: URI
+    disclaimer: Mapped[str] = mapped_column(Text, default="")  # empty = template_config.yaml default
     sections: Mapped[list] = mapped_column(JSON, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[str] = mapped_column(String(200), default="")

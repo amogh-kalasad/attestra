@@ -772,6 +772,68 @@ Technical HTML includes document control, environment, test types/standards, CVS
 
 [[attestra/reports/template_config.py#load_template_config]] lists all five assessment types and nine frameworks and defines the `retest` kind sections.
 
+## Phase 3 reports
+
+Template, evidence, branding, and Word/PDF gaps for technical and related report kinds ([[tests/test_phase3_reports.py]]).
+
+### Change column in document control
+
+Document-control tables on technical and retest reports include a Change column (history rows carry a change label; missing values show an em dash).
+
+### Screenshots end-to-end
+
+Attaching a tiny PNG screenshot embeds Fig. captions and data:image in technical HTML; DOCX contains a drawing/image part; PDF export completes without crash (text assert soft when pypdf missing).
+
+### List of figures
+
+Technical reports expose a List of figures section and TOC link built from screenshot captions via [[attestra/reports/render.py#_figures_list]].
+
+### Risk legend in Word
+
+Technical and executive DOCX exports include Risk rating / CVSS range text; executive HTML gets a legend injected by [[attestra/reports/docx_export.py#_ensure_risk_legend]] when absent.
+
+### Impact affected URLs references
+
+When a finding has impact, affected_urls, or references set, the technical finding detail renders those rows/sections.
+
+### HTTP request response in report
+
+`http_pair` evidence is hash-verified, defensively re-masked, pretty-printed under each finding as `pre.http-pair` without leaking stored secrets ([[attestra/reports/render.py#_http_pair_embeds]]).
+
+### Logo on cover
+
+A ReportTemplate logo PNG appears as a data:image on the technical cover along with the cover title.
+
+### Disclaimer branding override
+
+A tenant ReportTemplate disclaimer override replaces the template-config default in the technical disclaimer section.
+
+### DOCX TOC update note
+
+Styled Word TOC page instructs readers to right-click / Update Field or use References › Update Table.
+
+### Finding fields round-trip
+
+Library apply fills empty impact and references; affected_urls round-trip through [[attestra/api.py#_finding_dict]]; description compose fallback still includes Impact.
+
+### CVSS vector validation
+
+[[attestra/scoring.py#validate_cvss_vector]] accepts empty and CVSS 3.x vectors and rejects garbage; [[attestra/scoring.py#soft_cvss_vector]] clears bad import values.
+
+### History change key
+
+[[attestra/reports/render.py#_report_history]] rows include a `change` string derived from status (for example Submitted for QA).
+
+### Date check before window
+
+[[attestra/reports/render.py#generate_report]] raises ServiceError when today is before engagement `window_start`; missing window start still allows generate.
+
+### Front back matter
+
+Technical reports include distribution, sign-off placeholders, and an appendix; methodology and conclusion stay in the TOC.
+
+Distribution rows come from [[attestra/reports/render.py#_distribution_list]] (tenant contact plus authorized recipients). The in-report sign-off table has Author/QA/Approved placeholders; live status remains the Attestra sign-off banner. The appendix lists tool imports and scan runs.
+
 ## Phase 5 evidence hardening
 
 Masking corpus, storage immutability, retention purge, append-only audit, backup manifests, and offline feed refresh.

@@ -302,6 +302,13 @@ def apply_to_finding(s: Session, f: Finding, entry: LibraryEntry, *, actor: str)
     if entry.tenant_id != _tenant_of(s, f):
         raise LibraryError("writeup belongs to another tenant")
     changed: list[str] = []
+    if not (f.impact or "").strip() and (entry.impact or "").strip():
+        f.impact = entry.impact.strip()
+        changed.append("impact")
+    if not (f.references or []) and entry.references:
+        f.references = list(entry.references)
+        changed.append("references")
+    # Keep compose fallback for older consumers that only read description/recommendation.
     if not (f.description or "").strip():
         text = _compose_description(entry)
         if text:

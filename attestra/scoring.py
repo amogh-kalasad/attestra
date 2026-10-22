@@ -8,10 +8,41 @@ attestra.tuning); without an override the defaults below apply.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from attestra import config
+
+# Soft shape check for CVSS 3.x vectors (empty allowed; garbage rejected).
+_CVSS3_VECTOR_RE = re.compile(r"^CVSS:3\.\d+/[A-Za-z0-9:./_]+$")
+
+
+def validate_cvss_vector(vector: str) -> str:
+    """Return a normalized CVSS 3.x vector, or "" when empty.
+
+    Accepts common vectors that start with ``CVSS:3.`` and contain ``/`` metrics.
+    Raises ``ValueError`` for garbage. Callers that set the field explicitly
+    (API/UI) should raise; importers should catch and clear instead of aborting.
+    """
+    v = (vector or "").strip()
+    if not v:
+        return ""
+    if not (v.startswith("CVSS:3.") and "/" in v and _CVSS3_VECTOR_RE.match(v)):
+        raise ValueError(
+            "CVSS vector must be empty or a CVSS 3.x string starting with 'CVSS:3.' "
+            "and containing '/' metrics "
+            "(for example CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H)"
+        )
+    return v
+
+
+def soft_cvss_vector(vector: str | None) -> str:
+    """Keep a vector only when valid; otherwise return empty (import path)."""
+    try:
+        return validate_cvss_vector(vector or "")
+    except ValueError:
+        return ""
 
 # Used only when a tool gives a severity but no CVSS score.
 # Info stays 0 for internal assets; internet-facing Info uses INFO_INTERNET_BASE in risk_score.

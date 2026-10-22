@@ -1004,7 +1004,12 @@ class Builder:
         r5._r.append(_el("w:fldChar", **{"w__fldCharType": "end"}))
         note = self.para("Small")
         note.paragraph_format.space_before = self.Pt(10)
-        self._run(note, "Page numbers in this contents list are filled in by Word (References \u203a Update Table).", {})
+        self._run(
+            note,
+            "Page numbers in this contents list are filled in by Word: right-click the table "
+            "and choose Update Field, or use References \u203a Update Table.",
+            {},
+        )
         self.doc.add_page_break()
         # ask Word to refresh fields (TOC page numbers) on open
         settings = self.doc.settings.element
@@ -1055,6 +1060,41 @@ def _find(node, pred):
     return None
 
 
+def _risk_legend_html() -> str:
+    """Injected when the sealed HTML has no risk/severity legend (e.g. executive)."""
+    try:
+        from attestra.reports.pdf import SEVERITY_LEGEND
+    except Exception:
+        SEVERITY_LEGEND = (
+            ("critical", "9.0 – 10.0", ""),
+            ("high", "7.0 – 8.9", ""),
+            ("medium", "4.0 – 6.9", ""),
+            ("low", "0.1 – 3.9", ""),
+            ("info", "0.0", ""),
+        )
+    rows = "".join(
+        f"<tr><td>{sev}</td><td>{rng}</td><td>{desc}</td></tr>" for sev, rng, desc in SEVERITY_LEGEND
+    )
+    return (
+        '<h2 id="risk-legend">Risk rating legend</h2>'
+        "<table><tr><th>Severity</th><th>CVSS range</th><th>Meaning</th></tr>"
+        f"{rows}</table>"
+    )
+
+
+def _ensure_risk_legend(html: str, *, kind: str) -> str:
+    """Add a CVSS risk legend when the source HTML lacks one (mirrors pdf.prepare_html)."""
+    if kind in LETTER_KINDS:
+        return html
+    if 'id="risk-legend"' in html or 'id="pdf-severity-legend"' in html:
+        return html
+    block = _risk_legend_html()
+    m = re.search(r"(?is)</section>", html)
+    if m and 'id="cover"' in html[: m.end()]:
+        return html[: m.end()] + block + html[m.end() :]
+    return re.sub(r"(?is)(<body[^>]*>)", r"\1" + block.replace("\\", r"\\"), html, count=1)
+
+
 def render_docx(html: str, *, kind: str = "", draft: bool = True, base_url: str | None = None) -> bytes:
     """Rebuild the frozen HTML report as a styled Word document and return its bytes."""
     try:  # same display rules as the PDF: framework names, IST times (display only)
@@ -1063,6 +1103,7 @@ def render_docx(html: str, *, kind: str = "", draft: bool = True, base_url: str 
         html = _framework_names(_human_times(html))
     except Exception:
         pass
+    html = _ensure_risk_legend(html, kind=kind)
     root = parse(html)
     body = _find(root, lambda n: n.tag == "body") or root
     cover = _find(body, lambda n: n.tag == "section" and "cover" in n.classes)

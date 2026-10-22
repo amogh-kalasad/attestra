@@ -750,7 +750,7 @@ def import_results(
                 location=(nf.location + (f" [param: {nf.param}]" if nf.param else ""))[:1000],
                 severity=nf.severity,
                 cvss_score=nf.cvss_score,
-                cvss_vector=nf.cvss_vector,
+                cvss_vector=scoring.soft_cvss_vector(nf.cvss_vector),
                 first_seen=now,
                 last_seen=now,
             )
@@ -778,7 +778,11 @@ def import_results(
             elif _rank(nf.severity) > _rank(f.severity):
                 f.severity = nf.severity
             if f.cvss_score is None and nf.cvss_score is not None:
-                f.cvss_score, f.cvss_vector = nf.cvss_score, nf.cvss_vector
+                f.cvss_score = nf.cvss_score
+                if not (f.cvss_vector or "").strip():
+                    f.cvss_vector = scoring.soft_cvss_vector(nf.cvss_vector)
+            elif not (f.cvss_vector or "").strip() and nf.cvss_vector:
+                f.cvss_vector = scoring.soft_cvss_vector(nf.cvss_vector)
             if not f.cwe and nf.cwe:
                 f.cwe = nf.cwe
                 _apply_owasp(f)

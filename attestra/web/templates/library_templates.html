@@ -36,6 +36,8 @@
   </div>
   <div class="fields" style="grid-template-columns:1fr">
     <div><label for="rt_cover">Cover title</label><input type="text" id="rt_cover" name="cover_title" value="{{ t.cover_title if t else '' }}" placeholder="Security assessment report"></div>
+    <div><label for="rt_disclaimer">Disclaimer</label><textarea id="rt_disclaimer" name="disclaimer" rows="4" placeholder="Leave empty to use the built-in disclaimer">{{ t.disclaimer if t else '' }}</textarea>
+      <div class="hint">Shown in Assumptions, limitations and confidentiality. Empty keeps the default from template_config.yaml.</div></div>
     <div><label for="rt_sections">Section order</label><input type="text" id="rt_sections" name="sections" value="{{ (t.sections if t else sections)|join(', ') }}">
       <div class="hint">Comma separated: {{ sections|join(', ') }}</div></div>
     <div>
@@ -48,7 +50,7 @@
       {% if t and t.logo %}<div class="row" style="margin-top:10px"><img src="{{ t.logo }}" alt="current logo" style="max-height:40px"><label style="margin:0"><input type="checkbox" name="clear_logo" value="1"> Remove logo</label></div>{% endif %}
     </div>
     <div><label for="rt_source">Template source</label><textarea id="rt_source" name="source" rows="12" class="mono" style="font-family:var(--mono);font-size:13px">{{ t.source if t else '' }}</textarea>
-      <div class="hint">Leave empty for the built-in library layout</div></div>
+      <div class="hint">Leave empty to keep the built-in report for this kind (cover, logo and disclaimer still apply)</div></div>
     <div><label for="rt_upload">Or upload a template file</label><input type="file" id="rt_upload" name="upload" accept=".html,.j2,.jinja,.txt"></div>
   </div>
   <div class="actions-split">

@@ -108,6 +108,7 @@ class ApplyIn(BaseModel):
 class TemplateIn(BaseModel):
     source: str | None = None
     cover_title: str | None = None
+    disclaimer: str | None = None
     sections: list[str] | None = None
     enabled: bool | None = None
     clear_logo: bool = False
@@ -347,8 +348,8 @@ def ui_templates(request: Request, tenant_id: int | None = Query(None), kind: st
 
 @ui_router.post("/library/templates")
 async def ui_template_save(request: Request, tenant_id: int = Form(...), kind: str = Form(...), source: str = Form(""),
-                           cover_title: str = Form(""), sections: str = Form(""), enabled: str = Form(""),
-                           clear_logo: str = Form(""), action: str = Form("save"),
+                           cover_title: str = Form(""), disclaimer: str = Form(""), sections: str = Form(""),
+                           enabled: str = Form(""), clear_logo: str = Form(""), action: str = Form("save"),
                            logo: UploadFile | None = File(None), upload: UploadFile | None = File(None)):
     ui, principal, redirect = _ui_ctx(request)
     if redirect:
@@ -364,8 +365,11 @@ async def ui_template_save(request: Request, tenant_id: int = Form(...), kind: s
             if action == "delete":
                 rt.delete_template(s, tenant_id, kind, actor=principal.actor)
             else:
-                rt.save_template(s, tenant_id, kind, actor=principal.actor, source=source, cover_title=cover_title,
-                                 sections=sections, enabled=bool(enabled), logo=logo_bytes, clear_logo=bool(clear_logo))
+                rt.save_template(
+                    s, tenant_id, kind, actor=principal.actor, source=source, cover_title=cover_title,
+                    disclaimer=disclaimer, sections=sections, enabled=bool(enabled), logo=logo_bytes,
+                    clear_logo=bool(clear_logo),
+                )
     except (services.ServiceError, LookupError) as e:
         return RedirectResponse(f"{url}&error={_q(str(e))}", status_code=303)
     return RedirectResponse(f"{url}&msg={_q('Template removed.' if action == 'delete' else 'Template saved.')}", status_code=303)

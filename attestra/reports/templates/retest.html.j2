@@ -6,7 +6,7 @@
 
 <h2 id="document-control">1. Document control</h2>
 <table>
-  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th></tr>
+  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th><th>Change</th></tr>
   <tr>
     <td>v{{ version }}</td>
     <td>draft (this generation)</td>
@@ -14,6 +14,7 @@
     <td>{{ generated_by }}</td>
     <td>—</td>
     <td>—</td>
+    <td>Draft generated</td>
   </tr>
   {% for r in report_history %}
   <tr>
@@ -23,6 +24,7 @@
     <td>{{ r.generated_by }}</td>
     <td>{{ r.qa_by or "—" }}</td>
     <td>{{ r.approved_by or "—" }}</td>
+    <td>{{ r.change or "—" }}</td>
   </tr>
   {% endfor %}
 </table>
