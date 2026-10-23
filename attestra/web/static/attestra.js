@@ -286,3 +286,28 @@
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
   window.addEventListener("scroll", hide, true);
 })();
+
+/* Card header icons chosen from the heading text */
+(function () {
+  "use strict";
+  var RULES = [
+    [/signed authori|^authori/i, "pen"], [/target|scope|sites?\b|site grade/i, "target"],
+    [/test plan|coverage|sampling/i, "clip"], [/automated scan|scan|asv|quarter/i, "radar"],
+    [/import/i, "upload"], [/report|draft|writeup|statement of applic/i, "report"],
+    [/severity|breakdown|by tool|score/i, "bars"], [/open findings by|findings|finding|nonconform|from findings/i, "bug"],
+    [/passed|verified|integrity/i, "check"], [/calendar|scheduled/i, "cal"], [/history|events|audit log|pending/i, "clock"],
+    [/share|link|token/i, "link"], [/people|users?\b|invite|recipient|client/i, "users"], [/comment/i, "chat"],
+    [/badge|certificate|grade/i, "award"], [/how to fix|recommend|corrective/i, "wrench"], [/proof|evidence/i, "img"],
+    [/risk/i, "warn"], [/setting|switch|layout|template/i, "gear"], [/segmentation|pci|frameworks?|compliance|iso/i, "layers"],
+    [/library|description|details/i, "book"], [/engagement/i, "brief"], [/create|new|apply/i, "plus"]
+  ];
+  function pick(t) { for (var i = 0; i < RULES.length; i++) if (RULES[i][0].test(t)) return RULES[i][1]; return "doc"; }
+  function run() {
+    document.querySelectorAll(".card-head, .card > h2:first-child, .tile-head").forEach(function (el) {
+      if (el.hasAttribute("data-ico")) return;
+      var h = el.matches("h2") ? el : (el.querySelector("h2,h3") || el);
+      el.setAttribute("data-ico", pick((h.textContent || "").trim()));
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run); else run();
+})();
