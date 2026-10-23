@@ -1,4 +1,4 @@
-/* Attestra UI: progressive enhancement for native <select> (Option C dropdown).
+/* Attestra UI: progressive enhancement for native <select> (Option M).
    The real <select> stays in the DOM (hidden, still submitted); this only adds a
    styled trigger + listbox and mirrors the choice back with a 'change' event. */
 (function () {
@@ -206,7 +206,7 @@
 
   /* <details> used as menus (top nav "More", avatar menu, any details.topnav-more / [data-menu]):
      close on outside click and Esc (focus back to summary); opening one closes the others. */
-  var MENU = "details.topnav-more, details[data-menu]";
+  var MENU = "details.topnav-more, details.rail-menu, details[data-menu]";
   function menus() { return document.querySelectorAll(MENU); }
   document.addEventListener("toggle", function (e) {
     var d = e.target;
@@ -223,91 +223,21 @@
     });
   });
 
-  /* data-confirm: intercept submit/click and show the shared modal instead of window.confirm. */
-  var pendingConfirm = null;
-  function confirmEl() {
-    return {
-      backdrop: document.getElementById("confirm-backdrop"),
-      title: document.getElementById("confirm-title"),
-      message: document.getElementById("confirm-message"),
-      ok: document.getElementById("confirm-ok"),
-      cancel: document.getElementById("confirm-cancel"),
-    };
-  }
-  function openConfirm(message, onOk) {
-    var el = confirmEl();
-    if (!el.backdrop || !el.message) {
-      if (window.confirm(message)) onOk();
-      return;
-    }
-    pendingConfirm = onOk;
-    el.message.textContent = message;
-    el.backdrop.hidden = false;
-    (el.cancel || el.ok).focus();
-  }
-  function closeConfirm() {
-    var el = confirmEl();
-    pendingConfirm = null;
-    if (el.backdrop) el.backdrop.hidden = true;
-  }
-  function bindConfirmUi() {
-    var el = confirmEl();
-    if (!el.backdrop) return;
-    if (el.cancel) el.cancel.addEventListener("click", function () { closeConfirm(); });
-    if (el.ok) el.ok.addEventListener("click", function () {
-      var fn = pendingConfirm;
-      closeConfirm();
-      if (fn) fn();
-    });
-    el.backdrop.addEventListener("click", function (e) {
-      if (e.target === el.backdrop) closeConfirm();
-    });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && el.backdrop && !el.backdrop.hidden) {
-        e.preventDefault();
-        closeConfirm();
-      }
-    });
-  }
-  document.addEventListener("submit", function (e) {
-    var form = e.target;
-    if (!form || !form.getAttribute) return;
-    var msg = form.getAttribute("data-confirm");
-    if (!msg) return;
-    if (form.dataset.confirmProceed === "1") {
-      delete form.dataset.confirmProceed;
-      return;
-    }
-    e.preventDefault();
-    openConfirm(msg, function () {
-      form.dataset.confirmProceed = "1";
-      if (typeof form.requestSubmit === "function") form.requestSubmit();
-      else form.submit();
-    });
-  }, true);
+  /* Login "Show/Hide" password toggle (the template's inline script is blocked by the CSP). */
   document.addEventListener("click", function (e) {
-    var btn = e.target && e.target.closest ? e.target.closest("[data-confirm]") : null;
-    if (!btn || btn.tagName === "FORM") return;
-    if (btn.tagName !== "BUTTON" && btn.tagName !== "INPUT") return;
-    if (btn.form && btn.form.getAttribute("data-confirm")) return;
-    var msg = btn.getAttribute("data-confirm");
-    if (!msg) return;
-    if (btn.dataset.confirmProceed === "1") {
-      delete btn.dataset.confirmProceed;
-      return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    openConfirm(msg, function () {
-      btn.dataset.confirmProceed = "1";
-      btn.click();
-    });
-  }, true);
+    var btn = e.target.closest && e.target.closest("#toggle-pw");
+    if (!btn) return;
+    var input = document.getElementById("password");
+    if (!input) return;
+    var show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.textContent = show ? "Hide" : "Show";
+    btn.setAttribute("aria-pressed", show ? "true" : "false");
+  });
 
   function init() {
     document.documentElement.classList.add("js-asel");
     enhance(document);
-    bindConfirmUi();
     new MutationObserver(function (muts) {
       muts.forEach(function (m) {
         Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1 && !n.closest(".asel")) enhance(n); });
@@ -315,4 +245,44 @@
     }).observe(document.body, { childList: true, subtree: true });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
+
+/* Custom tooltips: replaces native title tooltips app-wide */
+(function () {
+  "use strict";
+  var tip = null, cur = null, timer = null;
+  function ensure() {
+    if (!tip) { tip = document.createElement("div"); tip.className = "atip"; tip.setAttribute("role", "tooltip"); tip.id = "atip"; document.body.appendChild(tip); }
+    return tip;
+  }
+  function find(el) {
+    while (el && el !== document.body && el.nodeType === 1) {
+      if (el.hasAttribute("title") && el.getAttribute("title").trim()) {
+        el.setAttribute("data-tip", el.getAttribute("title")); el.removeAttribute("title");
+      }
+      if (el.hasAttribute("data-tip")) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function place(el) {
+    var t = ensure(), r = el.getBoundingClientRect();
+    t.textContent = el.getAttribute("data-tip");
+    t.classList.remove("below"); t.style.left = "0px"; t.style.top = "0px"; t.classList.add("show");
+    var w = t.offsetWidth, h = t.offsetHeight, vw = document.documentElement.clientWidth;
+    var left = r.left + r.width / 2 - w / 2; left = Math.max(8, Math.min(left, vw - w - 8));
+    var top = r.top - h - 10;
+    if (top < 8) { top = r.bottom + 10; t.classList.add("below"); }
+    t.style.left = (left + window.scrollX) + "px"; t.style.top = (top + window.scrollY) + "px";
+    t.style.setProperty("--ax", (r.left + r.width / 2 - left) + "px");
+    el.setAttribute("aria-describedby", "atip");
+  }
+  function show(el) { clearTimeout(timer); cur = el; timer = setTimeout(function () { if (cur === el) place(el); }, 250); }
+  function hide() { clearTimeout(timer); if (cur) cur.removeAttribute("aria-describedby"); cur = null; if (tip) tip.classList.remove("show"); }
+  document.addEventListener("mouseover", function (e) { var el = find(e.target); if (el !== cur) { hide(); if (el) show(el); } });
+  document.addEventListener("mouseout", function (e) { if (cur && !cur.contains(e.relatedTarget)) hide(); });
+  document.addEventListener("focusin", function (e) { var el = find(e.target); if (el) { hide(); cur = el; place(el); } });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") hide(); });
+  window.addEventListener("scroll", hide, true);
 })();

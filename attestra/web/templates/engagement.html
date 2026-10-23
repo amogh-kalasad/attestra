@@ -4,7 +4,10 @@
 {% set prole = principal.role if principal else "" %}
 {% set has_auth = authorized_envs|length > 0 %}
 {% set plan_done = plan and plan|selectattr('findings')|list %}
-<div class="eng" style="display:flex;flex-direction:column;gap:22px">
+{% set fl = findings %}{% set cur_fid = None %}
+<div class="md">
+{% include "_findings_list.html" %}
+<div class="eng md-detail" style="display:flex;flex-direction:column;gap:18px">
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="/">Engagements</a>
   <span aria-hidden="true">/</span>
@@ -27,7 +30,6 @@
   <a href="/engagements/{{ e.id }}" aria-current="page">Overview</a>
   {% if has_pci %}<a href="/engagements/{{ e.id }}/pci">PCI DSS</a>{% endif %}
   {% if has_iso %}<a href="/engagements/{{ e.id }}/iso">ISO 27001</a>{% endif %}
-  {% if auth_web_enabled %}<a href="/engagements/{{ e.id }}/auth-coverage">Authenticated coverage</a>{% endif %}
   {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} <span class="chip">off</span>{% endif %}</a>{% endif %}
 </nav>
 
@@ -69,80 +71,22 @@
 <!-- ============================================================ FINDINGS -->
 <div class="card" id="findings">
   <h2>Findings (ranked by risk)</h2>
-  {% set ff = findings_filter or {} %}
-  <div class="row" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;align-items:flex-end">
-    <div>
-      <label for="ff-severity" class="meta" style="display:block;margin:0 0 2px">Severity</label>
-      <select id="ff-severity" data-native>
-        <option value="">All</option>
-        {% for s in ["critical","high","medium","low","info"] %}
-        <option value="{{ s }}" {{ "selected" if ff.severity == s }}>{{ s|capitalize }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div>
-      <label for="ff-status" class="meta" style="display:block;margin:0 0 2px">Status</label>
-      <select id="ff-status" data-native>
-        <option value="">All</option>
-        {% for s in ["new","triaged","validated","fixed","false_positive","risk_accepted","retest_passed"] %}
-        <option value="{{ s }}" {{ "selected" if ff.status == s }}>{{ s|label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div>
-      <label for="ff-tool" class="meta" style="display:block;margin:0 0 2px">Tool</label>
-      <select id="ff-tool" data-native>
-        <option value="">All</option>
-        {% set ns_tools = namespace(seen=[]) %}
-        {% for f in findings %}{% for t in (f.tools or []) %}
-          {% if t not in ns_tools.seen %}{% set _ = ns_tools.seen.append(t) %}
-          <option value="{{ t }}" {{ "selected" if ff.tool == t }}>{{ t }}</option>
-          {% endif %}
-        {% endfor %}{% endfor %}
-      </select>
-    </div>
-    <div>
-      <label for="ff-asset" class="meta" style="display:block;margin:0 0 2px">Target</label>
-      <select id="ff-asset" data-native>
-        <option value="">All</option>
-        {% for a in e.assets %}
-        <option value="{{ a.id }}" {{ "selected" if ff.asset == a.id|string }}>{{ a.name or a.identifier }}</option>
-        {% endfor %}
-        <option value="none" {{ "selected" if ff.asset == "none" }}>Unmatched</option>
-      </select>
-    </div>
-    <div>
-      <label for="ff-assigned" class="meta" style="display:block;margin:0 0 2px">Assignee</label>
-      <select id="ff-assigned" data-native>
-        <option value="">All</option>
-        <option value="me" {{ "selected" if ff.assigned == "me" }}>Assigned to me</option>
-        <option value="none" {{ "selected" if ff.assigned == "none" }}>Unassigned</option>
-      </select>
-    </div>
-    <span class="meta" id="ff-count" style="align-self:center"></span>
+  <div class="row" style="margin-bottom:12px">
     {% if can(prole, "finding.read") %}
-    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export" style="margin-left:auto">Export findings CSV</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Export findings CSV</a>
     {% endif %}
   </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
-  <table id="findings-table">
-    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Assignee</th><th>Status</th></tr>
+  <table>
+    <tr><th>ID</th><th>Severity</th><th>Risk</th><th>Title</th><th>Target</th><th>CWE / CVE</th><th>Status</th></tr>
     {% for f in findings %}
-    {% set asg = (finding_assignees or {}).get(f.id, "") %}
-    <tr id="f-{{ f.id }}" class="finding-row"
-        data-severity="{{ f.severity }}"
-        data-status="{{ f.status }}"
-        data-tools="{{ (f.tools or [])|join(',') }}"
-        data-asset="{{ f.asset_id or 'none' }}"
-        data-assignee="{{ asg }}"
-        data-assigned-to-me="{{ '1' if asg and me_username and asg|lower == me_username else '0' }}">
+    <tr id="f-{{ f.id }}">
       <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
       <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
-      <td class="meta">{{ asg or "—" }}</td>
       <td>
         <div class="status-cell">
           <div class="status-head"><span class="st fs fs-{{ f.status }}">{{ f.status|label }}</span><span class="meta fix-by">Fix by {{ f.sla_due or "-" }}</span></div>
@@ -168,8 +112,7 @@
         </div>
       </td>
     </tr>
-    {% else %}<tr id="findings-empty-all"><td colspan="7">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
-    <tr id="findings-empty-filter" hidden><td colspan="7" class="meta">No findings match these filters.</td></tr>
+    {% else %}<tr><td colspan="7">No findings yet. <a href="#import">Import results</a> or run a scan.</td></tr>{% endfor %}
   </table>
 </div>
 </section>
@@ -235,13 +178,8 @@
     </tr>
     {% else %}<tr><td colspan="6" class="st-not_met">No signed authorization yet. Record one below; scans and imports are blocked until then.</td></tr>{% endfor %}
   </table>
-  {% if e.authorizations %}
-  <p style="margin:12px 0 0">
-    <button type="button" class="secondary" id="auth_open_btn">+ Add another authorization</button>
-  </p>
-  {% endif %}
-  <details id="auth_details" {{ "open" if (not e.authorizations) or auth_open }}>
-    <summary>{% if e.authorizations %}Add another signed authorization{% else %}+ Record a signed authorization{% endif %}</summary>
+  <details {{ "open" if not e.authorizations }}>
+    <summary>+ Record a signed authorization</summary>
     <form method="post" action="/engagements/{{ e.id }}/authorizations" enctype="multipart/form-data" id="auth_form">
       <div class="fields">
         <div><label for="document">Signed document (PDF, image or text) *</label><input type="file" id="document" name="document" required></div>
@@ -254,7 +192,7 @@
       <div class="checks" role="group" aria-labelledby="env_label">
         {% for env in environments %}<label><input type="checkbox" name="environments" value="{{ env }}" {{ "checked" if env in ("staging", "uat") }}> <span class="env env-{{ env }}">{{ env }}</span></label>{% endfor %}
       </div>
-      <div class="flash err" id="env_error" hidden role="alert">Tick at least one environment.</div>
+      <div class="flash err" id="env_error" hidden>Tick at least one environment.</div>
       <label for="roe">Rules of engagement (testing hours, exclusions, contacts, intrusive tests allowed?)</label>
       <textarea id="roe" name="rules_of_engagement" placeholder="Testing 10:00-18:00 IST only. No denial-of-service. Production: non-intrusive scans only. Emergency contact: ..."></textarea>
       <div class="form-actions"><button type="submit">Save authorization</button></div>
@@ -289,16 +227,11 @@
           <p style="margin:6px 0 2px"><b>Option A: DNS TXT record</b></p>
           <div class="meta">Type: <span class="mono">TXT</span></div>
           <div class="meta">Name: <span class="mono">{{ oi.txt_name }}</span>{% if oi.txt_short_name != "@" %} (in GoDaddy and most DNS panels for <span class="mono">{{ oi.txt_zone }}</span>, type just <span class="mono">{{ oi.txt_short_name }}</span>){% else %} (in most DNS panels, type <span class="mono">@</span>){% endif %}</div>
-          <div class="meta" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">Value: <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span>
-            <button type="button" class="secondary" data-copy="{{ oi.txt_value }}">Copy</button></div>
-          <div class="meta">Token only: <span class="mono" style="word-break:break-all">{{ oi.token }}</span>
-            <button type="button" class="secondary" data-copy="{{ oi.token }}">Copy</button></div>
+          <div class="meta">Value: <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span></div>
           <div class="meta">DNS changes can take a few minutes to an hour to show up.</div>
           <p style="margin:8px 0 2px"><b>Option B: file on the website</b></p>
-          <div class="meta" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">Put a plain text file at: <span class="mono" style="word-break:break-all">{{ oi.file_url }}</span>
-            <button type="button" class="secondary" data-copy="{{ oi.file_url }}">Copy</button></div>
-          <div class="meta" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">The file must contain only: <span class="mono" style="word-break:break-all">{{ oi.file_content }}</span>
-            <button type="button" class="secondary" data-copy="{{ oi.file_content }}">Copy</button></div>
+          <div class="meta">Put a plain text file at: <span class="mono" style="word-break:break-all">{{ oi.file_url }}</span></div>
+          <div class="meta">The file must contain only: <span class="mono" style="word-break:break-all">{{ oi.file_content }}</span></div>
           <div class="meta">It must open directly (HTTP 200, no redirect).</div>
           {% if can(principal.role, "asset.verify_ownership") %}
           <form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/verify-ownership" style="margin-top:8px">
@@ -321,7 +254,7 @@
         </details>
         {% endif %}</td>
       <td class="meta">{{ a.owner }}{% if a.owner and a.notes %} &middot; {% endif %}{{ a.notes }}</td>
-      <td><form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/remove" data-confirm="{{ ('Remove ' ~ a.identifier ~ ' from scope? It has ' ~ nf ~ ' finding(s) and ' ~ ns ~ ' schedule(s). Findings stay on the engagement but lose their target; schedules for it stop.')|e }}"><button class="danger" type="submit">Remove</button></form></td>
+      <td><form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/remove" onsubmit="return confirm({{ ('Remove ' ~ a.identifier ~ ' from scope? It has ' ~ nf ~ ' finding(s) and ' ~ ns ~ ' schedule(s). Findings stay on the engagement but lose their target; schedules for it stop.')|tojson|forceescape }})"><button class="danger" type="submit">Remove</button></form></td>
     </tr>
     {% else %}<tr><td colspan="8">No targets yet. Add the URLs, APIs or systems the client wants tested.</td></tr>{% endfor %}
   </table>
@@ -423,7 +356,7 @@
   <h2>Automated scans</h2>
   <p class="meta">Run a scanner against one target in scope. A scan needs a valid signed authorization for the target's environment, the test window, verified ownership and, for the active profile, intrusive tests allowed on the target.</p>
   <div class="row" style="margin-bottom:10px">
-    {% if e.status != 'halted' %}<form method="post" action="/engagements/{{ e.id }}/halt" data-confirm="Halt all jobs for this engagement? Running and queued scans stop until you resume."><button type="submit" class="danger">Halt engagement</button></form>{% endif %}
+    {% if e.status != 'halted' %}<form method="post" action="/engagements/{{ e.id }}/halt" onsubmit="return confirm('Halt all jobs for this engagement? Running and queued scans stop until you resume.')"><button type="submit" class="danger">Halt engagement</button></form>{% endif %}
     {% if e.status == 'halted' %}<form method="post" action="/engagements/{{ e.id }}/resume"><button type="submit">Resume engagement</button></form>{% endif %}
     <span class="meta">Status: <b class="st st-{{ e.status }}">{{ e.status|label }}</b></span>
   </div>
@@ -438,7 +371,7 @@
       <td>
         {% if r.status in ("queued", "running") and can(prole, "scan.start") %}
         <form method="post" action="/engagements/{{ e.id }}/scans/{{ r.id }}/cancel"
-              data-confirm="Cancel scan #{{ r.id }}?">
+              onsubmit="return confirm('Cancel scan #{{ r.id }}?')">
           <button type="submit" class="danger">Cancel</button>
         </form>
         {% endif %}
@@ -521,7 +454,7 @@
       <td>{{ sch.last_enqueued_at|dt if sch.last_enqueued_at else "-" }}</td>
       <td>{{ "Yes" if sch.quarter_clean else "No" }}</td>
       <td>
-        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/remove" data-confirm="Remove this schedule? No more scans will be queued from it.">
+        <form method="post" action="/engagements/{{ e.id }}/schedules/{{ sch.id }}/remove" onsubmit="return confirm('Remove this schedule? No more scans will be queued from it.')">
           <button type="submit" class="danger">Remove</button>
         </form>
       </td>
@@ -544,7 +477,7 @@
   <div class="warn">Add a target in <a href="#targets">Targets in scope</a> first, then schedule recurring scans for it.</div>
   {% endif %}
   {% if due_schedules %}
-  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" class="form-follow" data-confirm="Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.">
+  <form method="post" action="/engagements/{{ e.id }}/schedules/run-due" class="form-follow" onsubmit="return confirm('Queue {{ due_schedules }} due scan(s) now? Scanners start against the scheduled targets.')">
     <div class="form-actions"><button type="submit" class="secondary">Queue {{ due_schedules }} due scan(s) now</button></div>
   </form>
   {% endif %}
@@ -635,23 +568,10 @@
   </div>
   <div class="card" id="reports">
     <h2>Reports</h2>
-    <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
-      {% if can(prole, "finding.read") %}
-      <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Findings CSV</a>
-      <a class="btn secondary" href="/engagements/{{ e.id }}/export/xlsx" download>Excel</a>
-      <a class="btn secondary" href="/engagements/{{ e.id }}/export/json" download>JSON export</a>
-      <a class="btn secondary" href="/engagements/{{ e.id }}/export/sarif">SARIF</a>
-      {% endif %}
-      {% if can(prole, "report.read") %}
-      <a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal-poam">OSCAL POA&amp;M</a>
-      {% for k in e.frameworks %}<a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal?framework={{ k|urlencode }}">OSCAL results &middot; {{ k|fw_name }}</a>{% endfor %}
-      {% endif %}
-    </div>
     <table>
       <tr><th>#</th><th>Report</th><th>Status</th><th>QA by</th><th>Approved by</th><th>Next step</th></tr>
       {% set my_uid = principal.user_id if principal else None %}
-      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a>
-          {% if can(prole, "report.read") %}<div class="row export-links" style="margin-top:4px;gap:6px"><a class="btn secondary" href="/engagements/{{ e.id }}/reports/{{ r.id }}/export/pdf" download title="Download a styled PDF{{ '' if r.status == 'signed' else ' (marked DRAFT until signed)' }}">PDF</a><a class="btn secondary" href="/engagements/{{ e.id }}/reports/{{ r.id }}/export/docx" download>Word</a></div>{% endif %}</td>
+      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a></td>
         <td><span class="st">{{ "In QA" if r.status == "submitted" else "QA approved" if r.status == "qa_approved" else r.status|label }}</span>{% if r.status == "rejected" and r.rejection_note %}<div class="meta">QA note: {{ r.rejection_note }}</div>{% endif %}</td>
         <td>{{ r.qa_by or "-" }}</td>
         <td>{{ r.approved_by or "-" }}{% if r.signed_at %}<div class="meta">{{ r.signed_at|dt }}</div>{% endif %}</td>
@@ -725,74 +645,9 @@
   const authForm = document.getElementById('auth_form');
   if (authForm) authForm.addEventListener('submit', ev => {
     const any = authForm.querySelectorAll('input[name=environments]:checked').length > 0;
-    const envErr = document.getElementById('env_error');
-    if (envErr) envErr.hidden = any;
-    if (!any) {
-      ev.preventDefault();
-      if (envErr) { envErr.hidden = false; envErr.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
-    }
+    document.getElementById('env_error').hidden = any;
+    if (!any) ev.preventDefault();
   });
-  const authDetails = document.getElementById('auth_details');
-  const authOpenBtn = document.getElementById('auth_open_btn');
-  if (authOpenBtn && authDetails) {
-    authOpenBtn.addEventListener('click', () => {
-      authDetails.open = true;
-      authDetails.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      const first = authDetails.querySelector('input,select,textarea');
-      if (first) first.focus();
-    });
-  }
-  // Copy buttons for ownership values (and CT suggestions).
-  document.addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('[data-copy]');
-    if (!btn) return;
-    const text = btn.getAttribute('data-copy') || '';
-    try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
-    catch (e) {
-      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
-      ta.select(); document.execCommand('copy'); document.body.removeChild(ta); btn.textContent = 'Copied';
-    }
-    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-  });
-  // Client-side findings filter (data-* on each row).
-  (function () {
-    const sev = document.getElementById('ff-severity');
-    const st = document.getElementById('ff-status');
-    const tool = document.getElementById('ff-tool');
-    const asset = document.getElementById('ff-asset');
-    const assigned = document.getElementById('ff-assigned');
-    const count = document.getElementById('ff-count');
-    const emptyFilter = document.getElementById('findings-empty-filter');
-    if (!sev || !st || !tool || !asset || !assigned) return;
-    function apply() {
-      const rows = document.querySelectorAll('#findings-table tr.finding-row');
-      let shown = 0;
-      rows.forEach(row => {
-        const okSev = !sev.value || row.dataset.severity === sev.value;
-        const okSt = !st.value || row.dataset.status === st.value;
-        const tools = (row.dataset.tools || '').split(',').filter(Boolean);
-        const okTool = !tool.value || tools.indexOf(tool.value) >= 0;
-        const okAsset = !asset.value || row.dataset.asset === asset.value;
-        let okAssigned = true;
-        if (assigned.value === 'me') okAssigned = row.dataset.assignedToMe === '1';
-        else if (assigned.value === 'none') okAssigned = !(row.dataset.assignee || '');
-        const show = okSev && okSt && okTool && okAsset && okAssigned;
-        row.hidden = !show;
-        if (show) shown += 1;
-      });
-      if (count) count.textContent = rows.length ? (shown + ' shown') : '';
-      if (emptyFilter) emptyFilter.hidden = !(rows.length && shown === 0);
-      const params = new URLSearchParams(window.location.search);
-      [['severity', sev.value], ['status', st.value], ['tool', tool.value], ['asset', asset.value], ['assigned', assigned.value]].forEach(([k, v]) => {
-        if (v) params.set(k, v); else params.delete(k);
-      });
-      const qs = params.toString();
-      const url = window.location.pathname + (qs ? '?' + qs : '') + '#findings';
-      if (history.replaceState) history.replaceState(null, '', url);
-    }
-    [sev, st, tool, asset, assigned].forEach(el => el.addEventListener('change', apply));
-    apply();
-  })();
   // Active profile only for targets that allow intrusive tests.
   const scanAsset = document.getElementById('scan_asset'), scanProfile = document.getElementById('scan_profile');
   function profileCheck() {
@@ -806,4 +661,5 @@
   }
   if (scanAsset) { scanAsset.addEventListener('change', profileCheck); profileCheck(); }
 </script>
+</div>
 {% endblock %}

@@ -16,6 +16,36 @@
 {% endfor %}
 {% set open_total = ns.crit + ns.high + ns.med + ns.low + ns.info %}
 
+<div class="md">
+<aside class="card md-list" aria-label="All engagements">
+  <div class="card-head"><h2>All engagements</h2>{% if rows %}<span class="meta">{{ rows|length }} engagement{{ "s" if rows|length != 1 }}</span>{% endif %}</div>
+  <div class="md-scroll">
+  {% for r in rows %}
+  <a class="lr{{ ' on' if loop.first }}" href="/engagements/{{ r.e.id }}">
+    <span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 14l2 2 4-4"/></svg></span>
+    <span class="lt">
+      <span class="top"><b>{{ r.e.name }}</b><span class="mono">ENG-{{ r.e.id }}</span></span>
+      <span class="meta">{{ r.e.tenant.name }}{% if r.e.tenant.contact_name %} &middot; {{ r.e.tenant.contact_name }}{% endif %} &middot; {{ r.e.type|type_label }} &middot; {{ r.targets }} target{{ "s" if r.targets != 1 }}</span>
+      <span class="pills">
+        {% set any_open = namespace(v=false) %}
+        {% for s in sevs %}{% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}" title="{{ s|capitalize }}">{{ r.open.get(s) }} {{ s|capitalize }}</span>{% endif %}{% endfor %}
+        {% if not any_open.v %}<span class="pill pass">None open</span>{% endif %}
+        {% for env in r.envs %}<span class="env env-{{ env }}">{{ env|capitalize }}</span>{% else %}<span class="badge">No authorization</span>{% endfor %}
+        {% set fws = r.e.frameworks|list %}{% for k in fws[:2] %}<span class="chip" title="{{ k|fw_name }}">{{ k|fw_name }}</span>{% endfor %}{% if fws|length > 2 %}<span class="chip chip-more" title="{% for k in fws[2:] %}{{ k|fw_name }}{{ " · " if not loop.last }}{% endfor %}">+{{ fws|length - 2 }} more</span>{% endif %}
+      </span>
+    </span>
+  </a>
+  {% else %}
+  <div class="empty" style="padding:24px 18px">
+    <div style="font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px">No engagements yet</div>
+    {% if principal and can(principal.role, "engagement.create") %}<a class="btn" href="/engagements/new">Create your first engagement</a><br><br>{% endif %}
+    Or run <span class="mono">attestra demo</span> to load a sample.
+  </div>
+  {% endfor %}
+  </div>
+</aside>
+
+<div class="md-detail">
 <div class="page-head">
   <div>
     <p class="eyebrow">From findings to signed attestation</p>
@@ -26,122 +56,51 @@
 
 {% if rows %}
 <div class="stat-strip" aria-label="Engagement summary">
-  <div class="stat-card">
-    <div class="label">Engagements</div>
-    <div class="value">{{ rows|length }}</div>
-    <div class="note">Active in your view</div>
-  </div>
-  <div class="stat-card">
-    <div class="label"><span class="dot crit" aria-hidden="true"></span> Open critical</div>
-    <div class="value is-crit">{{ ns.crit }}</div>
-    <div class="note">Across all engagements</div>
-  </div>
-  <div class="stat-card">
-    <div class="label"><span class="dot high" aria-hidden="true"></span> Open high</div>
-    <div class="value is-high">{{ ns.high }}</div>
-    <div class="note">{{ ns.med }} medium also open</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Targets in scope</div>
-    <div class="value">{{ ns.targets }}</div>
-    <div class="note">{% if ns.no_auth %}{{ ns.no_auth }} without authorization{% else %}All have authorized envs{% endif %}</div>
-  </div>
+  <div class="stat-card"><div class="label">Engagements</div><div class="value">{{ rows|length }}</div><div class="note meta">Active in your view</div></div>
+  <div class="stat-card"><div class="label">Open critical</div><div class="value is-crit">{{ ns.crit }}</div><div class="note meta">Across all engagements</div></div>
+  <div class="stat-card"><div class="label">Open high</div><div class="value is-high">{{ ns.high }}</div><div class="note meta">{{ ns.med }} medium also open</div></div>
+  <div class="stat-card"><div class="label">Targets in scope</div><div class="value">{{ ns.targets }}</div><div class="note meta">{% if ns.no_auth %}{{ ns.no_auth }} without authorization{% else %}All have authorized envs{% endif %}</div></div>
 </div>
 
-<div class="dash-grid">
-  <div class="card">
-    <h2>Open findings by engagement</h2>
-    <div class="hbar">
-      {% for r in rows[:8] %}
-      {% set o = r.open.values()|sum %}
-      <div class="hbar-row">
-        <a class="nm" href="/engagements/{{ r.e.id }}" title="{{ r.e.name }}">{{ r.e.name }}</a>
-        <div class="sbar" style="width:{{ [((o / ns.maxopen) * 100)|round(1), 2]|max }}%" aria-label="{{ o }} open findings">
-          {% for s, c in [("critical","c"),("high","h"),("medium","m"),("low","l"),("info","i")] %}{% if r.open.get(s) %}<span class="{{ c }}" style="width:{{ (r.open.get(s) / o * 100)|round(2) }}%" title="{{ r.open.get(s) }} {{ s }}"></span>{% endif %}{% endfor %}
-        </div>
-        <span class="tot">{{ o }}</span>
-      </div>
+<div class="dash-cols">
+  <div class="col">
+    <div class="card">
+      <h2>Open by severity</h2>
+      {% set mx = [ns.crit, ns.high, ns.med, ns.low, ns.info]|max or 1 %}
+      {% for s, v, c in [("Critical", ns.crit, "var(--dot-crit)"), ("High", ns.high, "var(--dot-high)"), ("Medium", ns.med, "var(--dot-med)"), ("Low", ns.low, "var(--dot-low)"), ("Info", ns.info, "var(--dot-info)")] %}
+      <div class="mix"><span>{{ s }}</span><div class="bar" role="img" aria-label="{{ v }} {{ s }}"><span style="width:{{ (v / mx * 100)|round(1) }}%;background:{{ c }}"></span></div><b>{{ v }}</b></div>
       {% endfor %}
-      {% if rows|length > 8 %}<p class="meta" style="margin:0">Showing the 8 most recent engagements.</p>{% endif %}
+      <p class="meta" style="margin:12px 0 0">{{ ns.total }} findings recorded in total; {{ open_total }} still open.</p>
+    </div>
+    <div class="card">
+      <h2>Authorization</h2>
+      {% set authd = rows|length - ns.no_auth %}
+      <div class="lr" style="margin:0 -20px"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 14l2 2 4-4"/></svg></span><span class="lt"><b>{{ authd }} engagement{{ "s" if authd != 1 }}</b><span class="meta">with signed authorization for at least one environment</span></span><span class="pill pass">Passed</span></div>
+      <div class="lr" style="margin:0 -20px"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 14l2 2 4-4"/></svg></span><span class="lt"><b>{{ ns.no_auth }} engagement{{ "s" if ns.no_auth != 1 }}</b><span class="meta">without authorization; testing is blocked</span></span>{% if ns.no_auth %}<span class="pill warn">Warning</span>{% else %}<span class="pill pass">Passed</span>{% endif %}</div>
+      <div class="lr" style="margin:0 -20px -8px"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 14l2 2 4-4"/></svg></span><span class="lt"><b>{{ ns.targets }} target{{ "s" if ns.targets != 1 }} in scope</b><span class="meta">across {{ rows|length }} engagement{{ "s" if rows|length != 1 }}</span></span><span class="pill neu">Scope</span></div>
     </div>
   </div>
-  <div class="card">
-    <h2>Open by severity</h2>
-    {% set t = open_total if open_total else 1 %}
-    {% set c1 = ns.crit / t * 100 %}{% set c2 = c1 + ns.high / t * 100 %}{% set c3 = c2 + ns.med / t * 100 %}{% set c4 = c3 + ns.low / t * 100 %}
-    <div class="donut-wrap">
-      <div style="width:132px;height:132px;border-radius:50%;flex:none;display:grid;place-items:center;background:{% if open_total %}conic-gradient(var(--dot-crit) 0 {{ c1|round(2) }}%, var(--dot-high) 0 {{ c2|round(2) }}%, var(--dot-med) 0 {{ c3|round(2) }}%, var(--dot-low) 0 {{ c4|round(2) }}%, var(--dot-info) 0 100%){% else %}#F1ECE3{% endif %}" role="img" aria-label="{{ open_total }} open findings by severity">
-        <div style="width:92px;height:92px;border-radius:50%;background:#fff;display:grid;place-items:center;text-align:center">
-          <div><div style="font-family:var(--display);font-size:28px;line-height:1">{{ open_total }}</div><div class="meta" style="font-size:12px">open</div></div>
+  <div class="col">
+    <div class="card">
+      <h2>Open findings by engagement</h2>
+      <div class="hbar">
+        {% for r in rows[:10] %}
+        {% set o = r.open.values()|sum %}
+        <div class="hbar-row">
+          <a class="nm" href="/engagements/{{ r.e.id }}" title="{{ r.e.name }}">{{ r.e.name }}</a>
+          <div class="sbar" style="width:{{ [((o / ns.maxopen) * 100)|round(1), 2]|max }}%" aria-label="{{ o }} open findings">
+            {% for s, c in [("critical","c"),("high","h"),("medium","m"),("low","l"),("info","i")] %}{% if r.open.get(s) %}<span class="{{ c }}" style="width:{{ (r.open.get(s) / o * 100)|round(2) }}%" title="{{ r.open.get(s) }} {{ s }}"></span>{% endif %}{% endfor %}
+          </div>
+          <span class="tot">{{ o }}</span>
         </div>
-      </div>
-      <div class="legend">
-        {% for s, v, d in [("Critical", ns.crit, "crit"), ("High", ns.high, "high"), ("Medium", ns.med, "med"), ("Low", ns.low, "low"), ("Info", ns.info, "info")] %}
-        <div><span class="dot {{ d }}" aria-hidden="true"></span>{{ s }}<b>{{ v }}</b></div>
         {% endfor %}
+        {% if rows|length > 10 %}<p class="meta" style="margin:0">Showing the 10 most recent engagements.</p>{% endif %}
       </div>
+      {% if principal and can(principal.role, "engagement.create") %}<a class="btn block" href="/engagements/new" style="margin-top:auto">+ New engagement</a>{% endif %}
     </div>
-    <p class="meta" style="margin:18px 0 0">{{ ns.total }} findings recorded in total; {{ open_total }} still open.</p>
   </div>
 </div>
 {% endif %}
-
-<div class="card">
-  <div class="card-head">
-    <h2 style="margin:0;padding:0;border:0">All engagements</h2>
-    {% if rows %}<span class="meta">{{ rows|length }} engagement{{ "s" if rows|length != 1 }}</span>{% endif %}
-  </div>
-  <div class="table-wrap">
-  <table>
-    <thead>
-    <tr><th>Engagement</th><th>Client</th><th>Type</th><th>Targets</th><th>Environments</th><th>Open findings</th><th>Frameworks</th></tr>
-    </thead>
-    <tbody>
-    {% for r in rows %}
-    <tr>
-      <td>
-        <div class="eng-name">
-          <a class="row-title" href="/engagements/{{ r.e.id }}">{{ r.e.name }}</a>
-          <span class="mono">ENG-{{ r.e.id }}</span>
-        </div>
-      </td>
-      <td>
-        <span style="display:block;font-weight:500">{{ r.e.tenant.name }}</span>
-        {% if r.e.tenant.contact_name %}<span class="meta">{{ r.e.tenant.contact_name }}</span>{% endif %}
-      </td>
-      <td>{{ r.e.type|type_label }}</td>
-      <td style="font-weight:600">{{ r.targets }}</td>
-      <td>
-        <div class="env-list">
-          {% for env in r.envs %}<span class="env env-{{ env }}">{{ env|capitalize }}</span>
-          {% else %}<span class="badge">No authorization</span>{% endfor %}
-        </div>
-      </td>
-      <td>
-        <div class="sevcounts">
-          {% set any_open = namespace(v=false) %}
-          {% for s in sevs %}
-            {% if r.open.get(s) %}{% set any_open.v = true %}<span class="pill {{ s }}" title="{{ s|capitalize }}">{{ r.open.get(s) }} {{ s|capitalize }}</span>{% endif %}
-          {% endfor %}
-          {% if not any_open.v %}<span class="meta">None</span>{% endif %}
-        </div>
-      </td>
-      <td>
-        <div class="env-list">
-          {% for k in r.e.frameworks %}<span class="chip">{{ k|fw_name }}</span>
-          {% else %}<span class="meta">None</span>{% endfor %}
-        </div>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="7"><div class="empty">
-      <div style="font-family:var(--display);font-size:24px;color:var(--ink);margin-bottom:8px">No engagements yet</div>
-      {% if principal and can(principal.role, "engagement.create") %}<a class="btn" href="/engagements/new">Create your first engagement</a><br><br>{% endif %}
-      Or run <span class="mono">attestra demo</span> to load a sample.
-    </div></td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  </div>
+</div>
 </div>
 {% endblock %}

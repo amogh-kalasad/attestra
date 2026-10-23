@@ -684,27 +684,8 @@
     #findings td:nth-child(2) .pill { font-size: 11px; padding: 2px 7px; }
   }
 </style>
-<link rel="stylesheet" href="/static/attestra.css?v=4">
-<script src="/static/attestra.js?v=4" defer></script>
-<style>
-  /* Shared confirm dialog (P1-13) */
-  .confirm-backdrop {
-    position: fixed; inset: 0; z-index: 200;
-    background: rgba(11, 18, 32, .45);
-    display: flex; align-items: center; justify-content: center;
-    padding: 24px;
-  }
-  .confirm-backdrop[hidden] { display: none !important; }
-  .confirm-dialog {
-    background: var(--card); color: var(--ink);
-    border-radius: var(--radius); box-shadow: 0 16px 48px rgba(15,40,60,.18);
-    max-width: 440px; width: 100%; padding: 24px;
-    border: 1px solid var(--rule);
-  }
-  .confirm-dialog h2 { margin: 0 0 8px; font-size: 18px; font-weight: 650; }
-  .confirm-dialog p { margin: 0 0 20px; color: var(--ink-2); line-height: 1.5; }
-  .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-</style>
+<link rel="stylesheet" href="/static/attestra.css?v=8">
+<script src="/static/attestra.js?v=5" defer></script>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">
 {% set role = principal.role if principal else None %}
@@ -720,60 +701,57 @@
 {% if use_shell %}
 {% set more_current = path.startswith('/library') or path.startswith('/tuning') or path.startswith('/users') or path.startswith('/settings') %}
 <div class="app">
+  <header class="rail" aria-label="Attestra">
+    <a class="rail-brand" href="{% if staff %}/{% else %}/portal{% endif %}" title="Attestra v{{ version }}"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="sr">attestra v{{ version }}</span></a>
+    <nav class="rail-nav" aria-label="Main">
+      {% if staff %}
+      <a href="/" title="Engagements" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg><span class="rail-label">Engagements</span></a>
+      <a href="/sites" title="Sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg><span class="rail-label">Sites</span></a>
+      <a href="/compliance/pci-calendar" title="PCI calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span class="rail-label">PCI calendar</span></a>
+      {% if can(role, "share.manage") %}
+      <a href="/shares" title="Share links" {{ 'aria-current=page' if path == '/shares' or path.startswith('/shares/') }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span class="rail-label">Share links</span></a>
+      {% endif %}
+      <details class="topnav-more rail-menu{{ ' is-current' if more_current }}">
+        <summary title="More"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg><span class="rail-label">More</span></summary>
+        <div class="menu-pop">
+          {% if can(role, "finding.write") %}
+          <div class="menu-label">Library</div>
+          <a href="/library" {{ 'aria-current=page' if path == '/library' or (path.startswith('/library/') and not path.startswith('/library/templates')) }}>Findings library</a>
+          <a href="/library/templates" {{ 'aria-current=page' if path.startswith('/library/templates') }}>Report templates</a>
+          {% endif %}
+          <div class="menu-label">Ops</div>
+          <a href="/tuning/false-positives" {{ 'aria-current=page' if path == '/tuning/false-positives' }}>False-positive rates</a>
+          {% if role in ("admin", "lead") %}
+          <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>Users</a>
+          <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>Email alerts</a>
+          {% endif %}
+          <a href="/docs">API docs</a>
+        </div>
+      </details>
+      {% elif role %}
+      <a href="/portal" title="{{ "Auditor view" if role == "auditor" else "Client portal" }}" {{ 'aria-current=page' if path == '/portal' or path.startswith('/portal/') }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rail-label">{{ "Auditor view" if role == "auditor" else "Client portal" }}</span></a>
+      {% endif %}
+    </nav>
+    <div class="rail-foot">
+      {% if staff and can(role, "engagement.create") and path != "/engagements/new" %}
+      <a class="rail-new" href="/engagements/new" title="New engagement"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="rail-label">+ New engagement</span></a>
+      {% endif %}
+      <details class="topnav-more rail-menu user-menu">
+        <summary aria-label="Account menu" title="{{ actor }}"><span class="avatar" aria-hidden="true">{{ initials }}</span></summary>
+        <div class="menu-pop up">
+          <div class="menu-user"><strong>{{ actor }}</strong><span>{% if role %}{{ role_labels.get(role, role) }}{% endif %}</span></div>
+          <form method="post" action="/logout">
+            <input type="hidden" name="next" value="/login">
+            <button type="submit">Sign out</button>
+          </form>
+        </div>
+      </details>
+    </div>
+  </header>
   <div class="workspace">
-    <header class="topnav">
-      <a class="brand" href="{% if staff %}/{% else %}/portal{% endif %}">
-        <span class="mark" aria-hidden="true">a</span>attestra<span class="ver">v{{ version }}</span>
-      </a>
-      <nav class="topnav-links" aria-label="Main">
-        {% if staff %}
-        <a href="/" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}>Engagements</a>
-        <a href="/dashboard" {{ 'aria-current=page' if path == '/dashboard' or path.startswith('/dashboard') }}>Dashboard</a>
-        <a href="/sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}>Sites</a>
-        <a href="/compliance/pci-calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}>PCI calendar</a>
-        {% if can(role, "share.manage") %}
-        <a href="/shares" {{ 'aria-current=page' if path == '/shares' or path.startswith('/shares/') }}>Share links</a>
-        {% endif %}
-        <details class="topnav-more{{ ' is-current' if more_current }}">
-          <summary>More</summary>
-          <div class="menu-pop">
-            {% if can(role, "finding.write") %}
-            <div class="menu-label">Library</div>
-            <a href="/library" {{ 'aria-current=page' if path == '/library' or (path.startswith('/library/') and not path.startswith('/library/templates')) }}>Findings library</a>
-            <a href="/library/templates" {{ 'aria-current=page' if path.startswith('/library/templates') }}>Report templates</a>
-            {% endif %}
-            <div class="menu-label">Ops</div>
-            <a href="/tuning/false-positives" {{ 'aria-current=page' if path == '/tuning/false-positives' }}>False-positive rates</a>
-            {% if role in ("admin", "lead") %}
-            <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>Users</a>
-            <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>Email alerts</a>
-            {% endif %}
-            <a href="/docs">API docs</a>
-          </div>
-        </details>
-        {% elif role %}
-        <a href="/portal" {{ 'aria-current=page' if path == '/portal' or path.startswith('/portal/') }}>{{ "Auditor view" if role == "auditor" else "Client portal" }}</a>
-        {% endif %}
-      </nav>
-      <div class="topnav-right">
-        {% if staff and can(role, "engagement.create") and path != "/engagements/new" %}
-        <a class="btn" href="/engagements/new">+ New engagement</a>
-        {% endif %}
-        <details class="topnav-more user-menu">
-          <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">{{ initials }}</span></summary>
-          <div class="menu-pop right">
-            <div class="menu-user"><strong>{{ actor }}</strong><span>{% if role %}{{ role_labels.get(role, role) }}{% endif %}</span></div>
-            <form method="post" action="/logout">
-              <input type="hidden" name="next" value="/login">
-              <button type="submit">Sign out</button>
-            </form>
-          </div>
-        </details>
-      </div>
-    </header>
 {% else %}
 <header class="auth-top">
-  <a class="brand" href="/"><span class="mark" aria-hidden="true">a</span> attestra</a>
+  <a class="brand" href="/"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span> attestra</a>
   {% if path != "/login" %}<a href="/login" style="margin-left:auto;font-weight:600;color:var(--accent)">Sign in</a>{% endif %}
 </header>
 {% endif %}
@@ -788,15 +766,5 @@
   </div>
 </div>
 {% endif %}
-<div id="confirm-backdrop" class="confirm-backdrop" hidden>
-  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
-    <h2 id="confirm-title">Please confirm</h2>
-    <p id="confirm-message"></p>
-    <div class="confirm-actions">
-      <button type="button" class="secondary" id="confirm-cancel">Cancel</button>
-      <button type="button" class="danger" id="confirm-ok">Confirm</button>
-    </div>
-  </div>
-</div>
 </body>
 </html>

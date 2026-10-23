@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, audit, config, db, services
+from attestra import __version__, ai_narratives, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -25,7 +25,6 @@ from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
     DEFAULT_TESTS,
-    DISPLAY_LABELS,
     ENGAGEMENT_TYPE_LABELS,
     ENVIRONMENTS,
     OPEN_STATUSES,
@@ -124,16 +123,11 @@ def format_dt(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
 
 
 def label(value) -> str:
-    """snake_case value -> curated or sentence-case display label."""
+    """snake_case value -> 'Sentence case' for display."""
     if value is None:
         return ""
-    key = str(value).strip()
-    if key in DISPLAY_LABELS:
-        return DISPLAY_LABELS[key]
-    if key in TEST_TYPES:
-        return TEST_TYPES[key]["label"]
-    text = key.replace("_", " ").strip()
-    return text[:1].upper() + text[1:] if text else ""
+    text = str(value).replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
 
 
 def fw_name(key) -> str:
@@ -326,22 +320,6 @@ def sites_dashboard(request: Request):
         return _render(request, "sites.html", {"rows": rows, "sort": sort, "q": q})
 
 
-@router.get("/dashboard", response_class=HTMLResponse)
-def metrics_dashboard(request: Request):
-    """Open findings by severity, SLA ageing, trend, and per-site grades."""
-    # @lat: [[interfaces#Web dashboard#Metrics dashboard]]
-    from attestra import dashboards
-
-    principal, redirect = _require_login(request)
-    if redirect:
-        return redirect
-    if principal.role in READ_ONLY_ROLES:
-        return RedirectResponse("/portal", status_code=303)
-    with db.session() as s:
-        summary = dashboards.summary_for_principal(s, principal)
-        return _render(request, "dashboard.html", {"summary": summary})
-
-
 @router.get("/tuning/false-positives", response_class=HTMLResponse)
 def false_positive_rates(request: Request):
     """Phase 7.4: share of each tool's findings marked false_positive, within the user's tenants."""
@@ -487,32 +465,6 @@ def _ct_apexes_for(s, eid: int) -> list[str]:
         return []
 
 
-def _finding_assignees_map(s, eid: int) -> dict[int, str]:
-    from attestra.assignments import assignees_for_engagement
-
-    return assignees_for_engagement(s, eid)
-
-
-def _tenant_usernames(s, tenant_id: int) -> list[str]:
-    """Active usernames that can be assigned findings in this tenant (plus platform admins)."""
-    from attestra.models import TenantMembership, User
-
-    members = {
-        m.user_id
-        for m in s.scalars(select(TenantMembership).where(TenantMembership.tenant_id == tenant_id))
-    }
-    users = list(
-        s.scalars(
-            select(User).where(User.active.is_(True)).order_by(User.username)
-        )
-    )
-    names: list[str] = []
-    for u in users:
-        if u.role == "admin" or u.tenant_id == tenant_id or u.id in members:
-            names.append(u.username)
-    return names
-
-
 def _engagement_ctx(
     request: Request,
     s,
@@ -564,7 +516,6 @@ def _engagement_ctx(
         "has_pci": _has_pci(frameworks),
         "has_iso": _has_iso(frameworks),
         "ai_enabled": ai_narratives.is_enabled(tenant_id=e.tenant_id),
-        "auth_web_enabled": config.AUTH_WEB_ENABLED,
         "e": e,
         "type_label": engagement_type_label(e.type),
         "findings": findings,
@@ -592,18 +543,6 @@ def _engagement_ctx(
         "ct_apexes": _ct_apexes_for(s, eid),
         "ct_suggestions": ct_suggestions or [],
         "ct_apex": ct_apex,
-        "auth_open": request.query_params.get("auth") == "1" or (
-            bool(request.query_params.get("error")) and "environment" in (request.query_params.get("error") or "").lower()
-        ),
-        "findings_filter": {
-            "severity": request.query_params.get("severity", ""),
-            "status": request.query_params.get("status", ""),
-            "tool": request.query_params.get("tool", ""),
-            "asset": request.query_params.get("asset", ""),
-            "assigned": request.query_params.get("assigned", ""),
-        },
-        "finding_assignees": _finding_assignees_map(s, eid),
-        "me_username": (principal.username or "").strip().lower() if principal else "",
     }
 
 
@@ -650,112 +589,6 @@ def export_findings_ui(request: Request, eid: int, asset_id: int | None = None):
     )
 
 
-_EXPORT_TYPES = {
-    "pdf": ("application/pdf", "pdf_path"),
-    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx_path"),
-}
-
-
-@router.get("/engagements/{eid}/reports/{rid}/export/{fmt}")
-def export_report_ui(request: Request, eid: int, rid: int, fmt: str):
-    """Page button: build (or rebuild) the PDF / Word copy of a sealed report and download it."""
-    from attestra.api import _report_file
-    from attestra.reports.export import export_report_formats
-
-    if fmt not in _EXPORT_TYPES:
-        raise HTTPException(404, "unknown export format")
-    principal, redirect = _require_login(request, f"/engagements/{eid}")
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, "report.read"):
-        raise HTTPException(403, "permission denied: report.read")
-    media, key = _EXPORT_TYPES[fmt]
-    try:
-        with db.session() as s:
-            services.get_engagement(s, eid, principal)
-            r, html_path = _report_file(s, rid, principal)
-            if r.engagement_id != eid:
-                raise LookupError(f"report #{rid} is not in this engagement")
-            out = export_report_formats(r, html_path)
-            audit.record(s, principal.actor, "report.exported", "report", r.id, format=fmt)
-            name = f"eng{eid}-{r.kind}{'-' + r.framework if r.framework else ''}-v{r.version}.{fmt}"
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    except services.ServiceError as e:
-        raise HTTPException(409, str(e)) from e
-    return FileResponse(out[key], media_type=media, filename=name, headers={"Cache-Control": "no-store"})
-
-
-@router.get("/engagements/{eid}/export/{fmt}")
-def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = ""):
-    """Page buttons: SARIF, OSCAL, Excel workbook, or full engagement JSON."""
-    import json
-
-    from fastapi.responses import Response
-
-    from attestra.reports.engagement_export import export_engagement_json
-    from attestra.reports.oscal import assessment_results, poam
-    from attestra.reports.sarif import findings_to_sarif
-    from attestra.reports.xlsx_export import export_engagement_xlsx
-
-    perms = {
-        "sarif": "finding.read",
-        "oscal": "report.read",
-        "oscal-poam": "report.read",
-        "xlsx": "finding.read",
-        "json": "finding.read",
-    }
-    if fmt not in perms:
-        raise HTTPException(404, "unknown export format")
-    principal, redirect = _require_login(request, f"/engagements/{eid}")
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, perms[fmt]):
-        raise HTTPException(403, f"permission denied: {perms[fmt]}")
-    try:
-        with db.session() as s:
-            eng = services.get_engagement(s, eid, principal)
-            if fmt == "xlsx":
-                # export_engagement_xlsx audits engagement.exported itself
-                data = export_engagement_xlsx(s, eid, actor=principal.actor)
-                return Response(
-                    data,
-                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={
-                        "Content-Disposition": f'attachment; filename="eng{eid}-export.xlsx"',
-                        "Cache-Control": "no-store",
-                    },
-                )
-            if fmt == "json":
-                # export_engagement_json audits engagement.exported itself
-                doc = export_engagement_json(s, eid, actor=principal.actor)
-                name = f"eng{eid}-export.json"
-            elif fmt == "sarif":
-                doc, name = findings_to_sarif(s, eid), f"eng{eid}-findings.sarif"
-                audit.record(
-                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
-                )
-            elif fmt == "oscal":
-                if framework not in (eng.frameworks or []):
-                    raise LookupError("choose one of this engagement's frameworks")
-                doc, name = assessment_results(s, eid, framework), f"eng{eid}-{framework}-oscal-ar.json"
-                audit.record(
-                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
-                )
-            else:
-                doc, name = poam(s, eid), f"eng{eid}-oscal-poam.json"
-                audit.record(
-                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
-                )
-    except LookupError as e:
-        raise HTTPException(404, str(e)) from e
-    return PlainTextResponse(
-        json.dumps(doc, indent=2, default=str),
-        media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{name}"'},
-    )
-
-
 @router.post("/engagements/{eid}/scope/suggestions")
 def fetch_ct_suggestions_ui(request: Request, eid: int, apex: str = Form(...)):
     """Find subdomain suggestions from CT logs (one request). Never changes scope."""
@@ -795,11 +628,8 @@ async def add_authorization(
     rules_of_engagement: str = Form(""),
 ):
     if not [env for env in environments if env.strip()]:
-        return _back(
-            f"/engagements/{eid}?auth=1",
-            error="Tick at least one environment the client authorizes for testing.",
-            anchor="#scope",
-        )
+        return _back(f"/engagements/{eid}", error="Tick at least one environment the client authorizes for testing.",
+                     anchor="#scope")
     data = await document.read()
     return _do(
         request, f"/engagements/{eid}", "#scope", "Signed authorization recorded.",
@@ -825,12 +655,8 @@ def target_page(request: Request, eid: int, aid: int):
         history = services.asset_scan_history(s, aid, principal)
         site_grade = services.asset_site_grade(s, aid, principal)
         from attestra.cert_expiry import asset_cert_status
-        from attestra.runner import ownership
-        from attestra.runner.policy import OWNERSHIP_KINDS
 
-        services.ensure_ownership_tokens(e)
         cert_status = asset_cert_status(s, aid)
-        needs_ownership = asset.kind in OWNERSHIP_KINDS
         return _render(
             request,
             "asset.html",
@@ -840,9 +666,6 @@ def target_page(request: Request, eid: int, aid: int):
                 "history": history,
                 "site_grade": site_grade,
                 "cert_status": cert_status,
-                "ownership_kinds": OWNERSHIP_KINDS,
-                "ownership_info": ownership.instructions(asset) if needs_ownership else None,
-                "ownership_method": services.ownership_methods(s, [asset.id]).get(asset.id, ""),
             },
         )
 
@@ -904,58 +727,6 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
                      anchor="#targets")
     msg = "Not verified yet. " + result.message
     return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
-
-
-@router.post("/engagements/{eid}/targets/{aid}/ownership-token")
-def set_target_ownership_token(request: Request, eid: int, aid: int, token: str = Form(...)):
-    """Lead/admin: set or reuse an ownership token on the target page."""
-    url = f"/engagements/{eid}/targets/{aid}"
-    principal, redirect = _require_login(request, url)
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, "asset.verify_ownership"):
-        return _back(url, error="Only a lead or admin can set the ownership token.", anchor="#ownership")
-    try:
-        with db.session() as s:
-            services.get_engagement(s, eid, principal)
-            a = services.set_ownership_token(s, eid, aid, token, actor=principal.actor)
-            ident = a.identifier
-    except (services.ServiceError, LookupError) as e:
-        return _back(url, error=str(e), anchor="#ownership")
-    return _back(
-        url,
-        msg=f"Ownership token saved for {ident}. Publish the new value, then click Verify now.",
-        anchor="#ownership",
-    )
-
-
-@router.post("/engagements/{eid}/targets/{aid}/verify-ownership-now")
-def verify_target_ownership_now(request: Request, eid: int, aid: int):
-    """Verify now from the target page: same check as engagement Check now, returns to the target."""
-    url = f"/engagements/{eid}/targets/{aid}"
-    principal, redirect = _require_login(request, url)
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, "asset.verify_ownership"):
-        return _back(url, error="Only a lead or admin can check target ownership.", anchor="#ownership")
-    try:
-        with db.session() as s:
-            services.get_engagement(s, eid, principal)
-            result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
-            from attestra.models import Asset
-
-            ident = s.get(Asset, aid).identifier
-    except (services.ServiceError, LookupError) as e:
-        return _back(url, error=str(e), anchor="#ownership")
-    except Exception:  # noqa: BLE001 - the check must never end in a 500 page
-        return _back(url, error="The ownership check could not run just now. Try again in a minute.",
-                     anchor="#ownership")
-    if result.ok:
-        how = {"dns": "the DNS TXT record", "file": "the verification file",
-               "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
-        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
-                     anchor="#ownership")
-    return _back(url, error="Not verified yet. " + result.message, anchor="#ownership")
 
 
 @router.post("/engagements/{eid}/targets/{aid}/confirm-ownership")
@@ -1346,112 +1117,6 @@ def ui_iso_sample(
     )
 
 
-# ---------------------------------------------------------------- authenticated website testing (feature-flagged)
-
-
-@router.get("/engagements/{eid}/auth-coverage", response_class=HTMLResponse)
-def ui_auth_coverage(request: Request, eid: int):
-    """Route inventory, WSTG/ASVS checklist, and auth profiles for security testing coverage."""
-    from attestra.auth_web import checklists, coverage
-    from attestra.auth_web import profiles as auth_profiles
-    from attestra.models import AuthRouteInventory
-
-    principal, redirect = _staff_page(request)
-    if redirect:
-        return redirect
-    if not config.AUTH_WEB_ENABLED:
-        raise HTTPException(404, "Authenticated website testing is not enabled on this server.")
-    if not has_permission(principal.role, "engagement.read"):
-        raise HTTPException(403, "permission denied: engagement.read")
-    with db.session() as s:
-        try:
-            eng = services.get_engagement(s, eid, principal)
-        except LookupError:
-            raise HTTPException(404, "engagement not found")
-        checklists.ensure_checklist(s, eng.id, eng.tenant_id)
-        checklist = checklists.list_checklist(s, eng.id)
-        summary = coverage.coverage_summary(s, eng.id)
-        profile_rows = auth_profiles.list_profiles(s, eng.id, principal)
-        routes = list(
-            s.scalars(
-                select(AuthRouteInventory)
-                .where(
-                    AuthRouteInventory.engagement_id == eng.id,
-                    AuthRouteInventory.tenant_id == eng.tenant_id,
-                )
-                .order_by(AuthRouteInventory.id)
-            ).all()
-        )
-        return _render(
-            request,
-            "engagement_auth_coverage.html",
-            {
-                "e": eng,
-                "eng": eng,
-                "coverage": summary,
-                "checklist": checklist,
-                "routes": routes,
-                "profiles": profile_rows,
-                "auth_profile_action": f"/engagements/{eid}/auth-profiles",
-            },
-        )
-
-
-@router.post("/engagements/{eid}/auth-profiles")
-def ui_create_auth_profile(
-    request: Request,
-    eid: int,
-    label: str = Form(...),
-    role_name: str = Form(""),
-    purpose: str = Form(""),
-    method: str = Form("form"),
-    login_url: str = Form(""),
-    username_selector: str = Form(""),
-    password_selector: str = Form(""),
-    submit_selector: str = Form(""),
-    success_url_contains: str = Form(""),
-    secret: str = Form(""),
-):
-    """Create an auth credential profile; secret posts once and is never echoed in redirects."""
-    from attestra.auth_web import profiles as auth_profiles
-
-    url = f"/engagements/{eid}/auth-coverage"
-    principal, redirect = _require_login(request, url)
-    if redirect:
-        return redirect
-    if not config.AUTH_WEB_ENABLED:
-        raise HTTPException(404, "Authenticated website testing is not enabled on this server.")
-    if not has_permission(principal.role, "engagement.write"):
-        return _back(url, error="Your role can't manage auth profiles.", anchor="#auth-profiles")
-    secret_value = secret if secret else None
-    if (method or "").strip().lower() == "none":
-        secret_value = None
-    try:
-        with db.session() as s:
-            auth_profiles.create_profile(
-                s,
-                eid,
-                label=label,
-                role_name=role_name,
-                purpose=purpose,
-                method=method,
-                login_url=login_url,
-                username_selector=username_selector,
-                password_selector=password_selector,
-                submit_selector=submit_selector,
-                success_url_contains=success_url_contains,
-                secret_value=secret_value,
-                actor=principal.actor,
-                principal=principal,
-            )
-    except LookupError:
-        raise HTTPException(404, "engagement not found")
-    except services.ServiceError as e:
-        # Never put secret material in the flash — ServiceError messages are safe metadata only.
-        return _back(url, error=str(e), anchor="#auth-profiles")
-    return _back(url, msg="Auth profile saved. Secret stored as a reference only.", anchor="#profiles")
-
-
 # ---------------------------------------------------------------- UI audit fixes: edit, finding status, reports
 
 
@@ -1503,7 +1168,7 @@ def finding_page(request: Request, eid: int, fid: int):
             raise HTTPException(404, "engagement not found") from None
         from attestra.comments import can_add_comment, can_delete_comment, list_comments
         from attestra.library import service as lib
-        from attestra.models import Finding, ProofReplay
+        from attestra.models import Finding
 
         f = s.get(Finding, fid)
         if not f or f.engagement_id != eid:
@@ -1511,71 +1176,21 @@ def finding_page(request: Request, eid: int, fid: int):
         # Touch relationships while the session is open.
         _ = list(f.evidence)
         _ = f.asset
-        replays = list(
-            s.scalars(
-                select(ProofReplay)
-                .where(ProofReplay.finding_id == fid)
-                .order_by(ProofReplay.id.desc())
-            )
-        )
-        # Latest replay per evidence id (first hit wins — ordered newest first).
-        latest_replay: dict[int, ProofReplay] = {}
-        for r in replays:
-            latest_replay.setdefault(r.evidence_id, r)
         comments = list_comments(s, fid, principal)
         for c in comments:
             c["can_delete"] = can_delete_comment(
                 principal.role, author_user_id=c["author_user_id"], actor_user_id=principal.user_id
             )
-        from attestra.assignments import current_assignee
-
         return _render(request, "finding.html", {
             "e": e,
             "f": f,
+            "siblings": services.list_findings(s, eid),
             "fix": lib.guidance_for_finding(s, f),
             "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
             "comments": comments,
             "can_add_comment": can_add_comment(principal.role),
             "show_accept_risk": request.query_params.get("accept_risk") == "1",
-            "latest_replay": latest_replay,
-            "assignee": current_assignee(s, fid),
-            "assignable_users": _tenant_usernames(s, e.tenant_id),
         })
-
-
-@router.get("/engagements/{eid}/evidence/{evid}/download")
-def ui_download_evidence(request: Request, eid: int, evid: int):
-    """Session-auth download of one evidence file (same path checks as the API)."""
-    principal, redirect = _require_login(request)
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, "finding.read"):
-        raise HTTPException(403, "not allowed")
-    from attestra import config as cfg
-    from attestra.models import Evidence, Finding
-
-    with db.session() as s:
-        try:
-            eng = services.get_engagement(s, eid, principal)
-        except LookupError:
-            raise HTTPException(404, "evidence not found") from None
-        ev = s.get(Evidence, evid)
-        if not ev:
-            raise HTTPException(404, "evidence not found")
-        f = s.get(Finding, ev.finding_id)
-        if not f or f.engagement_id != eid:
-            raise HTTPException(404, "evidence not found")
-        path = Path(ev.path).resolve()
-        allowed_roots = [
-            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
-            cfg.DATA_DIR.resolve(),
-        ]
-        if not any(str(path).startswith(str(root)) for root in allowed_roots):
-            raise HTTPException(404, "evidence not found")
-        if not path.is_file():
-            raise HTTPException(404, "evidence not found")
-        audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
-        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
 
 
 @router.post("/engagements/{eid}/findings/{fid}/comments")
@@ -1622,40 +1237,6 @@ def ui_delete_finding_comment(request: Request, eid: int, fid: int, cid: int):
     except (services.ServiceError, LookupError) as e:
         return _back(detail, error=str(e), anchor="#comments")
     return _back(detail, msg="Comment deleted.", anchor="#comments")
-
-
-@router.post("/engagements/{eid}/findings/{fid}/assign")
-def ui_assign_finding(request: Request, eid: int, fid: int, assignee: str = Form("")):
-    """Assign or clear a finding assignee from the finding detail page."""
-    from attestra.assignments import assign_finding, unassign_finding
-    from attestra.models import Finding
-
-    detail = f"/engagements/{eid}/findings/{fid}"
-    principal, redirect = _require_login(request, detail)
-    if redirect:
-        return redirect
-    if not has_permission(principal.role, "finding.write"):
-        return _back(detail, error="Your role can't assign findings.")
-    try:
-        with db.session() as s:
-            services.get_engagement(s, eid, principal)
-            f = s.get(Finding, fid)
-            if not f or f.engagement_id != eid:
-                raise LookupError("finding not found")
-            name = (assignee or "").strip()
-            if not name:
-                unassign_finding(s, fid, actor=principal.actor)
-                msg = "Assignee cleared."
-            else:
-                assign_finding(
-                    s, fid, assignee=name, actor=principal.actor, user_id=principal.user_id
-                )
-                msg = f"Assigned to {name}."
-    except LookupError as e:
-        return _back(detail, error=str(e))
-    except services.ServiceError as e:
-        return _back(detail, error=str(e))
-    return _back(detail, msg=msg)
 
 
 @router.post("/engagements/{eid}/findings/{fid}/status")
