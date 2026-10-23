@@ -256,6 +256,24 @@ def cmd_import(args) -> None:
         _print({"import_run": run.id, "new": run.new_findings, "merged": run.updated_findings, "sha256": run.sha256})
 
 
+def cmd_scan(args) -> None:
+    """Queue a security testing scan through the same gate as the UI."""
+    actor, _ = _resolve_actor(args)
+    with db.session() as s:
+        run = services.request_scan(
+            s,
+            args.engagement,
+            asset_id=args.asset,
+            tool=args.tool,
+            profile=args.profile,
+            actor=actor,
+        )
+        out = {"scan_run": run.id, "status": run.status, "requested_by": run.requested_by}
+        if run.refuse_reason:
+            out["refuse_reason"] = run.refuse_reason
+        _print(out)
+
+
 def cmd_enrich(args) -> None:
     actor, _ = _resolve_actor(args)
     meta = {}
@@ -662,6 +680,15 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("file")
     sp.set_defaults(fn=cmd_import)
 
+    from attestra.runner.scanners.registry import list_adapters
+
+    sp = sub.add_parser("scan", help="queue a security testing scan (same path as the UI)")
+    sp.add_argument("engagement", type=int)
+    sp.add_argument("asset", type=int, help="target asset id")
+    sp.add_argument("--tool", required=True, choices=list_adapters())
+    sp.add_argument("--profile", default="baseline", choices=["baseline", "active", "intrusive"])
+    sp.set_defaults(fn=cmd_scan)
+
     sp = sub.add_parser("enrich", help="apply CISA KEV JSON and/or FIRST EPSS CSV feeds")
     sp.add_argument("--kev")
     sp.add_argument("--epss")
@@ -716,7 +743,16 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("engagement", type=int)
     sp.add_argument(
         "kind",
-        choices=["technical", "executive", "compliance", "iso_soa", "ageing", "closure_letter", "attestation_letter"],
+        choices=[
+            "technical",
+            "executive",
+            "compliance",
+            "iso_soa",
+            "ageing",
+            "closure_letter",
+            "attestation_letter",
+            "owasp_top10",
+        ],
     )
     sp.add_argument("--framework")
     sp.set_defaults(fn=cmd_report)

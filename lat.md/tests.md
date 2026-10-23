@@ -1069,6 +1069,7 @@ Test modules for features added on top of the core flow. Each line says what the
 - `tests/test_control_libraries.py`: PCI, ISO and SOC 2 crosswalks cover every objective, and OSCAL and SCF control libraries import correctly.
 - `tests/test_iso42001_pack.py`: the ISO/IEC 42001 pack loads with all 38 Annex A items, clauses 4 to 10, and the LLM Top 10 map.
 - `tests/test_phase8_framework_packs.py`: extra framework packs load from YAML, bad packs are refused, and reports render them.
+- `tests/test_phase8_library_certin.py`: CERT-In 2022 pack titles and compliance, findings-library JSON/CSV template import, and idempotent seed.
 - `tests/test_findings_library.py`: the findings library (search, add, apply without overwrite) and tenant report templates with a safe sandbox.
 - `tests/test_fix_snippets.py`: header/TLS/cookie/CSP library entries carry importance, effort, fix steps and four server snippets; finding page, report and API show them; empty fields still render.
 - `tests/test_fingerprint_variant.py`: an empty `variant` keeps the fingerprint exactly the same as before the field existed.
@@ -1299,3 +1300,429 @@ When only a subdomain is in scope, the suggestions status endpoint reports disab
 ### Live HarmonyPM CSV row count
 
 On a temp copy of the live ui_data database, HarmonyPM engagement findings export to CSV with the expected row count. No real CT lookup.
+
+## Phase 6 auth web
+
+Authenticated website testing: Fernet credential store, profiles, crawl scope, evidence redaction, checklists, and coverage ([[tests/test_phase6_credentials.py]], [[tests/test_phase6_auth_web_crawl.py]], [[tests/test_phase6_checklists_coverage.py]], [[tests/test_phase6_auth_profiles_api.py]], [[tests/test_phase6_auth_mock_smoke.py]], [[tests/test_phase6_screenshot_redact.py]]).
+
+### Credential put/get round-trip
+
+[[attestra/credentials/store.py#put_secret]] returns an opaque `cred:` ref; [[attestra/credentials/store.py#get_secret]] round-trips the value without putting plaintext in the ref.
+
+### Missing key fails closed
+
+Without `ATTESTRA_CREDENTIAL_FERNET_KEY` and without ephemeral allow, [[attestra/credentials/store.py#resolve_fernet_key]] and put raise SecretsError.
+
+### Ephemeral key when allowed
+
+With `ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL=1`, put/get works using a process-local Fernet key for tests and local dev.
+
+### Delete removes secret
+
+[[attestra/credentials/store.py#delete_secret]] removes ciphertext; subsequent get raises; delete is idempotent.
+
+### Rotate keeps ref
+
+[[attestra/credentials/store.py#rotate_secret]] overwrites ciphertext at the same `secret_ref`.
+
+### Secrets never logged or repr
+
+Store `repr` and debug logs never contain the plaintext secret value.
+
+### Screenshot DOM prep JS
+
+[[attestra/proof/screenshot_redact.py#prepare_page_for_capture]] returns a JS snippet that masks password inputs and sensitive selectors with bullets and `data-attestra-redact`.
+
+### Screenshot PNG ASCII scan
+
+[[attestra/proof/screenshot_redact.py#scan_png_for_plaintext_ascii]] and [[attestra/proof/screenshot_redact.py#assert_no_secret_in_png_metadata]] find forbidden strings in PNG bytes/text chunks; strip removes tEXt leaks.
+
+### Screenshot attach redaction status
+
+[[attestra/proof/screenshot_redact.py#attach_redacted_screenshot]] stores via [[attestra/proof/store.py#attach_screenshot]] and records `redaction_status=redacted|skipped` in the note.
+
+### Screenshot pixel region redaction
+
+With Pillow installed, [[attestra/proof/screenshot_redact.py#redact_png_regions]] blacks out regions and clears text-chunk secrets from the PNG payload.
+
+### Screenshot redact without Pillow
+
+Without Pillow, pixel redact raises [[attestra/proof/screenshot_redact.py#RedactionError]]; attach skips pixel paint, strips text chunks, and notes `redaction_status=skipped`.
+
+### Profile create does not return secret
+
+[[attestra/auth_web/profiles.py#create_profile]] plus POST `/api/auth-web/.../auth-profiles` return [[attestra/auth_web/profiles.py#profile_dict]] metadata and `has_secret` only; plaintext never appears in the JSON body.
+
+### Profile list never contains secret
+
+List endpoints for auth-web profiles never echo stored secrets; rows expose `has_secret` and a truncated `secret_ref` via [[attestra/auth_web/profiles.py#profile_dict]].
+
+### Profile rotate revoke delete
+
+[[attestra/auth_web/profiles.py#rotate_secret]] keeps the same `secret_ref`, [[attestra/auth_web/profiles.py#revoke_profile]] marks status revoked, and [[attestra/auth_web/profiles.py#delete_profile]] removes the profile and ciphertext.
+
+### Profile cross-tenant denied
+
+Staff limited to one tenant get 404 on another engagement's profiles; viewers may read home profiles but cannot write.
+
+### SSO bootstrap validate blocked
+
+[[attestra/auth_web/profiles.py#validate_profile]] sets method `sso_bootstrap` to `blocked_sso` with a redacted MFA/SSO note and no secret echo.
+
+### Method none validates valid
+
+A profile with method `none` and no secret validates to status `valid` for unauthenticated baseline coverage.
+
+### SSRF localhost blocked
+
+[[attestra/auth_web/scope.py#scope_from_seeds]] and [[attestra/auth_web/scope.py#assert_url_in_scope]] reject localhost, loopback, and link-local metadata hosts.
+
+### Out-of-scope redirect blocked
+
+[[attestra/auth_web/scope.py#assert_redirect_in_scope]] rejects cross-origin and same-host path redirects outside the seed prefix.
+
+### Route normalization dedup
+
+[[attestra/auth_web/crawl.py#normalize_url]] lowercases host, sorts/caps query params, and drops fragments so equivalent URLs dedupe.
+
+### Crawler respects max_routes
+
+[[attestra/auth_web/crawl.py#crawl]] stops visiting once [[attestra/auth_web/limits.py#CrawlLimits]] `max_routes` is reached.
+
+### Synthetic data never echoes secrets
+
+[[attestra/auth_web/forms.py#synthetic_value]] and [[attestra/auth_web/forms.py#fill_form_values]] never copy JWT/password/API-key-looking field values into filled payloads.
+
+### Role compare read-only by default
+
+[[attestra/auth_web/roles.py#is_read_only_comparison]] is true unless intrusive is enabled; [[attestra/auth_web/roles.py#compare_roles]] stays non-mutating by default; [[attestra/auth_web/roles.py#plan_object_access_probes]] raises unless ``intrusive=True``.
+
+### Checklist seeds defaults
+
+[[attestra/auth_web/checklists.py#ensure_checklist]] inserts [[attestra/auth_web/checklists.py#DEFAULT_CHECKLIST]] as `not_started` and is idempotent (never marks passed).
+
+### Checklist rejects skipped as passed
+
+[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `status=passed` when notes start with "skipped"; the row stays unchanged.
+
+### Checklist blocked needs evidence
+
+Moving from `blocked` to `passed` via [[attestra/auth_web/checklists.py#update_checklist_item]] requires `evidence_ids`; without them the update raises ServiceError.
+
+### Checklist accepts real pass
+
+A genuine pass with notes is accepted; an invalid status such as `skipped` is rejected by [[attestra/auth_web/checklists.py#update_checklist_item]].
+
+### Coverage math and incomplete
+
+[[attestra/auth_web/coverage.py#coverage_summary]] computes `routes.coverage_pct` as visited/discovered, keeps skipped≠passed for checklist counts, and sets `incomplete` when work remains.
+
+### Coverage empty engagement
+
+An engagement with no inventories reports zero `coverage_pct` and `incomplete` true with [[attestra/auth_web/coverage.py#EXCLUSIONS_NOTE]].
+
+### Mock login succeeds
+
+[[tests/fixtures/auth_web_mock_app.py#create_app]] accepts synthetic viewer credentials and grants `/app` after form login.
+
+### Unauthenticated app gate
+
+Unauthenticated `GET /app` returns 302 to `/login` (or 401) on the local mock.
+
+### Admin role gate
+
+Viewer sessions receive 403 on `/admin`; admin sessions receive 200.
+
+### Public home and settings
+
+`GET /` is public; `/app/settings` requires an authenticated session on the mock app.
+
+## Phase 7 testing depth
+
+CLI scan queue path, ZAP auth contexts, multi-role comparison, gated intrusive IDOR probes, auto screenshots on findings, and checklist rows in technical reports ([[tests/test_phase7_checklist_report.py]], [[tests/test_phase7_screenshots.py]]).
+
+### Multi-role comparison
+
+[[attestra/auth_web/role_scan.py#run_role_comparison]] loads two [[attestra/models.py#AuthCredentialProfile]] roles, captures read-only snapshots (mock fetcher or prebuilt), and calls [[attestra/auth_web/roles.py#compare_roles]] with ``intrusive=False`` ([[tests/test_phase7_role_scan.py]]).
+
+### Multi-role same responses no findings
+
+Identical status/redirect/controls across roles produce no Finding rows.
+
+### Multi-role status diff creates finding
+
+A status mismatch persists a ``tools=["auth_web_roles"]`` finding (severity low, CWE-862) with reproducible steps; a second run dedupes by fingerprint.
+
+### Multi-role cross-tenant denied
+
+A principal scoped to another tenant receives LookupError from [[attestra/services.py#get_engagement]] and creates no findings.
+
+### Multi-role disabled flag
+
+When [[attestra/config.py#AUTH_WEB_ENABLED]] is off, [[attestra/auth_web/role_scan.py#run_role_comparison]] raises ServiceError.
+
+### Multi-role secrets never in finding
+
+Credential plaintext loaded for the fetcher never appears in finding title, description, recommendation, location, or the returned result dict.
+
+### Auto screenshot from PNG bytes
+
+[[attestra/proof/screenshots.py#capture_finding_screenshot]] stores a `screenshot` evidence row with a sha256 when given PNG bytes.
+
+### Auto screenshot redaction status
+
+Evidence notes include `redaction_status=` and must not echo secret strings from PNG metadata.
+
+### Auto screenshot skip existing
+
+A second capture for a finding that already has a screenshot returns None and does not duplicate evidence.
+
+### Auto screenshot capture_fn registry
+
+[[attestra/proof/screenshots.py#register_screenshot_capture]] supplies bytes from a URL; batch capture strips location params before calling it.
+
+### Auto screenshot secret not in note
+
+Secret substrings from PNG text chunks must not appear in the evidence note or stored file bytes.
+
+### Auto screenshot import stays network-free
+
+Without a registered capture function, [[attestra/proof/capture.py#capture_from_import]] attaches nothing and performs no network IO.
+
+### Auto screenshot via import registry
+
+With a registered capture function, import-time capture attaches a screenshot for findings that have locations.
+
+### Checklist refs in technical report
+
+When [[attestra/models.py#AuthChecklistItem]] rows exist, [[attestra/reports/render.py#generate_report]] technical HTML includes `#auth-checklist` with WSTG/ASVS refs and statuses.
+
+### Blocked not labeled passed
+
+Blocked checklist rows (including notes that say skipped) render their real status in the technical report and are not labeled Passed.
+
+### Checklist section absent when off
+
+With [[attestra/config.py#AUTH_WEB_ENABLED]] off and no checklist rows, the authenticated security testing checklist section is omitted from technical HTML.
+
+### No secrets in checklist report
+
+Technical HTML with a checklist must not contain auth profile `secret_ref` values or credential plaintext from profile metadata.
+
+### Auth web on seeds checklist for report
+
+When [[attestra/config.py#AUTH_WEB_ENABLED]] is on and the engagement has no checklist rows, report generation seeds defaults via [[attestra/auth_web/checklists.py#ensure_checklist]] and renders them.
+
+### CLI scan queues through request_scan
+
+`attestra scan` calls [[attestra/services.py#request_scan]] (same path as the UI); a path tool on a repo asset queues and writes `scan.request`.
+
+### CLI scan refused without authorization
+
+Expired authorization yields `status=refused` with a refuse reason and `scan.refused` audit; GateError is absorbed, not a CLI crash.
+
+### CLI scan actor attribution
+
+`--user` resolves via [[attestra/cli.py#_resolve_actor]] so `requested_by` and the `scan.request` audit actor match the username.
+
+### ZAP auth contexts
+
+[[attestra/auth_web/zap_auth.py]] builds mounted ZAP auth config from credential profiles without putting secrets on argv or in ScanRun rows ([[tests/test_phase7_zap_auth.py]]).
+
+#### Form header cookie omit secret
+
+Form, header, and cookie builders keep secrets out of ``repr``/``str`` of public metadata; secrets exist only in restrictive files under ``out_dir``.
+
+#### SSO bootstrap blocked
+
+Method ``sso_bootstrap`` yields blocked status with an MFA/SSO reason and no secret-bearing file bodies.
+
+#### Baseline argv unchanged without auth
+
+With [[attestra/config.py#AUTH_WEB_ENABLED]] off, [[attestra/runner/scanners/zap.py#ZapAdapter#build_argv]] baseline argv stays unauthenticated (no ``-n`` / ``-U``).
+
+#### get_secret used missing ref raises
+
+[[attestra/auth_web/zap_auth.py#load_profile_secret]] uses [[attestra/credentials/store.py#get_secret]] and raises a clean [[attestra/auth_web/zap_auth.py#ZapAuthError]] when the ref is missing.
+
+### Baseline profile refused
+
+[[attestra/auth_web/tamper.py#assert_intrusive_allowed]] raises when the scan profile is `baseline` (not active/intrusive).
+
+### Intrusive without flag refused
+
+Intrusive probes are refused when the asset's `intrusive_allowed` flag is false.
+
+### Without ownership refused
+
+Intrusive probes are refused when target ownership has not been verified.
+
+### Plan only never fetches
+
+With `execute=False`, [[attestra/auth_web/tamper.py#plan_and_maybe_execute_probes]] returns a plan and never calls `fetch_fn`.
+
+### Execute bounded after gate
+
+After the intrusive gate passes, execute runs at most [[attestra/auth_web/tamper.py#MAX_EXECUTE_OBJECT_IDS]] GETs.
+
+### Sensitive marker redacts and stops
+
+A response containing a sensitive marker is redacted, recorded, and stops further probe execution.
+
+## Phase 8 packs portal dashboards
+
+ASVS pack and Top 10 report view, client remediation portal, severity/SLA/trend dashboards, library seed and CERT-In verification, public report verify with QR, Safe-to-Host letter and SEBI testing timeline.
+
+### Public verify valid signature
+
+Signed report with a correct HMAC `sig` returns 200 and shows the SHA-256, signer, and kind on the public page.
+
+### Public verify bad signature
+
+A wrong `sig` query value returns 404 without leaking report metadata.
+
+### Public verify unsigned not public
+
+Draft/unsigned reports return 404 even when the HMAC is computed from their sha256.
+
+### Public verify no grade when untested
+
+When the engagement has no completed scan, the verify page omits letter grades and scores (P0-4).
+
+### Public verify QR present
+
+Valid verify HTML includes an inline SVG QR and the absolute `/verify/reports/{rid}?sig=` URL.
+
+### Client remediation portal
+
+Portal P6-2: client_viewer comment, fix evidence, retest, branding; auditor read-only ([[tests/test_phase8_portal_remediation.py]], [[interfaces#Client remediation portal]]).
+
+#### Client can comment
+
+A client_viewer posts a comment on a visible finding via the portal route; the body is stored and linked to their user.
+
+#### Client can upload evidence
+
+A client_viewer uploads a small file as kind `client_fix` (never screenshot); actor is the principal.
+
+#### Client can request retest
+
+On a validated finding, client_viewer requests a retest with a note; an open Retest row is created.
+
+#### Cannot retest new finding
+
+Untriaged (`new`) findings are hidden (404) and retest POST is refused for client_viewer.
+
+#### Cross-tenant 404
+
+A client_viewer from another tenant gets 404 on engagement and finding portal routes (including comment POST).
+
+#### Auditor cannot write
+
+Auditor can open the portal finding page but cannot POST comment, evidence, or retest (403); write forms are omitted.
+
+#### Tenant branding
+
+A tenant ReportTemplate logo and cover title appear on portal home, engagement, and finding pages.
+
+### Safe-to-Host attestation letter
+
+Attestation HTML includes a Safe-to-Host block with client, authorization, environments, open critical/high count, and a non-certification hosting decision statement using security-testing wording only.
+
+### SEBI security testing timeline
+
+Timeline milestones expose planning through retest statuses; the SEBI pack still loads; the staff UI page renders without secrets.
+
+### Metrics dashboard
+
+Phase 8 P6-3 staff metrics page: open-by-severity, SLA ageing, trend, site grades ([[tests/test_phase8_dashboard.py]], [[attestra/dashboards.py#summary_for_principal]]).
+
+#### Empty tenant zeros
+
+A tenant with no engagements returns zero severity and SLA counts, empty site grade lists, and zeroed trend weeks.
+
+#### Overdue counted
+
+Open findings past `sla_due` land in `sla_ageing.overdue`; due-within-7d and on-track/no-SLA fill `due_soon` and `ok`.
+
+#### Severity totals
+
+Open findings are tallied by severity; closed statuses do not add to `open_by_severity` or `trend.current_open`.
+
+#### Role redirect
+
+`client_viewer` and `auditor` hitting `/dashboard` are redirected to `/portal`.
+
+### ASVS pack loads
+
+`asvs_4_0` appears in [[attestra/compliance/engine.py#load_library]] with V1–V14 chapter titles from `attestra/compliance/data/packs/asvs_4_0.yaml`.
+
+### ASVS compliance rollup
+
+[[attestra/services.py#compliance]] for `asvs_4_0` returns titled control results with unique chapter refs.
+
+### OWASP Top 10 report view
+
+Kind `owasp_top10` renders HTML with Top 10 2021 category headings and no user-facing "VAPT" string.
+
+### LLM Top 10 optional block
+
+When the engagement includes `iso_42001_2023`, the Top 10 report also shows OWASP LLM Top 10 2025 headings.
+
+### Client remediation portal
+
+Client viewers can comment, upload fix evidence, and request retests; auditors stay read-only.
+
+#### Client can comment
+
+A `client_viewer` may post a finding comment on a triaged finding in their tenant.
+
+#### Client can upload evidence
+
+Portal fix-evidence upload stores a capped `client_fix` evidence item on the finding.
+
+#### Client can request retest
+
+Client viewers may request a retest for an eligible triaged finding.
+
+#### Cannot retest new finding
+
+Untriaged `new` findings are rejected for client retest requests.
+
+#### Cross-tenant 404
+
+Portal actions on another tenant's engagement return 404.
+
+#### Auditor cannot write
+
+Auditor role cannot post comments, upload evidence, or request retests.
+
+#### Tenant branding
+
+Portal pages show the tenant's configured branding when present.
+
+### Public verify valid signature
+
+A signed report with a correct HMAC sig returns a public verify page that confirms the seal.
+
+### Public verify bad signature
+
+A wrong or truncated sig does not show a successful public verification.
+
+### Public verify unsigned not public
+
+Draft or unsigned reports are not exposed on the public verify route.
+
+### Public verify no grade when untested
+
+When no graded scan exists, the public page omits a site grade claim.
+
+### Public verify QR present
+
+The public verify page embeds a QR SVG pointing at the verify URL.
+
+### Library seed import and CERT-In
+
+[[tests/test_phase8_library_certin.py]] checks CERT-In 2022 pack titles (Dir.(i)/(ii)/(iv)/(v), Annex I), compliance on a `cert_in_2022` engagement, JSON/CSV template convert, oversized reject, idempotent [[attestra/library/service.py#seed_defaults]], and `POST /api/library/import` with `library.import` audit.
+
+

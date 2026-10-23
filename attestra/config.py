@@ -98,3 +98,13 @@ def require_image_digest(image: str) -> str:
     if "@sha256:" not in image:
         raise ValueError(f"scanner image must be pinned with @sha256: digest, got {image!r}")
     return image
+
+
+# Authenticated website testing (market-gap Phase 6). Off by default.
+AUTH_WEB_ENABLED = os.environ.get("ATTESTRA_AUTH_WEB_ENABLED", "").lower() in ("1", "true", "yes")
+AUTH_WEB_MAX_ROUTES = int(os.environ.get("ATTESTRA_AUTH_WEB_MAX_ROUTES", "100"))
+AUTH_WEB_MAX_DEPTH = int(os.environ.get("ATTESTRA_AUTH_WEB_MAX_DEPTH", "5"))
+AUTH_WEB_MAX_DURATION_S = int(os.environ.get("ATTESTRA_AUTH_WEB_MAX_DURATION_S", "600"))
+AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST", "2"))
+AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
+# Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).

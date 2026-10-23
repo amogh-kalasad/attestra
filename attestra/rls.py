@@ -118,6 +118,14 @@ EMAIL_ALERT_POLICIES: dict[str, str] = {
     "email_alert_sent": _tenant("tenant_id"),
 }
 POLICIES.update(EMAIL_ALERT_POLICIES)
+# Authenticated website testing (migration 0022_auth_web).
+AUTH_WEB_POLICIES: dict[str, str] = {
+    "auth_credential_profiles": _tenant("tenant_id"),
+    "auth_route_inventory": _tenant("tenant_id"),
+    "auth_element_inventory": _tenant("tenant_id"),
+    "auth_checklist_items": _tenant("tenant_id"),
+}
+POLICIES.update(AUTH_WEB_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

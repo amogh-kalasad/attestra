@@ -37,7 +37,7 @@ Asset matching for imported locations: [[attestra/services.py#match_asset]] (hos
 
 Bearer API keys and signed session cookies identify callers; roles gate every route.
 
-[[attestra/api.py#get_principal]] resolves `Authorization: Bearer` via [[attestra/auth/keys.py#authenticate_api_key]] or the `attestra_session` cookie via [[attestra/auth/session.py#read_session]]. [[attestra/api.py#require]] checks [[attestra/auth/roles.py#has_permission]] against the six roles in [[attestra/auth/roles.py#ROLES]]. Share links use `share.create` and `share.manage` (admin, lead, tester); see [[interfaces#Share links]].
+[[attestra/api.py#get_principal]] resolves `Authorization: Bearer` via [[attestra/auth/keys.py#authenticate_api_key]] or the `attestra_session` cookie via [[attestra/auth/session.py#read_session]]. [[attestra/api.py#require]] checks [[attestra/auth/roles.py#has_permission]] against the six roles in [[attestra/auth/roles.py#ROLES]]. Share links use `share.create` and `share.manage` (admin, lead, tester); see [[interfaces#Share links]]. Portal remediation uses narrow `portal.evidence` and `portal.retest_request` (admin, lead, tester, client_viewer) without granting `finding.write` to clients; see [[interfaces#Client remediation portal]].
 
 UI login: [[attestra/web/ui.py#login]]. Passwords use scrypt ([[attestra/auth/keys.py#hash_password]]). Report workflow enforces distinct author / QA / signer user ids ([[attestra/reports/render.py#sign_report]]).
 

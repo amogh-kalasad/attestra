@@ -7,7 +7,7 @@ Work through the phases in order. Each phase lists goal, tasks, dependencies, ac
 **Depends on:** nothing.
 1. Add schema migrations with Alembic and replace the ad-hoc migration in `db.py`. Files: `attestra/db.py`, new `migrations/`. Source: New.
 2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (predecessor `ci.yml`).
-3. Restore the tests to the GitHub copy. `tests/` was removed from `E:\GitHub\attestra` before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
+3. Restore the tests to the GitHub copy. `tests/` was removed from the GitHub clone before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
 4. Add a `SECURITY.md` and a threat-model note covering the scope gate, signing key and audit chain. Source: New.
 5. Fix the Starlette TestClient deprecation warning. Source: New.
 

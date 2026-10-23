@@ -37,7 +37,7 @@ Install: `pip install -e ".[temporal]"` (adds `temporalio`).
 
 ## Local run (no Docker)
 
-    temporal server start-dev --headless          # E:\tools\bin\temporal.exe, port 7233
+    temporal server start-dev --headless          # temporal CLI on PATH, port 7233
     $env:ATTESTRA_ORCHESTRATOR = "temporal"
     attestra worker                               # second terminal
     attestra serve                                # third terminal; scan requests now start workflows

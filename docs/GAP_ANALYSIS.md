@@ -1,6 +1,6 @@
 # Attestra — Gap analysis vs "Security Testing & Compliance Platform Architecture v2"
 
-Date: 2026-10-14 (IST). Spec dated Oct 13 2026. Code: `E:\attestra` v0.1.0, reviewed read-only (no code changes).
+Date: 2026-10-14 (IST). Spec dated Oct 13 2026. Code: Attestra working tree v0.1.0, reviewed read-only (no code changes).
 
 ## Summary
 
@@ -26,7 +26,7 @@ Status counts: Done 19, Done-untested 3, Partial 19, Stub 3, Not done 44
 | Reports & signing | 10 | 50% |
 | Evidence & audit | 8 | 28% |
 
-**Tests:** `pytest` in E:\attestra (TEMP=E:\tmp): **34 passed, 0 failed**, 1 deprecation warning, ~6 s.
+**Tests:** `pytest` in the working tree (TEMP set to a local temp dir): **34 passed, 0 failed**, 1 deprecation warning, ~6 s.
 
 **Key fact:** Attestra is an *import-and-report* layer. It never runs scanners (importers/__init__.py), so runners, OPA, Temporal, kill switch and egress controls have nothing to act on yet.
 
@@ -213,11 +213,11 @@ Suggested path: port the predecessor's authorization + dns_pin + scanner adapter
 # Appendix — Compliance / reports / evidence worker detail
 
 # Gap analysis – part: tests, compliance, reports, evidence & audit
-Checked against the architecture doc (v2: PCI, ISO 27001, SOC 2) on 2026-10-14. Code reviewed read-only in `E:\attestra`.
+Checked against the architecture doc (v2: PCI, ISO 27001, SOC 2) on 2026-10-14. Code reviewed read-only in the Attestra working tree.
 Legend: **Done** = built + tested · **Done-untested** = built, no test · **Partial** · **Stub** · **Not done**
 
 ## 1. Test run
-- Command: `set TEMP=E:\tmp & .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider` (in `E:\attestra`)
+- Command: `set TEMP=<local-temp> & .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider` (from repo root)
 - Result: **34 passed, 0 failed**, 1 warning (Starlette/httpx deprecation in fastapi.testclient), 5.9 s.
 - Relevant tests: `tests/test_compliance_reports.py` (library integrity, PCI roll-up, CDE scoping, ISO merge, assessor override, four-eyes/sign/tamper, report versions + compliance pack), `tests/test_services.py:94` (audit chain tamper).
 

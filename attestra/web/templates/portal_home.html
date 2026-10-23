@@ -1,6 +1,12 @@
 {% extends "_layout.html" %}
 {% block title %}{% if role == "auditor" %}Auditor view{% else %}Client portal{% endif %} &middot; Attestra{% endblock %}
 {% block main %}
+{% if branding and branding.has_logo %}
+<div class="portal-brand" style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);margin:0">
+  <img src="{{ branding.logo }}" alt="{{ branding.cover_title or 'Tenant' }} logo" style="max-height:40px;max-width:180px;object-fit:contain">
+  {% if branding.cover_title %}<span style="font-weight:600;font-size:15px;color:var(--ink)">{{ branding.cover_title }}</span>{% endif %}
+</div>
+{% endif %}
 {% if role not in ("client_viewer", "auditor") %}<div class="warn">Preview of the client portal: this is what client viewers see for these engagements. <a href="/">Back to engagements</a></div>{% endif %}
 
 {% set ns = namespace(crit=0, high=0, closed=0) %}
@@ -14,7 +20,7 @@
   <div>
     <p class="eyebrow">From findings to signed attestation</p>
     <h1>{% if role == "auditor" %}Auditor view{% elif role not in ("client_viewer",) %}Preview of client portal{% else %}Client portal{% endif %}</h1>
-    <p class="lede">Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.</p>
+    <p class="lede">{% if role == "auditor" %}Read-only. Findings, signed reports, and the audit trail for engagements you can access.{% elif can_write %}Findings shown here have been triaged by the test team. You can comment, upload fix evidence, and request retests. Reports appear once signed.{% else %}Read-only. Findings shown here have been triaged by the test team; reports are listed once signed.{% endif %}</p>
   </div>
 </div>
 

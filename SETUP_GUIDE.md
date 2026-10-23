@@ -46,6 +46,14 @@ $env:ATTESTRA_HSTS_PRELOAD_LOOKUP = "1"     # optional: check the HSTS preload l
 
 The built-in values are placeholders, so a scanner without a real image won't run.
 
+You can also queue a scan from the CLI (same permission gate as the UI):
+
+```powershell
+python -m attestra.cli --user <username> scan <engagement_id> <asset_id> --tool zap --profile baseline
+```
+
+`--profile` is `baseline`, `active`, or `intrusive`.
+
 ## 5. Start the app
 Window 1 (the web app):
 
@@ -61,31 +69,64 @@ Window 2 (the worker that runs queued scans):
 python -m attestra.cli worker
 ```
 
-Then open:
-- Dashboard: http://127.0.0.1:8000/
+Then open (after sign-in):
+- Home: http://127.0.0.1:8000/
+- Metrics dashboard: http://127.0.0.1:8000/dashboard
+- Sites (grades): http://127.0.0.1:8000/sites
+- Client / auditor portal: http://127.0.0.1:8000/portal
 - API docs: http://127.0.0.1:8000/docs
 
 Keep both windows open while you use the app. Scans stay "Queued" if the worker is not running.
 
-## 6. Stop the app
+## 6. Optional: authenticated website testing
+
+Off by default. Full notes: [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md).
+
+```powershell
+$env:ATTESTRA_AUTH_WEB_ENABLED = "1"
+# Production / shared installs: set a Fernet key (do not commit it)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ATTESTRA_CREDENTIAL_FERNET_KEY = "<paste-key-here>"
+# Local/dev only when you have no Fernet key yet:
+# $env:ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL = "1"
+```
+
+Restart the app and worker after changing these. `cryptography` is already in `requirements.txt`.
+
+## 7. Optional: PostgreSQL
+
+SQLite under `data\attestra.db` is fine for local use. For Postgres:
+
+```powershell
+pip install -e ".[postgres]"
+$env:ATTESTRA_DATABASE_URL = "postgresql+psycopg://user:pass@127.0.0.1:5432/attestra"
+python -m attestra.cli init
+# Or apply migrations explicitly:
+.\.venv\Scripts\alembic.exe upgrade head
+```
+
+Migration `0022_auth_web` creates the authenticated-website tables (`auth_credential_profiles`, route/element inventory, checklist). Bring Postgres to head before enabling auth-web there.
+
+## 8. Stop the app
 Press `Ctrl+C` in each window, or:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8000 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
 ```
 
-## 7. Run tests
+## 9. Run tests
 
 ```powershell
 python -m pytest -q
 ruff check .
 ```
 
-## 8. Troubleshooting
-- "Port 8000 in use": another copy of Attestra may still be running. Stop it (step 6) or use `--port 8001`. Run only one copy on a port at a time.
+## 10. Troubleshooting
+- "Port 8000 in use": another copy of Attestra may still be running. Stop it (step 8) or use `--port 8001`. Run only one copy on a port at a time.
 - "invalid choice: 'set-password'" (or another missing command): the `attestra.exe` in the venv is out of date. Use `python -m attestra.cli ...`, or run `pip install -e .` again.
 - "Invalid password" at sign-in after changing it: the password was saved to a different database. Run the command from the app's folder, or set `ATTESTRA_DATA_DIR` to the app's data folder.
 - Scans stay Queued: start the worker (step 5) and make sure Docker is running.
 - A scanner says its image is not set: set `ATTESTRA_IMAGE_<TOOL>` (step 4) and restart the app and worker.
 - Disk full during install: move TEMP, TMP and PIP_CACHE_DIR to a drive with space (step 2).
 - `/metrics` returns 401: set `ATTESTRA_METRICS_TOKEN` for Prometheus scrapers. Don't leave metrics open on a public host. `ATTESTRA_METRICS_ALLOW_ANON=true` is only for trusted private networks.
+- Auth-web refuses or credential store errors: confirm `ATTESTRA_AUTH_WEB_ENABLED` and either `ATTESTRA_CREDENTIAL_FERNET_KEY` or (dev only) `ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL=1`. On Postgres, confirm Alembic is at head including `0022_auth_web`.

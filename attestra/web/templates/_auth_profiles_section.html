@@ -1,0 +1,73 @@
+{# Auth test-role guidance and secret-safe profile form (include from engagement / new engagement). #}
+<div class="card" id="auth-profiles">
+  <h2>Authenticated security testing — test roles</h2>
+  <p class="meta">
+    Define the roles you will exercise (viewer, user, manager, admin, and any custom roles).
+    Prefer separate test accounts per role. Choose how the scanner authenticates: form login, header token, cookie, or SSO bootstrap.
+  </p>
+  <p class="hint" style="margin-top:0">
+    Secrets (passwords, tokens, session values) must go to the dedicated credential endpoint — never into ordinary engagement notes, rules of engagement, or free-text metadata.
+    This form stores only non-secret metadata and posts the secret field to that endpoint as an opaque reference.
+  </p>
+  <div class="warn" role="note">
+    Do not paste production passwords here. Use disposable test accounts authorized in the signed rules of engagement.
+    Secrets are stored as references only and are never shown again in the UI.
+  </div>
+
+  <form method="post" action="{{ auth_profile_action }}" autocomplete="off" class="form-follow">
+    <div class="fields">
+      <div>
+        <label for="ap_label">Profile label *</label>
+        <input type="text" id="ap_label" name="label" required placeholder="Portal admin (staging)" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_role">Test role *</label>
+        <input type="text" id="ap_role" name="role_name" required placeholder="admin" autocomplete="off">
+        <div class="hint">Examples: viewer, user, manager, admin.</div>
+      </div>
+      <div>
+        <label for="ap_method">Auth method *</label>
+        <select id="ap_method" name="method" required>
+          <option value="form">Form login</option>
+          <option value="header">Header token</option>
+          <option value="cookie">Cookie / session</option>
+          <option value="sso_bootstrap">SSO bootstrap</option>
+          <option value="none">None (anonymous)</option>
+        </select>
+      </div>
+      <div>
+        <label for="ap_login_url">Login URL</label>
+        <input type="url" id="ap_login_url" name="login_url" placeholder="https://app.example.com/login" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_purpose">Purpose</label>
+        <input type="text" id="ap_purpose" name="purpose" placeholder="Authenticated crawl + IDOR checks" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_username_selector">Username selector</label>
+        <input type="text" id="ap_username_selector" name="username_selector" placeholder="#username" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_password_selector">Password field selector</label>
+        <input type="text" id="ap_password_selector" name="password_selector" placeholder="#password" autocomplete="off">
+        <div class="hint">CSS selector only — not the password value.</div>
+      </div>
+      <div>
+        <label for="ap_submit_selector">Submit selector</label>
+        <input type="text" id="ap_submit_selector" name="submit_selector" placeholder="button[type=submit]" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_success">Success URL contains</label>
+        <input type="text" id="ap_success" name="success_url_contains" placeholder="/dashboard" autocomplete="off">
+      </div>
+      <div>
+        <label for="ap_secret">Secret (password or token) *</label>
+        <input type="password" id="ap_secret" name="secret" required autocomplete="off" spellcheck="false">
+        <div class="hint">Sent only to the credential store; never saved in engagement metadata.</div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit">Save auth profile</button>
+    </div>
+  </form>
+</div>

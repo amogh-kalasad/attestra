@@ -10,10 +10,11 @@
     <li><a href="#scope">Scope and authorization</a></li>
     <li><a href="#methodology">Methodology and data sources</a></li>
     <li><a href="#standards">Standards and test types</a></li>
-    <li><a href="#risk-legend">Risk rating legend</a></li>
+    <li><a href="#risk-legend">Risk Rating Legend</a></li>
     <li><a href="#summary">Summary</a></li>
     <li><a href="#findings-overview">Findings overview</a></li>
     <li><a href="#passed-checks">Passed checks</a></li>
+    {% if auth_checklist %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
     <li><a href="#site-grades">Site grades</a></li>
     <li><a href="#tls">TLS summary</a></li>
     <li><a href="#findings">Detailed findings</a></li>
@@ -165,7 +166,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 <p><b>Standards referenced:</b> {{ standards|join("; ") }}</p>
 {% endif %}
 
-<h2 id="risk-legend">7. Risk rating legend</h2>
+<h2 id="risk-legend">7. Risk Rating Legend</h2>
 <table>
   <tr><th>Severity</th><th>CVSS range</th><th>Open count</th></tr>
   {% for s in severities %}
@@ -216,6 +217,25 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   </tr>
   {% else %}<tr><td colspan="4">No check list stored yet. Re-import a ZAP or webcheck report, or run a new scan.</td></tr>{% endfor %}
 </table>
+
+{% if auth_checklist %}
+<h2 id="auth-checklist">Authenticated security testing checklist</h2>
+<p class="meta">WSTG/ASVS checks performed during authenticated security testing. Skipped and blocked items are not treated as passed.</p>
+{% if auth_coverage and auth_coverage.exclusions_note %}
+<p class="meta">{{ auth_coverage.exclusions_note }}</p>
+{% endif %}
+<table>
+  <tr><th>Ref</th><th>Title</th><th>Status</th><th>Notes</th></tr>
+  {% for item in auth_checklist %}
+  <tr>
+    <td class="mono">{{ item.ref }}</td>
+    <td>{{ item.title }}</td>
+    <td>{% if item.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif item.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">{{ item.status|replace("_", " ") }}</span>{% endif %}</td>
+    <td>{{ item.notes or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
 
 <h2 id="site-grades">11. Site grades</h2>
 <p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>

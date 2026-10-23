@@ -1,0 +1,120 @@
+{% extends "_layout.html" %}
+{% block title %}Dashboard · Attestra{% endblock %}
+{% block main %}
+{% set open = summary.open_by_severity %}
+{% set sla = summary.sla_ageing %}
+{% set trend = summary.trend %}
+{% set grades = summary.site_grades %}
+{% set open_total = open.critical + open.high + open.medium + open.low + open.info %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Severity, SLA, trend, and site grades</p>
+    <h1>Dashboard</h1>
+    <p class="lede">Open findings across your engagements, SLA ageing buckets, weekly inflow, and Observatory-style site grades. Drill into individual targets on <a href="/sites">Sites</a>.</p>
+  </div>
+</div>
+
+<div class="sev-strip" aria-label="Open findings by severity" style="margin-bottom:20px">
+  {% for s in ["critical","high","medium","low","info"] %}
+  <div class="sev-card">
+    <span class="pill {{ s }}">{{ s|capitalize }}</span>
+    <span class="value">{{ open.get(s, 0) }}</span>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="stat-strip" aria-label="SLA ageing" style="margin-bottom:20px">
+  <div class="stat-card">
+    <div class="label"><span class="status-pill overdue"><span class="dot" aria-hidden="true"></span>Overdue</span></div>
+    <div class="value is-crit">{{ sla.overdue }}</div>
+    <div class="note">Past SLA due date</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="status-pill due"><span class="dot" aria-hidden="true"></span>Due soon</span></div>
+    <div class="value is-high">{{ sla.due_soon }}</div>
+    <div class="note">Within 7 days</div>
+  </div>
+  <div class="stat-card">
+    <div class="label"><span class="status-pill done"><span class="dot" aria-hidden="true"></span>On track</span></div>
+    <div class="value">{{ sla.ok }}</div>
+    <div class="note">More than 7 days left or no SLA</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Open total</div>
+    <div class="value">{{ open_total }}</div>
+    <div class="note">
+      {% if trend.delta > 0 %}+{{ trend.delta }} vs prior week{% elif trend.delta < 0 %}{{ trend.delta }} vs prior week{% else %}Unchanged vs prior week{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="dash-grid" style="margin-bottom:20px">
+  <div class="card">
+    <h2>Trend (last {{ trend.weeks|length }} weeks)</h2>
+    <p class="meta" style="margin-top:0">New findings first seen each week (all statuses). Current open {{ trend.current_open }}; open that predate this week {{ trend.previous_open }}.</p>
+    {% set max_opened = namespace(v=1) %}
+    {% for w in trend.weeks %}{% if w.opened > max_opened.v %}{% set max_opened.v = w.opened %}{% endif %}{% endfor %}
+    <div class="hbar">
+      {% for w in trend.weeks %}
+      <div class="hbar-row">
+        <span class="nm mono">{{ w.week_start }}</span>
+        <div class="sbar" style="width:{{ [((w.opened / max_opened.v) * 100)|round(1), 2]|max }}%" aria-label="{{ w.opened }} opened">
+          <span class="m" style="width:100%" title="{{ w.opened }} opened"></span>
+        </div>
+        <span class="tot">{{ w.opened }}</span>
+      </div>
+      {% else %}
+      <p class="meta">No weekly data yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <h2 style="margin:0;padding:0;border:0">Site grades</h2>
+      <a class="btn secondary" href="/sites">All sites</a>
+    </div>
+    <h3 class="meta" style="margin:16px 0 8px;text-transform:uppercase;letter-spacing:.04em;font-size:12px">Worst</h3>
+    <div class="table-wrap" style="margin:0 -24px">
+    <table>
+      <thead>
+      <tr><th>Target</th><th>Grade</th><th>Crit</th><th>High</th></tr>
+      </thead>
+      <tbody>
+      {% for r in grades.worst %}
+      <tr>
+        <td><a class="row-title" href="{{ r.url }}">{{ r.name }}</a><div class="meta mono">{{ r.identifier }}</div></td>
+        <td><b>{{ r.grade }}</b> <span class="meta">· {{ r.score }}</span></td>
+        <td>{{ r.open_by_sev.critical }}</td>
+        <td>{{ r.open_by_sev.high }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4"><div class="empty">No graded sites yet. Run a finished scan, or open <a href="/sites">Sites</a>.</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <h3 class="meta" style="margin:16px 0 8px;text-transform:uppercase;letter-spacing:.04em;font-size:12px">Best</h3>
+    <div class="table-wrap" style="margin:0 -24px -24px">
+    <table>
+      <thead>
+      <tr><th>Target</th><th>Grade</th><th>Crit</th><th>High</th></tr>
+      </thead>
+      <tbody>
+      {% for r in grades.best %}
+      <tr>
+        <td><a class="row-title" href="{{ r.url }}">{{ r.name }}</a><div class="meta mono">{{ r.identifier }}</div></td>
+        <td><b>{{ r.grade }}</b> <span class="meta">· {{ r.score }}</span></td>
+        <td>{{ r.open_by_sev.critical }}</td>
+        <td>{{ r.open_by_sev.high }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4"><div class="empty">No graded sites yet.</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

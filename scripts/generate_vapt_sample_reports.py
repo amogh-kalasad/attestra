@@ -24,7 +24,7 @@ def main() -> None:
         e = services.create_engagement(
             s,
             tenant="Sample Corp (synthetic)",
-            name="Sample VAPT coverage engagement",
+            name="Sample VA + PT coverage engagement",
             type="vapt",
             frameworks=[
                 "pci_dss_4",

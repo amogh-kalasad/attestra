@@ -1,6 +1,6 @@
 # Attestra — Implementation Status & Traceability Matrix
 
-Date: 2026-10-14, updated 2026-10-15. Spec: `docs/IMPLEMENTATION_GUIDE.md` (Phases 0-8). Code: `E:\GitHub\attestra` (pushed `main` @ `d835682`) plus the uncommitted new features, synced to `E:\attestra`.
+Date: 2026-10-14, updated 2026-10-15. Spec: `docs/IMPLEMENTATION_GUIDE.md` (Phases 0-8). Code: Attestra GitHub clone (pushed `main` @ `d835682`) plus the uncommitted new features, synced to the local working tree.
 
 ## 1. Executive summary
 

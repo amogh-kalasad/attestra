@@ -22,6 +22,7 @@ supported_frameworks:
   - rbi_csf_2016
   - sebi_cscrf_2024
   - dora_2022
+  - asvs_4_0
 
 export_formats:
   - html
@@ -114,6 +115,14 @@ kinds:
     assessment_types: [va, pt, vapt, retest]
     sections:
       - letter
+  owasp_top10:
+    label: OWASP Top 10
+    assessment_types: [va, pt, vapt, continuous, retest]
+    sections:
+      - cover
+      - top10_categories
+      - llm_top10
+      - disclaimer
 
 methodology_phases:
   - Planning and authorization

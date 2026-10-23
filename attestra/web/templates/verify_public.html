@@ -1,0 +1,39 @@
+{% extends "_public.html" %}
+{% block title %}Verify report · {{ v.kind }}{% endblock %}
+{% block main %}
+<p class="meta">Public report verification</p>
+<h1>Signed report</h1>
+<p class="meta">{{ v.engagement_name }}</p>
+
+<div class="card">
+  <p>
+    {% if v.verified %}
+    <span class="ok">&#10003; Signature and hash verified</span>
+    {% else %}
+    <span class="bad">&#10007; Verification failed</span>
+    {% endif %}
+  </p>
+  <p><strong>Kind</strong> {{ v.kind }}{% if v.framework %} · {{ v.framework }}{% endif %} · version {{ v.version }}</p>
+  <p><strong>Signer</strong> {{ v.signer or "—" }}</p>
+  <p><strong>Signed</strong>
+    {% if v.signed_at %}{{ v.signed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}—{% endif %}
+  </p>
+  <p><strong>Algorithm</strong> <code>{{ v.algorithm or "—" }}</code></p>
+  <p class="meta">SHA-256 <code>{{ v.sha256 }}</code></p>
+  <p class="meta">
+    Hash {% if v.hash_matches %}<span class="ok">matches</span>{% else %}<span class="bad">mismatch</span>{% endif %}
+    · Signature {% if v.signature_valid %}<span class="ok">valid</span>{% else %}<span class="bad">invalid</span>{% endif %}
+  </p>
+</div>
+
+<div class="card" id="verify-qr">
+  <h2>Verification link</h2>
+  <p class="meta">Scan the QR code or copy the link to re-check this fingerprint.</p>
+  <div style="max-width:220px;margin:12px 0">{{ v.qr_svg | safe }}</div>
+  <p><code>{{ v.verify_url }}</code></p>
+</div>
+
+{% if v.untested %}
+<p class="meta">This engagement has no completed scan yet. Absence of a grade here is intentional; this page never shows letter grades or scores.</p>
+{% endif %}
+{% endblock %}

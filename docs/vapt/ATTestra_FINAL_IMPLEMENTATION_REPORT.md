@@ -40,7 +40,7 @@ See `ATTestra_GAP_REGISTER.md`. Highest priority closed items were stored-not-re
 | --- | --- | --- |
 | VA | Supported | technical (+ compliance) |
 | PT | Supported | technical (+ compliance) |
-| VAPT | Supported; label `VA + PT` | technical (+ compliance) |
+| VA + PT | Supported; label `VA + PT` (key `vapt`) | technical (+ compliance) |
 | Retest | Supported with false-close guard | **retest** kind |
 | Continuous | Supported; scan history in technical | technical; trends limited |
 

@@ -1397,6 +1397,19 @@ app.include_router(share_api_router)
 app.include_router(share_public_router)
 app.include_router(share_ui_router)
 
+from attestra.auth_web.routes import api_router as auth_web_api_router  # noqa: E402
+
+app.include_router(auth_web_api_router)
+
+# Phase 8 P6-6: SEBI CSCRF security-testing timeline staff UI (parent include_router)
+from attestra.web.sebi_routes import ui_router as sebi_ui_router  # noqa: E402
+
+app.include_router(sebi_ui_router)
+
+from attestra.verify.routes import public_router as verify_public_router  # noqa: E402
+
+app.include_router(verify_public_router)
+
 from attestra.web.errors import install as install_ui_errors  # noqa: E402
 
 install_ui_errors(app)

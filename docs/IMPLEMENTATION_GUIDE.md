@@ -1,6 +1,6 @@
 # Attestra – Step-by-Step Implementation Guide (Phase 0 → Phase 8)
 
-This guide turns `PHASES.md` and `ROADMAP.md` into concrete, ordered steps. It is based on the real code in `E:\attestra` (v0.1.0). Every step is a **new implementation inside the attestra package** – no code is copied from other projects.
+This guide turns `PHASES.md` and `ROADMAP.md` into concrete, ordered steps. It is based on the real code in the Attestra working tree (v0.1.0). Every step is a **new implementation inside the attestra package** – no code is copied from other projects.
 
 ## How to use this guide
 
@@ -8,15 +8,15 @@ This guide turns `PHASES.md` and `ROADMAP.md` into concrete, ordered steps. It i
 - Each step has: **What**, **Files**, **Key code / schema**, **Commands**, **Tests**, **Done when**.
 - `VERIFY` marks a command or path I could not confirm from the project. Check it before relying on it.
 - Effort figures are estimates.
-- **Commits:** you commit yourself, in GitHub Desktop, at each **Commit point**. Work in `E:\attestra`, then copy the changed files into `E:\GitHub\attestra` (or switch to working directly in the clone), review the **Changes** tab, write a summary, click **Commit to main**, then **Push origin**.
-- **Keep everything on E:**: the virtual env is `E:\attestra\.venv`; temp, caches and scanner output go under `E:\attestra\data` or `E:\attestra\.cache`. Never commit `.venv`, `data/`, `*.db`, or `.cache`.
+- **Commits:** you commit yourself, in GitHub Desktop, at each **Commit point**. Work in your local working tree, then copy the changed files into the GitHub clone if they differ (or switch to working directly in the clone), review the **Changes** tab, write a summary, click **Commit to main**, then **Push origin**.
+- **Local layout:** the virtual env is `.\.venv`; temp, caches and scanner output go under `.\data` or `.\.cache`. Never commit `.venv`, `data/`, `*.db`, or `.cache`.
 - **No microservices rewrite early.** Phases 0–5 stay inside the single `attestra` Python package (FastAPI + SQLAlchemy + Jinja). Infrastructure changes (Postgres default, Temporal, OPA, Vault, Kubernetes) wait for Phase 6.
 - **No LLM / paid AI** anywhere unless the architecture owner requires it. It is an optional, last item in Phase 8.
 
-### Standard commands (PowerShell, from `E:\attestra`)
+### Standard commands (PowerShell, from the repo root)
 
 ```powershell
-cd E:\attestra
+cd <repo-root>
 .\.venv\Scripts\Activate.ps1                       # turn on the venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"   # install / refresh deps
 .\.venv\Scripts\python.exe -m pytest -q            # run all tests (34 today)
@@ -25,7 +25,7 @@ attestra demo                                      # load the synthetic engageme
 attestra serve --host 127.0.0.1 --port 8000        # UI http://127.0.0.1:8000, API docs /docs
 attestra verify-audit                              # check the hash chain
 ```
-Optional: set `$env:TEMP="E:\attestra\.cache\tmp"` and `$env:ATTESTRA_DATA_DIR="E:\attestra\data"` in the session so temp files stay on E:.
+Optional: set `$env:TEMP=".\.cache\tmp"` and `$env:ATTESTRA_DATA_DIR=".\data"` in the session so temp files stay under the repo.
 
 ### Where things are today (map of the real code)
 
@@ -43,17 +43,17 @@ Optional: set `$env:TEMP="E:\attestra\.cache\tmp"` and `$env:ATTESTRA_DATA_DIR="
 | API | `attestra/api.py` | identity = `X-Attestra-Actor` header (`actor()` dependency) |
 | Web UI | `attestra/web/ui.py`, `web/templates/*.html` | Jinja |
 | CLI | `attestra/cli.py` | `attestra` entry point |
-| Tests | `tests/conftest.py` (`fresh_db`, `engagement`, `loaded` fixtures), `test_api, test_compliance_reports, test_importers, test_scope, test_services` | in `E:\attestra` only, removed from the GitHub copy |
+| Tests | `tests/conftest.py` (`fresh_db`, `engagement`, `loaded` fixtures), `test_api, test_compliance_reports, test_importers, test_scope, test_services` | historically local-only; restore into the GitHub copy |
 
 ---
 
 ## Phase 0 – Foundations and a safe baseline (2–3 days)
 
-**Prerequisites:** venv works and `.\.venv\Scripts\python.exe -m pytest -q` shows 34 passed. GitHub Desktop has `E:\GitHub\attestra` cloned.
+**Prerequisites:** venv works and `.\.venv\Scripts\python.exe -m pytest -q` shows 34 passed. GitHub Desktop has the Attestra clone ready.
 
 ### Step 0.1 – Record the baseline
 - **What:** run the suite and save the result so later phases can compare.
-- **Commands:** `.\.venv\Scripts\python.exe -m pytest -q -W default > E:\attestra\.cache\baseline.txt` (create `.cache` first).
+- **Commands:** `.\.venv\Scripts\python.exe -m pytest -q -W default > .\.cache\baseline.txt` (create `.cache` first).
 - **Done when:** 34 passed, and the warnings list (e.g. the Starlette TestClient deprecation) is written down.
 
 ### Step 0.2 – Add Alembic and an initial migration
@@ -87,7 +87,7 @@ Optional: set `$env:TEMP="E:\attestra\.cache\tmp"` and `$env:ATTESTRA_DATA_DIR="
 - **Done when:** ruff clean locally; CI is green after your push.
 
 ### Step 0.4 – Put the tests back into the repo
-- **What:** CI needs `tests/`. Copy `E:\attestra\tests\` to `E:\GitHub\attestra\tests\` (exclude `__pycache__`, `.DS_Store`). Also delete stray `.DS_Store` files from `attestra/` and add `.DS_Store` to `.gitignore`.
+- **What:** CI needs `tests/`. Copy local `tests/` into the GitHub clone (exclude `__pycache__`, `.DS_Store`). Also delete stray `.DS_Store` files from `attestra/` and add `.DS_Store` to `.gitignore`.
 - **Files:** `tests/**`, `.gitignore`.
 - **Done when:** GitHub Desktop Changes tab shows `tests/` (14 files) and no `.DS_Store`.
 
@@ -110,7 +110,7 @@ Optional: set `$env:TEMP="E:\attestra\.cache\tmp"` and `$env:ATTESTRA_DATA_DIR="
 - [ ] No deprecation warnings
 - [ ] SECURITY.md + THREAT_MODEL.md
 
-**Commit point:** copy changes into `E:\GitHub\attestra`, commit in GitHub Desktop as `Phase 0: migrations, CI, tests, security docs`, push, and check the CI run on GitHub.
+**Commit point:** copy changes into the GitHub clone if needed, commit in GitHub Desktop as `Phase 0: migrations, CI, tests, security docs`, push, and check the CI run on GitHub.
 
 ---
 
@@ -474,7 +474,7 @@ tests/security/...
 
 ### Step 5.5 – Backup and restore with manifest
 - **What:** new `attestra/ops/backup.py` with `backup()` / `restore()` covering the DB (SQLite online backup API or `pg_dump`), evidence and reports; write `manifest.json` (sha256 per file); restore refuses on any mismatch – no silent fallback.
-- **CLI:** `attestra backup E:\attestra-backups\<date>` and `attestra restore <dir>`.
+- **CLI:** `attestra backup <backup-dir>\<date>` and `attestra restore <dir>`.
 - **Tests:** backup → tamper one file → restore fails; clean restore passes.
 
 ### Step 5.6 – KEV/EPSS refresh

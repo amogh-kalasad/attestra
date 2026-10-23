@@ -45,7 +45,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 **Depends on:** nothing.
 1. Add schema migrations with Alembic and replace the ad-hoc migration in `db.py`. Files: `attestra/db.py`, new `migrations/`. Source: New.
 2. Add CI with ruff and pytest (GitHub Actions). New file: `.github/workflows/ci.yml`. Source: Port (predecessor `ci.yml`).
-3. Restore the tests to the GitHub copy. `tests/` was removed from `E:\GitHub\attestra` before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
+3. Restore the tests to the GitHub copy. `tests/` was removed from the GitHub clone before the first push. Decide with the architecture owner whether tests belong in the repo (recommended: yes). Source: existing.
 4. Add a `SECURITY.md` and a threat-model note covering the scope gate, signing key and audit chain. Source: New.
 5. Fix the Starlette TestClient deprecation warning. Source: New.
 
@@ -183,7 +183,7 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 Steps:
 1. Create a branch in GitHub Desktop: **Branch → New branch** named `phase1-scope-gate`.
 2. Read the predecessor `src\vapt\core\authorization.py` and its `tests\unit\test_authorization.py`.
-3. Copy them to `E:\GitHub\attestra\attestra\runner\authorization.py` and `tests\runner\test_authorization.py`. Change the imports to `attestra.*`.
+3. Copy them to `attestra/runner/authorization.py` and `tests/runner/test_authorization.py` in the clone. Change the imports to `attestra.*`.
 4. Write an adapter function `authorize_target(engagement, target)` that builds the allowed scope from Attestra's `Authorization` (valid and unexpired), `Asset` rows and the engagement window.
 5. Fix the bug around `authorization.py:382`: images match exactly unless the entry ends with `*`. Add a test showing `nginx` does **not** allow `nginx-evil/x`.
 6. Widen the SSRF check (Phase 1, item 3) and add tests for `100.64.0.1`, `::ffff:169.254.169.254` and `0.0.0.0`.

@@ -1,0 +1,48 @@
+{% extends "_layout.html" %}
+{% block title %}SEBI testing timeline &middot; {{ e.name }} &middot; Attestra{% endblock %}
+{% block main %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a><span aria-hidden="true">/</span>
+  <a href="/engagements/{{ e.id }}">ENG-{{ e.id }}</a><span aria-hidden="true">/</span>
+  <span class="current">SEBI timeline</span>
+</nav>
+<div class="page-head">
+  <div>
+    <h1>SEBI CSCRF security testing timeline</h1>
+    <p class="lede">{{ e.name }} &middot; {{ e.tenant.name }}. Milestones mapped to periodic security testing expectations under SEBI CSCRF (ID.RA / GV.OV). This is a tracking aid, not a certification.</p>
+  </div>
+  <div class="actions">
+    <a class="btn secondary" href="/engagements/{{ e.id }}">Back to engagement</a>
+  </div>
+</div>
+
+<div class="card" id="expectation">
+  <h2>Expectation</h2>
+  <p>{{ timeline.expectation }}</p>
+  <p class="meta">Framework: {{ timeline.framework_name }} ({{ timeline.framework }}). Test window:
+    {% if timeline.window_start or timeline.window_end %}
+      {{ timeline.window_start or "not set" }} to {{ timeline.window_end or "not set" }}
+    {% else %}
+      not set
+    {% endif %}
+  </p>
+</div>
+
+<div class="card" id="milestones">
+  <h2>Milestones</h2>
+  <table>
+    <tr><th>Milestone</th><th>Status</th><th>Date</th><th>Detail</th></tr>
+    {% for m in milestones %}
+    <tr>
+      <td>{{ m.label }}</td>
+      <td><span class="status-pill {{ m.status }}">{{ m.status|label }}</span></td>
+      <td>{{ m.date or "—" }}</td>
+      <td>{{ m.detail or "—" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No milestones derived yet.</td></tr>
+    {% endfor %}
+  </table>
+  {% if timeline.notes %}<p class="meta">Notes: {{ timeline.notes }}</p>{% endif %}
+</div>
+{% endblock %}

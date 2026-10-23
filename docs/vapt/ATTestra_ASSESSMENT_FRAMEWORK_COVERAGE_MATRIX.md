@@ -42,15 +42,15 @@ All **5 × 9 = 45** combinations. Status is evidence-backed; coexistence of an a
 | PT | RBI CSF | rbi_csf_2016 | Supported with limitations | Same | Same | compliance | Yes | — | coverage |
 | PT | SEBI CSCRF | sebi_cscrf_2024 | Supported with limitations | Same | Same | compliance | Yes | — | coverage |
 | PT | DORA | dora_2022 | Supported with limitations | Same | Same | compliance | Yes | — | coverage |
-| VAPT | PCI DSS v4.0.1 | pci_dss_4 | Supported and verified | Combined VA+PT evidence | Dedup by fingerprint | technical (label VA + PT), compliance | Yes | Method origin is tool/test_type, not separate VA/PT finding class | engagement label tests |
-| VAPT | ISO 27001:2022 | iso_27001_2022 | Supported and verified | Same | Same | Same | Yes | — | coverage |
-| VAPT | SOC 2 | soc2 | Supported and verified | Same | Same | Same | Yes | — | coverage |
-| VAPT | ISO 42001 | iso_42001_2023 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
-| VAPT | CERT-In | cert_in_2022 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
-| VAPT | NIST CSF 2.0 | nist_csf_2 | Supported and verified | Same | Same | Same | Yes | — | coverage |
-| VAPT | RBI CSF | rbi_csf_2016 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
-| VAPT | SEBI CSCRF | sebi_cscrf_2024 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
-| VAPT | DORA | dora_2022 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
+| VA + PT | PCI DSS v4.0.1 | pci_dss_4 | Supported and verified | Combined VA+PT evidence | Dedup by fingerprint | technical (label VA + PT), compliance | Yes | Method origin is tool/test_type, not separate VA/PT finding class | engagement label tests |
+| VA + PT | ISO 27001:2022 | iso_27001_2022 | Supported and verified | Same | Same | Same | Yes | — | coverage |
+| VA + PT | SOC 2 | soc2 | Supported and verified | Same | Same | Same | Yes | — | coverage |
+| VA + PT | ISO 42001 | iso_42001_2023 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
+| VA + PT | CERT-In | cert_in_2022 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
+| VA + PT | NIST CSF 2.0 | nist_csf_2 | Supported and verified | Same | Same | Same | Yes | — | coverage |
+| VA + PT | RBI CSF | rbi_csf_2016 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
+| VA + PT | SEBI CSCRF | sebi_cscrf_2024 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
+| VA + PT | DORA | dora_2022 | Supported with limitations | Same | Same | Same | Yes | — | coverage |
 | Retest | PCI DSS v4.0.1 | pci_dss_4 | Supported and verified | Remediation/retest objectives | Retest records + evidence | retest, compliance | Yes | Retest results: fixed / still_open / inconclusive | retest + coverage |
 | Retest | ISO 27001:2022 | iso_27001_2022 | Supported and verified | Same | Same | Same | Yes | — | coverage |
 | Retest | SOC 2 | soc2 | Supported and verified | Same | Same | Same | Yes | — | coverage |

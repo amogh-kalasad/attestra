@@ -1,0 +1,126 @@
+{% extends "_layout.html" %}
+{% block title %}Auth coverage &middot; {{ e.name }} &middot; Attestra{% endblock %}
+{% block main %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Engagements</a><span aria-hidden="true">/</span>
+  <a href="/engagements/{{ e.id }}">ENG-{{ e.id }}</a><span aria-hidden="true">/</span>
+  <span class="current">Auth coverage</span>
+</nav>
+<div class="page-head">
+  <div>
+    <h1>Authenticated security testing coverage</h1>
+    <p class="lede">{{ e.name }} &middot; Route inventory, WSTG/ASVS checklist progress, and test-role profiles for this engagement.</p>
+  </div>
+</div>
+
+<div class="warn" role="note">
+  Secrets for test accounts are stored as opaque references only and are never shown on this page.
+  Use the dedicated secret endpoint when adding or rotating credentials — do not paste passwords into ordinary notes or engagement metadata.
+</div>
+
+{% if coverage.incomplete %}
+<div class="warn">Coverage is incomplete. Skipped or blocked work is not treated as passed.</div>
+{% endif %}
+<p class="hint">{{ coverage.exclusions_note }}</p>
+
+<div class="sev-strip" aria-label="Route coverage summary" style="margin-bottom:22px">
+  <div class="sev-card"><span class="meta">Routes discovered</span><span class="value">{{ coverage.routes.discovered }}</span></div>
+  <div class="sev-card"><span class="meta">Visited</span><span class="value">{{ coverage.routes.visited }}</span></div>
+  <div class="sev-card"><span class="meta">Skipped</span><span class="value">{{ coverage.routes.skipped }}</span></div>
+  <div class="sev-card"><span class="meta">Failed</span><span class="value">{{ coverage.routes.failed }}</span></div>
+  <div class="sev-card"><span class="meta">Blocked</span><span class="value">{{ coverage.routes.blocked }}</span></div>
+  <div class="sev-card"><span class="meta">Coverage</span><span class="value">{{ coverage.routes.coverage_pct }}%</span></div>
+</div>
+
+<div class="card" id="summary">
+  <h2>Coverage cards</h2>
+  <p class="meta">Elements tested {{ coverage.elements.tested }} of {{ coverage.elements.discovered }} discovered.
+    Checklist passed {{ coverage.checklist.passed }} of {{ coverage.checklist.total }}.
+    Auth profiles {{ coverage.auth_profiles.total }}.</p>
+  {% if coverage.findings_by_severity %}
+  <p class="meta">Open findings by severity:
+    {% for s, n in coverage.findings_by_severity.items() %}
+      <span class="pill {{ s }}">{{ s|capitalize }} {{ n }}</span>
+    {% endfor %}
+  </p>
+  {% endif %}
+  {% if coverage.routes.by_role %}
+  <h3>By test role</h3>
+  <table>
+    <tr><th>Role</th><th>Discovered</th><th>Visited</th><th>Skipped</th><th>Failed</th><th>Blocked</th><th>Coverage</th></tr>
+    {% for role, row in coverage.routes.by_role.items() %}
+    <tr>
+      <td>{{ role }}</td>
+      <td>{{ row.discovered }}</td><td>{{ row.visited }}</td><td>{{ row.skipped }}</td>
+      <td>{{ row.failed }}</td><td>{{ row.blocked }}</td><td>{{ row.coverage_pct }}%</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+<div class="card" id="checklist">
+  <h2>WSTG / ASVS checklist</h2>
+  <p class="hint" style="margin-top:0">Do not mark an item passed merely because it was skipped. Record evidence or notes that show the check was actually performed.</p>
+  <table>
+    <tr><th>Ref</th><th>Title</th><th>Mapping</th><th>Status</th><th>Notes</th><th>Evidence</th><th>Findings</th></tr>
+    {% for item in checklist %}
+    <tr>
+      <td class="mono">{{ item.ref }}</td>
+      <td>{{ item.title }}</td>
+      <td class="meta">{{ item.mapping_version }}</td>
+      <td><span class="st">{{ item.status|label }}</span></td>
+      <td class="meta">{{ item.notes or "-" }}</td>
+      <td class="meta">{{ (item.evidence_ids or [])|length }}</td>
+      <td class="meta">{{ (item.finding_ids or [])|length }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="meta">No checklist items yet. Seed defaults when authenticated security testing is enabled for this engagement.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card" id="routes">
+  <h2>Route inventory</h2>
+  <p class="meta">Discovered and visited URLs for in-scope authenticated security testing. Skipped and blocked routes stay visible and are not counted as covered.</p>
+  <table>
+    <tr><th>Method</th><th>URL</th><th>Role</th><th>Status</th><th>Authenticated</th><th>Skip reason</th></tr>
+    {% for r in routes %}
+    <tr>
+      <td class="mono">{{ r.http_method }}</td>
+      <td class="mono">{{ r.url }}{% if r.title %}<div class="meta">{{ r.title }}</div>{% endif %}</td>
+      <td>{{ r.role_name or "(anonymous)" }}</td>
+      <td><span class="st">{{ r.status|label }}</span></td>
+      <td>{{ "Yes" if r.authenticated else "No" }}</td>
+      <td class="meta">{{ r.skip_reason or "-" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="meta">No routes recorded yet. Crawl results appear here after an authorized authenticated scan.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card" id="profiles">
+  <h2>Auth profiles</h2>
+  <p class="meta">Test roles and login methods. Secret values are never displayed — only status and metadata.</p>
+  <table>
+    <tr><th>Label</th><th>Role</th><th>Method</th><th>Status</th><th>Last validated</th><th>Note</th></tr>
+    {% for p in profiles %}
+    <tr>
+      <td>{{ p.label or "-" }}</td>
+      <td>{{ p.role_name or "-" }}</td>
+      <td>{{ p.method|label }}</td>
+      <td><span class="st">{{ p.status|label }}</span></td>
+      <td class="meta">{{ p.last_validated_at or "-" }}</td>
+      <td class="meta">{{ p.last_validation_note or "-" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="meta">No auth profiles yet. Add test roles with the form below; secrets go to the dedicated credential endpoint.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if can(principal.role if principal else "", "engagement.write") %}
+{% include "_auth_profiles_section.html" %}
+{% endif %}
+{% endblock %}

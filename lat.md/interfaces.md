@@ -48,7 +48,9 @@ Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attes
 
 Command-line entrypoint sharing the same services layer.
 
-[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, user set-password, user disable, key create, key list, key revoke, migrate-storage, serve, worker, import, enrich (`--refresh`), purge, backup, restore, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
+[[attestra/cli.py]] — `attestra` entrypoint: init, demo, user add, user set-password, user disable, key create, key list, key revoke, migrate-storage, serve, worker, import, scan, enrich (`--refresh`), purge, backup, restore, transition, compliance, report, approve, verify-report, verify-audit, findings. Identity via `--api-key` / `ATTESTRA_API_KEY` or `--user`.
+
+`attestra scan <engagement> <asset> --tool <tool> [--profile baseline|active|intrusive]` ([[attestra/cli.py#cmd_scan]]) queues through [[attestra/services.py#request_scan]] — the same gate and audit path as the UI scan POST. Tool choices come from [[attestra/runner/scanners/registry.py#list_adapters]]. Prints `scan_run`, `status`, `requested_by`, and `refuse_reason` when refused.
 
 `attestra user set-password <username>` ([[attestra/cli.py#cmd_user_set_password]]) sets a local user's password. Without `--password` it asks twice at a hidden prompt and stops if the two do not match. [[attestra/users/service.py#set_password]] finds the user by name (exact, then case-insensitive), refuses SSO users, applies the same rules as [[attestra/users/service.py#validate_password]] (at least 12 characters, not the username, not too simple), revokes open reset links, and writes a `user.password_set` audit event with the CLI login name as actor. If the account is disabled, the command says it cannot sign in until an admin enables it.
 
@@ -64,11 +66,21 @@ Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/u
 
 Report lifecycle buttons post to `/engagements/{eid}/reports/{rid}/submit`, `/qa-approve`, `/qa-reject` and `/sign`; see [[reports#Workflow]]. Report links open `/reports/{rid}` in a new tab with the sign-off record on top ([[reports#Sign-off record]]).
 
+When [[attestra/config.py#AUTH_WEB_ENABLED]] is on, engagement pages link to authenticated coverage ([[attestra/web/ui.py#ui_auth_coverage]]) and accept profile creates via [[attestra/web/ui.py#ui_create_auth_profile]]; when off those routes return 404. See [[architecture#Authenticated website testing]].
+
+Staff SEBI CSCRF security-testing timeline is at `GET /engagements/{eid}/sebi-timeline` ([[attestra/web/sebi_routes.py#ui_sebi_timeline]], included from [[attestra/api.py]]); see [[compliance#SEBI security testing timeline]].
+
 ### Sites dashboard
 
 Tenant-wide list of every target with grade, open counts, last scan, and score trend.
 
 `/sites` ([[attestra/web/ui.py#sites_dashboard]], template `sites.html`) and `GET /api/sites` call [[attestra/services.py#list_tenant_sites]]. Each row shows name/URL, Observatory grade and score (or “not graded” when there is no finished scan), last scan date/status, open Critical/High/Medium/Low counts (one grouped query), and a trend arrow from the last two finished scans’ Observatory scores via [[attestra/history.py#observatory_score_for_scan]]. Cancelled and failed scans are excluded from grade and trend. Default sort is worst grade first ([[attestra/grade.py#grade_rank]]); name and last-scan sorts and a name filter are available. Rows link to the target page. Sidebar Work nav includes Sites.
+
+### Metrics dashboard
+
+Staff roll-up of open severity, SLA ageing, weekly inflow, and worst/best site grades.
+
+`GET /dashboard` ([[attestra/web/ui.py#metrics_dashboard]], template `dashboard.html`) calls [[attestra/dashboards.py#summary_for_principal]]. Keys: `open_by_severity`, `sla_ageing` (`ok` / `due_soon` within 7d / `overdue` via `Finding.sla_due`), `trend` (last N weeks opened plus current vs previous open), and `site_grades` (worst/best from [[attestra/services.py#list_tenant_sites]]). Read-only roles redirect to `/portal`. Nav links Dashboard; the page links to `/sites`.
 
 ### Finding comments
 
@@ -119,11 +131,35 @@ Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside
 
 [[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates.
 
+## Client remediation portal
+
+Client viewers comment, upload fix evidence, and request retests; auditors stay read-only; tenant branding on portal pages.
+
+[[attestra/web/portal.py]] serves `/portal`, `/portal/engagements/{eid}`, and `/portal/engagements/{eid}/findings/{fid}` (template `portal_finding.html`). `new` / `false_positive` stay hidden from `client_viewer`. Comment POST calls [[attestra/comments.py#add_comment]] (same `can_add_comment` gate). Evidence POST requires `portal.evidence`, always stores kind `client_fix` (never `screenshot`), caps size via [[attestra/web/portal.py#PORTAL_EVIDENCE_MAX_BYTES]], and uses [[attestra/services.py#add_evidence]]. Retest POST requires `portal.retest_request` and a note, then [[attestra/retest.py#request_retest]] (validated/fixed only) plus a `portal.retest_request` audit. Auditor GETs omit write forms; POSTs return 403. Cross-tenant access is 404 via [[attestra/services.py#get_engagement]]. Branding from [[attestra/web/portal.py#tenant_branding]] (tenant `ReportTemplate` logo/cover via [[attestra/library/templates.py#_pick]]); no logo keeps the Attestra shell default.
+
+## Public report verification
+
+Public HMAC URL to confirm a sealed report hash and signature without login.
+
+Route `GET /verify/reports/{rid}?sig=…` ([[attestra/verify/routes.py#public_verify_report]], mounted from [[attestra/api.py]]). [[attestra/verify/service.py#make_sig]] / [[attestra/verify/service.py#check_sig]] HMAC `{rid}:{sha256}` with the session secret; [[attestra/verify/service.py#public_view]] loads only signed reports, verifies hash+Ed25519/HMAC via [[attestra/reports/render.py#verify_report]], and returns kind, engagement name, sha256, signer, signed_at, validity flags, verify URL, and QR SVG — never findings, evidence, or grades. Template `verify_public.html` extends `_public.html` with no-cache / noindex headers.
+
+### QR
+
+Minimal dependency-free QR SVG for absolute verify URLs.
+
+[[attestra/verify/qr_svg.py#qr_svg]] encodes byte-mode ECC-M codes (versions 1–10) for typical verify links and renders dark modules as SVG rects (no `qrcode` package, no external QR image host).
+
 ## Share links
 
 Tokenized read-only links for one target grade or one scan, plus an SVG badge.
 
 [[attestra/share/service.py#create_share]] issues a long random token (`secrets`, at least 32 bytes) and stores only [[attestra/share/service.py#hash_token]] on [[attestra/share/models.py#ShareLink]]. Default expiry is 7 days (max 90). [[attestra/share/service.py#revoke_share]] and expiry both make the link invalid. Public page `/share/{token}` and badge `/share/{token}/badge.svg` ([[attestra/share/routes.py]]) show only target name, grade, score breakdown, and finding title/severity/status/tool (via [[attestra/comments.py#finding_fields_for_share]]); never evidence, comments, emails, tenant id, notes, API keys, or paths ([[attestra/share/service.py#FORBIDDEN_PUBLIC_KEYS]]). Invalid, expired, and revoked tokens return the same “link not valid” answer (410) with `noindex` and no-cache headers. Audits: `share.created`, `share.revoked`, and rate-limited `share.viewed`. Roles: `share.create` / `share.manage` for admin, lead, tester. UI list/revoke at `/shares`; API under `/api/v1/shares`. `GET /api/v1/shares` takes optional `tenant_id`; when omitted, [[attestra/share/routes.py#_default_share_tenant]] picks the caller’s home tenant, else the first allowed membership, else (unrestricted lead/admin) the first tenant by name.
+
+## Auth-web credential profiles
+
+Engagement-scoped test-account metadata for authenticated website testing; secrets stay in the credential store.
+
+[[attestra/auth_web/profiles.py#create_profile]] accepts `secret_value` once (or an existing `secret_ref`), calls [[attestra/credentials/store.py#put_secret]], and stores only the opaque ref on [[attestra/models.py#AuthCredentialProfile]]. [[attestra/auth_web/profiles.py#profile_dict]] returns metadata, `has_secret`, and a truncated ref — never plaintext. [[attestra/auth_web/profiles.py#validate_profile]] is low-impact: `none` → `valid`, form/header/cookie without a live check → `pending`, `sso_bootstrap` → `blocked_sso` (never bypass MFA/SSO). Rotate/revoke/delete audit and delete ciphertext via [[attestra/credentials/store.py#delete_secret]]. API router [[attestra/auth_web/routes.py]] prefix `/api/auth-web` (mounted by the parent app): list/create under `/engagements/{eid}/auth-profiles`, plus `validate` / `rotate` / `revoke` / DELETE on `/{pid}`. Object-level tenant checks use [[attestra/services.py#get_engagement]]; permissions `engagement.read` / `engagement.write`.
 
 ## Email alerts
 
@@ -159,4 +195,4 @@ Environment variables and on-disk data layout.
 
 Standalone AntHive-branded HTML describing implemented Attestra capabilities for the public website.
 
-`docs/marketing/attestra.html` is a self-contained product page (hero, problem, solution workflow, features, advantages, report deliverables, audiences, CTA). Claims track `README.md`, [[architecture]], [[reports]], and report templates under `attestra/reports/templates`. It is not served by the app; drop it into anthive.tech when integrating.
+`docs/marketing/attestra.html` is a self-contained product page (hero, problem, solution workflow, features, advantages, report deliverables, audiences, CTA). Claims track `README.md`, [[architecture]], [[reports]], and report templates under `attestra/reports/templates`. Readable copy uses "security testing" or "VA + PT" and never the legacy acronym (stored type key `vapt` is unchanged). It is not served by the app; drop it into anthive.tech when integrating.
