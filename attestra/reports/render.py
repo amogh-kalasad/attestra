@@ -48,6 +48,7 @@ KINDS = (
     "closure_letter",
     "attestation_letter",
     "retest",
+    "owasp_top10",
 )
 _env = Environment(
     loader=FileSystemLoader(Path(__file__).parent / "templates"),
@@ -348,6 +349,74 @@ def _scan_history(s: Session, engagement_id: int) -> list[ScanRun]:
     )
 
 
+def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
+    """WSTG/ASVS checklist (+ optional coverage) for reports; never includes secrets."""
+    # @lat: [[reports#Generation]]
+    # @lat: [[architecture#Authenticated website testing]]
+    from attestra.auth_web.checklists import ensure_checklist, list_checklist
+
+    rows = list_checklist(s, eng.id)
+    if not rows and config.AUTH_WEB_ENABLED:
+        rows = ensure_checklist(s, eng.id, eng.tenant_id)
+    if not rows:
+        return {"auth_checklist": [], "auth_coverage": None}
+
+    auth_checklist = [
+        {
+            "ref": item.ref,
+            "title": item.title,
+            "status": item.status,
+            "notes": item.notes or "",
+            "mapping_version": item.mapping_version or "",
+            "executed_at": item.executed_at.isoformat() if item.executed_at else None,
+        }
+        for item in rows
+    ]
+    try:
+        from attestra.auth_web.coverage import coverage_summary
+
+        auth_coverage = coverage_summary(s, eng.id)
+    except Exception:
+        auth_coverage = None
+    return {"auth_checklist": auth_checklist, "auth_coverage": auth_coverage}
+
+
+def _safe_to_host_context(eng: Engagement, open_critical_high: int) -> dict:
+    """Safe-to-Host letter fields for attestation; never claims compliance certification."""
+    # @lat: [[reports#Safe-to-Host attestation]]
+    auths = list(eng.authorizations or [])
+    envs: list[str] = []
+    for a in auths:
+        for env in a.environments or []:
+            if env and env not in envs:
+                envs.append(str(env))
+    if not envs:
+        for asset in eng.assets or []:
+            env = getattr(asset, "environment", None)
+            if env and env not in envs:
+                envs.append(str(env))
+    client = eng.tenant.name if eng.tenant else ""
+    return {
+        "safe_to_host": True,
+        "safe_to_host_client": client,
+        "safe_to_host_engagement": eng.name,
+        "safe_to_host_authorization_present": bool(auths),
+        "safe_to_host_environments": envs,
+        "safe_to_host_open_critical_high": int(open_critical_high),
+    }
+
+
+def _sebi_timeline_report_context(s: Session, eng: Engagement) -> dict:
+    """Optional SEBI CSCRF security-testing timeline summary for report context."""
+    # @lat: [[compliance#SEBI security testing timeline]]
+    try:
+        from attestra.compliance.sebi_timeline import build_timeline
+
+        return {"sebi_timeline": build_timeline(s, eng)}
+    except Exception:
+        return {"sebi_timeline": None}
+
+
 def _context(s: Session, engagement_id: int, framework: str = "", *, include_comments: bool = False, kind: str = "") -> dict:
     eng = services.get_engagement(s, engagement_id)
     findings = services.list_findings(s, engagement_id)
@@ -383,6 +452,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     branding = _branding(s, eng.tenant_id, kind or "technical")
     tmpl_cfg = load_template_config()
     embeds = _evidence_embeds(reportable)
+    open_critical_high = sum(1 for f in open_f if f.severity in ("critical", "high"))
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -411,7 +481,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "kev_open": [f for f in open_f if f.kev],
         "today": date.today(),
         "version_str": __version__,
-        "open_critical_high": sum(1 for f in open_f if f.severity in ("critical", "high")),
+        "open_critical_high": open_critical_high,
         "feed_catalog": _feed_catalog(),
         "include_comments": include_comments,
         "comments_by_finding": comments_by_finding,
@@ -437,6 +507,9 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "contact_email": eng.tenant.contact_email or "",
         "distribution": _distribution_list(eng),
         **_ai_context(engagement_id, eng.tenant_id),
+        **_auth_web_report_context(s, eng),
+        **_safe_to_host_context(eng, open_critical_high),
+        **_sebi_timeline_report_context(s, eng),
     }
 
 
@@ -507,6 +580,22 @@ def generate_report(
             f for f in ctx["findings"] if f.status in OPEN_STATUSES or f.status in ("validated", "fixed")
         ]
         ctx["findings_by_id"] = {f.id: f for f in ctx["findings"]}
+    if kind == "owasp_top10":
+        from attestra.compliance.owasp import (
+            get_llm_top10,
+            get_top10,
+            group_findings_by_llm_top10,
+            group_findings_by_top10,
+            should_show_llm_top10,
+        )
+
+        ctx["top10_catalog"] = get_top10()
+        ctx["top10_groups"] = group_findings_by_top10(ctx["findings"])
+        ctx["show_llm_top10"] = should_show_llm_top10(eng.frameworks, ctx["findings"])
+        ctx["llm_top10_catalog"] = get_llm_top10()
+        ctx["llm_top10_groups"] = (
+            group_findings_by_llm_top10(ctx["findings"]) if ctx["show_llm_top10"] else []
+        )
     # Generated files are always draft until the separate sign-off workflow completes.
     ctx.update(kind=kind, version=version, generated_by=actor, generated_at=utcnow(), is_draft=True)
     from attestra.library.templates import render_custom  # tenant template, else built-in

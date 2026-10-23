@@ -1,0 +1,41 @@
+# OWASP Application Security Verification Standard 4.0 (ASVS).
+# Public source: https://owasp.org/www-project-application-security-verification-standard/
+# Refs are chapter-level (V1–V14). Titles are our own short summaries, not the
+# official requirement text. VERIFY against the published ASVS before production use.
+framework: asvs_4_0
+name: OWASP ASVS 4.0
+pack: OWASP ASVS 4.0 chapter register
+controls:
+  vuln_identification: ["V1"]
+  patching: ["V14"]
+  secure_coding: ["V5", "V10", "V11"]
+  web_app_protection: ["V5", "V12", "V13", "V14"]
+  secure_config: ["V14"]
+  crypto_in_transit: ["V9"]
+  authentication: ["V2", "V3"]
+  access_control: ["V4"]
+  data_protection: ["V8", "V6"]
+  secrets_management: ["V2", "V6"]
+  logging: ["V7"]
+  supply_chain: ["V14", "V10"]
+  network_segmentation: ["V1"]
+  change_management: ["V1"]
+  internal_scanning: ["V14"]
+  penetration_testing: ["V1"]
+  remediation_retest: ["V1"]
+  testing_authorization: ["V1"]
+titles:
+  "V1": Architecture, design and threat modelling
+  "V2": Authentication
+  "V3": Session management
+  "V4": Access control
+  "V5": Validation, sanitisation and encoding
+  "V6": Stored cryptography
+  "V7": Error handling and logging
+  "V8": Data protection
+  "V9": Communications
+  "V10": Malicious code
+  "V11": Business logic
+  "V12": Files and resources
+  "V13": API and web service
+  "V14": Configuration

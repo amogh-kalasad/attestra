@@ -49,4 +49,7 @@
 <p class="meta">Control statuses are proposed from test evidence and confirmed by a named assessor. They indicate readiness for the
 controls the security testing evidence supports, not certification against the full framework. <b>No exceptions</b> means testing found
 nothing against the control; it does not by itself show the control is in place.</p>
+{% if auth_coverage and auth_coverage.checklist and auth_coverage.checklist.total %}
+<p class="meta">Authenticated security testing checklist: {{ auth_coverage.checklist.passed }} of {{ auth_coverage.checklist.total }} passed. Skipped and blocked items are not counted as passed.</p>
+{% endif %}
 {% endblock %}

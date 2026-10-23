@@ -209,6 +209,43 @@ def seed_defaults(s: Session, tenant_id: int, *, actor: str) -> int:
     return added
 
 
+def import_template_entries(
+    s: Session, tenant_id: int, data: bytes, *, fmt: str | None = None, actor: str
+) -> dict:
+    """Create library entries from an onboarding JSON/CSV template.
+
+    Existing titles for the tenant are skipped. Audited as ``library.import``.
+    """
+    from attestra.library.import_convert import convert_library_template
+
+    rows = convert_library_template(data, fmt)
+    existing = {
+        e.title
+        for e in s.scalars(select(LibraryEntry).where(LibraryEntry.tenant_id == tenant_id))
+    }
+    created: list[LibraryEntry] = []
+    skipped = 0
+    for data_row in rows:
+        if data_row["title"] in existing:
+            skipped += 1
+            continue
+        e = LibraryEntry(tenant_id=tenant_id, updated_by=actor, updated_at=utcnow(), **data_row)
+        s.add(e)
+        created.append(e)
+        existing.add(data_row["title"])
+    s.flush()
+    audit.record(
+        s, actor, "library.import", "tenant", tenant_id,
+        added=len(created), skipped=skipped, total=len(rows),
+    )
+    return {
+        "added": len(created),
+        "skipped": skipped,
+        "total": len(rows),
+        "entries": [entry_dict(e) for e in created],
+    }
+
+
 # ---------------------------------------------------------------- findings
 
 

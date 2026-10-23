@@ -28,6 +28,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "report.sign": frozenset({"admin", "lead"}),
     "report.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
     "retest.manage": frozenset({"admin", "lead", "tester"}),
+    # Portal remediation (P6-2): client_viewer may upload fix evidence / request retest
+    # without gaining finding.write. Comments stay on can_add_comment (finding.write | client_viewer).
+    "portal.evidence": frozenset({"admin", "lead", "tester", "client_viewer"}),
+    "portal.retest_request": frozenset({"admin", "lead", "tester", "client_viewer"}),
     "audit.read": frozenset({"admin", "lead", "auditor"}),
     "user.manage": frozenset({"admin"}),
     "webhook.manage": frozenset({"admin", "lead"}),

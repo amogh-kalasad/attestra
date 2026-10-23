@@ -4,7 +4,7 @@ Off by default. Runs only when ``ATTESTRA_GSB_ENABLED`` is on and
 ``ATTESTRA_GSB_API_KEY`` is set. The API key is never logged, saved, or
 returned in findings, notes, checks, or the report body.
 """
-# @lat: [[runner#Scanner runs#webcheck (passive headers and DNS)#Safe Browsing]]
+# @lat: [[runner#Runner plane#Scanner runs#webcheck (passive headers and DNS)#Safe Browsing]]
 
 from __future__ import annotations
 

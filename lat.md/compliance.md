@@ -11,8 +11,15 @@ How framework and CWE YAML become the in-memory Library.
 - `attestra/compliance/data/controls.yaml` — frameworks, objectives, evidence expectations, control titles
 - `attestra/compliance/data/cwe_map.yaml` — CWE → objectives with `strength`/`rationale` (+ defaults)
 - `attestra/compliance/data/owasp.yaml` — CWE → OWASP Top 10 / ASVS / WSTG (via [[attestra/compliance/owasp.py#map_finding_to_owasp]])
+- `attestra/compliance/data/packs/*.yaml` — optional framework packs merged by [[attestra/compliance/engine.py#_merge_pack]] (ISO 42001, CERT-In, NIST CSF 2, RBI, SEBI, DORA, ASVS 4.0)
 
 Cached as [[attestra/compliance/engine.py#Library]] with [[attestra/compliance/engine.py#CweMapping]] entries.
+
+## ASVS 4.0 pack
+
+Chapter-level OWASP ASVS 4.0 register loaded as framework key `asvs_4_0`.
+
+`attestra/compliance/data/packs/asvs_4_0.yaml` maps hub objectives to V1–V14 chapter refs with short titles. It loads like other packs via [[attestra/compliance/engine.py#load_library]] and supports [[attestra/services.py#compliance]] / compliance report generation.
 
 ## Finding to objectives
 
@@ -72,7 +79,13 @@ Meaning of each status string used in proposals and confirmations.
 
 CWE-driven OWASP Top 10, ASVS, and WSTG labels on findings.
 
-[[attestra/compliance/owasp.py#map_finding_to_owasp]] reads `attestra/compliance/data/owasp.yaml` and populates finding OWASP columns at import/enrich time.
+[[attestra/compliance/owasp.py#map_finding_to_owasp]] reads `attestra/compliance/data/owasp.yaml` and populates finding OWASP columns at import/enrich time. [[attestra/compliance/owasp.py#get_top10]] returns Top 10 2021 ids; [[attestra/compliance/owasp.py#group_findings_by_top10]] and [[attestra/compliance/owasp.py#should_show_llm_top10]] feed the `owasp_top10` report view (web categories always; optional LLM Top 10 2025 when ISO 42001 / AI evidence is present).
+
+## SEBI security testing timeline
+
+Engagement milestones mapped to SEBI CSCRF periodic security-testing expectations.
+
+[[attestra/compliance/sebi_timeline.py#build_timeline]] derives planning, authorization recorded, testing window, scans completed, report signed, and retest from window dates, authorizations, scan/import runs, signed reports, and retests. Statuses are `pending`, `in_progress`, `done`, `overdue`, or `n/a`. Optional notes/status overrides persist under `DATA_DIR/tenants/{tid}/sebi_timeline/{eid}.json` ([[attestra/compliance/sebi_timeline.py#save_overrides]]) with no Alembic migration. Staff UI: `GET /engagements/{eid}/sebi-timeline` ([[attestra/web/sebi_routes.py#ui_sebi_timeline]]). Report context may include the timeline via [[attestra/reports/render.py#_sebi_timeline_report_context]].
 
 ## Shared audit sampling
 

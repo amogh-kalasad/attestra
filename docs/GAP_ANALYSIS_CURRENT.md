@@ -3,7 +3,7 @@
 **Date:** 2026-10-15  
 **Spec:** [`docs/IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) (Phases 0–8)  
 **Codebase:** `attestra` v1.0.0 (local working tree)  
-**Validation (15 Oct 2026, E:\attestra):** `pytest -q` -> **478 passed, 26 skipped, 0 failed**; Postgres 16 RLS test (`tests/test_postgres_rls.py` with `ATTESTRA_TEST_POSTGRES_URL`) **7 passed**; `ruff check` clean  
+**Validation (15 Oct 2026, local working tree):** `pytest -q` -> **478 passed, 26 skipped, 0 failed**; Postgres 16 RLS test (`tests/test_postgres_rls.py` with `ATTESTRA_TEST_POSTGRES_URL`) **7 passed**; `ruff check` clean  
 
 This document supersedes the *status* of the older architecture-oriented [`GAP_ANALYSIS.md`](GAP_ANALYSIS.md) for **implementation progress**. Keep that file for historical comparison against the v2 architecture narrative; use **this file** for “what is done / what is pending” against the phased implementation guide.
 

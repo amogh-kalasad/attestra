@@ -60,7 +60,7 @@ A run succeeds only when the report file exists and the importer can read it. A 
 
 ZAP runs only in Docker. The report folder is mounted at `/zap/wrk`, the only place the ZAP scripts write their JSON report.
 
-[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside.
+[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside. Authenticated ZAP contexts from credential profiles are built by [[attestra/auth_web/zap_auth.py]] without putting secrets on argv.
 
 ### webcheck (passive headers and DNS)
 
@@ -114,3 +114,9 @@ Passive Google Safe Browsing v4 reputation lookup for in-scope target URLs.
 
 [[attestra/runner/scanners/testssl.py#_flags]] for `profile=baseline` runs config checks only (`-p -S -P -f -H`) and never passes `-U` / `--vulnerable`. Non-baseline keeps the default full run (includes vulnerability checks).
 
+
+## ZAP authentication
+
+OWASP ZAP scanner adapter and authenticated context wiring for Docker-based baseline/full scans.
+
+See [[runner#Scanner runs#ZAP]] for the adapter report mount and scope quarantine. When [[attestra/config.py#AUTH_WEB_ENABLED]] is on, [[attestra/auth_web/zap_auth.py#build_zap_auth_context]] / [[attestra/auth_web/zap_auth.py#write_zap_auth_files]] prepare JSON/YAML plus a ``.context`` file under the scanner ``out_dir`` (mounted at ``/zap/wrk``). [[attestra/auth_web/zap_auth.py#load_profile_secret]] reads secrets only via [[attestra/credentials/store.py#get_secret]] with engagement tenant checks. Supported methods: form (``formBasedAuthentication``), header (session headers), cookie (httpSessions); ``sso_bootstrap`` is blocked and never bypasses MFA. [[attestra/runner/scanners/zap.py#ZapAdapter#build_argv]] accepts optional ``auth_context_path`` / ``auth_opts`` and wires ``-n`` / ``-U`` only for mounted ``.context`` files — never passwords via ``-z`` or argv logged into ScanRun.extra.

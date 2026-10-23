@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 from attestra.models import Finding
 from attestra.proof.pair import HttpPair, pair_from_raw
 from attestra.proof.store import attach_http_pair, has_http_pair
+
+log = logging.getLogger(__name__)
 
 TOOLS = ("zap", "nuclei", "burp")
 
@@ -79,25 +82,39 @@ def _base(url: str) -> str:
 
 
 def capture_from_import(s: Session, engagement_id: int, tool: str, data: bytes, *, actor: str) -> int:
-    """Attach one redacted pair per matching finding that has none yet. Returns count attached."""
+    """Attach one redacted pair per matching finding that has none yet. Returns count attached.
+
+    After HTTP pairs, also attempts screenshots for those findings when a
+    [[attestra.proof.screenshots.register_screenshot_capture]] callable is set
+    (default None keeps imports network-free). Screenshot failures never raise.
+    """
     if tool not in TOOLS:
         return 0
-    pairs = extract_pairs(tool, data)
-    if not pairs:
-        return 0
-    findings = [f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id)) if tool in (f.tools or [])]
+    findings = [
+        f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id)) if tool in (f.tools or [])
+    ]
     attached = 0
-    done: set[int] = set()
-    for pair in pairs:
-        key = _base(pair.url)
-        for f in findings:
-            if f.id in done or not key or _base(f.location.split(" [param:", 1)[0]) != key:
-                continue
-            if has_http_pair(s, f.id):
+    pairs = extract_pairs(tool, data)
+    if pairs:
+        done: set[int] = set()
+        for pair in pairs:
+            key = _base(pair.url)
+            for f in findings:
+                if f.id in done or not key or _base(f.location.split(" [param:", 1)[0]) != key:
+                    continue
+                if has_http_pair(s, f.id):
+                    done.add(f.id)
+                    continue
+                attach_http_pair(s, f.id, pair, actor=actor, note=f"auto-captured from {tool}")
                 done.add(f.id)
-                continue
-            attach_http_pair(s, f.id, pair, actor=actor, note=f"auto-captured from {tool}")
-            done.add(f.id)
-            attached += 1
-            break
+                attached += 1
+                break
+    # Optional screenshots: only when a capture_fn is registered/injected.
+    try:
+        from attestra.proof.screenshots import capture_screenshots_for_findings, registered_screenshot_capture
+
+        if registered_screenshot_capture() is not None and findings:
+            capture_screenshots_for_findings(s, findings, actor=actor)
+    except Exception:  # noqa: BLE001 — never roll back http_pair attaches
+        log.exception("screenshot auto-capture failed after %s import", tool)
     return attached

@@ -113,7 +113,7 @@ th { color: #5b6170; font-weight: bold; font-size: 8pt; }
 pre { font-family: AttestraMono, Courier; font-size: 7.5pt; }
 .note { background-color: #f5f7fb; border-left: 2pt solid #2457d6; padding: 6pt 8pt; font-size: 9pt; }
 .cover { padding-top: 6cm; }
-.toc-title { font-size: 14pt; font-weight: bold; margin-bottom: 8pt; }
+.toc-title { font-size: 14pt; font-weight: bold; margin-bottom: 8pt; -pdf-outline: false; }
 .cover h1 { font-size: 26pt; }
 .cover img { height: 2cm; }
 .evidence-img { width: 15cm; border: 0.5pt solid #e3e5ea; margin: 4pt 0; }
@@ -499,14 +499,18 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
     letter = kind in LETTER_KINDS
     extras = []
     if not letter:
-        # Contents with real page numbers replaces the HTML link list.
+        # Replace the HTML link list with a plain Contents heading in normal flow (extractable).
         out = re.sub(r'(?is)<nav class="toc"[^>]*>.*?</nav>', "", out)
+        long_enough = len(re.findall(r"(?i)<h2", out)) >= 3
         if for_engine == "xhtml2pdf":
             extras.append(
-                '<pdf:nextpage /><p class="toc-title">Contents</p><div><pdf:toc /></div><pdf:nextpage />'
-                if len(re.findall(r"(?i)<h2", out)) >= 3
+                '<pdf:nextpage /><h2 class="toc-title">Contents</h2><div><pdf:toc /></div><pdf:nextpage />'
+                if long_enough
                 else "<pdf:nextpage />"  # short reports: cover, then straight to the content
             )
+        elif for_engine in ("weasyprint", "minimal") and long_enough:
+            # Keep the word "Contents" visible without pdf:toc (DOCX builds its own TOC).
+            extras.append('<h2 class="toc-title">Contents</h2>')
         if 'id="risk-legend"' not in out:
             extras.append(_legend_html())
     if extras:
@@ -543,6 +547,9 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
             )
             out = re.sub(r"(?is)(<body[^>]*>)", r'\1<div class="pdf-draft">DRAFT</div>', out, count=1)
         out = out.replace("</head>", f"<style>{extra_css}</style></head>", 1)
+    elif for_engine == "minimal" and draft:
+        # Plain-text fallback PDF: keep DRAFT as extractable body text (no CSS transform).
+        out = re.sub(r"(?is)(<body[^>]*>)", r"\1<p>DRAFT</p>", out, count=1)
     return out
 
 

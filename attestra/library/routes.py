@@ -144,6 +144,30 @@ def api_seed(tenant_id: int | None = None, principal: Principal = Depends(_requi
     return _run(fn)
 
 
+@api_router.post("/library/import")
+async def api_import(
+    file: UploadFile = File(...),
+    fmt: str | None = Form(None),
+    tenant_id: int | None = None,
+    principal: Principal = Depends(_require(PERM_LIBRARY)),
+):
+    """Import onboarding writeups from a JSON or CSV template."""
+    data = await file.read()
+    name = (file.filename or "").lower()
+    kind = (fmt or "").strip().lower() or None
+    if not kind:
+        if name.endswith(".json"):
+            kind = "json"
+        elif name.endswith(".csv"):
+            kind = "csv"
+
+    def fn(s):
+        tid = resolve_tenant(s, principal, tenant_id)
+        return lib.import_template_entries(s, tid, data, fmt=kind, actor=principal.actor)
+
+    return _run(fn)
+
+
 @api_router.get("/library/{entry_id}")
 def api_get(entry_id: int, principal: Principal = Depends(_require(PERM_LIBRARY))):
     return _run(lambda s: lib.entry_dict(lib.get_entry(s, entry_id, services.tenant_ids_for(s, principal))))

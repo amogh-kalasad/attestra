@@ -1,12 +1,19 @@
 {% extends "_layout.html" %}
 {% block title %}{{ e.name }} &middot; Client portal &middot; Attestra{% endblock %}
 {% block main %}
+{% if branding and branding.has_logo %}
+<div class="portal-brand" style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);margin:0">
+  <img src="{{ branding.logo }}" alt="{{ branding.cover_title or e.tenant.name }} logo" style="max-height:40px;max-width:180px;object-fit:contain">
+  {% if branding.cover_title %}<span style="font-weight:600;font-size:15px;color:var(--ink)">{{ branding.cover_title }}</span>{% endif %}
+</div>
+{% endif %}
+
 <p class="back-link"><a href="/portal">&larr; All engagements</a>{% if role == "auditor" %} &middot; <a href="/auditor/engagements/{{ e.id }}">Audit trail</a>{% endif %}</p>
 
 <div class="page-head">
   <div>
     <h1>{{ e.name }}</h1>
-    <p class="lede">{{ e.tenant.name }} &middot; {{ e.type|type_label }} &middot; read-only view</p>
+    <p class="lede">{{ e.tenant.name }} &middot; {{ e.type|type_label }}{% if role == "auditor" %} &middot; read-only view{% elif can_write %} &middot; comment, upload fix evidence, request retest{% else %} &middot; read-only view{% endif %}</p>
   </div>
 </div>
 
@@ -29,9 +36,13 @@
     <tbody>
     {% for f in findings %}
     <tr>
-      <td>{{ f.id }}</td><td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
-      <td>{{ f.title }}</td><td class="mono">{{ f.location }}</td><td><span class="st">{{ f.status|label }}</span></td>
-      <td>{{ f.sla_due or "-" }}</td><td class="mono">{{ f.ticket_ref or "-" }}</td>
+      <td><a href="/portal/engagements/{{ e.id }}/findings/{{ f.id }}">{{ f.id }}</a></td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span></td>
+      <td><a href="/portal/engagements/{{ e.id }}/findings/{{ f.id }}">{{ f.title }}</a></td>
+      <td class="mono">{{ f.location }}</td>
+      <td><span class="st">{{ f.status|label }}</span></td>
+      <td>{{ f.sla_due or "-" }}</td>
+      <td class="mono">{{ f.ticket_ref or "-" }}</td>
     </tr>
     {% else %}<tr><td colspan="7"><div class="empty">No findings to show yet. They appear here once the test team has triaged them.</div></td></tr>{% endfor %}
     </tbody>

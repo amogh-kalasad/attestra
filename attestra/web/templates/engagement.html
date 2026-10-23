@@ -27,6 +27,7 @@
   <a href="/engagements/{{ e.id }}" aria-current="page">Overview</a>
   {% if has_pci %}<a href="/engagements/{{ e.id }}/pci">PCI DSS</a>{% endif %}
   {% if has_iso %}<a href="/engagements/{{ e.id }}/iso">ISO 27001</a>{% endif %}
+  {% if auth_web_enabled %}<a href="/engagements/{{ e.id }}/auth-coverage">Authenticated coverage</a>{% endif %}
   {% if can(prole, "report.generate") %}<a href="/engagements/{{ e.id }}/ai-drafts"{% if not ai_enabled %} title="AI drafts are switched off"{% endif %}>AI drafts{% if not ai_enabled %} <span class="chip">off</span>{% endif %}</a>{% endif %}
 </nav>
 

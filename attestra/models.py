@@ -886,3 +886,118 @@ class EmailAlertSent(Base):
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[int] = mapped_column(Integer)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- Authenticated web testing (Phase 6)
+
+
+AUTH_METHODS = ("none", "form", "header", "cookie", "sso_bootstrap")
+AUTH_PROFILE_STATUSES = (
+    "pending",
+    "valid",
+    "invalid",
+    "revoked",
+    "blocked_mfa",
+    "blocked_sso",
+)
+ROUTE_VISIT_STATUSES = ("discovered", "visited", "skipped", "failed", "blocked")
+CHECKLIST_STATUSES = ("not_started", "passed", "failed", "not_applicable", "blocked", "not_tested")
+ELEMENT_TEST_STATUSES = ("not_tested", "passed", "failed", "skipped", "blocked")
+
+
+class AuthCredentialProfile(Base):
+    """Test-account metadata for authenticated website testing. Secrets live only in secret_ref."""
+
+    __tablename__ = "auth_credential_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"))
+    label: Mapped[str] = mapped_column(String(200), default="")
+    role_name: Mapped[str] = mapped_column(String(100), default="")  # viewer | user | manager | admin…
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    method: Mapped[str] = mapped_column(String(30), default="form")  # AUTH_METHODS
+    login_url: Mapped[str] = mapped_column(String(1000), default="")
+    username_selector: Mapped[str] = mapped_column(String(300), default="")
+    password_selector: Mapped[str] = mapped_column(String(300), default="")
+    submit_selector: Mapped[str] = mapped_column(String(300), default="")
+    success_url_contains: Mapped[str] = mapped_column(String(500), default="")
+    # Opaque reference into credentials store — never the secret value.
+    secret_ref: Mapped[str] = mapped_column(String(300), default="")
+    # Non-secret config (header names, cookie names, field map) — values that are secrets use secret_ref.
+    config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_validation_note: Mapped[str] = mapped_column(String(500), default="")  # redacted reason only
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    engagement: Mapped[Engagement] = relationship()
+    asset: Mapped[Asset | None] = relationship()
+
+
+class AuthRouteInventory(Base):
+    """Discovered/visited route coverage for an engagement target and optional auth role."""
+
+    __tablename__ = "auth_route_inventory"
+    __table_args__ = (UniqueConstraint("engagement_id", "asset_id", "url", "role_name", "http_method"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"))
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"))
+    url: Mapped[str] = mapped_column(String(2000))
+    http_method: Mapped[str] = mapped_column(String(10), default="GET")
+    title: Mapped[str] = mapped_column(String(300), default="")
+    role_name: Mapped[str] = mapped_column(String(100), default="")
+    status: Mapped[str] = mapped_column(String(30), default="discovered")
+    skip_reason: Mapped[str] = mapped_column(String(500), default="")
+    discovered_from: Mapped[str] = mapped_column(String(2000), default="")
+    authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
+    depth: Mapped[int] = mapped_column(Integer, default=0)
+    visited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthElementInventory(Base):
+    """Interactive UI elements discovered on a route for safe form/control testing."""
+
+    __tablename__ = "auth_element_inventory"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    route_id: Mapped[int] = mapped_column(ForeignKey("auth_route_inventory.id"))
+    selector: Mapped[str] = mapped_column(String(500), default="")
+    accessible_name: Mapped[str] = mapped_column(String(300), default="")
+    element_type: Mapped[str] = mapped_column(String(50), default="")  # link|button|textbox|…
+    input_type: Mapped[str] = mapped_column(String(50), default="")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    test_status: Mapped[str] = mapped_column(String(30), default="not_tested")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthChecklistItem(Base):
+    """Engagement checklist row mapped to WSTG/ASVS (or custom) with explicit status."""
+
+    __tablename__ = "auth_checklist_items"
+    __table_args__ = (UniqueConstraint("engagement_id", "ref"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    ref: Mapped[str] = mapped_column(String(80))  # e.g. WSTG-ATHN-01 or ASVS-2.1.1
+    title: Mapped[str] = mapped_column(String(300), default="")
+    mapping_version: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(30), default="not_started")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
+    finding_ids: Mapped[list] = mapped_column(JSON, default=list)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

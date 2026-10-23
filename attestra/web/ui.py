@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, audit, db, services
+from attestra import __version__, ai_narratives, audit, config, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -326,6 +326,22 @@ def sites_dashboard(request: Request):
         return _render(request, "sites.html", {"rows": rows, "sort": sort, "q": q})
 
 
+@router.get("/dashboard", response_class=HTMLResponse)
+def metrics_dashboard(request: Request):
+    """Open findings by severity, SLA ageing, trend, and per-site grades."""
+    # @lat: [[interfaces#Web dashboard#Metrics dashboard]]
+    from attestra import dashboards
+
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if principal.role in READ_ONLY_ROLES:
+        return RedirectResponse("/portal", status_code=303)
+    with db.session() as s:
+        summary = dashboards.summary_for_principal(s, principal)
+        return _render(request, "dashboard.html", {"summary": summary})
+
+
 @router.get("/tuning/false-positives", response_class=HTMLResponse)
 def false_positive_rates(request: Request):
     """Phase 7.4: share of each tool's findings marked false_positive, within the user's tenants."""
@@ -548,6 +564,7 @@ def _engagement_ctx(
         "has_pci": _has_pci(frameworks),
         "has_iso": _has_iso(frameworks),
         "ai_enabled": ai_narratives.is_enabled(tenant_id=e.tenant_id),
+        "auth_web_enabled": config.AUTH_WEB_ENABLED,
         "e": e,
         "type_label": engagement_type_label(e.type),
         "findings": findings,
@@ -1327,6 +1344,112 @@ def ui_iso_sample(
         request, f"/engagements/{eid}/iso", "#sampling", "Audit sample drawn.",
         services.draw_audit_sample, eid, population=population, sample_size=size, seed=seed,
     )
+
+
+# ---------------------------------------------------------------- authenticated website testing (feature-flagged)
+
+
+@router.get("/engagements/{eid}/auth-coverage", response_class=HTMLResponse)
+def ui_auth_coverage(request: Request, eid: int):
+    """Route inventory, WSTG/ASVS checklist, and auth profiles for security testing coverage."""
+    from attestra.auth_web import checklists, coverage
+    from attestra.auth_web import profiles as auth_profiles
+    from attestra.models import AuthRouteInventory
+
+    principal, redirect = _staff_page(request)
+    if redirect:
+        return redirect
+    if not config.AUTH_WEB_ENABLED:
+        raise HTTPException(404, "Authenticated website testing is not enabled on this server.")
+    if not has_permission(principal.role, "engagement.read"):
+        raise HTTPException(403, "permission denied: engagement.read")
+    with db.session() as s:
+        try:
+            eng = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "engagement not found")
+        checklists.ensure_checklist(s, eng.id, eng.tenant_id)
+        checklist = checklists.list_checklist(s, eng.id)
+        summary = coverage.coverage_summary(s, eng.id)
+        profile_rows = auth_profiles.list_profiles(s, eng.id, principal)
+        routes = list(
+            s.scalars(
+                select(AuthRouteInventory)
+                .where(
+                    AuthRouteInventory.engagement_id == eng.id,
+                    AuthRouteInventory.tenant_id == eng.tenant_id,
+                )
+                .order_by(AuthRouteInventory.id)
+            ).all()
+        )
+        return _render(
+            request,
+            "engagement_auth_coverage.html",
+            {
+                "e": eng,
+                "eng": eng,
+                "coverage": summary,
+                "checklist": checklist,
+                "routes": routes,
+                "profiles": profile_rows,
+                "auth_profile_action": f"/engagements/{eid}/auth-profiles",
+            },
+        )
+
+
+@router.post("/engagements/{eid}/auth-profiles")
+def ui_create_auth_profile(
+    request: Request,
+    eid: int,
+    label: str = Form(...),
+    role_name: str = Form(""),
+    purpose: str = Form(""),
+    method: str = Form("form"),
+    login_url: str = Form(""),
+    username_selector: str = Form(""),
+    password_selector: str = Form(""),
+    submit_selector: str = Form(""),
+    success_url_contains: str = Form(""),
+    secret: str = Form(""),
+):
+    """Create an auth credential profile; secret posts once and is never echoed in redirects."""
+    from attestra.auth_web import profiles as auth_profiles
+
+    url = f"/engagements/{eid}/auth-coverage"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not config.AUTH_WEB_ENABLED:
+        raise HTTPException(404, "Authenticated website testing is not enabled on this server.")
+    if not has_permission(principal.role, "engagement.write"):
+        return _back(url, error="Your role can't manage auth profiles.", anchor="#auth-profiles")
+    secret_value = secret if secret else None
+    if (method or "").strip().lower() == "none":
+        secret_value = None
+    try:
+        with db.session() as s:
+            auth_profiles.create_profile(
+                s,
+                eid,
+                label=label,
+                role_name=role_name,
+                purpose=purpose,
+                method=method,
+                login_url=login_url,
+                username_selector=username_selector,
+                password_selector=password_selector,
+                submit_selector=submit_selector,
+                success_url_contains=success_url_contains,
+                secret_value=secret_value,
+                actor=principal.actor,
+                principal=principal,
+            )
+    except LookupError:
+        raise HTTPException(404, "engagement not found")
+    except services.ServiceError as e:
+        # Never put secret material in the flash — ServiceError messages are safe metadata only.
+        return _back(url, error=str(e), anchor="#auth-profiles")
+    return _back(url, msg="Auth profile saved. Secret stored as a reference only.", anchor="#profiles")
 
 
 # ---------------------------------------------------------------- UI audit fixes: edit, finding status, reports

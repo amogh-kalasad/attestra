@@ -167,18 +167,20 @@ def to_docx(report: Report, html_path: Path | None = None) -> tuple[Path, str]:
 
 
 def to_pdf(report: Report, html_path: Path | None = None) -> tuple[Path, str]:
-    from attestra.reports.pdf import render_pdf
+    from attestra.reports.pdf import prepare_html, render_pdf
 
     src = Path(html_path or report.path)
     html = src.read_text(encoding="utf-8", errors="replace")
+    kind, draft = report.kind or "", (report.status or "draft") != "signed"
     data, _engine = render_pdf(
         html,
-        kind=report.kind or "",
-        draft=(report.status or "draft") != "signed",
+        kind=kind,
+        draft=draft,
         base_url=str(src.parent),
     )
     if not data:
-        data = _minimal_pdf(_html_to_text(html))
+        # Same display normalisation / legend / disclaimer as the styled engines, without pdf: tags.
+        data = _minimal_pdf(_html_to_text(prepare_html(html, kind=kind, draft=draft, for_engine="minimal")))
     sha = hashlib.sha256(data).hexdigest()
     out = src.with_suffix(".pdf")
     _atomic_write_readonly(out, data)

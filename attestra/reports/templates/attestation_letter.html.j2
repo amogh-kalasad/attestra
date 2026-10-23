@@ -21,5 +21,29 @@ technical report under dual-control approval.</p>
   <tr><td>Open critical/high (count only)</td><td>{{ open_critical_high }}</td></tr>
 </table>
 
+{% if safe_to_host %}
+<section id="safe-to-host" class="safe-to-host">
+  <h2>Safe-to-Host statement</h2>
+  <p>This Safe-to-Host style statement summarizes the security testing posture for
+  <strong>{{ safe_to_host_client or tenant }}</strong> under engagement
+  <strong>{{ safe_to_host_engagement or eng.name }}</strong>. It is intended to
+  support the client's own hosting or go-live decision. It is
+  <strong>not</strong> a compliance certification, audit opinion, or guarantee
+  that systems are free of risk.</p>
+  <table>
+    <tr><th>Item</th><th>Value</th></tr>
+    <tr><td>Client</td><td>{{ safe_to_host_client or tenant }}</td></tr>
+    <tr><td>Engagement</td><td>{{ safe_to_host_engagement or eng.name }}</td></tr>
+    <tr><td>Signed authorization on file</td><td>{{ "Yes" if safe_to_host_authorization_present else "No" }}</td></tr>
+    <tr><td>Approved environments</td><td>{{ (safe_to_host_environments or [])|join(", ") or "n/a" }}</td></tr>
+    <tr><td>Open critical/high findings (count only)</td><td>{{ safe_to_host_open_critical_high if safe_to_host_open_critical_high is defined else open_critical_high }}</td></tr>
+  </table>
+  <p>Any decision to host, promote, or go live remains solely with the client.
+  Absence of open critical or high findings does not prove that controls are
+  effective. This letter records security testing under the stated authorization
+  and scope; it does not certify compliance with any regulatory framework.</p>
+</section>
+{% endif %}
+
 <p>Prepared by {{ generated_by }} on {{ generated_at }}.</p>
 {% endblock %}

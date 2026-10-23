@@ -728,6 +728,7 @@
       <nav class="topnav-links" aria-label="Main">
         {% if staff %}
         <a href="/" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}>Engagements</a>
+        <a href="/dashboard" {{ 'aria-current=page' if path == '/dashboard' or path.startswith('/dashboard') }}>Dashboard</a>
         <a href="/sites" {{ 'aria-current=page' if path == '/sites' or path.startswith('/sites') }}>Sites</a>
         <a href="/compliance/pci-calendar" {{ 'aria-current=page' if path == '/compliance/pci-calendar' }}>PCI calendar</a>
         {% if can(role, "share.manage") %}

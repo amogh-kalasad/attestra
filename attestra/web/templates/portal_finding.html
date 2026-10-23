@@ -1,0 +1,137 @@
+{% extends "_layout.html" %}
+{% block title %}F-{{ f.id }} {{ f.title }} &middot; Client portal &middot; Attestra{% endblock %}
+{% block main %}
+{% if branding and branding.has_logo %}
+<div class="portal-brand" style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);margin:0">
+  <img src="{{ branding.logo }}" alt="{{ branding.cover_title or e.tenant.name }} logo" style="max-height:40px;max-width:180px;object-fit:contain">
+  {% if branding.cover_title %}<span style="font-weight:600;font-size:15px;color:var(--ink)">{{ branding.cover_title }}</span>{% endif %}
+</div>
+{% endif %}
+
+<nav class="breadcrumb back-link" aria-label="Breadcrumb">
+  <a href="/portal">Portal</a><span aria-hidden="true">/</span>
+  <a href="/portal/engagements/{{ e.id }}">&larr; {{ e.name }}</a><span aria-hidden="true">/</span>
+  <span class="current">F-{{ f.id }}</span>
+</nav>
+
+<div class="page-head">
+  <div>
+    <div class="meta-row"><span class="id-tag">F-{{ f.id }}</span><span class="sep">&middot;</span><span>{{ e.tenant.name }}</span></div>
+    <div class="title-row"><span class="pill {{ f.severity }}">{{ f.severity }}</span><h1>F-{{ f.id }}: {{ f.title }}</h1></div>
+    <p class="lede">
+      <span class="st">{{ f.status|label }}</span>
+      {% if f.location %} &middot; <span class="mono">{{ f.location }}</span>{% endif %}
+      {% if f.sla_due %} &middot; Fix by {{ f.sla_due }}{% endif %}
+    </p>
+  </div>
+</div>
+
+{% if f.description %}
+<div class="card">
+  <h2>Description</h2>
+  <p class="prose">{{ f.description }}</p>
+</div>
+{% endif %}
+
+{% if f.recommendation %}
+<div class="card">
+  <h2>Recommendation</h2>
+  <p class="prose">{{ f.recommendation }}</p>
+</div>
+{% endif %}
+
+<div class="card" id="evidence">
+  <h2>Evidence <span class="meta" style="font-weight:400">{{ f.evidence|length }} item{{ "s" if f.evidence|length != 1 }}</span></h2>
+  {% if f.evidence %}
+  <ul style="list-style:none;padding:0;margin:0 0 16px;display:flex;flex-direction:column;gap:10px">
+    {% for ev in f.evidence %}
+    <li style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid var(--rule);border-radius:var(--radius-xs);background:var(--field)">
+      <span class="chip">{{ ev.kind|label }}</span>
+      <div style="flex:1;min-width:0">
+        <div class="mono" style="font-size:13px">{{ ev.filename }}</div>
+        {% if ev.note %}<p class="meta" style="margin:4px 0 0">{{ ev.note }}</p>{% endif %}
+        <p class="meta" style="margin:4px 0 0">Uploaded by {{ ev.captured_by }}{% if ev.captured_at %} &middot; {{ ev.captured_at|dt }}{% endif %}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">No evidence yet.</p>
+  {% endif %}
+  {% if can_upload_evidence %}
+  <form method="post" action="/portal/engagements/{{ e.id }}/findings/{{ f.id }}/evidence" enctype="multipart/form-data">
+    <div class="fields">
+      <div>
+        <label for="ev_file">Upload fix evidence</label>
+        <input id="ev_file" type="file" name="file" required>
+        <p class="hint">Stored as client fix evidence (not scanner proof). Max {{ (evidence_max_bytes / (1024 * 1024))|int }} MB.</p>
+      </div>
+      <div style="grid-column:1/-1">
+        <label for="ev_note">Note (optional)</label>
+        <textarea id="ev_note" name="note" rows="2" maxlength="2000" placeholder="What this file shows"></textarea>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Upload evidence</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" id="comments">
+  <h2>Comments</h2>
+  <p class="meta">Plain text only.</p>
+  {% if comments %}
+  <ul class="comment-list" style="list-style:none;padding:0;margin:0 0 16px">
+    {% for c in comments %}
+    <li class="comment">
+      <span class="avatar" aria-hidden="true">{{ (c.author_name or "?")[:2]|upper }}</span>
+      <div style="flex:1;min-width:0">
+        <div><b>{{ c.author_name }}</b> <span class="meta">&middot; {{ c.created_at|dt }}</span></div>
+        <p style="white-space:pre-wrap;margin:6px 0 0;color:var(--ink-2)">{{ c.body }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">No comments yet.</p>
+  {% endif %}
+  {% if can_add_comment %}
+  <form method="post" action="/portal/engagements/{{ e.id }}/findings/{{ f.id }}/comments">
+    <div class="fields">
+      <div style="grid-column:1/-1">
+        <label for="comment_body">Add a comment</label>
+        <textarea id="comment_body" name="body" rows="3" maxlength="5000" required placeholder="Plain text, up to 5000 characters"></textarea>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Post comment</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" id="retest">
+  <h2>Retest</h2>
+  {% if open_retests %}
+  <p class="meta" style="margin-bottom:12px">Open retest request{{ "s" if open_retests|length != 1 }}:</p>
+  <ul style="margin:0 0 16px;padding-left:18px">
+    {% for rt in open_retests %}
+    <li class="meta">#{{ rt.id }} requested by {{ rt.requested_by }}{% if rt.note %} — {{ rt.note }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">No open retest requests.</p>
+  {% endif %}
+  {% if can_request_retest %}
+  <form method="post" action="/portal/engagements/{{ e.id }}/findings/{{ f.id }}/retest">
+    <div class="fields">
+      <div style="grid-column:1/-1">
+        <label for="retest_note">Request a retest</label>
+        <textarea id="retest_note" name="note" rows="3" maxlength="2000" required placeholder="Describe the fix and what the tester should verify"></textarea>
+        <p class="hint">Available when the finding is validated or marked fixed.</p>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Request retest</button></div>
+  </form>
+  {% elif role != "auditor" and f.status not in ("validated", "fixed") %}
+  <p class="meta">Retest can be requested once the finding is validated or marked fixed.</p>
+  {% endif %}
+</div>
+{% endblock %}

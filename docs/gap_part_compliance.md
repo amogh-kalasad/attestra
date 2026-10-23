@@ -1,9 +1,9 @@
 # Gap analysis – part: tests, compliance, reports, evidence & audit
-Checked against the architecture doc (v2: PCI, ISO 27001, SOC 2) on 2026-10-14. Code reviewed read-only in `E:\attestra`.
+Checked against the architecture doc (v2: PCI, ISO 27001, SOC 2) on 2026-10-14. Code reviewed read-only in the Attestra working tree.
 Legend: **Done** = built + tested · **Done-untested** = built, no test · **Partial** · **Stub** · **Not done**
 
 ## 1. Test run
-- Command: `set TEMP=E:\tmp & .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider` (in `E:\attestra`)
+- Command: `set TEMP=<local-temp> & .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider` (from repo root)
 - Result: **34 passed, 0 failed**, 1 warning (Starlette/httpx deprecation in fastapi.testclient), 5.9 s.
 - Relevant tests: `tests/test_compliance_reports.py` (library integrity, PCI roll-up, CDE scoping, ISO merge, assessor override, four-eyes/sign/tamper, report versions + compliance pack), `tests/test_services.py:94` (audit chain tamper).
 

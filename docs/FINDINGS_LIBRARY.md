@@ -12,6 +12,7 @@ importance / effort / fix steps and nginx, Apache, IIS and Cloudflare snippets
   - `GET /api/library?q=&tenant_id=` search (title, text, tags, rule ids, `cwe-79`)
   - `POST /api/library`, `GET|PUT|DELETE /api/library/{id}`
   - `POST /api/library/seed` adds about 30 starter web writeups (OWASP Top 10 style) the tenant does not have yet
+  - `POST /api/library/import` multipart `file` (+ optional `fmt=json|csv`, `tenant_id`) imports an onboarding template: JSON list or CSV of `{title, severity, description, recommendation, owasp_top10?}` → library entries (skips existing titles; audited as `library.import`; rejects oversized files)
   - `POST /api/findings/{fid}/apply-library {"entry_id": n}`
   - `GET /api/findings/{fid}/library-suggestions`, `GET /api/engagements/{eid}/library-suggestions`
   - imports return `library_suggestions` (findings with a matching writeup)
