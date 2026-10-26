@@ -708,6 +708,12 @@ Reject loop; same user cannot QA their own draft; three distinct actors for subm
 
 Closure/attestation letters (no finding IDs), DOCX/PDF sha storage, SARIF structure, OSCAL min schema, framework pack zip (including sealed-path rebuild), executive trend SVG, signature verify.
 
+### Report HTML PDF Docs downloads
+
+Report HTML view shows Download PDF and Download Docs in the sign-off banner only; engagement page has neither.
+
+Those links hit `GET /reports/{rid}/export/pdf` and `/export/docx` and return PDF / DOCX bytes; unknown formats return 404.
+
 ## Phase 4 market exports
 
 PDF engine probe, OSCAL AR/POA&M validation, Word re-export, JSON engagement export, and XLSX sheets ([[tests/test_phase4_market_exports.py]]).

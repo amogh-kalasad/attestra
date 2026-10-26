@@ -698,3 +698,48 @@ td form input, td form textarea, details form input, details form textarea{max-w
 [data-ico="info"]::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 11v5M12 8h.01'/%3E%3C/svg%3E") !important}
 [data-ico="brief"]::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='7' width='16' height='12' rx='2'/%3E%3Cpath d='M9 7V5h6v2M4 12h16'/%3E%3C/svg%3E") !important}
 [data-ico="layers"]::before{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4l8 4-8 4-8-4z'/%3E%3Cpath d='M4 12l8 4 8-4M4 16l8 4 8-4'/%3E%3C/svg%3E") !important}
+/* ---- Login V1: informative story panel ---- */
+.login-c { grid-template-columns: 440px minmax(0, 1fr); gap: 28px; padding: 28px; }
+.login-c .formside { align-self: center; }
+.login-c .story.ls { justify-content: flex-start; padding: 34px 38px; gap: 0; }
+.login-c .story.ls h2 { font-size: 30px; line-height: 1.15; margin: 16px 0 8px; }
+.login-c .story.ls > p { max-width: 720px; font-size: 14px; line-height: 1.5; color: var(--quiet-2); }
+.ls-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; margin-top: 20px; }
+.ls-col { display: flex; flex-direction: column; gap: 16px; }
+.ls-card { background: #fff; border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; }
+.ls-card h3 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; font-weight: 700; }
+.ls-steps { list-style: none; margin: 0; padding: 0; }
+.ls-steps li { display: flex; gap: 12px; padding: 6px 0; border-top: 1px solid #EEF2F7; }
+.ls-steps li:first-child { border-top: 0; }
+.ls-steps b { font-family: var(--mono); font-weight: 500; color: var(--accent); width: 20px; flex: none; font-size: 13px; }
+.ls-steps strong, .ls-trust strong { display: block; font-size: 13.5px; color: var(--ink); }
+.ls-steps span, .ls-trust span { display: block; font-size: 12.5px; color: var(--quiet); line-height: 1.4; }
+.ls-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.ls-pills .pill, .ls-pills .fs, .ls-ex-top .pill { font-size: 11.5px; padding: 2px 8px; }
+.ls-example strong { display: block; margin: 4px 0 6px; font-size: 14px; color: var(--ink); }
+.ls-ex-top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--quiet); }
+.ls-life { font-size: 11.5px; color: var(--quiet); margin-top: 6px; }
+.ls-trustrow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.ls-trust { display: flex; gap: 10px; padding: 12px; }
+.ls-trust span { font-size: 12px; }
+.ls-ico { width: 30px; height: 30px; border-radius: 9px; background: #fff; color: var(--accent); border: 1px solid #CFE6E3; display: grid; place-items: center; flex: none; }
+.ls-ico svg { width: 16px; height: 16px; }
+@media (max-width: 1250px) { .ls-grid { grid-template-columns: minmax(0, 1fr); } .ls-trustrow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .login-c { grid-template-columns: minmax(0, 1fr); padding: 20px; } .login-c .story.ls { display: none; } }
+.ls .pill, .ls .fs { text-transform: none; }
+.login-c .story.ls { padding: 28px 34px; }
+.login-c .story.ls h2 { margin: 12px 0 6px; }
+.ls-grid { margin-top: 16px; }
+.ls-steps li { padding: 5px 0; }
+
+/* fix: center icons inside login trust tiles */
+.ls-ico{display:inline-flex !important;align-items:center !important;justify-content:center !important;flex:none;line-height:0;padding:0 !important}
+.ls-ico > svg, .ls-ico .ri-ico{display:block;margin:0 !important;width:18px;height:18px;position:static !important;transform:none !important}
+.ls-trust{align-items:flex-start}
+
+/* login: information on the left, sign-in card on the right */
+@media (min-width: 1001px) {
+  .login-c { grid-template-columns: minmax(0, 1fr) 440px; }
+  .login-c > .formside { order: 2; }
+  .login-c > .story { order: 1; }
+}

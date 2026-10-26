@@ -684,7 +684,7 @@
     #findings td:nth-child(2) .pill { font-size: 11px; padding: 2px 7px; }
   }
 </style>
-<link rel="stylesheet" href="/static/attestra.css?v=10">
+<link rel="stylesheet" href="/static/attestra.css?v=13">
 <script src="/static/attestra.js?v=6" defer></script>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">
@@ -702,7 +702,7 @@
 {% set more_current = path.startswith('/library') or path.startswith('/tuning') or path.startswith('/users') or path.startswith('/settings') %}
 <div class="app">
   <header class="rail" aria-label="Attestra">
-    <a class="rail-brand" href="{% if staff %}/{% else %}/portal{% endif %}" title="Attestra v{{ version }}"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="sr">attestra v{{ version }}</span></a>
+    <a class="rail-brand" href="{% if staff %}/{% else %}/portal{% endif %}" title="Attestra v{{ version }}"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="sr">Attestra v{{ version }}</span></a>
     <nav class="rail-nav" aria-label="Main">
       {% if staff %}
       <a href="/" title="Engagements" {{ 'aria-current=page' if path == '/' or (path.startswith('/engagements/') and path != '/engagements/new') }}><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg><span class="rail-label">Engagements</span></a>
@@ -751,7 +751,7 @@
   <div class="workspace">
 {% else %}
 <header class="auth-top">
-  <a class="brand" href="/"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span> attestra</a>
+  <a class="brand" href="/"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span> Attestra</a>
   {% if path != "/login" %}<a href="/login" style="margin-left:auto;font-weight:600;color:var(--accent)">Sign in</a>{% endif %}
 </header>
 {% endif %}

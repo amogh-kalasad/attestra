@@ -954,6 +954,12 @@ def _report_file(s, rid: int, principal: Principal) -> tuple[Report, Path]:
     return r, path
 
 
+_REPORT_EXPORT_TYPES = {
+    "pdf": ("application/pdf", "pdf_path"),
+    "docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx_path"),
+}
+
+
 @app.get("/reports/{rid}")
 def download_report(rid: int, principal: Principal = Depends(require("report.read"))):
     """View a report: the sealed HTML with a sign-off record added on top. The file itself is not changed."""
@@ -964,9 +970,39 @@ def download_report(rid: int, principal: Principal = Depends(require("report.rea
     with db.session() as s:
         r, path = _report_file(s, rid, principal)
         sealed = path.read_bytes()
-        banner = banner_html(r, verify_report(s, rid), sealed_url=f"/reports/{rid}/sealed")
+        banner = banner_html(
+            r,
+            verify_report(s, rid),
+            sealed_url=f"/reports/{rid}/sealed",
+            pdf_url=f"/reports/{rid}/export/pdf",
+            docs_url=f"/reports/{rid}/export/docx",
+        )
         audit.record(s, principal.actor, "report.download", "report", r.id)
     return HTMLResponse(inject(sealed, banner), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/reports/{rid}/export/{fmt}")
+def download_report_export(rid: int, fmt: str, principal: Principal = Depends(require("report.read"))):
+    """Build (or rebuild) the PDF / Word copy of a sealed report and download it."""
+    from attestra.reports.export import export_report_formats
+
+    if fmt not in _REPORT_EXPORT_TYPES:
+        raise HTTPException(404, "unknown export format")
+    media, key = _REPORT_EXPORT_TYPES[fmt]
+    try:
+        with db.session() as s:
+            r, html_path = _report_file(s, rid, principal)
+            out = export_report_formats(r, html_path)
+            audit.record(s, principal.actor, "report.exported", "report", r.id, format=fmt)
+            name = (
+                f"eng{r.engagement_id}-{r.kind}"
+                f"{'-' + r.framework if r.framework else ''}-v{r.version}.{fmt}"
+            )
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except services.ServiceError as e:
+        raise HTTPException(409, str(e)) from e
+    return FileResponse(out[key], media_type=media, filename=name, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/reports/{rid}/sealed")

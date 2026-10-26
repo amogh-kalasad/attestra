@@ -4,26 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in &middot; Attestra</title>
-<link rel="stylesheet" href="/static/attestra.css?v=10">
+<link rel="stylesheet" href="/static/attestra.css?v=13">
 <script src="/static/attestra.js?v=6" defer></script>
 </head>
 <body class="is-auth">
 <div class="login-c">
-  <section class="story" aria-label="About Attestra">
-    <div class="brand"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>attestra</div>
-    <h2>From findings<br>to signed attestation.</h2>
-    <p>One workspace for each client test or audit cycle: authorization, scope, results, validated findings, compliance status and signed reports.</p>
-    <div class="flow" aria-label="How an engagement flows">
-      <div><b>01</b><span>Signed authorization</span></div>
-      <div><b>02</b><span>Targets in scope</span></div>
-      <div><b>03</b><span>Test plan</span></div>
-      <div><b>04</b><span>Automated scans</span></div>
-      <div><b>05</b><span>Results imported</span></div>
-      <div><b>06</b><span>Signed reports</span></div>
-    </div>
-    <div class="foot">PCI DSS v4.0.1 &middot; ISO/IEC 27001:2022 &middot; SOC 2 &middot; SHA-256 sealed reports</div>
-  </section>
-
   <section class="formside">
     <div class="top">API client? <a href="/docs">Use an API key</a></div>
     <div class="formbox" role="group" aria-label="Sign in">
@@ -59,20 +44,40 @@
     </div>
     <div class="bottom"><span>Attestra v{{ version }}</span><span>From findings to signed attestation</span></div>
   </section>
+  <section class="story ls" aria-label="About Attestra">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>Attestra</div>
+    <h2>From findings to signed attestation.</h2>
+    <p>Attestra turns security testing results into audit-ready evidence: import your scanners' results, validate and risk-rank findings, map them to framework controls, and issue hashed, four-eyes approved, signed reports. It never runs attacks itself.</p>
+    <div class="ls-grid">
+      <div class="ls-card">
+        <h3>The workflow</h3>
+        <ol class="ls-steps">
+        <li><b>01</b><div><strong>Signed authorization</strong><span>Hashed and write-once. Imports are refused without a valid one.</span></div></li>
+        <li><b>02</b><div><strong>Targets in scope</strong><span>Assets with criticality 1&ndash;5, internet/internal exposure, PCI CDE flag.</span></div></li>
+        <li><b>03</b><div><strong>Test plan</strong><span>Scope and approach for the VA / PT test window.</span></div></li>
+        <li><b>04</b><div><strong>Automated scans</strong><span>ZAP, Nuclei, Trivy, Semgrep, Gitleaks, Checkov, testssl and more.</span></div></li>
+        <li><b>05</b><div><strong>Results imported</strong><span>De-duplicated by fingerprint and risk-ranked with CVSS, EPSS and CISA KEV.</span></div></li>
+        <li><b>06</b><div><strong>Signed reports</strong><span>Versioned, SHA-256 hashed, four-eyes approved, then signed.</span></div></li>
+        </ol>
+      </div>
+      <div class="ls-col">
+        <div class="ls-card"><h3>Frameworks mapped</h3><div class="ls-pills">{% for n in login_frameworks or ["PCI DSS v4.0.1", "ISO/IEC 27001:2022 Annex A", "SOC 2 Trust Services Criteria (Security)"] %}<span class="pill neu">{{ n }}</span>{% endfor %}</div></div>
+        <div class="ls-card"><h3>Imports results from</h3><div class="ls-pills">{% for n in login_formats or [] %}<span class="pill neu" title="{{ n }}">{{ n.split(" (")[0] }}</span>{% endfor %}</div></div>
+        <div class="ls-card ls-example" aria-label="Example finding">
+          <div class="ls-ex-top"><span class="mono">F-1 &middot; CWE-79</span><span class="pill neu">Example</span></div>
+          <strong>Cross Site Scripting (Reflected)</strong>
+          <div class="ls-pills"><span class="pill high">High</span><span class="fs fs-triaged">Triaged</span><span class="pill neu">A03: Injection</span></div>
+          <div class="mono ls-life">new &rarr; triaged &rarr; validated &rarr; fixed &rarr; retest_passed</div>
+        </div>
+      </div>
+    </div>
+    <div class="ls-trustrow">
+      <div class="ls-card ls-trust"><span class="ls-ico"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/></svg></span><div><strong>SHA-256 sealed</strong><span>Reports and evidence hashed, write-once</span></div></div>
+      <div class="ls-card ls-trust"><span class="ls-ico"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><div><strong>Four-eyes sign-off</strong><span>Approver must differ from the author</span></div></div>
+      <div class="ls-card ls-trust"><span class="ls-ico"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 14l2 2 4-4"/></svg></span><div><strong>Hash-chained audit</strong><span>Append-only log with tamper check</span></div></div>
+      <div class="ls-card ls-trust"><span class="ls-ico"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0113 0M16 4.5a3.5 3.5 0 010 7M21.5 20a6.5 6.5 0 00-4-6"/></svg></span><div><strong>Role-based access</strong><span>Admin, Lead, Tester, Reviewer, Client, Auditor</span></div></div>
+    </div>
+  </section>
 </div>
-
-<script>
-  (function () {
-    const input = document.getElementById('password');
-    const btn = document.getElementById('toggle-pw');
-    if (!input || !btn) return;
-    btn.addEventListener('click', function () {
-      const show = input.type === 'password';
-      input.type = show ? 'text' : 'password';
-      btn.textContent = show ? 'Hide' : 'Show';
-      btn.setAttribute('aria-pressed', show ? 'true' : 'false');
-    });
-  })();
-</script>
 </body>
 </html>

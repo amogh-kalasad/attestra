@@ -40,7 +40,15 @@ def _default_fmt(value) -> str:
     return format_dt(value)
 
 
-def banner_html(r: Report, check: dict, *, sealed_url: str, fmt: Callable[[object], str] | None = None) -> str:
+def banner_html(
+    r: Report,
+    check: dict,
+    *,
+    sealed_url: str,
+    pdf_url: str = "",
+    docs_url: str = "",
+    fmt: Callable[[object], str] | None = None,
+) -> str:
     """One block of HTML describing the report's current sign-off state."""
     fmt = fmt or _default_fmt
     status = r.status or "draft"
@@ -77,6 +85,29 @@ def banner_html(r: Report, check: dict, *, sealed_url: str, fmt: Callable[[objec
         '<div style="font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all">'
         f"SHA-256 {escape(r.sha256 or '')}</div>"
     )
+    if pdf_url or docs_url:
+        # Screen-only downloads; not part of the sealed file and hidden when printing.
+        draft_hint = "" if status == "signed" else " (marked DRAFT until signed)"
+        btn = (
+            "display:inline-block;margin:0 8px 0 0;padding:6px 12px;border-radius:6px;"
+            "background:#2457d6;color:#fff;text-decoration:none;font-size:13px;font-weight:600"
+        )
+        bits: list[str] = []
+        if pdf_url:
+            bits.append(
+                f'<a href="{escape(pdf_url)}" download style="{btn}" '
+                f'title="Download a styled PDF{draft_hint}">Download PDF</a>'
+            )
+        if docs_url:
+            bits.append(
+                f'<a href="{escape(docs_url)}" download style="{btn}" '
+                'title="Download a Word document">Download Docs</a>'
+            )
+        lines.append(
+            '<div class="attestra-export-actions" style="margin-top:10px">'
+            + "".join(bits)
+            + "</div>"
+        )
     lines.append(
         '<div style="color:#5b6170;font-size:12px;margin-top:4px">This sign-off record is added by Attestra when you '
         "view the report. It is not part of the sealed file, so the SHA-256 above still matches. "
@@ -84,6 +115,7 @@ def banner_html(r: Report, check: dict, *, sealed_url: str, fmt: Callable[[objec
         f'<span style="font-family:ui-monospace,Menlo,monospace">attestra verify-report {int(r.id)}</span>.</div>'
     )
     return (
+        f'<style>@media print {{ #{BANNER_ID} .attestra-export-actions {{ display:none !important; }} }}</style>'
         f'<div id="{BANNER_ID}" data-status="{escape(status)}" role="status" '
         f'style="font:14px/1.5 -apple-system,\'Segoe UI\',Inter,Roboto,sans-serif;color:#16181d;'
         f'border:2px solid {border};background:{bg};border-radius:8px;padding:10px 14px;margin:0 0 20px">'

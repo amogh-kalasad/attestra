@@ -85,6 +85,8 @@ def test_fallback_pdf_keeps_every_word():
 
 
 def test_ui_export_buttons_download_files(client, loaded):
+    """PDF/Docs download links live on the report HTML view only (sign-off banner)."""
+    # @lat: [[tests#Phase 4 report tests#Report HTML PDF Docs downloads]]
     from attestra import db
     from attestra.reports import generate_report
 
@@ -93,19 +95,20 @@ def test_ui_export_buttons_download_files(client, loaded):
     client.headers.pop("Authorization", None)
     assert client.post("/login", data={"username": "lead", "password": "test-pass-lead"},
                        follow_redirects=False).status_code == 303
-    page = client.get(f"/engagements/{loaded}")
-    assert f"/engagements/{loaded}/reports/{rid}/export/pdf" in page.text
-    assert f"/engagements/{loaded}/export/sarif" in page.text
+    eng = client.get(f"/engagements/{loaded}")
+    assert f"/reports/{rid}/export/pdf" not in eng.text
+    assert f"/reports/{rid}/export/docx" not in eng.text
+    page = client.get(f"/reports/{rid}")
+    assert page.status_code == 200
+    assert "Download PDF" in page.text and "Download Docs" in page.text
+    assert f"/reports/{rid}/export/pdf" in page.text
+    assert f"/reports/{rid}/export/docx" in page.text
     for _ in range(2):
-        r = client.get(f"/engagements/{loaded}/reports/{rid}/export/pdf")
+        r = client.get(f"/reports/{rid}/export/pdf")
         assert r.status_code == 200 and r.content[:4] == b"%PDF"
-    r = client.get(f"/engagements/{loaded}/reports/{rid}/export/docx")
+    r = client.get(f"/reports/{rid}/export/docx")
     assert r.status_code == 200 and r.content[:2] == b"PK"
-    assert client.get(f"/engagements/{loaded}/export/sarif").json()["version"] == "2.1.0"
-    assert "plan-of-action-and-milestones" in client.get(f"/engagements/{loaded}/export/oscal-poam").json()
-    assert "assessment-results" in client.get(
-        f"/engagements/{loaded}/export/oscal", params={"framework": "pci_dss_4"}).json()
-    assert client.get(f"/engagements/{loaded}/reports/{rid}/export/exe").status_code == 404
+    assert client.get(f"/reports/{rid}/export/exe").status_code == 404
 
 
 def test_api_reexport_twice(client, loaded):

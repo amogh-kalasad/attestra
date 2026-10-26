@@ -234,7 +234,15 @@ def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwarg
 
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, next: str = "/"):
-    return _render(request, "login.html", {"next_url": _safe_next(next)})
+    try:
+        fw_names = [v["name"] for v in load_library().frameworks.values()]
+    except Exception:  # the sign-in page must render even if the library fails to load
+        fw_names = []
+    return _render(
+        request,
+        "login.html",
+        {"next_url": _safe_next(next), "login_frameworks": fw_names, "login_formats": list(IMPORT_FORMAT_LABELS.values())},
+    )
 
 
 @router.post("/login")
