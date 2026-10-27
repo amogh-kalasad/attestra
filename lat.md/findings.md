@@ -106,9 +106,9 @@ Triage CSV download with a formula-injection guard; evidence bodies are omitted.
 
 ## Evidence
 
-Attaching hashed artifacts to a finding.
+Attaching hashed artifacts to a finding, with provenance and original-vs-annotated roles.
 
-[[attestra/services.py#add_evidence]] masks secrets/PANs via [[attestra/evidence/mask.py#mask_bytes]] before hashing and write-once store ([[attestra/models.py#Evidence]] `masking_applied`). Imports mask raw bytes the same way after parse. Storage backends implement [[attestra/storage/__init__.py#Storage]] (`local` or `s3`).
+[[attestra/services.py#add_evidence]] masks secrets/PANs via [[attestra/evidence/mask.py#mask_bytes]] before hashing and write-once store ([[attestra/models.py#Evidence]] `masking_applied`). Image screenshots keep bytes intact aside from prior redaction. Imports mask raw bytes the same way after parse. Storage backends implement [[attestra/storage/__init__.py#Storage]] (`local` or `s3`). Kinds include `screenshot`, `http_pair`, `log`, `code`, `package`, `note`, `file`, and `capture_failure`. Provenance and gallery behaviour: [[authorization#Evidence gallery]].
 
 ## Findings library fix snippets
 

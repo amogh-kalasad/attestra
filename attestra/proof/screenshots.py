@@ -112,18 +112,36 @@ def capture_finding_screenshot(
     if has_screenshot(session, finding.id):
         return None
 
+    from attestra import services
+
+    def _fail(reason: str) -> Evidence | None:
+        try:
+            return services.record_capture_failure(
+                session,
+                finding.id,
+                actor=actor,
+                reason=reason,
+                note="Screenshot capture did not succeed; finding and other evidence are unchanged.",
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("could not record capture failure for finding %s", getattr(finding, "id", "?"))
+            return None
+
+    attempted = False
     png = page_png_bytes
     if png is None:
         fn = capture_fn if capture_fn is not None else _registered_capture
         if fn is None:
+            # No capture mechanism configured — leave finding intact; do not fabricate.
             return None
+        attempted = True
         try:
             png = fn(url)
-        except Exception:  # noqa: BLE001 — never fail callers / imports
+        except Exception as exc:  # noqa: BLE001 — never fail callers / imports
             log.exception("screenshot capture_fn failed for finding %s", getattr(finding, "id", "?"))
-            return None
+            return _fail(f"capture_fn raised {type(exc).__name__}")
     if not png:
-        return None
+        return _fail("capture returned no image bytes") if attempted or page_png_bytes is not None else None
 
     safe_note = (note or "auto-captured screenshot").strip()
     return attach_redacted_screenshot(

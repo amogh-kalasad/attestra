@@ -342,6 +342,9 @@ pre { background: var(--field) !important; border: 1px solid var(--rule) !import
 }
 .ev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .ev { border: 1px solid var(--rule); border-radius: 14px; padding: 14px; background: var(--field); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ev.ev-annotated { border-color: #F5A3A3; background: #FFF8F8; }
+.ev-chips { display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; }
+.ev-fail { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #F5C2C2; border-radius: 14px; background: #FFF5F5; color: var(--ink-2); font-size: 13.5px; }
 .ev .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .comment { display: flex; gap: 12px; padding: 14px 0; border-top: 1px solid var(--rule-2); }
 .comment:first-child { border-top: 0; }

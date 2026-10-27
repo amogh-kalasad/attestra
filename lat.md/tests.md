@@ -1963,4 +1963,36 @@ Re-importing the same scanner file updates observations without creating duplica
 
 Mid-confidence matches remain separate findings or are flagged rather than force-merged.
 
+## Evidence gallery and annotations
+
+Master Phase 7: provenance fields, annotated screenshot derivatives, capture-failure honesty, and gallery APIs (`tests/test_evidence_gallery.py`).
+
+### Gallery partitions roles
+
+[[attestra/evidence/gallery.py#build_gallery]] separates originals, annotated rows, and capture failures and never includes storage paths.
+
+### Visually verified requires screenshot
+
+`visually_verified` is true only when a successful screenshot original or annotated derivative exists.
+
+### Capture failure recorded
+
+[[attestra/services.py#record_capture_failure]] stores kind `capture_failure` with a reason and does not create screenshot bytes.
+
+### Annotate creates derivative
+
+[[attestra/services.py#attach_annotated_screenshot]] writes role `annotated` with `parent_evidence_id` and leaves the original SHA-256 unchanged.
+
+### Annotate refuses annotated parent
+
+Annotating an already-annotated row raises [[attestra/services.py#ServiceError]].
+
+### Gallery API no path
+
+`GET /api/findings/{fid}/evidence/gallery` returns cards without a `path` key.
+
+### Annotate API
+
+`POST /api/findings/{fid}/evidence/{eid}/annotate` returns the new evidence id and annotation metadata.
+
 

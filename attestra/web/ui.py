@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, db, services
+from attestra import __version__, ai_narratives, audit, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -25,6 +25,7 @@ from attestra.dedup import detected_by_label
 from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
+    DISPLAY_LABELS,
     ENGAGEMENT_TYPE_LABELS,
     ENVIRONMENTS,
     OPEN_STATUSES,
@@ -126,11 +127,16 @@ def format_dt(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
 
 
 def label(value) -> str:
-    """snake_case value -> 'Sentence case' for display."""
+    """snake_case value -> curated or sentence-case display label."""
     if value is None:
         return ""
-    text = str(value).replace("_", " ").strip()
-    return text[:1].upper() + text[1:]
+    key = str(value).strip()
+    if key in DISPLAY_LABELS:
+        return DISPLAY_LABELS[key]
+    if key in TEST_TYPES:
+        return TEST_TYPES[key]["label"]
+    text = key.replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else ""
 
 
 def fw_name(key) -> str:
@@ -1261,16 +1267,24 @@ def finding_page(request: Request, eid: int, fid: int):
         except LookupError:
             raise HTTPException(404, "engagement not found") from None
         from attestra.comments import can_add_comment, can_delete_comment, list_comments
+        from attestra.evidence.gallery import build_gallery
         from attestra.library import service as lib
-        from attestra.models import Finding
+        from attestra.models import Finding, ProofReplay
 
         f = s.get(Finding, fid)
         if not f or f.engagement_id != eid:
             raise HTTPException(404, "finding not found")
         # Touch relationships while the session is open.
-        _ = list(f.evidence)
+        evidence_rows = list(f.evidence)
         _ = f.asset
         observations = sorted(list(f.observations or []), key=lambda o: o.id)
+        gallery = build_gallery(evidence_rows)
+        replays = list(
+            s.scalars(select(ProofReplay).where(ProofReplay.finding_id == fid).order_by(ProofReplay.id.desc()))
+        )
+        latest_replay: dict[int, ProofReplay] = {}
+        for r in replays:
+            latest_replay.setdefault(r.evidence_id, r)
         comments = list_comments(s, fid, principal)
         for c in comments:
             c["can_delete"] = can_delete_comment(
@@ -1286,7 +1300,44 @@ def finding_page(request: Request, eid: int, fid: int):
             "comments": comments,
             "can_add_comment": can_add_comment(principal.role),
             "show_accept_risk": request.query_params.get("accept_risk") == "1",
+            "gallery": gallery,
+            "latest_replay": latest_replay,
         })
+
+
+@router.get("/engagements/{eid}/evidence/{evid}/download")
+def ui_download_evidence(request: Request, eid: int, evid: int):
+    """Session-auth download of one evidence file (same path checks as the API)."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.read"):
+        raise HTTPException(403, "not allowed")
+    from attestra import config as cfg
+    from attestra.models import Evidence, Finding
+
+    with db.session() as s:
+        try:
+            eng = services.get_engagement(s, eid, principal)
+        except LookupError:
+            raise HTTPException(404, "evidence not found") from None
+        ev = s.get(Evidence, evid)
+        if not ev:
+            raise HTTPException(404, "evidence not found")
+        f = s.get(Finding, ev.finding_id)
+        if not f or f.engagement_id != eid:
+            raise HTTPException(404, "evidence not found")
+        path = Path(ev.path).resolve()
+        allowed_roots = [
+            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
+            cfg.DATA_DIR.resolve(),
+        ]
+        if not any(str(path).startswith(str(root)) for root in allowed_roots):
+            raise HTTPException(404, "evidence not found")
+        if not path.is_file():
+            raise HTTPException(404, "evidence not found")
+        audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
+        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
 
 
 @router.post("/engagements/{eid}/findings/{fid}/comments")

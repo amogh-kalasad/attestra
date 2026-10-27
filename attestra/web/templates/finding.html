@@ -44,19 +44,58 @@
   {% endif %}
 
 <div class="card" id="evidence">
-  <h2>Proof &amp; evidence <span class="meta" style="font-weight:400">{{ f.evidence|length }} item{{ "s" if f.evidence|length != 1 }}</span></h2>
+  <h2>Proof &amp; evidence <span class="meta" style="font-weight:400">{{ (gallery.counts.total if gallery else f.evidence|length) }} item{{ "s" if (gallery.counts.total if gallery else f.evidence|length) != 1 }}</span>
+    {% if gallery and gallery.visually_verified %}<span class="pill info" title="At least one successful application screenshot is attached">{{ "visually_verified"|label }}</span>{% endif %}
+  </h2>
   {% if f.location %}<pre class="proof" style="margin-bottom:16px">{{ f.location }}</pre>{% endif %}
-  {% if f.evidence %}
+  {% if gallery and gallery.capture_failures %}
+  <div class="ev-fail" role="status">
+    <strong>Screenshot capture did not succeed.</strong>
+    <ul style="margin:8px 0 0;padding-left:18px">
+      {% for fail in gallery.capture_failures %}
+      <li class="meta">{{ fail.capture_failure_reason or fail.note or "Capture unavailable" }}{% if fail.source_tool_label %} · {{ fail.source_tool_label }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    <p class="meta" style="margin:8px 0 0">The finding and other evidence are unchanged. No screenshot was fabricated.</p>
+  </div>
+  {% endif %}
+  {% set gallery_cards = (gallery["items"] if gallery else [])|rejectattr("kind", "equalto", "capture_failure")|list %}
+  {% if gallery_cards %}
   <div class="ev-grid">
-    {% for ev in f.evidence %}
-    <div class="ev">
-      <span class="chip" style="align-self:flex-start">{{ ev.kind|label }}</span>
-      <span class="mono" title="{{ ev.filename }}">{{ ev.filename }}</span>
-      <span style="font-size:13.5px">{{ ev.note or "-" }}</span>
-      <span class="meta">{{ ev.captured_by }} &middot; {{ ev.captured_at|dt }}</span>
+    {% for card in gallery_cards %}
+    {% set replay = (latest_replay or {}).get(card.id) %}
+    <div class="ev{{ ' ev-annotated' if card.role == 'annotated' }}">
+      <div class="ev-chips">
+        <span class="chip">{{ card.kind|label }}</span>
+        {% if card.role and card.role != "original" %}<span class="chip">{{ card.role|label }}</span>{% endif %}
+        {% if card.redaction_status %}<span class="chip meta">{{ card.redaction_status }}</span>{% endif %}
+      </div>
+      <span class="mono" title="{{ card.filename }}">{{ card.filename }}</span>
+      <span style="font-size:13.5px">{{ card.note or "-" }}</span>
+      {% if card.source_tool_label %}<span class="meta">Source: {{ card.source_tool_label }}</span>{% elif card.source_tool %}<span class="meta">Source: {{ card.source_tool }}</span>{% endif %}
+      {% if card.parent_evidence_id %}<span class="meta">Derivative of evidence #{{ card.parent_evidence_id }}</span>{% endif %}
+      <span class="meta">{{ card.captured_by }} &middot; {{ card.captured_at|dt }}</span>
+      {% if can(prole, "finding.read") %}
+      <a class="btn secondary" href="/engagements/{{ e.id }}/evidence/{{ card.id }}/download" style="align-self:flex-start">Download</a>
+      {% endif %}
+      {% if replay %}
+      <div class="meta" style="margin-top:4px">
+        Replay:
+        {% if replay.confirmed_result %}
+          <span class="st fs">confirmed {{ replay.confirmed_result|label }}</span>
+        {% elif replay.suggested %}
+          <span class="st fs">suggested {{ replay.suggested|label }}</span>
+        {% else %}
+          <span class="meta">recorded</span>
+        {% endif %}
+        {% if replay.reason %}<div class="meta">{{ replay.reason }}</div>{% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
+  {% elif gallery and gallery.capture_failures %}
+  <p class="meta" style="margin:0">No successful evidence items yet.</p>
   {% else %}
   <p class="meta" style="margin:0">No evidence yet.</p>
   {% endif %}

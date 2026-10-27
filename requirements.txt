@@ -29,6 +29,7 @@ ruff>=0.5
 # docxtpl>=0.16               # docs: Word report output
 # weasyprint>=61              # docs: PDF report output
 # boto3>=1.34                 # s3: evidence storage in S3
+# Pillow>=10                  # screenshots: pixel redact + annotated derivatives
 # temporalio>=1.7             # temporal: Temporal workflow engine
 # opentelemetry-api>=1.24     # observability: tracing
 # opentelemetry-sdk>=1.24

@@ -40,6 +40,8 @@ Notable routes:
 | GET | `/api/audit/verify` | Audit chain check |
 | GET | `/api/audit/export` | Audit export JSON/CSV + chain proof |
 | GET | `/api/evidence/{eid}/download` | Download evidence (audited) |
+| GET | `/api/findings/{fid}/evidence/gallery` | Grouped evidence cards (no paths) |
+| POST | `/api/findings/{fid}/evidence/{eid}/annotate` | Annotated screenshot derivative |
 | POST | `/api/scans/{sid}/cancel` | Cancel a queued or running scan (`scan.start`) |
 
 Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attestra/api.py#require]] for the route permission. Service errors map via [[attestra/api.py#_run]].
@@ -98,7 +100,7 @@ Staff can cancel a queued or running scan from the scan list or the scan page.
 
 Finding detail and per-tool false-positive lists finish the partly-done UI audit items.
 
-[[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence and status change (UI audit #55). Evidence cards use [[attestra/api.py#download_evidence]] (`GET /api/evidence/{eid}/download`, auth required) and show the latest [[attestra/models.py#ProofReplay]] status per item. False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
+[[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence gallery and status change (UI audit #55). Evidence cards come from [[attestra/evidence/gallery.py#build_gallery]] (roles, capture failures, visually-verified badge), download via [[attestra/web/ui.py#ui_download_evidence]] (`GET /engagements/{eid}/evidence/{evid}/download`) or [[attestra/api.py#download_evidence]], and show the latest [[attestra/models.py#ProofReplay]] status per item. False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
 
 ### Findings filter on the engagement page
 

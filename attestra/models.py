@@ -118,6 +118,12 @@ DISPLAY_LABELS = {
     "not_assessed": "Not assessed",
     "not_met": "Not met",
     "no_exceptions": "No exceptions",
+    "http_pair": "HTTP request/response",
+    "capture_failure": "Capture failure",
+    "annotated": "Annotated",
+    "original": "Original",
+    "excerpt": "Excerpt",
+    "visually_verified": "Visually verified",
 }
 
 # Sensible defaults when a target is added without explicit test types.
@@ -509,7 +515,7 @@ class Evidence(Base):
     __tablename__ = "evidence"
     id: Mapped[int] = mapped_column(primary_key=True)
     finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
-    kind: Mapped[str] = mapped_column(String(30))  # screenshot | http_pair | log | file | note
+    kind: Mapped[str] = mapped_column(String(30))  # screenshot | http_pair | log | file | note | code | package | capture_failure
     filename: Mapped[str] = mapped_column(String(300))
     path: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64))
@@ -517,8 +523,20 @@ class Evidence(Base):
     masking_applied: Mapped[dict] = mapped_column(JSON, default=dict)
     captured_by: Mapped[str] = mapped_column(String(200))
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Phase 7 provenance / original-vs-annotated / capture honesty.
+    content_type: Mapped[str] = mapped_column(String(100), default="")
+    source_tool: Mapped[str] = mapped_column(String(50), default="")
+    observation_id: Mapped[int | None] = mapped_column(ForeignKey("finding_observations.id"))
+    import_run_id: Mapped[int | None] = mapped_column(ForeignKey("import_runs.id"))
+    parent_evidence_id: Mapped[int | None] = mapped_column(ForeignKey("evidence.id"))
+    role: Mapped[str] = mapped_column(String(20), default="original")  # original | annotated | excerpt
+    redaction_status: Mapped[str] = mapped_column(String(20), default="")  # redacted | skipped | none | n/a
+    capture_status: Mapped[str] = mapped_column(String(20), default="success")  # success | failed | unavailable | n/a
+    capture_failure_reason: Mapped[str] = mapped_column(String(500), default="")
+    annotation_meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
     finding: Mapped[Finding] = relationship(back_populates="evidence")
+    parent: Mapped[Evidence | None] = relationship(remote_side=[id], foreign_keys=[parent_evidence_id])
 
 
 class RetentionPolicy(Base):

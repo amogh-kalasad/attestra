@@ -92,3 +92,15 @@ The confirmation sets `ownership_verified_at` and is audited as `asset.ownership
 A lead or admin can paste another target's token on the target page so several hosts share one DNS TXT or well-known file.
 
 [[attestra/services.py#set_ownership_token]] validates format via [[attestra/runner/ownership.py#set_token]] (16–64 urlsafe characters). Changing the token clears `ownership_verified_at` so the proof must be checked again. Audit `asset.ownership_token_set` stores only a four-character suffix, never the full token. [[attestra/web/ui.py#verify_target_ownership]] runs the ownership check from the target page.
+
+## Evidence gallery
+
+Finding evidence cards group originals, annotated derivatives, and honest capture failures without exposing storage paths.
+
+[[attestra/models.py#Evidence]] stores provenance fields (`content_type`, `source_tool`, `observation_id`, `import_run_id`, `parent_evidence_id`, `role`, `redaction_status`, `capture_status`, `capture_failure_reason`, `annotation_meta`) via migration `0026_evidence_provenance`. [[attestra/services.py#add_evidence]] accepts those kwargs; screenshots skip text masking. [[attestra/services.py#record_capture_failure]] stores kind `capture_failure` without fabricating media. [[attestra/evidence/gallery.py#build_gallery]] partitions rows for UI/API and sets `visually_verified` only when a successful screenshot exists. Finding page [[attestra/web/ui.py#finding_page]] and `GET /api/findings/{fid}/evidence/gallery` both use the gallery helper. Downloads stay session/API authenticated ([[attestra/web/ui.py#ui_download_evidence]], [[attestra/api.py#download_evidence]]) and never return raw paths in JSON.
+
+### Annotated derivatives
+
+Annotated screenshots are separate hashed rows linked to the original; the original bytes stay unchanged.
+
+[[attestra/evidence/annotate.py#annotate_png]] draws non-obstructive borders and numbered markers with an optional caption strip (requires Pillow). [[attestra/services.py#attach_annotated_screenshot]] verifies the original SHA-256, writes role `annotated` with `parent_evidence_id`, and refuses annotating an already-annotated row. API: `POST /api/findings/{fid}/evidence/{eid}/annotate`.

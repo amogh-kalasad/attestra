@@ -1333,17 +1333,66 @@ def transition(
     return f
 
 
-def add_evidence(s: Session, finding_id: int, *, kind: str, filename: str, data: bytes, note: str, actor: str) -> Evidence:
+def add_evidence(
+    s: Session,
+    finding_id: int,
+    *,
+    kind: str,
+    filename: str,
+    data: bytes,
+    note: str,
+    actor: str,
+    content_type: str = "",
+    source_tool: str = "",
+    observation_id: int | None = None,
+    import_run_id: int | None = None,
+    parent_evidence_id: int | None = None,
+    role: str = "original",
+    redaction_status: str = "",
+    capture_status: str = "success",
+    capture_failure_reason: str = "",
+    annotation_meta: dict | None = None,
+) -> Evidence:
     from attestra.evidence.mask import mask_bytes
 
     f = s.get(Finding, finding_id)
     if not f:
         raise LookupError(f"finding {finding_id} not found")
     eng = get_engagement(s, f.engagement_id)
-    ct = "text/plain" if kind in ("note", "http_pair", "log") else "application/octet-stream"
-    masked, mask_report = mask_bytes(data, ct)
+    allowed_kinds = ("screenshot", "http_pair", "log", "file", "note", "code", "package", "capture_failure")
+    if kind not in allowed_kinds:
+        raise ServiceError(f"evidence kind must be one of {allowed_kinds}")
+    if role not in ("original", "annotated", "excerpt"):
+        raise ServiceError("evidence role must be original, annotated, or excerpt")
+    if parent_evidence_id is not None:
+        parent = s.get(Evidence, parent_evidence_id)
+        if parent is None or parent.finding_id != finding_id:
+            raise ServiceError("parent evidence must belong to the same finding")
+    default_ct = {
+        "note": "text/plain",
+        "http_pair": "application/json",
+        "log": "text/plain",
+        "code": "text/plain",
+        "package": "application/json",
+        "capture_failure": "text/plain",
+        "screenshot": "image/png",
+        "file": "application/octet-stream",
+    }.get(kind, "application/octet-stream")
+    ct = (content_type or default_ct).strip()
+    # Screenshots and binary files: mask only when text-like; images keep bytes intact aside from prior redaction.
+    if kind in ("screenshot",) or ct.startswith("image/"):
+        masked, mask_report = data, {}
+    else:
+        masked, mask_report = mask_bytes(data, ct if ct.startswith("text/") or ct.endswith("json") else "text/plain")
     sha = _sha256(masked)
     path = _store(eng.tenant_id, "evidence", sha, filename, masked)
+    # Prefer explicit redaction_status; fall back to note marker used by older screenshot attach.
+    redaction = (redaction_status or "").strip()
+    if not redaction:
+        for line in (note or "").splitlines():
+            if line.strip().startswith("redaction_status="):
+                redaction = line.strip().split("=", 1)[1].strip()
+                break
     ev = Evidence(
         finding_id=finding_id,
         kind=kind,
@@ -1353,11 +1402,106 @@ def add_evidence(s: Session, finding_id: int, *, kind: str, filename: str, data:
         note=note,
         masking_applied=mask_report,
         captured_by=actor,
+        content_type=ct,
+        source_tool=(source_tool or "")[:50],
+        observation_id=observation_id,
+        import_run_id=import_run_id,
+        parent_evidence_id=parent_evidence_id,
+        role=role,
+        redaction_status=redaction[:20],
+        capture_status=(capture_status or "success")[:20],
+        capture_failure_reason=(capture_failure_reason or "")[:500],
+        annotation_meta=dict(annotation_meta or {}),
     )
     s.add(ev)
     s.flush()
-    audit.record(s, actor, "evidence.add", "evidence", ev.id, finding_id=finding_id, sha256=sha, masking=mask_report)
+    audit.record(
+        s,
+        actor,
+        "evidence.add",
+        "evidence",
+        ev.id,
+        finding_id=finding_id,
+        sha256=sha,
+        masking=mask_report,
+        role=role,
+        capture_status=ev.capture_status,
+    )
     return ev
+
+
+def record_capture_failure(
+    s: Session,
+    finding_id: int,
+    *,
+    actor: str,
+    reason: str,
+    source_tool: str = "",
+    note: str = "",
+) -> Evidence:
+    """Record an honest screenshot/evidence capture failure without fabricating media."""
+    body = (reason or "capture unavailable").strip()[:500]
+    return add_evidence(
+        s,
+        finding_id,
+        kind="capture_failure",
+        filename="capture_failure.txt",
+        data=(body + "\n").encode("utf-8"),
+        note=note or "Screenshot capture did not succeed; other evidence is unchanged.",
+        actor=actor,
+        content_type="text/plain",
+        source_tool=source_tool,
+        role="original",
+        capture_status="failed" if body else "unavailable",
+        capture_failure_reason=body,
+        redaction_status="n/a",
+    )
+
+
+def attach_annotated_screenshot(
+    s: Session,
+    finding_id: int,
+    *,
+    original: Evidence,
+    highlights: list,
+    caption: str = "",
+    actor: str,
+    note: str = "",
+) -> Evidence:
+    """Create an annotated PNG derivative linked to an original screenshot evidence row."""
+    from pathlib import Path
+
+    from attestra.evidence.annotate import AnnotateError, annotate_png
+
+    if original.finding_id != finding_id or original.kind != "screenshot":
+        raise ServiceError("annotated derivatives require a screenshot original on the same finding")
+    if original.role == "annotated":
+        raise ServiceError("cannot annotate an already-annotated derivative; use the original")
+    raw = Path(original.path).read_bytes()
+    if _sha256(raw) != original.sha256:
+        raise ServiceError("original screenshot hash mismatch; refusing to annotate")
+    try:
+        annotated_bytes, meta = annotate_png(raw, highlights, caption=caption)
+    except AnnotateError as e:
+        raise ServiceError(str(e)) from e
+    return add_evidence(
+        s,
+        finding_id,
+        kind="screenshot",
+        filename=(Path(original.filename).stem + ".annotated.png"),
+        data=annotated_bytes,
+        note=note or (caption or "Annotated screenshot derivative"),
+        actor=actor,
+        content_type="image/png",
+        source_tool=original.source_tool,
+        observation_id=original.observation_id,
+        import_run_id=original.import_run_id,
+        parent_evidence_id=original.id,
+        role="annotated",
+        redaction_status=original.redaction_status or "none",
+        capture_status="success",
+        annotation_meta=meta,
+    )
 
 
 # ---------------------------------------------------------------- compliance

@@ -808,6 +808,71 @@ async def add_evidence(
     return {"id": ev.id, "sha256": ev.sha256}
 
 
+class AnnotateEvidenceIn(BaseModel):
+    highlights: list[dict] = Field(default_factory=list)
+    caption: str = ""
+    note: str = ""
+
+
+@app.get("/api/findings/{fid}/evidence/gallery")
+def finding_evidence_gallery(fid: int, principal: Principal = Depends(require("finding.read"))):
+    """Grouped evidence cards for a finding (no storage paths)."""
+    from sqlalchemy import select
+
+    from attestra.evidence.gallery import build_gallery
+    from attestra.models import Evidence, Finding
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        rows = list(s.scalars(select(Evidence).where(Evidence.finding_id == fid).order_by(Evidence.id)))
+        gallery = build_gallery(rows)
+        gallery["finding_id"] = fid
+        return gallery
+
+    return _run(fn)
+
+
+@app.post("/api/findings/{fid}/evidence/{eid}/annotate", status_code=201)
+def annotate_finding_evidence(
+    fid: int,
+    eid: int,
+    body: AnnotateEvidenceIn,
+    principal: Principal = Depends(require("finding.write")),
+):
+    """Create an annotated screenshot derivative without altering the original."""
+    from attestra.models import Evidence, Finding
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        original = s.get(Evidence, eid)
+        if not original or original.finding_id != fid:
+            raise LookupError(f"evidence {eid} not found on finding {fid}")
+        ev = services.attach_annotated_screenshot(
+            s,
+            fid,
+            original=original,
+            highlights=body.highlights,
+            caption=body.caption,
+            actor=principal.actor,
+            note=body.note,
+        )
+        return {
+            "id": ev.id,
+            "sha256": ev.sha256,
+            "role": ev.role,
+            "parent_evidence_id": ev.parent_evidence_id,
+            "annotation_meta": dict(ev.annotation_meta or {}),
+        }
+
+    return _run(fn)
+
+
 @app.get("/api/engagements/{eid}/compliance")
 def compliance(
     eid: int,

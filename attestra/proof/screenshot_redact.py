@@ -278,4 +278,5 @@ def attach_redacted_screenshot(
         data=payload,
         actor=actor,
         note=_note_with_status(note, status),
+        redaction_status=status,
     )

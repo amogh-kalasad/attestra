@@ -26,10 +26,43 @@ def attach_http_pair(s: Session, finding_id: int, pair: HttpPair, *, actor: str,
     )
 
 
-def attach_screenshot(s: Session, finding_id: int, *, filename: str, data: bytes, actor: str, note: str = "") -> Evidence:
+def attach_screenshot(
+    s: Session,
+    finding_id: int,
+    *,
+    filename: str,
+    data: bytes,
+    actor: str,
+    note: str = "",
+    source_tool: str = "",
+    observation_id: int | None = None,
+    import_run_id: int | None = None,
+    redaction_status: str = "",
+) -> Evidence:
     if not data.startswith(_IMAGE_MAGIC):
         raise services.ServiceError("screenshot must be a PNG, JPEG, GIF or WebP image")
-    return services.add_evidence(s, finding_id, kind="screenshot", filename=filename or "screenshot.png", data=data, note=note, actor=actor)
+    status = redaction_status
+    if not status:
+        for line in (note or "").splitlines():
+            if line.strip().startswith("redaction_status="):
+                status = line.strip().split("=", 1)[1].strip()
+                break
+    return services.add_evidence(
+        s,
+        finding_id,
+        kind="screenshot",
+        filename=filename or "screenshot.png",
+        data=data,
+        note=note,
+        actor=actor,
+        content_type="image/png" if data.startswith(b"\x89PNG") else "application/octet-stream",
+        source_tool=source_tool,
+        observation_id=observation_id,
+        import_run_id=import_run_id,
+        role="original",
+        redaction_status=status or "none",
+        capture_status="success",
+    )
 
 
 def proof_items(s: Session, finding_id: int) -> list[Evidence]:
