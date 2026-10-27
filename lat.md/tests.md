@@ -1759,4 +1759,40 @@ Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead
 
 [[attestra/config.py#validate_runtime_config]] refreshes the module-level flag from the environment and raises on invalid values for API/CLI/worker startup.
 
+## Organization test-run credits
+
+Master Phase 2: shared tenant credit balance, single admission charge, renewal request, and admin allocation (`tests/test_subscription_credits.py`).
+
+### Initial allocation
+
+New tenants receive [[attestra/config.py#INITIAL_TEST_RUN_CREDITS]] via [[attestra/credits/service.py#ensure_account]] with an audited initial ledger row.
+
+### Engagement create free
+
+[[attestra/services.py#create_engagement]] does not reduce the organization credit balance.
+
+### Consume one on admit
+
+[[attestra/credits/service.py#consume_for_scan_admit]] debits one credit when enforcement is on.
+
+### Idempotent consume
+
+Repeating the same idempotency key returns the prior ledger row without a second debit.
+
+### Cannot overspend
+
+A second admit with balance zero raises [[attestra/services.py#ServiceError]].
+
+### OFF skips consume
+
+With `SUBSCRIPTION_SERVICE=OFF`, admit does not debit and [[attestra/credits/service.py#balance_view]] stays informational with `can_run_tests` true.
+
+### Admin allocate
+
+Renewal approval and [[attestra/credits/service.py#allocate_credits]] increase balance; allocate idempotency prevents double grants.
+
+### API exhausted
+
+`POST /api/engagements/{eid}/scans` returns 402 when enforcement is on and the organization balance is zero.
+
 

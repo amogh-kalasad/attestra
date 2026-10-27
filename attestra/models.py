@@ -1001,3 +1001,53 @@ class AuthChecklistItem(Base):
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TenantCreditAccount(Base):
+    """Organization-wide test-run credit balance (shared by all members of the tenant)."""
+
+    __tablename__ = "tenant_credit_accounts"
+
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), primary_key=True)
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    grant_total: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CreditRenewalRequest(Base):
+    """Request for additional organization test-run credits (no payment gateway)."""
+
+    __tablename__ = "credit_renewal_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    requested_by: Mapped[str] = mapped_column(String(200), default="")
+    requested_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    credits_requested: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|rejected|cancelled
+    note: Mapped[str] = mapped_column(Text, default="")
+    admin_note: Mapped[str] = mapped_column(Text, default="")
+    resolved_by: Mapped[str] = mapped_column(String(200), default="")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
+
+
+class CreditTransaction(Base):
+    """Auditable ledger row for credit grants, debits, refunds, and adjustments."""
+
+    __tablename__ = "credit_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    amount: Mapped[int] = mapped_column(Integer)  # positive grant, negative debit
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(String(40), default="")
+    actor: Mapped[str] = mapped_column(String(200), default="")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    engagement_id: Mapped[int | None] = mapped_column(ForeignKey("engagements.id"))
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"))
+    renewal_request_id: Mapped[int | None] = mapped_column(ForeignKey("credit_renewal_requests.id"))
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

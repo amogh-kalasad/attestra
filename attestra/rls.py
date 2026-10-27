@@ -126,6 +126,13 @@ AUTH_WEB_POLICIES: dict[str, str] = {
     "auth_checklist_items": _tenant("tenant_id"),
 }
 POLICIES.update(AUTH_WEB_POLICIES)
+# Organization test-run credits (migration 0023_subscription_credits).
+SUBSCRIPTION_CREDIT_POLICIES: dict[str, str] = {
+    "tenant_credit_accounts": _tenant("tenant_id"),
+    "credit_transactions": _tenant("tenant_id"),
+    "credit_renewal_requests": _tenant("tenant_id"),
+}
+POLICIES.update(SUBSCRIPTION_CREDIT_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

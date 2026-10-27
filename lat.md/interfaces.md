@@ -198,7 +198,13 @@ Template: `.env.example`.
 
 Centralized ON/OFF switch for organization test-run credit enforcement.
 
-[[attestra/config.py#parse_subscription_service]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#subscription_enforcement_enabled]] is the single helper later credit admission uses. [[attestra/config.py#validate_runtime_config]] runs at API lifespan ([[attestra/api.py]]), `attestra init`, `attestra serve`, and `attestra worker` so API, CLI, schedules, and workers share one path. Changing the variable requires restarting the API and workers; Attestra does not hot-reload subscription mode. `OFF` bypasses only subscription credit checks; auth, tenant isolation, scope, SSRF, signed authorization, and audit stay enforced. Credit ledger behaviour lands in a later phase.
+[[attestra/config.py#parse_subscription_service]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#subscription_enforcement_enabled]] is the single helper credit admission uses. [[attestra/config.py#validate_runtime_config]] runs at API lifespan ([[attestra/api.py]]), `attestra init`, `attestra serve`, and `attestra worker` so API, CLI, schedules, and workers share one path. Changing the variable requires restarting the API and workers; Attestra does not hot-reload subscription mode. `OFF` bypasses only subscription credit checks; auth, tenant isolation, scope, SSRF, signed authorization, and audit stay enforced.
+
+### Organization test-run credits
+
+Shared per-tenant balance consumed once at successful scan admission.
+
+[[attestra/credits/service.py#ensure_account]] grants [[attestra/config.py#INITIAL_TEST_RUN_CREDITS]] (default 3) when a tenant is first created. [[attestra/services.py#create_engagement]] does not debit. [[attestra/services.py#request_scan]] is the only charging point (API, UI, CLI, and schedules all call it): after the runner gate accepts, [[attestra/credits/service.py#consume_for_scan_admit]] atomically decrements with optional idempotency; queue/dispatch failure refunds when [[attestra/config.py#CREDIT_REFUND_ON_PRE_START_FAILURE]] is on. Exhausted balance raises [[attestra/services.py#ServiceError]] (HTTP 402) only when enforcement is on. UI header and `/credits` show [[attestra/credits/service.py#balance_view]]; renewal requests and Super Admin (`admin`) allocation live in [[attestra/credits/service.py#request_renewal]] / [[attestra/credits/service.py#allocate_credits]] (no payment gateway). Schema: migration `0023_subscription_credits`.
 
 ## Product marketing page
 

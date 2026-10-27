@@ -725,6 +725,9 @@
           <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>Users</a>
           <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>Email alerts</a>
           {% endif %}
+          {% if can(role, "credits.read") %}
+          <a href="/credits" {{ 'aria-current=page' if path.startswith('/credits') }}>Organization credits</a>
+          {% endif %}
           <a href="/docs">API docs</a>
         </div>
       </details>
@@ -733,6 +736,11 @@
       {% endif %}
     </nav>
     <div class="rail-foot">
+      {% if org_credits and staff %}
+      <a class="rail-credits" href="/credits" title="{{ org_credits.label }}" {% if org_credits.exhausted %}style="color:var(--danger)"{% endif %}>
+        <span class="rail-label">{{ org_credits.balance }} / {{ org_credits.grant_total }} credits{% if not org_credits.enforcement %} (info){% endif %}</span>
+      </a>
+      {% endif %}
       {% if staff and can(role, "engagement.create") and path != "/engagements/new" %}
       <a class="rail-new" href="/engagements/new" title="New engagement"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="rail-label">+ New engagement</span></a>
       {% endif %}
@@ -740,6 +748,7 @@
         <summary aria-label="Account menu" title="{{ actor }}"><span class="avatar" aria-hidden="true">{{ initials }}</span></summary>
         <div class="menu-pop up">
           <div class="menu-user"><strong>{{ actor }}</strong><span>{% if role %}{{ role_labels.get(role, role) }}{% endif %}</span></div>
+          {% if can(role, "credits.read") %}<a href="/credits">Organization credits</a>{% endif %}
           <form method="post" action="/logout">
             <input type="hidden" name="next" value="/login">
             <button type="submit">Sign out</button>

@@ -167,3 +167,14 @@ def validate_runtime_config() -> None:
 
 
 SUBSCRIPTION_SERVICE = parse_subscription_service()
+
+# Organization test-run credits (master Phase 2). Initial allocation is configurable.
+INITIAL_TEST_RUN_CREDITS = max(0, int(os.environ.get("ATTESTRA_INITIAL_TEST_RUN_CREDITS", "3")))
+# Refund a consumed credit when admission fails before the run is queued/dispatched.
+CREDIT_REFUND_ON_PRE_START_FAILURE = os.environ.get(
+    "ATTESTRA_CREDIT_REFUND_ON_PRE_START_FAILURE", "ON"
+).strip().upper() in ("ON", "1", "TRUE", "YES")
+# Do not auto-refund merely because a started scan later fails (explicit opt-in).
+CREDIT_REFUND_ON_POST_START_FAILURE = os.environ.get(
+    "ATTESTRA_CREDIT_REFUND_ON_POST_START_FAILURE", "OFF"
+).strip().upper() in ("ON", "1", "TRUE", "YES")

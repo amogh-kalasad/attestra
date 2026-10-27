@@ -174,6 +174,20 @@ def _principal(request: Request):
         )
 
 
+def _org_credits_for(principal, s, tenant_id: int | None = None) -> dict | None:
+    """Server-sourced organization credit balance for the header and scan UI."""
+    if principal is None or not has_permission(principal.role, "credits.read"):
+        return None
+    tid = tenant_id if tenant_id is not None else principal.tenant_id
+    if tid is None:
+        return None
+    if principal.role != "admin" and principal.tenant_id != tid:
+        return None
+    from attestra.credits import balance_view
+
+    return balance_view(s, int(tid), actor=getattr(principal, "actor", None) or principal.username)
+
+
 def _render(request: Request, template: str, ctx: dict, status_code: int = 200) -> HTMLResponse:
     principal = _principal(request)
     base = {
@@ -183,7 +197,11 @@ def _render(request: Request, template: str, ctx: dict, status_code: int = 200) 
         "msg": request.query_params.get("msg"),
         "error": request.query_params.get("error"),
         "path": request.url.path,
+        "org_credits": ctx.get("org_credits"),
     }
+    if base["org_credits"] is None and principal is not None:
+        with db.session() as s:
+            base["org_credits"] = _org_credits_for(principal, s)
     return templates.TemplateResponse(request, template, {**base, **ctx}, status_code=status_code)
 
 
@@ -551,6 +569,7 @@ def _engagement_ctx(
         "ct_apexes": _ct_apexes_for(s, eid),
         "ct_suggestions": ct_suggestions or [],
         "ct_apex": ct_apex,
+        "org_credits": _org_credits_for(principal, s, e.tenant_id),
     }
 
 
@@ -790,7 +809,8 @@ def queue_scan(
     tool: str = Form(...),
     profile: str = Form("baseline"),
 ):
-    who = _actor(request)
+    principal = _principal(request)
+    who = principal.username if principal else None
     url = f"/engagements/{eid}"
     if not who:
         return _login_redirect(url)
@@ -800,7 +820,15 @@ def queue_scan(
         return _back(url, error=f"Choose a tool from the list ({', '.join(SCAN_TOOLS)}).", anchor="#scans")
     try:
         with db.session() as s:
-            run = services.request_scan(s, eid, asset_id=int(asset_id), tool=tool, profile=profile, actor=who)
+            run = services.request_scan(
+                s,
+                eid,
+                asset_id=int(asset_id),
+                tool=tool,
+                profile=profile,
+                actor=who,
+                user_id=principal.user_id if principal else None,
+            )
             if run.status == "refused":
                 return _back(url, error=run.refuse_reason or "scan refused", anchor="#scans")
     except (services.ServiceError, LookupError) as e:
@@ -1426,3 +1454,133 @@ def ui_sign_report(request: Request, eid: int, rid: int):
         f"Report #{rid} approved and signed. Its fingerprint is now sealed with a signature.",
         lambda s, p: sign_report(s, rid, actor=p.actor, user_id=p.user_id, role=p.role),
     )
+
+
+@router.get("/credits", response_class=HTMLResponse)
+def ui_credits_page(request: Request):
+    """Organization credit balance and renewal request form."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "credits.read"):
+        return _back("/", error="Your role cannot view organization credits.")
+    from attestra.credits import list_renewal_requests
+    from attestra.models import Tenant
+
+    with db.session() as s:
+        tenants = []
+        if principal.role == "admin":
+            tenants = list(s.scalars(select(Tenant).order_by(Tenant.name)))
+        elif principal.tenant_id:
+            t = s.get(Tenant, principal.tenant_id)
+            tenants = [t] if t else []
+        tid = principal.tenant_id or (tenants[0].id if tenants else None)
+        qtid = request.query_params.get("tenant_id")
+        if qtid and qtid.isdigit() and principal.role == "admin":
+            tid = int(qtid)
+        credits = _org_credits_for(principal, s, tid) if tid else None
+        requests = list_renewal_requests(s, tenant_id=tid, status=None) if tid else []
+        return _render(
+            request,
+            "credits.html",
+            {
+                "tenants": tenants,
+                "selected_tenant_id": tid,
+                "org_credits": credits,
+                "renewal_requests": requests,
+                "can_request": has_permission(principal.role, "credits.request"),
+                "can_allocate": has_permission(principal.role, "credits.allocate"),
+            },
+        )
+
+
+@router.post("/credits/renewal-request")
+def ui_credits_renewal_request(
+    request: Request,
+    tenant_id: int = Form(...),
+    credits_requested: int = Form(...),
+    note: str = Form(""),
+):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "credits.request"):
+        return _back("/credits", error="Your role cannot request additional credits.")
+    if principal.role != "admin" and principal.tenant_id != tenant_id:
+        return _back("/credits", error="cross-tenant credit access denied")
+    from attestra.credits import request_renewal
+
+    try:
+        with db.session() as s:
+            request_renewal(
+                s,
+                tenant_id,
+                credits_requested=int(credits_requested),
+                actor=principal.actor,
+                user_id=principal.user_id,
+                note=note,
+            )
+    except (services.ServiceError, ValueError) as e:
+        return _back("/credits", error=str(e))
+    return _back("/credits", msg="Credit request submitted for Super Admin review.")
+
+
+@router.post("/credits/allocate")
+def ui_credits_allocate(
+    request: Request,
+    tenant_id: int = Form(...),
+    amount: int = Form(...),
+    note: str = Form(""),
+):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "credits.allocate"):
+        return _back("/credits", error="Only a Super Admin can allocate credits.")
+    from attestra.credits import allocate_credits
+
+    try:
+        with db.session() as s:
+            allocate_credits(
+                s,
+                tenant_id,
+                amount=int(amount),
+                actor=principal.actor,
+                user_id=principal.user_id,
+                note=note,
+            )
+    except (services.ServiceError, ValueError) as e:
+        return _back("/credits", error=str(e))
+    return _back(f"/credits?tenant_id={tenant_id}", msg=f"Allocated {amount} credit(s).")
+
+
+@router.post("/credits/renewal-requests/{rid}/resolve")
+def ui_credits_resolve(
+    request: Request,
+    rid: int,
+    approve: str = Form("0"),
+    admin_note: str = Form(""),
+    allocate_amount: str = Form(""),
+):
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "credits.allocate"):
+        return _back("/credits", error="Only a Super Admin can resolve credit requests.")
+    from attestra.credits import resolve_renewal
+
+    amount = int(allocate_amount) if allocate_amount.strip().isdigit() else None
+    try:
+        with db.session() as s:
+            row = resolve_renewal(
+                s,
+                rid,
+                approve=approve in ("1", "true", "yes", "on"),
+                actor=principal.actor,
+                admin_note=admin_note,
+                allocate_amount=amount,
+            )
+            tid = row.tenant_id
+    except (services.ServiceError, LookupError, ValueError) as e:
+        return _back("/credits", error=str(e))
+    return _back(f"/credits?tenant_id={tid}", msg=f"Renewal request #{rid} updated.")

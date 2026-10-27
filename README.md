@@ -130,8 +130,11 @@ Settings are read from environment variables. The most used ones are:
 | Variable | Purpose |
 | --- | --- |
 | `SUBSCRIPTION_SERVICE` | `ON` (default when unset) or `OFF`. When credit accounting is active, `ON` enforces organization test-run credits; `OFF` bypasses only those checks. Invalid values fail startup. Restart API and workers after changing. See `.env.example` |
+| `ATTESTRA_INITIAL_TEST_RUN_CREDITS` | Starting organization test-run credits for a new tenant (default `3`) |
+| `ATTESTRA_CREDIT_REFUND_ON_PRE_START_FAILURE` | Refund a consumed credit if queue/dispatch fails before the run starts (default `ON`) |
+| `ATTESTRA_CREDIT_REFUND_ON_POST_START_FAILURE` | Auto-refund when a started scan later fails (default `OFF`) |
 | `ATTESTRA_DATA_DIR` | Folder for the database, evidence, reports and signing key (default `./data`) |
-| `ATTESTRA_DATABASE_URL` | Use another database, for example PostgreSQL (`pip install -e ".[postgres]"`). On Postgres, run Alembic to head (migration `0022_auth_web` adds auth-web tables) |
+| `ATTESTRA_DATABASE_URL` | Use another database, for example PostgreSQL (`pip install -e ".[postgres]"`). On Postgres, run Alembic to head (migration `0023_subscription_credits` adds credit tables; earlier `0022_auth_web` for auth-web) |
 | `ATTESTRA_PUBLIC_URL` | The address users open, used in links, emails and public verify QR URLs |
 | `ATTESTRA_SESSION_SECRET` | Secret for sign-in sessions (also used for public report verify HMAC). Set a long random value outside development |
 | `ATTESTRA_IMAGE_<TOOL>` | Docker image for a scanner, pinned by digest (for example `ATTESTRA_IMAGE_TESTSSL`, `ATTESTRA_IMAGE_ZAP`). Built-in values are placeholders and must be set before that scanner can run |

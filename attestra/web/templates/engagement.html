@@ -385,7 +385,15 @@
     <div class="warn" id="scan_no_targets">No targets in scope yet. Add a target in <a href="#targets">Targets in scope</a> first, then queue a scan here.</div>
     {% endif %}
     {% if not has_auth %}<div class="warn">Record a valid signed authorization in <a href="#scope">Signed authorization</a> first; scans are blocked until then.</div>{% endif %}
-    {% set scan_ready = e.assets and has_auth %}
+    {% set credits_block = org_credits and org_credits.exhausted %}
+    {% if credits_block %}
+    <div class="warn" role="alert">The organization has exhausted its available test-run credits. Existing engagements, findings, and reports stay available. <a href="/credits">Request additional credits</a>.</div>
+    {% elif org_credits and not org_credits.enforcement %}
+    <p class="meta">{{ org_credits.label }}</p>
+    {% elif org_credits %}
+    <p class="meta">{{ org_credits.label }}</p>
+    {% endif %}
+    {% set scan_ready = e.assets and has_auth and not credits_block %}
     <form method="post" action="/engagements/{{ e.id }}/scans">
       <fieldset {{ "disabled" if not scan_ready }}>
       <div class="fields">

@@ -1104,6 +1104,27 @@ class ScanIn(BaseModel):
     asset_id: int
     tool: str
     profile: str = "baseline"
+    idempotency_key: str | None = None
+
+
+class CreditAllocateIn(BaseModel):
+    tenant_id: int
+    amount: int = Field(ge=1, le=10000)
+    note: str = ""
+    idempotency_key: str | None = None
+
+
+class CreditRenewalIn(BaseModel):
+    tenant_id: int
+    credits_requested: int = Field(ge=1, le=10000)
+    note: str = ""
+    idempotency_key: str | None = None
+
+
+class CreditRenewalResolveIn(BaseModel):
+    approve: bool
+    admin_note: str = ""
+    allocate_amount: int | None = Field(default=None, ge=1, le=10000)
 
 
 def _scan_dict(r) -> dict:
@@ -1129,17 +1150,152 @@ def start_scan(eid: int, body: ScanIn, principal: Principal = Depends(require("s
     try:
         with db.session() as s:
             services.get_engagement(s, eid, principal)
-            run = services.request_scan(s, eid, **body.model_dump(), actor=principal.actor)
+            data = body.model_dump()
+            idem = data.pop("idempotency_key", None)
+            run = services.request_scan(
+                s,
+                eid,
+                **data,
+                actor=principal.actor,
+                user_id=principal.user_id,
+                idempotency_key=idem,
+            )
             payload = _scan_dict(run)
             refused = run.status == "refused"
             reason = run.refuse_reason or "scan refused"
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except services.ServiceError as e:
-        raise HTTPException(409, str(e)) from e
+        msg = str(e)
+        code = 402 if "exhausted its available test-run credits" in msg else 409
+        raise HTTPException(code, msg) from e
     if refused:
         raise HTTPException(403, reason)
     return payload
+
+
+def _credits_tenant_allowed(principal: Principal, tenant_id: int) -> bool:
+    if principal.role == "admin":
+        return True
+    return principal.tenant_id == tenant_id
+
+
+@app.get("/api/tenants/{tenant_id}/credits")
+def get_tenant_credits(tenant_id: int, principal: Principal = Depends(require("credits.read"))):
+    if not _credits_tenant_allowed(principal, tenant_id):
+        raise HTTPException(403, "cross-tenant credit access denied")
+    from attestra.credits import balance_view
+
+    def fn(s):
+        return balance_view(s, tenant_id, actor=principal.actor)
+
+    return _run(fn)
+
+
+@app.post("/api/credits/allocate", status_code=201)
+def allocate_credits_api(body: CreditAllocateIn, principal: Principal = Depends(require("credits.allocate"))):
+    from attestra.credits import allocate_credits, balance_view
+
+    try:
+        with db.session() as s:
+            tx = allocate_credits(
+                s,
+                body.tenant_id,
+                amount=body.amount,
+                actor=principal.actor,
+                user_id=principal.user_id,
+                note=body.note,
+                idempotency_key=body.idempotency_key,
+            )
+            view = balance_view(s, body.tenant_id, actor=principal.actor)
+            return {"transaction_id": tx.id, "credits": view}
+    except services.ServiceError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/api/credits/renewal-requests", status_code=201)
+def create_renewal_request(body: CreditRenewalIn, principal: Principal = Depends(require("credits.request"))):
+    if not _credits_tenant_allowed(principal, body.tenant_id):
+        raise HTTPException(403, "cross-tenant credit access denied")
+    from attestra.credits import request_renewal
+
+    try:
+        with db.session() as s:
+            row = request_renewal(
+                s,
+                body.tenant_id,
+                credits_requested=body.credits_requested,
+                actor=principal.actor,
+                user_id=principal.user_id,
+                note=body.note,
+                idempotency_key=body.idempotency_key,
+            )
+            return {
+                "id": row.id,
+                "tenant_id": row.tenant_id,
+                "credits_requested": row.credits_requested,
+                "status": row.status,
+            }
+    except services.ServiceError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/credits/renewal-requests")
+def list_renewal_requests_api(
+    status: str | None = Query("pending"),
+    tenant_id: int | None = None,
+    principal: Principal = Depends(require("credits.read")),
+):
+    from attestra.credits import list_renewal_requests
+
+    if tenant_id is not None and not _credits_tenant_allowed(principal, tenant_id):
+        raise HTTPException(403, "cross-tenant credit access denied")
+    if principal.role != "admin":
+        tenant_id = principal.tenant_id
+        if tenant_id is None:
+            return []
+
+    def fn(s):
+        rows = list_renewal_requests(s, tenant_id=tenant_id, status=status)
+        return [
+            {
+                "id": r.id,
+                "tenant_id": r.tenant_id,
+                "credits_requested": r.credits_requested,
+                "status": r.status,
+                "requested_by": r.requested_by,
+                "note": r.note,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
+
+    return _run(fn)
+
+
+@app.post("/api/credits/renewal-requests/{rid}/resolve")
+def resolve_renewal_api(
+    rid: int,
+    body: CreditRenewalResolveIn,
+    principal: Principal = Depends(require("credits.allocate")),
+):
+    from attestra.credits import resolve_renewal
+
+    try:
+        with db.session() as s:
+            row = resolve_renewal(
+                s,
+                rid,
+                approve=body.approve,
+                actor=principal.actor,
+                admin_note=body.admin_note,
+                allocate_amount=body.allocate_amount,
+            )
+            return {"id": row.id, "status": row.status, "tenant_id": row.tenant_id}
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except services.ServiceError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @app.get("/api/engagements/{eid}/scans")

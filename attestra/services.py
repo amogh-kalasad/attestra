@@ -174,6 +174,9 @@ def get_or_create_tenant(
         s.add(t)
         s.flush()
         audit.record(s, actor, "tenant.create", "tenant", t.id, name=name)
+        from attestra.credits import ensure_account
+
+        ensure_account(s, t.id, actor=actor)
     changed = {}
     for field, value in (("industry", industry), ("contact_name", contact_name), ("contact_email", contact_email)):
         if value and value.strip() != getattr(t, field):
@@ -1548,12 +1551,27 @@ def request_scan(
     tool: str,
     profile: str = "baseline",
     actor: str,
+    user_id: int | None = None,
+    idempotency_key: str | None = None,
 ) -> ScanRun:
-    """Create a ScanRun + Job after the dispatch gate accepts the request."""
+    """Create a ScanRun + Job after the dispatch gate accepts the request.
+
+    Organization test-run credits are consumed once here on successful
+    admission when ``SUBSCRIPTION_SERVICE=ON``. Schedules, API, UI, and CLI
+    all call this function so charging is not duplicated in workers.
+    """
+    from attestra.credits import attach_scan_run, balance_view, consume_for_scan_admit, refund_for_scan
     from attestra.jobs.durable import enqueue
     from attestra.runner.gate import GateError, check
 
-    get_engagement(s, engagement_id)
+    eng = get_engagement(s, engagement_id)
+    # Fail-fast when enforcement is on and the org has no credits (no debit yet).
+    if config.subscription_enforcement_enabled():
+        if balance_view(s, eng.tenant_id, actor=actor)["exhausted"]:
+            raise ServiceError(
+                "The organization has exhausted its available test-run credits. "
+                "Request additional credits or ask a Super Admin to allocate more."
+            )
     try:
         check(s, engagement_id, asset_id, tool=tool, profile=profile, actor=actor)
     except GateError as exc:
@@ -1570,6 +1588,15 @@ def request_scan(
         s.flush()
         return run
 
+    # Single credit-charging point: after the gate accepts, before queue/dispatch.
+    debit = consume_for_scan_admit(
+        s,
+        eng.tenant_id,
+        actor=actor,
+        engagement_id=engagement_id,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
+    )
     run = ScanRun(
         engagement_id=engagement_id,
         asset_id=asset_id,
@@ -1580,10 +1607,24 @@ def request_scan(
     )
     s.add(run)
     s.flush()
-    job = enqueue(s, run.id)
-    from attestra.orchestration import dispatch_scan
+    attach_scan_run(s, debit, run.id)
+    try:
+        job = enqueue(s, run.id)
+        from attestra.orchestration import dispatch_scan
 
-    dispatch_scan(s, run.id, job.id)
+        dispatch_scan(s, run.id, job.id)
+    except Exception:
+        refund_for_scan(
+            s,
+            eng.tenant_id,
+            actor=actor,
+            scan_run_id=run.id,
+            engagement_id=engagement_id,
+            debit_tx=debit,
+            post_start=False,
+            note="Refund after pre-start queue/dispatch failure",
+        )
+        raise
     audit.record(s, actor, "scan.request", "scan_run", run.id, tool=tool, profile=profile, asset_id=asset_id)
     return run
 

@@ -37,6 +37,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "webhook.manage": frozenset({"admin", "lead"}),
     "share.create": frozenset({"admin", "lead", "tester"}),
     "share.manage": frozenset({"admin", "lead", "tester"}),
+    # Organization test-run credits (master Phase 2).
+    "credits.read": frozenset({"admin", "lead", "tester", "reviewer", "auditor"}),
+    "credits.request": frozenset({"admin", "lead", "tester"}),
+    "credits.allocate": frozenset({"admin"}),
 }
 
 
