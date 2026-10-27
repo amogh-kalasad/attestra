@@ -93,6 +93,67 @@ def _store(tenant_id: int | None, sub: str, sha: str, filename: str, data: bytes
     return path
 
 
+# Evidence kinds accepted by add_evidence (portal uses client_upload).
+EVIDENCE_KINDS = (
+    "screenshot",
+    "http_pair",
+    "log",
+    "file",
+    "note",
+    "code",
+    "package",
+    "capture_failure",
+    "client_upload",
+)
+# client_viewer may download only their own remediation uploads, not scanner proof.
+CLIENT_DOWNLOADABLE_KINDS = frozenset({"client_upload"})
+
+
+def path_under_roots(path: Path, roots: list[Path]) -> bool:
+    """True when ``path`` resolves under at least one allowed root (no prefix tricks)."""
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            if resolved.is_relative_to(Path(root).resolve()):
+                return True
+        except (OSError, ValueError, TypeError):
+            continue
+    return False
+
+
+def evidence_storage_roots(tenant_id: int) -> list[Path]:
+    """Tenant evidence root plus legacy DATA_DIR for pre-tenant paths."""
+    return [
+        (config.DATA_DIR / "tenants" / str(tenant_id)).resolve(),
+        config.DATA_DIR.resolve(),
+    ]
+
+
+def assert_evidence_path_readable(path: Path, tenant_id: int) -> Path:
+    """Resolve and require the file to sit under the tenant (or legacy) data root."""
+    # @lat: [[authorization#Evidence file security]]
+    try:
+        resolved = Path(path).resolve()
+    except OSError as exc:
+        raise LookupError("evidence not found") from exc
+    if not path_under_roots(resolved, evidence_storage_roots(tenant_id)):
+        raise LookupError("evidence not found")
+    if not resolved.is_file():
+        raise LookupError("evidence not found")
+    return resolved
+
+
+def client_may_download_evidence(role: str, kind: str) -> bool:
+    """Whether ``role`` may download an evidence row of ``kind``."""
+    # @lat: [[authorization#Evidence file security]]
+    if role != "client_viewer":
+        return True
+    return kind in CLIENT_DOWNLOADABLE_KINDS
+
+
 def tenant_ids_for(s: Session, principal) -> set[int] | None:
     """Tenant IDs the principal may access. ``None`` means unrestricted.
 
@@ -978,6 +1039,7 @@ def import_results(
             rule.hits += 1
             suppressed += 1
             continue
+        added_cross_tool = False
         if f is None:
             f = Finding(
                 engagement_id=engagement_id,
@@ -1008,6 +1070,8 @@ def import_results(
             new += 1
         else:
             # Same issue seen again (another tool or a rescan): merge, keep the higher severity.
+            if nf.tool and nf.tool not in (f.tools or []):
+                added_cross_tool = True
             f.occurrences += 1
             f.last_seen = now
             if nf.tool not in f.tools:
@@ -1051,6 +1115,34 @@ def import_results(
             match_rationale=match_rationale or ("new" if possible_dup is None else f"ambiguous:{match_rationale}"),
             possible_duplicate_of=possible_dup,
         )
+        # Light audit for soft/ambiguous and cross-tool exact merges (Phase 9 auditability).
+        if match_rationale.startswith("soft:") or match_rationale.startswith("ambiguous:"):
+            audit.record(
+                s,
+                actor,
+                "finding.dedup",
+                "finding",
+                f.id,
+                match=match_rationale.split(":", 1)[0],
+                confidence=match_confidence,
+                rationale=(match_rationale or "")[:500],
+                tool=nf.tool,
+                import_run=run.id,
+                possible_duplicate_of=possible_dup,
+            )
+        elif added_cross_tool and match_rationale == "exact_fingerprint":
+            audit.record(
+                s,
+                actor,
+                "finding.dedup",
+                "finding",
+                f.id,
+                match="exact_cross_tool",
+                confidence=match_confidence,
+                rationale=match_rationale,
+                tool=nf.tool,
+                import_run=run.id,
+            )
         rescore(f)
 
     # Renewed cert (>30 days left): close open expiry findings for this target.
@@ -1359,9 +1451,11 @@ def add_evidence(
     if not f:
         raise LookupError(f"finding {finding_id} not found")
     eng = get_engagement(s, f.engagement_id)
-    allowed_kinds = ("screenshot", "http_pair", "log", "file", "note", "code", "package", "capture_failure")
-    if kind not in allowed_kinds:
-        raise ServiceError(f"evidence kind must be one of {allowed_kinds}")
+    if kind not in EVIDENCE_KINDS:
+        raise ServiceError(f"evidence kind must be one of {EVIDENCE_KINDS}")
+    max_bytes = int(getattr(config, "EVIDENCE_MAX_BYTES", 20 * 1024 * 1024) or 0)
+    if max_bytes > 0 and len(data) > max_bytes:
+        raise ServiceError(f"evidence exceeds {max_bytes} byte limit")
     if role not in ("original", "annotated", "excerpt"):
         raise ServiceError("evidence role must be original, annotated, or excerpt")
     if parent_evidence_id is not None:
@@ -1377,6 +1471,7 @@ def add_evidence(
         "capture_failure": "text/plain",
         "screenshot": "image/png",
         "file": "application/octet-stream",
+        "client_upload": "application/octet-stream",
     }.get(kind, "application/octet-stream")
     ct = (content_type or default_ct).strip()
     # Screenshots and binary files: mask only when text-like; images keep bytes intact aside from prior redaction.
@@ -1477,7 +1572,12 @@ def attach_annotated_screenshot(
         raise ServiceError("annotated derivatives require a screenshot original on the same finding")
     if original.role == "annotated":
         raise ServiceError("cannot annotate an already-annotated derivative; use the original")
-    raw = Path(original.path).read_bytes()
+    f = s.get(Finding, finding_id)
+    if not f:
+        raise LookupError(f"finding {finding_id} not found")
+    eng = get_engagement(s, f.engagement_id)
+    raw_path = assert_evidence_path_readable(Path(original.path), eng.tenant_id)
+    raw = raw_path.read_bytes()
     if _sha256(raw) != original.sha256:
         raise ServiceError("original screenshot hash mismatch; refusing to annotate")
     try:

@@ -706,7 +706,12 @@ def engagement_dedup_suggestions(eid: int, principal: Principal = Depends(requir
 def transition(fid: int, body: TransitionIn, principal: Principal = Depends(require("finding.write"))):
     def fn(s):
         from attestra.library import service as lib
+        from attestra.models import Finding
 
+        row = s.get(Finding, fid)
+        if not row:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, row.engagement_id, principal)
         f = services.transition(s, fid, to=body.to, note=body.note, actor=principal.actor)
         return _finding_dict(f, lib.finding_api_fix_fields(s, f))
 
@@ -795,16 +800,29 @@ async def add_evidence(
     file: UploadFile = File(...),
     principal: Principal = Depends(require("finding.write")),
 ):
+    from attestra.models import Finding
+
     data = await file.read()
-    ev = _run(
-        services.add_evidence,
-        fid,
-        kind=kind,
-        filename=file.filename or "evidence",
-        data=data,
-        note=note,
-        actor=principal.actor,
-    )
+    max_bytes = config.EVIDENCE_MAX_BYTES
+    if max_bytes > 0 and len(data) > max_bytes:
+        raise HTTPException(413, f"evidence exceeds {max_bytes} byte limit")
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        return services.add_evidence(
+            s,
+            fid,
+            kind=kind,
+            filename=file.filename or "evidence",
+            data=data,
+            note=note,
+            actor=principal.actor,
+        )
+
+    ev = _run(fn)
     return {"id": ev.id, "sha256": ev.sha256}
 
 
@@ -1197,13 +1215,13 @@ def _report_file(s, rid: int, principal: Principal) -> tuple[Report, Path]:
     data_root = cfg.DATA_DIR.resolve()
     tenant_root = (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve()
     allowed_roots = [tenant_root, data_root]  # legacy pre-tenant paths under DATA_DIR
-    if not any(str(path).startswith(str(root)) for root in allowed_roots):
+    if not services.path_under_roots(path, allowed_roots):
         # DATA_DIR moved (or a temp DB copy): remap .../tenants/<id>/... under the current root.
         parts = path.parts
         if "tenants" in parts:
             idx = parts.index("tenants")
             candidate = (cfg.DATA_DIR.joinpath(*parts[idx:])).resolve()
-            if str(candidate).startswith(str(tenant_root)) and candidate.is_file():
+            if services.path_under_roots(candidate, [tenant_root]) and candidate.is_file():
                 path = candidate
             else:
                 raise HTTPException(404, "report not found")
@@ -1276,7 +1294,6 @@ def download_sealed_report(rid: int, principal: Principal = Depends(require("rep
 
 @app.get("/api/evidence/{eid}/download")
 def download_evidence(eid: int, principal: Principal = Depends(require("finding.read"))):
-    from attestra import config as cfg
     from attestra.models import Evidence, Finding
 
     with db.session() as s:
@@ -1287,15 +1304,12 @@ def download_evidence(eid: int, principal: Principal = Depends(require("finding.
         if not f:
             raise HTTPException(404, "evidence not found")
         eng = services.get_engagement(s, f.engagement_id, principal)
-        path = Path(ev.path).resolve()
-        allowed_roots = [
-            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
-            cfg.DATA_DIR.resolve(),
-        ]
-        if not any(str(path).startswith(str(root)) for root in allowed_roots):
-            raise HTTPException(404, "evidence not found")
-        if not path.is_file():
-            raise HTTPException(404, "evidence not found")
+        if not services.client_may_download_evidence(principal.role, ev.kind):
+            raise HTTPException(403, "client viewers may download only client_upload evidence")
+        try:
+            path = services.assert_evidence_path_readable(Path(ev.path), eng.tenant_id)
+        except LookupError:
+            raise HTTPException(404, "evidence not found") from None
         audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
         return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
 

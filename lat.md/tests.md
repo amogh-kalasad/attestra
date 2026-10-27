@@ -2019,4 +2019,40 @@ Annotating an already-annotated row raises [[attestra/services.py#ServiceError]]
 
 `POST /api/findings/{fid}/evidence/{eid}/annotate` returns the new evidence id and annotation metadata.
 
+## Phase 9 security
+
+Master Phase 9 tenant isolation, evidence upload/download limits, path containment, and dedup audit (`tests/test_phase9_security.py`).
+
+### Cross-tenant evidence upload denied
+
+`POST /api/findings/{fid}/evidence` returns 404 when the finding belongs to another tenant.
+
+### Cross-tenant transition denied
+
+`POST /api/findings/{fid}/transition` returns 404 across tenants after [[attestra/services.py#assert_engagement_access]].
+
+### Evidence upload size capped
+
+API evidence upload returns 413 when the body exceeds [[attestra/config.py#EVIDENCE_MAX_BYTES]].
+
+### Proof screenshot size capped
+
+`POST /api/findings/{fid}/proof/screenshot` returns 413 over the same size cap.
+
+### Client upload kind accepted
+
+[[attestra/services.py#add_evidence]] accepts kind `client_upload` used by the portal.
+
+### Client viewer blocked from scanner download
+
+Role `client_viewer` receives 403 for scanner kinds and 200 only for `client_upload`.
+
+### Path containment uses is_relative_to
+
+[[attestra/services.py#assert_evidence_path_readable]] rejects DATA_DIR prefix siblings that string `startswith` would allow.
+
+### Dedup soft merge audited
+
+Cross-tool import merges emit `finding.dedup` audit events (`soft`, `ambiguous`, or `exact_cross_tool`).
+
 

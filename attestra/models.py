@@ -515,7 +515,7 @@ class Evidence(Base):
     __tablename__ = "evidence"
     id: Mapped[int] = mapped_column(primary_key=True)
     finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
-    kind: Mapped[str] = mapped_column(String(30))  # screenshot | http_pair | log | file | note | code | package | capture_failure
+    kind: Mapped[str] = mapped_column(String(30))  # screenshot | http_pair | log | file | note | code | package | capture_failure | client_upload
     filename: Mapped[str] = mapped_column(String(300))
     path: Mapped[str] = mapped_column(String(500))
     sha256: Mapped[str] = mapped_column(String(64))

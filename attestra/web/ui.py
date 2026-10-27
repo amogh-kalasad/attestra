@@ -1419,7 +1419,6 @@ def ui_download_evidence(request: Request, eid: int, evid: int):
         return redirect
     if not has_permission(principal.role, "finding.read"):
         raise HTTPException(403, "not allowed")
-    from attestra import config as cfg
     from attestra.models import Evidence, Finding
 
     with db.session() as s:
@@ -1433,15 +1432,12 @@ def ui_download_evidence(request: Request, eid: int, evid: int):
         f = s.get(Finding, ev.finding_id)
         if not f or f.engagement_id != eid:
             raise HTTPException(404, "evidence not found")
-        path = Path(ev.path).resolve()
-        allowed_roots = [
-            (cfg.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve(),
-            cfg.DATA_DIR.resolve(),
-        ]
-        if not any(str(path).startswith(str(root)) for root in allowed_roots):
-            raise HTTPException(404, "evidence not found")
-        if not path.is_file():
-            raise HTTPException(404, "evidence not found")
+        if not services.client_may_download_evidence(principal.role, ev.kind):
+            raise HTTPException(403, "client viewers may download only client_upload evidence")
+        try:
+            path = services.assert_evidence_path_readable(Path(ev.path), eng.tenant_id)
+        except LookupError:
+            raise HTTPException(404, "evidence not found") from None
         audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
         return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
 

@@ -108,7 +108,7 @@ Triage CSV download with a formula-injection guard; evidence bodies are omitted.
 
 Attaching hashed artifacts to a finding, with provenance and original-vs-annotated roles.
 
-[[attestra/services.py#add_evidence]] masks secrets/PANs via [[attestra/evidence/mask.py#mask_bytes]] before hashing and write-once store ([[attestra/models.py#Evidence]] `masking_applied`). Image screenshots keep bytes intact aside from prior redaction. Imports mask raw bytes the same way after parse. Storage backends implement [[attestra/storage/__init__.py#Storage]] (`local` or `s3`). Kinds include `screenshot`, `http_pair`, `log`, `code`, `package`, `note`, `file`, and `capture_failure`. Provenance and gallery behaviour: [[authorization#Evidence gallery]].
+[[attestra/services.py#add_evidence]] masks secrets/PANs via [[attestra/evidence/mask.py#mask_bytes]] before hashing and write-once store ([[attestra/models.py#Evidence]] `masking_applied`). Image screenshots keep bytes intact aside from prior redaction. Imports mask raw bytes the same way after parse. Storage backends implement [[attestra/storage/__init__.py#Storage]] (`local` or `s3`). Allowed kinds are [[attestra/services.py#EVIDENCE_KINDS]] (`screenshot`, `http_pair`, `log`, `code`, `package`, `note`, `file`, `capture_failure`, `client_upload`). Upload size is capped by [[attestra/config.py#EVIDENCE_MAX_BYTES]] (portal uses a stricter 5 MB). Provenance and gallery behaviour: [[authorization#Evidence gallery]]. Download and path rules: [[authorization#Evidence file security]].
 
 ## Findings library fix snippets
 

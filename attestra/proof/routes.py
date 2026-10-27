@@ -91,7 +91,12 @@ def add_http_proof(fid: int, body: HttpPairIn, principal=Depends(_require("findi
 
 @router.post("/api/findings/{fid}/proof/screenshot", status_code=201)
 async def add_screenshot(fid: int, note: str = Form(""), file: UploadFile = File(...), principal=Depends(_require("finding.write"))):
+    from attestra import config
+
     data = await file.read()
+    max_bytes = config.EVIDENCE_MAX_BYTES
+    if max_bytes > 0 and len(data) > max_bytes:
+        raise HTTPException(413, f"evidence exceeds {max_bytes} byte limit")
 
     def fn(s):
         _finding(s, fid, principal)

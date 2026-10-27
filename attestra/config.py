@@ -81,6 +81,9 @@ SCANNER_IMAGES = {
 # Persistent scanner caches (nuclei templates, trivy DB) so each run does not download them again.
 SCANNER_CACHE_DIR = Path(os.environ.get("ATTESTRA_SCANNER_CACHE_DIR", DATA_DIR / "scanner-cache")).resolve()
 
+# Evidence upload size cap (API + proof screenshot). Portal uses a stricter 5 MB cap.
+EVIDENCE_MAX_BYTES = int(os.environ.get("ATTESTRA_EVIDENCE_MAX_BYTES", str(20 * 1024 * 1024)))
+
 
 def image_is_placeholder(image: str) -> bool:
     """True for the built-in all-zero digests, which point at no real image."""
