@@ -1154,6 +1154,25 @@ def export_engagement_json_api(eid: int, principal: Principal = Depends(require(
     return _run(fn)
 
 
+@app.get("/api/engagements/{eid}/export/markdown")
+def export_engagement_markdown_api(eid: int, principal: Principal = Depends(require("finding.read"))):
+    """Consolidated findings Markdown (evidence references only; no public URLs)."""
+    from fastapi.responses import PlainTextResponse
+
+    from attestra.reports.markdown_export import export_engagement_markdown
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        return export_engagement_markdown(s, eid, actor=principal.actor)
+
+    body = _run(fn)
+    return PlainTextResponse(
+        body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="eng{eid}-findings.md"'},
+    )
+
+
 @app.get("/api/engagements/{eid}/packs/{framework}")
 def framework_pack(eid: int, framework: str, principal: Principal = Depends(require("report.read"))):
     from fastapi.responses import FileResponse

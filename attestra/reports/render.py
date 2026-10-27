@@ -186,26 +186,70 @@ def _latest_retest(retests_by_finding: dict[int, list[Retest]], finding_id: int)
     return rows[0] if rows else None
 
 
+def _evidence_source_label(e) -> str:
+    from attestra.dedup import tool_display_name
+
+    tool = getattr(e, "source_tool", "") or ""
+    return tool_display_name(tool) if tool else ""
+
+
+def _screenshot_caption(e) -> str:
+    """Human caption with role and source attribution for report figures."""
+    base = (e.note or "").strip() or e.filename or "screenshot"
+    # Strip machine redaction markers from captions.
+    lines = [ln for ln in base.splitlines() if not ln.strip().startswith("redaction_status=")]
+    base = " ".join(lines).strip() or e.filename or "screenshot"
+    role = getattr(e, "role", None) or "original"
+    parts = [base]
+    if role == "annotated":
+        parts.append("annotated derivative")
+    src = _evidence_source_label(e)
+    if src:
+        parts.append(f"source: {src}")
+    return " · ".join(parts)
+
+
 def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
-    """Embed screenshot evidence as data URIs when the file is present and hash-matches."""
+    """Embed screenshot evidence as data URIs when the file is present and hash-matches.
+
+    Prefers annotated derivatives over their originals to avoid repeating the same
+    capture. Capture-failure rows are never embedded as images.
+    """
     out: dict[int, list[dict]] = {}
     for f in findings:
+        screenshots = [
+            e
+            for e in (f.evidence or [])
+            if e.kind == "screenshot" and (getattr(e, "capture_status", None) or "success") == "success"
+        ]
+        parents_with_annotated = {
+            e.parent_evidence_id
+            for e in screenshots
+            if (getattr(e, "role", None) or "") == "annotated" and e.parent_evidence_id
+        }
         embeds: list[dict] = []
-        for e in f.evidence or []:
-            if e.kind != "screenshot":
+        for e in screenshots:
+            if e.id in parents_with_annotated:
+                # Original has an annotated derivative — show the derivative only.
                 continue
             path = Path(e.path)
+            role = getattr(e, "role", None) or "original"
+            meta = {
+                "id": e.id,
+                "filename": e.filename,
+                "sha256": e.sha256,
+                "note": e.note or "",
+                "caption": _screenshot_caption(e),
+                "role": role,
+                "source_tool": getattr(e, "source_tool", "") or "",
+                "source_tool_label": _evidence_source_label(e),
+                "parent_evidence_id": getattr(e, "parent_evidence_id", None),
+                "redaction_status": getattr(e, "redaction_status", "") or "",
+                "data_uri": "",
+                "missing": True,
+            }
             if not path.is_file():
-                embeds.append(
-                    {
-                        "id": e.id,
-                        "filename": e.filename,
-                        "sha256": e.sha256,
-                        "note": e.note or "",
-                        "data_uri": "",
-                        "missing": True,
-                    }
-                )
+                embeds.append(meta)
                 continue
             try:
                 data = path.read_bytes()
@@ -216,18 +260,46 @@ def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
             mime = mimetypes.guess_type(e.filename)[0] or "image/png"
             if not mime.startswith("image/"):
                 mime = "image/png"
-            embeds.append(
-                {
-                    "id": e.id,
-                    "filename": e.filename,
-                    "sha256": e.sha256,
-                    "note": e.note or "",
-                    "data_uri": f"data:{mime};base64," + base64.b64encode(data).decode("ascii"),
-                    "missing": False,
-                }
-            )
+            meta["data_uri"] = f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+            meta["missing"] = False
+            embeds.append(meta)
         if embeds:
             out[f.id] = embeds
+    return out
+
+
+def _evidence_limitations(findings: list) -> dict[int, list[str]]:
+    """Per-finding capture-failure / limitation notes for report honesty."""
+    out: dict[int, list[str]] = {}
+    for f in findings:
+        notes: list[str] = []
+        for e in f.evidence or []:
+            if e.kind == "capture_failure" or (getattr(e, "capture_status", None) or "") in ("failed", "unavailable"):
+                reason = (getattr(e, "capture_failure_reason", None) or e.note or "Screenshot capture did not succeed").strip()
+                src = _evidence_source_label(e)
+                notes.append(f"{reason}" + (f" (source: {src})" if src else ""))
+        if notes:
+            out[f.id] = notes
+    return out
+
+
+def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
+    """Scanner observations for report attribution (canonical findings only once)."""
+    from attestra.models import FindingObservation
+
+    ids = [f.id for f in findings]
+    if not ids:
+        return {}
+    rows = list(
+        s.scalars(
+            select(FindingObservation)
+            .where(FindingObservation.finding_id.in_(ids))
+            .order_by(FindingObservation.id)
+        )
+    )
+    out: dict[int, list] = {}
+    for o in rows:
+        out.setdefault(o.finding_id, []).append(o)
     return out
 
 
@@ -242,8 +314,10 @@ def _figures_list(evidence_embeds: dict[int, list[dict]]) -> list[dict]:
             figures.append(
                 {
                     "id": f"F-{fid}-{i}",
-                    "caption": e.get("note") or e.get("filename") or "screenshot",
+                    "caption": e.get("caption") or e.get("note") or e.get("filename") or "screenshot",
                     "finding_id": fid,
+                    "role": e.get("role") or "original",
+                    "source_tool_label": e.get("source_tool_label") or "",
                 }
             )
     return figures
@@ -459,6 +533,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "tenant": eng.tenant.name,
         "type_label": engagement_type_label(eng.type),
         "detected_by": detected_by_label,
+        "observations_by_finding": _observations_by_finding(s, reportable),
+        "evidence_limitations": _evidence_limitations(reportable),
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
         "tls_summaries": services.tls_summaries(s, engagement_id),

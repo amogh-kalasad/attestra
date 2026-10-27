@@ -22,6 +22,7 @@ Notable routes:
 | GET | `/api/engagements/{eid}/findings/export` | Findings CSV (formula-safe); optional `asset_id` |
 | GET | `/api/engagements/{eid}/export/xlsx` | Excel Findings/Controls/Evidence workbook |
 | GET | `/api/engagements/{eid}/export/json` | Full engagement JSON (`version` + `export_schema_version`) |
+| GET | `/api/engagements/{eid}/export/markdown` | Consolidated findings Markdown |
 | POST | `/api/findings/{fid}/assign` | Assign finding to a tenant username (audited) |
 | POST | `/api/findings/{fid}/unassign` | Clear finding assignee (audited) |
 | GET | `/api/findings/{fid}/assignee` | Current assignee username |

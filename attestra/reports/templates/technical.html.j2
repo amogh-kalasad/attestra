@@ -304,6 +304,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     {% if f.asvs_ref %}<tr><th>ASVS</th><td>{{ f.asvs_ref }}</td></tr>{% endif %}
     {% if f.wstg_ref %}<tr><th>WSTG</th><td>{{ f.wstg_ref }}</td></tr>{% endif %}
     <tr><th>Detected by</th><td>{{ detected_by(f.tools) }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
+    {% if f.dedup_rationale %}<tr><th>Dedup</th><td class="meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</td></tr>{% endif %}
     {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
     <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
   </table>
@@ -332,13 +333,18 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% endfor %}
   {% endif %}
   {% if ai_narratives and ai_narratives.get(f.id) %}<p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>{% endif %}
+  {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
+  {% if obs %}
+  <p><b>Scanner observations.</b></p>
+  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
   {% set embeds = evidence_embeds.get(f.id, []) %}
   {% if embeds %}
   <p><b>Evidence (screenshots).</b></p>
   {% for e in embeds %}
   <figure>
-    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.filename }}">{% endif %}
-    <figcaption class="fig-caption">Fig. F-{{ f.id }}-{{ loop.index }}: {{ e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
+    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
+    <figcaption class="fig-caption">Fig. F-{{ f.id }}-{{ loop.index }}: {{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
   </figure>
   {% endfor %}
   {% endif %}
@@ -349,7 +355,13 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   <pre class="http-pair mono">{{ p.display }}</pre>
   {% endfor %}
   {% endif %}
-  {% if f.evidence %}<p><b>Evidence register.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  {% set limits = evidence_limitations.get(f.id, []) if evidence_limitations is defined else [] %}
+  {% if limits %}
+  <p><b>Evidence capture limitations.</b></p>
+  <ul>{% for note in limits %}<li>{{ note }}</li>{% endfor %}</ul>
+  <p class="meta">No screenshot was fabricated. Other available evidence is listed below.</p>
+  {% endif %}
+  {% if f.evidence %}<p><b>Evidence register.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}{% if e.role and e.role != "original" %} ({{ e.role }}){% endif %}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.source_tool %} · {{ e.source_tool }}{% endif %}{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
   {% if include_comments and comments_by_finding.get(f.id) %}
   <p><b>Comments.</b></p>
   <ul>{% for c in comments_by_finding[f.id] %}<li style="white-space:pre-wrap">{{ c.body }}</li>{% endfor %}</ul>

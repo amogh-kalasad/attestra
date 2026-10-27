@@ -14,10 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import __version__, audit
-from attestra.models import Evidence, Finding, Report, engagement_type_label
+from attestra.dedup import detected_by_label, tool_display_name
+from attestra.models import Evidence, Finding, FindingObservation, Report, engagement_type_label
 from attestra.services import compliance, get_engagement, list_findings
 
-EXPORT_SCHEMA_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
 
 
 def _json_value(value: object) -> Any:
@@ -54,6 +55,9 @@ def _finding_export_dict(f: Finding) -> dict[str, Any]:
         "affected_urls": list(f.affected_urls or []),
         "references": list(f.references or []),
         "tools": list(f.tools or []),
+        "detected_by": detected_by_label(f.tools),
+        "dedup_confidence": f.dedup_confidence,
+        "dedup_rationale": f.dedup_rationale or "",
         "occurrences": f.occurrences,
         "sla_due": _json_value(f.sla_due),
         "validated_by": f.validated_by or "",
@@ -64,6 +68,28 @@ def _finding_export_dict(f: Finding) -> dict[str, Any]:
         "fingerprint": f.fingerprint,
         "first_seen": _json_value(f.first_seen),
         "last_seen": _json_value(f.last_seen),
+        "recommendation": f.recommendation or "",
+        "description": f.description or "",
+    }
+
+
+def _observation_export_dict(o: FindingObservation) -> dict[str, Any]:
+    return {
+        "id": o.id,
+        "finding_id": o.finding_id,
+        "tool": o.tool,
+        "tool_label": tool_display_name(o.tool),
+        "original_id": o.original_id or "",
+        "title": o.title or "",
+        "severity": o.severity or "",
+        "location": o.location or "",
+        "param": o.param or "",
+        "cwe": o.cwe,
+        "cves": list(o.cves or []),
+        "match_confidence": o.match_confidence,
+        "match_rationale": o.match_rationale or "",
+        "import_run_id": o.import_run_id,
+        "observed_at": _json_value(o.observed_at),
     }
 
 
@@ -88,11 +114,24 @@ def _control_export_dict(r) -> dict[str, Any]:
 def _evidence_export_dict(ev: Evidence) -> dict[str, Any]:
     """Evidence metadata only — never bodies, paths, or secret-bearing keys."""
     return {
+        "id": ev.id,
         "kind": ev.kind,
         "filename": ev.filename,
         "sha256": ev.sha256,
         "note": ev.note or "",
         "finding_id": ev.finding_id,
+        "role": ev.role or "original",
+        "content_type": ev.content_type or "",
+        "source_tool": ev.source_tool or "",
+        "source_tool_label": tool_display_name(ev.source_tool) if ev.source_tool else "",
+        "observation_id": ev.observation_id,
+        "import_run_id": ev.import_run_id,
+        "parent_evidence_id": ev.parent_evidence_id,
+        "redaction_status": ev.redaction_status or "",
+        "capture_status": ev.capture_status or "",
+        "capture_failure_reason": ev.capture_failure_reason or "",
+        "captured_by": ev.captured_by or "",
+        "captured_at": _json_value(ev.captured_at),
     }
 
 
@@ -129,9 +168,17 @@ def export_engagement_json(s: Session, engagement_id: int, *, actor: str) -> dic
         controls[fw] = [_control_export_dict(r) for r in results]
 
     evidence_rows: list[Evidence] = []
+    observation_rows: list[FindingObservation] = []
     if finding_ids:
         evidence_rows = list(
             s.scalars(select(Evidence).where(Evidence.finding_id.in_(finding_ids)).order_by(Evidence.id))
+        )
+        observation_rows = list(
+            s.scalars(
+                select(FindingObservation)
+                .where(FindingObservation.finding_id.in_(finding_ids))
+                .order_by(FindingObservation.id)
+            )
         )
 
     reports = list(
@@ -153,6 +200,7 @@ def export_engagement_json(s: Session, engagement_id: int, *, actor: str) -> dic
             "status": eng.status,
         },
         "findings": [_finding_export_dict(f) for f in findings],
+        "observations": [_observation_export_dict(o) for o in observation_rows],
         "controls": controls,
         "evidence": [_evidence_export_dict(ev) for ev in evidence_rows],
         "reports": [_report_export_dict(r) for r in reports],
@@ -167,6 +215,7 @@ def export_engagement_json(s: Session, engagement_id: int, *, actor: str) -> dic
         format="json",
         finding_count=len(findings),
         evidence_count=len(evidence_rows),
+        observation_count=len(observation_rows),
         report_count=len(reports),
     )
     return payload

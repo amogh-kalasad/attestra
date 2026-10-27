@@ -76,8 +76,8 @@
   <p><b>Evidence linked to finding.</b></p>
   {% for e in embeds %}
   <figure>
-    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.filename }}">{% endif %}
-    <figcaption class="fig-caption">{{ e.note or e.filename }} · sha256 {{ e.sha256 }}</figcaption>
+    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
+    <figcaption class="fig-caption">{{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}</figcaption>
   </figure>
   {% endfor %}
   {% endif %}

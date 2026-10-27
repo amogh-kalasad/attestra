@@ -78,6 +78,13 @@
       {% if can(prole, "finding.read") %}
       <a class="btn secondary" href="/engagements/{{ e.id }}/evidence/{{ card.id }}/download" style="align-self:flex-start">Download</a>
       {% endif %}
+      {% set preview = (text_previews or {}).get(card.id) %}
+      {% if preview %}
+      <details class="ev-preview">
+        <summary class="meta">Show content</summary>
+        <pre class="proof" style="margin-top:8px;max-height:280px;overflow:auto">{{ preview }}</pre>
+      </details>
+      {% endif %}
       {% if replay %}
       <div class="meta" style="margin-top:4px">
         Replay:

@@ -71,9 +71,17 @@
 <!-- ============================================================ FINDINGS -->
 <div class="card" id="findings">
   <h2>Findings (ranked by risk)</h2>
-  <div class="row" style="margin-bottom:12px">
+  <div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">
     {% if can(prole, "finding.read") %}
-    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Export findings CSV</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/findings/export">Findings CSV</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/export/xlsx" download>Excel</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/export/json" download>JSON export</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/export/markdown" download>Markdown</a>
+    <a class="btn secondary" href="/engagements/{{ e.id }}/export/sarif">SARIF</a>
+    {% endif %}
+    {% if can(prole, "report.read") %}
+    <a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal-poam">OSCAL POA&amp;M</a>
+    {% for k in e.frameworks %}<a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal?framework={{ k|urlencode }}">OSCAL results · {{ k|fw_name }}</a>{% endfor %}
     {% endif %}
   </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}

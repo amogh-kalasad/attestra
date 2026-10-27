@@ -29,8 +29,12 @@ EVIDENCE_COLUMNS = (
     "finding_id",
     "evidence id",
     "kind",
+    "role",
     "filename",
     "sha256",
+    "source tool",
+    "capture status",
+    "parent evidence id",
     "note",
 )
 
@@ -77,8 +81,12 @@ def _evidence_rows(s: Session, engagement_id: int) -> list[list[str]]:
             csv_cell(ev.finding_id),
             csv_cell(ev.id),
             csv_cell(ev.kind),
+            csv_cell(ev.role or "original"),
             csv_cell(ev.filename),
             csv_cell(ev.sha256),
+            csv_cell(ev.source_tool or ""),
+            csv_cell(ev.capture_status or ""),
+            csv_cell(ev.parent_evidence_id or ""),
             csv_cell(ev.note),
         ]
         for ev in evidence

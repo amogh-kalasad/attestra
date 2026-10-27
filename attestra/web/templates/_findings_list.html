@@ -8,6 +8,7 @@
       <span class="top"><span class="mono">F-{{ x.id }}</span><span class="pill {{ x.severity }}">{{ x.severity|capitalize }}</span></span>
       <b>{{ x.title }}</b>
       <span class="top"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{% if x.asset %}{{ x.asset.name or x.asset.identifier }}{% else %}Unmatched{% endif %}{% if x.cwe %} &middot; CWE-{{ x.cwe }}{% endif %}</span><span class="fs fs-{{ x.status }}" style="padding:2px 8px;font-size:11.5px">{{ x.status|label }}</span></span>
+      {% if x.tools %}<span class="meta" style="font-size:11.5px">{{ detected_by(x.tools) }}</span>{% endif %}
     </span>
   </a>
   {% else %}

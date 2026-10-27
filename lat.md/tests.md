@@ -1963,6 +1963,30 @@ Re-importing the same scanner file updates observations without creating duplica
 
 Mid-confidence matches remain separate findings or are flagged rather than force-merged.
 
+## Canonical findings in reports
+
+Master Phase 8: shared report context, PDF/HTML evidence attribution, JSON schema v2, and Markdown export (`tests/test_phase8_reports.py`).
+
+### Technical report prefers annotated screenshot
+
+When an annotated derivative exists, [[attestra/reports/render.py#_evidence_embeds]] embeds it and omits the parent original image.
+
+### Technical report lists capture limitations
+
+Capture-failure evidence appears as limitations text; no fabricated screenshot is embedded.
+
+### JSON export schema v2
+
+[[attestra/reports/engagement_export.py#export_engagement_json]] includes `detected_by`, observations, and evidence provenance fields at `export_schema_version` 2.
+
+### Markdown export consolidated findings
+
+[[attestra/reports/markdown_export.py#export_engagement_markdown]] lists each canonical finding once with tools, observations, and evidence references.
+
+### Markdown export no public evidence URL
+
+Markdown evidence lines reference evidence ids and authenticated download; they do not invent public file URLs.
+
 ## Evidence gallery and annotations
 
 Master Phase 7: provenance fields, annotated screenshot derivatives, capture-failure honesty, and gallery APIs (`tests/test_evidence_gallery.py`).

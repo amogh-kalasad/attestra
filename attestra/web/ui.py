@@ -655,6 +655,83 @@ def export_findings_ui(request: Request, eid: int, asset_id: int | None = None):
     )
 
 
+@router.get("/engagements/{eid}/export/{fmt}")
+def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = ""):
+    """Page buttons: SARIF, OSCAL, Excel, JSON, or Markdown of consolidated findings."""
+    import json
+
+    from fastapi.responses import Response
+
+    from attestra.reports.engagement_export import export_engagement_json
+    from attestra.reports.markdown_export import export_engagement_markdown
+    from attestra.reports.oscal import assessment_results, poam
+    from attestra.reports.sarif import findings_to_sarif
+    from attestra.reports.xlsx_export import export_engagement_xlsx
+
+    perms = {
+        "sarif": "finding.read",
+        "oscal": "report.read",
+        "oscal-poam": "report.read",
+        "xlsx": "finding.read",
+        "json": "finding.read",
+        "markdown": "finding.read",
+        "md": "finding.read",
+    }
+    if fmt not in perms:
+        raise HTTPException(404, "unknown export format")
+    principal, redirect = _require_login(request, f"/engagements/{eid}")
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, perms[fmt]):
+        raise HTTPException(403, f"permission denied: {perms[fmt]}")
+    try:
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            if fmt == "xlsx":
+                data = export_engagement_xlsx(s, eid, actor=principal.actor)
+                return Response(
+                    data,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="eng{eid}-export.xlsx"',
+                        "Cache-Control": "no-store",
+                    },
+                )
+            if fmt in ("markdown", "md"):
+                body = export_engagement_markdown(s, eid, actor=principal.actor)
+                return PlainTextResponse(
+                    body,
+                    media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="eng{eid}-findings.md"'},
+                )
+            if fmt == "json":
+                doc, name = export_engagement_json(s, eid, actor=principal.actor), f"eng{eid}-export.json"
+            elif fmt == "sarif":
+                doc, name = findings_to_sarif(s, eid), f"eng{eid}-findings.sarif"
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
+            elif fmt == "oscal":
+                if framework not in (eng.frameworks or []):
+                    raise LookupError("choose one of this engagement's frameworks")
+                doc, name = assessment_results(s, eid, framework), f"eng{eid}-{framework}-oscal-ar.json"
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
+            else:
+                doc, name = poam(s, eid), f"eng{eid}-oscal-poam.json"
+                audit.record(
+                    s, principal.actor, "engagement.exported", "engagement", eid, format=fmt, framework=framework
+                )
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    return PlainTextResponse(
+        json.dumps(doc, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @router.post("/engagements/{eid}/scope/suggestions")
 def fetch_ct_suggestions_ui(request: Request, eid: int, apex: str = Form(...)):
     """Find subdomain suggestions from CT logs (one request). Never changes scope."""
@@ -1253,6 +1330,33 @@ def edit_engagement(
     return _back(url, msg="Engagement updated.")
 
 
+_TEXT_PREVIEW_KINDS = frozenset({"http_pair", "log", "code", "note", "package", "capture_failure"})
+_TEXT_PREVIEW_CAP = 8000
+
+
+def _evidence_text_previews(evidence_rows: list) -> dict[int, str]:
+    """Load small text/json evidence bodies for finding-detail readable preview."""
+    out: dict[int, str] = {}
+    for ev in evidence_rows:
+        if ev.kind not in _TEXT_PREVIEW_KINDS:
+            continue
+        path = Path(ev.path)
+        if not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if len(raw) > 200_000:
+            out[ev.id] = "(preview omitted — file too large; use Download)"
+            continue
+        text = raw.decode("utf-8", "replace")
+        if len(text) > _TEXT_PREVIEW_CAP:
+            text = text[:_TEXT_PREVIEW_CAP] + f"\n… truncated ({len(raw)} bytes total)"
+        out[ev.id] = text
+    return out
+
+
 @router.get("/engagements/{eid}/findings/{fid}", response_class=HTMLResponse)
 def finding_page(request: Request, eid: int, fid: int):
     """Finding detail page (UI audit #55)."""
@@ -1279,6 +1383,7 @@ def finding_page(request: Request, eid: int, fid: int):
         _ = f.asset
         observations = sorted(list(f.observations or []), key=lambda o: o.id)
         gallery = build_gallery(evidence_rows)
+        text_previews = _evidence_text_previews(evidence_rows)
         replays = list(
             s.scalars(select(ProofReplay).where(ProofReplay.finding_id == fid).order_by(ProofReplay.id.desc()))
         )
@@ -1302,6 +1407,7 @@ def finding_page(request: Request, eid: int, fid: int):
             "show_accept_risk": request.query_params.get("accept_risk") == "1",
             "gallery": gallery,
             "latest_replay": latest_replay,
+            "text_previews": text_previews,
         })
 
 
