@@ -24,7 +24,6 @@ from attestra.compliance import load_library
 from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
-    DEFAULT_TESTS,
     ENGAGEMENT_TYPE_LABELS,
     ENVIRONMENTS,
     OPEN_STATUSES,
@@ -32,7 +31,10 @@ from attestra.models import (
     Engagement,
     ImportRun,
     Report,
+    allowed_test_types_for,
+    default_tests_for,
     engagement_type_label,
+    new_engagement_type_labels,
 )
 
 READ_ONLY_ROLES = frozenset({"client_viewer", "auditor"})
@@ -395,7 +397,7 @@ def new_engagement_form(request: Request):
         return _back("/", error="Only leads and admins can create engagements. Ask your lead to set one up.")
     lib = load_library()
     return _render(request, "new_engagement.html", {
-        "types": ENGAGEMENT_TYPE_LABELS,
+        "types": new_engagement_type_labels(),
         "frameworks": {k: v["name"] for k, v in lib.frameworks.items()},
         "today": date.today(),
     })
@@ -465,7 +467,7 @@ def _test_plan(e: Engagement) -> list[dict]:
         found = by_asset.get(a.id, [])
         tools_seen = sorted({t for f in found for t in (f.tools or [])})
         tests = []
-        for key in a.test_types or DEFAULT_TESTS.get(a.kind, []):
+        for key in a.test_types or default_tests_for(a.kind, e.type):
             tt = TEST_TYPES.get(key)
             if not tt:
                 continue
@@ -562,8 +564,12 @@ def _engagement_ctx(
         "plan": _test_plan(e),
         "environments": ENVIRONMENTS,
         "asset_kinds": ASSET_KINDS,
-        "test_types": TEST_TYPES,
-        "default_tests": DEFAULT_TESTS,
+        "test_types": {
+            k: v for k, v in TEST_TYPES.items() if k in allowed_test_types_for(e.type)
+        },
+        "default_tests": {
+            kind: default_tests_for(kind, e.type) for kind in ASSET_KINDS
+        },
         "import_formats": sorted(PARSERS),
         "today": date.today(),
         "ct_apexes": _ct_apexes_for(s, eid),

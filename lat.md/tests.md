@@ -1827,4 +1827,48 @@ Missing authorization ids return 404 without storage paths in the body.
 
 `SUBSCRIPTION_SERVICE=OFF` does not allow lead/tester document download.
 
+## New engagement types
+
+Master Phase 4: new creates are limited to VA / PT / VA+PT (`tests/test_engagement_types.py`).
+
+### Only three create keys
+
+[[attestra/models.py#NEW_ENGAGEMENT_TYPES]] is `va`, `pt`, `vapt`; [[attestra/models.py#new_engagement_type_labels]] omits retest/continuous and labels `vapt` as `VA + PT`.
+
+### API rejects retest create
+
+`POST /api/engagements` with `type=retest` returns 409.
+
+### API rejects continuous create
+
+`POST /api/engagements` with `type=continuous` returns 409.
+
+### API accepts VA PT VAPT
+
+Each of `va`, `pt`, and `vapt` creates successfully through the API.
+
+### Catalog lists new types
+
+`GET /api/catalog` exposes `new_engagement_types` / `new_engagement_type_keys` without retest or continuous.
+
+### UI form omits retest continuous
+
+`GET /engagements/new` offers only the three new-type options with `VA + PT` for `vapt`.
+
+### Historical retest still readable
+
+An existing `retest` engagement row remains loadable via [[attestra/services.py#get_engagement]].
+
+### VA defaults exclude manual_pt
+
+[[attestra/models.py#default_tests_for]] and [[attestra/services.py#add_asset]] for `va` omit `manual_pt` and reject it when supplied.
+
+### PT defaults are manual_pt
+
+PT engagements default planned tests to `manual_pt` and reject scanner-only types such as `web_dast`.
+
+### VAPT defaults combine
+
+`vapt` engagements keep combined VA and PT defaults from [[attestra/models.py#DEFAULT_TESTS]].
+
 

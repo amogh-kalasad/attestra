@@ -40,7 +40,7 @@
     <div class="fields">
       <div><label for="name">Engagement name <span style="color:var(--danger)">*</span></label><input type="text" id="name" name="name" required placeholder="FY27 Q3 pentest: customer portal"></div>
       <div><label for="type">Type of test <span style="color:var(--danger)">*</span></label>
-        <select id="type" name="type">{% for k, label in types.items() %}<option value="{{ k }}" {{ "selected" if loop.index == 3 }}>{{ label }}</option>{% endfor %}</select></div>
+        <select id="type" name="type">{% for k, label in types.items() %}<option value="{{ k }}" {{ "selected" if k == "vapt" }}>{{ label }}</option>{% endfor %}</select></div>
       <div><label for="window_start">Test window start</label><input type="date" id="window_start" name="window_start" value="{{ today }}"></div>
       <div><label for="window_end">Test window end</label><input type="date" id="window_end" name="window_end" min="{{ today }}">
         <div class="hint">Must be on or after the start date.</div></div>

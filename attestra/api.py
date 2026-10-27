@@ -22,7 +22,17 @@ from attestra.auth.keys import Principal, authenticate_api_key
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME, read_session
 from attestra.compliance import load_library
-from attestra.models import ASSET_KINDS, ENVIRONMENTS, FRAMEWORKS, TEST_TYPES, Engagement, Report, User
+from attestra.models import (
+    ASSET_KINDS,
+    ENVIRONMENTS,
+    FRAMEWORKS,
+    NEW_ENGAGEMENT_TYPES,
+    TEST_TYPES,
+    Engagement,
+    Report,
+    User,
+    new_engagement_type_labels,
+)
 from attestra.reports import (
     approve_report,
     generate_report,
@@ -115,7 +125,7 @@ def _run(fn, *args, **kwargs):
 class EngagementIn(BaseModel):
     tenant: str
     name: str
-    type: str = Field(description="va | pt | vapt | retest | continuous")
+    type: str = Field(description="va | pt | vapt (retest and continuous are historical only)")
     frameworks: list[str] = []
     window_start: date | None = None
     window_end: date | None = None
@@ -258,7 +268,13 @@ def health():
 
 @app.get("/api/catalog")
 def catalog():
-    return {"environments": ENVIRONMENTS, "asset_kinds": ASSET_KINDS, "test_types": TEST_TYPES}
+    return {
+        "environments": ENVIRONMENTS,
+        "asset_kinds": ASSET_KINDS,
+        "test_types": TEST_TYPES,
+        "new_engagement_types": new_engagement_type_labels(),
+        "new_engagement_type_keys": list(NEW_ENGAGEMENT_TYPES),
+    }
 
 
 @app.get("/api/frameworks")

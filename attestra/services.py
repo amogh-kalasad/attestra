@@ -27,10 +27,9 @@ from attestra.fingerprint import (
 )
 from attestra.models import (
     ASSET_KINDS,
-    DEFAULT_TESTS,
-    ENGAGEMENT_TYPES,
     ENVIRONMENTS,
     FRAMEWORKS,
+    NEW_ENGAGEMENT_TYPES,
     OPEN_STATUSES,
     TEST_TYPES,
     TRANSITIONS,
@@ -51,6 +50,9 @@ from attestra.models import (
     SegmentationTest,
     Tenant,
     TenantMembership,
+    allowed_test_types_for,
+    default_tests_for,
+    engagement_type_label,
     normalize_engagement_type,
     utcnow,
 )
@@ -205,8 +207,12 @@ def create_engagement(
     if not name.strip():
         raise ServiceError("engagement name is required")
     type = normalize_engagement_type(type)
-    if type not in ENGAGEMENT_TYPES:
-        raise ServiceError(f"type must be one of {ENGAGEMENT_TYPES}")
+    if type not in NEW_ENGAGEMENT_TYPES:
+        raise ServiceError(
+            f"type must be one of {NEW_ENGAGEMENT_TYPES} "
+            f"({', '.join(engagement_type_label(t) for t in NEW_ENGAGEMENT_TYPES)}); "
+            "retest and continuous are preserved for existing engagements only"
+        )
     from attestra.compliance import load_library
 
     known = tuple(load_library().frameworks) or FRAMEWORKS
@@ -444,10 +450,20 @@ def add_asset(
         raise ServiceError("criticality must be 1..5")
     if exposure not in ("internet", "internal"):
         raise ServiceError("exposure must be 'internet' or 'internal'")
-    tests = list(dict.fromkeys(test_types or DEFAULT_TESTS.get(kind, [])))
+    allowed = allowed_test_types_for(eng.type)
+    if test_types:
+        tests = list(dict.fromkeys(test_types))
+    else:
+        tests = default_tests_for(kind, eng.type)
     bad = [x for x in tests if x not in TEST_TYPES]
     if bad:
         raise ServiceError(f"unknown test types {bad}; choose from {list(TEST_TYPES)}")
+    disallowed = [x for x in tests if x not in allowed]
+    if disallowed:
+        raise ServiceError(
+            f"test types {disallowed} are not part of the {engagement_type_label(eng.type)} workflow; "
+            f"choose from {sorted(allowed)}"
+        )
     if any(_asset_key(x.identifier) == _asset_key(identifier) for x in eng.assets):
         raise ServiceError(f"target '{identifier}' is already in scope for this engagement")
     a = Asset(

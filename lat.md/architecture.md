@@ -69,9 +69,9 @@ Production and `attestra init` / serve apply Alembic to head; tests still use fa
 
 End-to-end path for one engagement from create to signed report.
 
-1. Create tenant + engagement ([[attestra/services.py#create_engagement]]).
+1. Create tenant + engagement ([[attestra/services.py#create_engagement]]; new types from [[attestra/models.py#NEW_ENGAGEMENT_TYPES]] only).
 2. Record signed authorization ([[attestra/services.py#add_authorization]]); imports are blocked without a currently valid one.
-3. Add in-scope assets ([[attestra/services.py#add_asset]]).
+3. Add in-scope assets ([[attestra/services.py#add_asset]]; planned tests follow engagement-type workflow via [[attestra/models.py#default_tests_for]]).
 4. Import scanner results ([[attestra/services.py#import_results]]).
 5. Enrich with KEV / EPSS ([[attestra/services.py#enrich]]); triage via [[attestra/services.py#transition]].
 6. Evaluate compliance ([[attestra/services.py#compliance]]); assessor confirms controls.

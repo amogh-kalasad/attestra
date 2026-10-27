@@ -17,6 +17,8 @@ def utcnow() -> datetime:
 
 
 ENGAGEMENT_TYPES = ("va", "pt", "vapt", "retest", "continuous")
+# Types offered when creating a new engagement (historical retest/continuous stay readable).
+NEW_ENGAGEMENT_TYPES = ("va", "pt", "vapt")
 # Display labels for ENGAGEMENT_TYPES. Key "vapt" stays stored; label is "VA + PT".
 ENGAGEMENT_TYPE_LABELS = {
     "va": "Vulnerability Assessment (VA)",
@@ -52,6 +54,11 @@ def engagement_type_label(value: str) -> str:
     """Human label for a stored type key or legacy label. Does not rewrite rows."""
     key = normalize_engagement_type(value)
     return ENGAGEMENT_TYPE_LABELS.get(key, value)
+
+
+def new_engagement_type_labels() -> dict[str, str]:
+    """Labels for the new-engagement dropdown and API create catalogue."""
+    return {k: ENGAGEMENT_TYPE_LABELS[k] for k in NEW_ENGAGEMENT_TYPES}
 
 
 # Core frameworks; v2.1 packs in compliance/data/packs add more at load time.
@@ -123,6 +130,31 @@ DEFAULT_TESTS = {
     "cloud_account": ["iac_cloud"],
     "mobile_app": ["mobile", "manual_pt"],
 }
+
+# Workflow mapping: VA = automated scanners; PT = manual penetration test; VA+PT = both.
+PT_TEST_TYPES = frozenset({"manual_pt"})
+VA_TEST_TYPES = frozenset(k for k in TEST_TYPES if k not in PT_TEST_TYPES)
+
+
+def allowed_test_types_for(engagement_type: str) -> frozenset[str]:
+    """Test-type keys permitted for an engagement's workflow."""
+    et = normalize_engagement_type(engagement_type)
+    if et == "va":
+        return VA_TEST_TYPES
+    if et == "pt":
+        return PT_TEST_TYPES
+    return frozenset(TEST_TYPES)
+
+
+def default_tests_for(kind: str, engagement_type: str | None = None) -> list[str]:
+    """Default planned tests for a target kind under an engagement type."""
+    et = normalize_engagement_type(engagement_type or "vapt")
+    allowed = allowed_test_types_for(et)
+    if et == "pt":
+        return [t for t in ("manual_pt",) if t in allowed]
+    base = list(DEFAULT_TESTS.get(kind, []))
+    filtered = [t for t in base if t in allowed]
+    return filtered if filtered else [t for t in base if t in TEST_TYPES]
 
 # Finding lifecycle. Every transition is written to the audit log.
 TRANSITIONS: dict[str, set[str]] = {
