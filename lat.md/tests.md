@@ -2125,4 +2125,10 @@ Master Phase 11: execute and extend automated coverage for Phases 1–9 areas (`
 
 Leaf specs stay under the Phase 1–9 sections above. Phase 11 added refund, allocate RBAC/isolation, endpoint/cross-engagement dedup, invalid framework, entrypoint validate, and merged-report one-top-level leaves.
 
+## Phase 12 final verification
+
+Master Phase 12: final verification checklist and delivery report (`docs/MASTER_IMPL_PHASE12_FINAL.md`).
+
+Focused unit/integration/auth/migration/report suites and ruff on master-impl modules passed; representative JSON/Markdown/PDF text inspected from a merged ZAP+Nuclei engagement. Full-tree pytest, live scanner E2E, and browser UI walkthrough were not re-run; see the Phase 12 report section K for limitations.
+
 
