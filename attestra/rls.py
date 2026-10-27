@@ -133,6 +133,11 @@ SUBSCRIPTION_CREDIT_POLICIES: dict[str, str] = {
     "credit_renewal_requests": _tenant("tenant_id"),
 }
 POLICIES.update(SUBSCRIPTION_CREDIT_POLICIES)
+# Canonical scanner observations (migration 0025; RLS applied in 0027).
+FINDING_OBSERVATION_POLICIES: dict[str, str] = {
+    "finding_observations": _via_engagement(),
+}
+POLICIES.update(FINDING_OBSERVATION_POLICIES)
 # Deliberately not isolated: users/api_keys (needed to authenticate before the
 # tenant is known), jobs (worker queue), audit_events (global hash chain).
 

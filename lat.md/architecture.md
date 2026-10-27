@@ -63,7 +63,8 @@ Raw imports and evidence are masked ([[attestra/evidence/mask.py#mask_bytes]]), 
 
 Production and `attestra init` / serve apply Alembic to head; tests still use fast `create_all`.
 
-[[attestra/db.py#upgrade]] runs Alembic (`alembic.ini`, [[migrations/env.py]]) against [[attestra/config.py#DATABASE_URL]]. [[attestra/db.py#init]] takes `use_migrations=True` for CLI/API startup; pytest uses `create_all` for speed. Baseline revision: [[migrations/versions/0001_baseline.py]].
+[[attestra/db.py#upgrade]] runs Alembic (`alembic.ini`, [[migrations/env.py]]) against [[attestra/config.py#DATABASE_URL]]. [[attestra/db.py#init]] takes `use_migrations=True` for CLI/API startup; pytest uses `create_all` for speed. Baseline revision: [[migrations/versions/0001_baseline.py]]. Head: `0027_finding_observations_rls`. Master Phase 1–9 schema map, backfill policy (no destructive historical rewrite), and rollback notes: `docs/MASTER_IMPL_PHASE10_MIGRATIONS.md`. Evidence provenance uses SQLite-safe `batch_alter_table` in [[migrations/versions/0026_evidence_provenance.py]]; observation RLS is [[migrations/versions/0027_finding_observations_rls.py]] / [[attestra/rls.py#FINDING_OBSERVATION_POLICIES]].
+
 
 ## Engagement flow
 

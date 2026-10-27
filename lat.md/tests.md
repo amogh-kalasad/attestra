@@ -550,7 +550,23 @@ Key assertions: PCI DSS 4, ISO 27001, SOC 2 evaluations return non-empty lists w
 
 Alembic baseline builds an empty SQLite DB whose tables match SQLAlchemy metadata.
 
-Calls `alembic upgrade head` then `downgrade base` via [[attestra/db.py#upgrade]] config paths. Asserts every table in [[attestra/db.py#Base]] metadata appears after upgrade and disappears after downgrade.
+Calls `alembic upgrade head` then `downgrade base` via [[attestra/db.py#upgrade]] config paths. Asserts every table in [[attestra/db.py#Base]] metadata appears after upgrade and disappears after downgrade. Head revision is `0027_finding_observations_rls`; evidence provenance columns and `finding_observations` are present at head.
+
+## Phase 10 migrations
+
+Master Phase 10: head column parity, representative-data upgrade, and partial `0026` resume (`tests/test_phase10_migrations.py`, `docs/MASTER_IMPL_PHASE10_MIGRATIONS.md`).
+
+### Upgrade head column parity
+
+Empty SQLite upgraded to head exposes credits, tenant profile, observation, dedup, and evidence provenance columns.
+
+### Representative data survives upgrade
+
+Rows inserted at `0025_finding_observations` keep finding id, observation tool, evidence path/sha256, and credit balance after upgrade to head.
+
+### Partial 0026 resume
+
+A DB with provenance columns already present (failed mid-`0026`) finishes `upgrade head` without error.
 
 ## Phase 1 security and runner tests
 

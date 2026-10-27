@@ -12,7 +12,7 @@ Baseline from repository inspection before subscription, credits, recommendation
 | AuthN | Bearer API keys, signed session cookies; optional OIDC |
 | AuthZ | RBAC in `attestra/auth/roles.py` (`admin`, `lead`, `tester`, `reviewer`, `client_viewer`, `auditor`) |
 | Config | `attestra/config.py` (env vars); no `.env.example` before Phase 1 |
-| Migrations | `migrations/versions/` through `0023_subscription_credits` (Phase 2 credits; earlier head was `0022_auth_web`) |
+| Migrations | `migrations/versions/` through `0027_finding_observations_rls` (see `docs/MASTER_IMPL_PHASE10_MIGRATIONS.md`; Phase 2 credits began at `0023`) |
 
 There is no separate Super Admin role string. Platform-wide admin is role `admin`. Organizational lead is `lead`. Tester is `tester`.
 
