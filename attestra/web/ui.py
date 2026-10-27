@@ -21,6 +21,7 @@ from attestra import __version__, ai_narratives, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
+from attestra.dedup import detected_by_label
 from attestra.importers import PARSERS
 from attestra.models import (
     ASSET_KINDS,
@@ -145,7 +146,11 @@ templates.env.filters["label"] = label
 templates.env.filters["fw_name"] = fw_name
 templates.env.filters["type_label"] = engagement_type_label
 templates.env.globals.update(
-    type_labels=ENGAGEMENT_TYPE_LABELS, role_labels=ROLE_LABELS, can=has_permission, tz_label=TZ_LABEL,
+    type_labels=ENGAGEMENT_TYPE_LABELS,
+    role_labels=ROLE_LABELS,
+    can=has_permission,
+    tz_label=TZ_LABEL,
+    detected_by=detected_by_label,
 )
 
 
@@ -1265,6 +1270,7 @@ def finding_page(request: Request, eid: int, fid: int):
         # Touch relationships while the session is open.
         _ = list(f.evidence)
         _ = f.asset
+        observations = sorted(list(f.observations or []), key=lambda o: o.id)
         comments = list_comments(s, fid, principal)
         for c in comments:
             c["can_delete"] = can_delete_comment(
@@ -1273,6 +1279,7 @@ def finding_page(request: Request, eid: int, fid: int):
         return _render(request, "finding.html", {
             "e": e,
             "f": f,
+            "observations": observations,
             "siblings": services.list_findings(s, eid),
             "fix": lib.guidance_for_finding(s, f),
             "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},

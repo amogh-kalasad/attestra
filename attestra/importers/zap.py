@@ -39,6 +39,8 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                     NormalizedFinding(
                         tool="zap",
                         rule_id=pluginid,
+                        original_id=str(alert_ref or pluginid),
+                        confidence=str(alert.get("confidence", "") or ""),
                         title=alert.get("alert") or alert.get("name") or "ZAP alert",
                         severity=severity,
                         location=inst.get("uri", ""),

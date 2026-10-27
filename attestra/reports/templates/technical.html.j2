@@ -303,7 +303,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     {% if f.owasp_top10 %}<tr><th>OWASP Top 10</th><td>{{ f.owasp_top10 }}</td></tr>{% endif %}
     {% if f.asvs_ref %}<tr><th>ASVS</th><td>{{ f.asvs_ref }}</td></tr>{% endif %}
     {% if f.wstg_ref %}<tr><th>WSTG</th><td>{{ f.wstg_ref }}</td></tr>{% endif %}
-    <tr><th>Detected by</th><td>{{ f.tools|join(", ") }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
+    <tr><th>Detected by</th><td>{{ detected_by(f.tools) }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
     {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
     <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
   </table>

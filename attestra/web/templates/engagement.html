@@ -84,7 +84,7 @@
       <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
       <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
-      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Tools: {{ f.tools|join(", ") }}</div>{% endif %}</td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Detected by: {{ detected_by(f.tools) }}</div>{% endif %}</td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
       <td>

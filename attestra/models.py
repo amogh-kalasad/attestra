@@ -432,12 +432,60 @@ class Finding(Base):
     owasp_top10: Mapped[str] = mapped_column(String(100), default="")
     asvs_ref: Mapped[str] = mapped_column(String(50), default="")
     wstg_ref: Mapped[str] = mapped_column(String(50), default="")
+    # Phase 6: last successful cross-tool / fingerprint merge metadata.
+    dedup_confidence: Mapped[float | None] = mapped_column(Float)
+    dedup_rationale: Mapped[str] = mapped_column(String(500), default="")
 
     engagement: Mapped[Engagement] = relationship(back_populates="findings")
     asset: Mapped[Asset | None] = relationship()
     evidence: Mapped[list[Evidence]] = relationship(back_populates="finding")
     risk_acceptances: Mapped[list[RiskAcceptance]] = relationship(back_populates="finding")
     comments: Mapped[list[FindingComment]] = relationship(back_populates="finding")
+    observations: Mapped[list[FindingObservation]] = relationship(
+        "FindingObservation",
+        back_populates="finding",
+        foreign_keys="FindingObservation.finding_id",
+    )
+
+
+class FindingObservation(Base):
+    """One scanner observation retained under a canonical finding (master Phase 6)."""
+
+    __tablename__ = "finding_observations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    finding_id: Mapped[int] = mapped_column(ForeignKey("findings.id"))
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    import_run_id: Mapped[int | None] = mapped_column(ForeignKey("import_runs.id"))
+    scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"))
+    tool: Mapped[str] = mapped_column(String(50), default="")
+    tool_version: Mapped[str] = mapped_column(String(100), default="")
+    original_id: Mapped[str] = mapped_column(String(200), default="")
+    title: Mapped[str] = mapped_column(String(500), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String(10), default="")
+    confidence: Mapped[str] = mapped_column(String(50), default="")
+    location: Mapped[str] = mapped_column(String(1000), default="")
+    param: Mapped[str] = mapped_column(String(200), default="")
+    package: Mapped[str] = mapped_column(String(200), default="")
+    package_version: Mapped[str] = mapped_column(String(100), default="")
+    fixed_version: Mapped[str] = mapped_column(String(100), default="")
+    cwe: Mapped[int | None] = mapped_column(Integer)
+    cves: Mapped[list] = mapped_column(JSON, default=list)
+    rule_ids: Mapped[list] = mapped_column(JSON, default=list)
+    line_start: Mapped[int | None] = mapped_column(Integer)
+    line_end: Mapped[int | None] = mapped_column(Integer)
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    fingerprint: Mapped[str] = mapped_column(String(64), default="")
+    match_confidence: Mapped[float | None] = mapped_column(Float)
+    match_rationale: Mapped[str] = mapped_column(String(500), default="")
+    possible_duplicate_of: Mapped[int | None] = mapped_column(ForeignKey("findings.id"))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    finding: Mapped[Finding] = relationship(
+        back_populates="observations",
+        foreign_keys=[finding_id],
+    )
 
 
 class FindingComment(Base):

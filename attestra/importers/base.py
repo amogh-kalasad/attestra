@@ -22,6 +22,15 @@ class NormalizedFinding:
     param: str = ""
     package: str = ""
     variant: str = ""
+    # Optional observation fields (Phase 6). Importers may leave these empty.
+    tool_version: str = ""
+    original_id: str = ""
+    confidence: str = ""  # scanner confidence label/score when provided
+    package_version: str = ""
+    fixed_version: str = ""
+    line_start: int | None = None
+    line_end: int | None = None
+    evidence_refs: list[str] = field(default_factory=list)
 
 
 _CWE_RE = re.compile(r"cwe[-_/ ]?(\d+)", re.IGNORECASE)

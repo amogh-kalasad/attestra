@@ -40,6 +40,7 @@ from attestra.models import (
     Engagement,
     Evidence,
     Finding,
+    FindingObservation,
     ImportRun,
     Job,
     Nonconformity,
@@ -835,14 +836,56 @@ def import_results(
     s.add(run)
     s.flush()
 
-    existing = {f.fingerprint: f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id))}
+    existing_rows = list(s.scalars(select(Finding).where(Finding.engagement_id == engagement_id)))
+    existing = {f.fingerprint: f for f in existing_rows}
     now = utcnow()
     new = updated = suppressed = 0
     unmatched = skipped_hosts + sum(1 for _, a in matched if a is None)
     from attestra import tuning
+    from attestra.dedup import classify_match, find_best_soft_match
 
     rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
     known_fps = set(existing)
+
+    def _record_observation(
+        finding: Finding,
+        nf,
+        *,
+        fp: str,
+        match_confidence: float | None,
+        match_rationale: str,
+        possible_duplicate_of: int | None = None,
+    ) -> None:
+        obs = FindingObservation(
+            finding_id=finding.id,
+            engagement_id=engagement_id,
+            import_run_id=run.id,
+            tool=nf.tool,
+            tool_version=getattr(nf, "tool_version", "") or "",
+            original_id=(getattr(nf, "original_id", "") or nf.rule_id or "")[:200],
+            title=(nf.title or "")[:500],
+            description=nf.description or "",
+            severity=nf.severity or "",
+            confidence=str(getattr(nf, "confidence", "") or ""),
+            location=(nf.location or "")[:1000],
+            param=(nf.param or "")[:200],
+            package=(nf.package or "")[:200],
+            package_version=(getattr(nf, "package_version", "") or "")[:100],
+            fixed_version=(getattr(nf, "fixed_version", "") or "")[:100],
+            cwe=nf.cwe,
+            cves=list(nf.cves or []),
+            rule_ids=[nf.rule_id] if nf.rule_id else [],
+            line_start=getattr(nf, "line_start", None),
+            line_end=getattr(nf, "line_end", None),
+            evidence_refs=list(getattr(nf, "evidence_refs", None) or []),
+            fingerprint=fp,
+            match_confidence=match_confidence,
+            match_rationale=(match_rationale or "")[:500],
+            possible_duplicate_of=possible_duplicate_of,
+            observed_at=now,
+        )
+        s.add(obs)
+
     for nf, asset in matched:
         asset_id = asset.id if asset else None
         variant = getattr(nf, "variant", "") or ""
@@ -860,9 +903,12 @@ def import_results(
         merge_kwargs = canonicalize_for_merge(**raw_kwargs)
         fp = fingerprint(**merge_kwargs)
         f = existing.get(fp)
+        match_confidence = 1.0 if f is not None else None
+        match_rationale = "exact_fingerprint" if f is not None else ""
+        possible_dup: int | None = None
 
         def _adopt(legacy_fp: str) -> None:
-            nonlocal f
+            nonlocal f, match_confidence, match_rationale
             legacy = existing.get(legacy_fp)
             if legacy is None:
                 return
@@ -870,6 +916,8 @@ def import_results(
             del existing[legacy_fp]
             f.fingerprint = fp
             existing[fp] = f
+            match_confidence = 1.0
+            match_rationale = "legacy_fingerprint"
 
         # Raw (pre-canonical) key so older testssl DNS_CAArecord rows still match.
         if f is None:
@@ -899,6 +947,31 @@ def import_results(
                 _adopt(alt_fp)
                 if f is not None:
                     break
+        # Phase 6: high-confidence cross-tool soft match when exact fingerprint misses.
+        if f is None:
+            soft = find_best_soft_match(
+                engagement_findings=list(existing.values()),
+                tool=nf.tool,
+                location=nf.location,
+                cwe=nf.cwe,
+                cves=list(nf.cves or []),
+                title=nf.title,
+                param=nf.param,
+                package=nf.package,
+                asset_id=asset_id,
+            )
+            kind = classify_match(soft.confidence)
+            if kind == "merge" and soft.finding is not None:
+                f = soft.finding
+                match_confidence = soft.confidence
+                match_rationale = f"soft:{soft.rationale}"
+                # Align fingerprint to the canonical row's key so later exact matches stick.
+                if f.fingerprint not in existing:
+                    existing[f.fingerprint] = f
+            elif kind == "ambiguous" and soft.finding is not None:
+                possible_dup = soft.finding.id
+                match_confidence = soft.confidence
+                match_rationale = f"ambiguous:{soft.rationale}"
         rule = tuning.first_match(rules, nf) if f is None and rules else None
         if rule is not None:
             # Suppressed (Phase 7.4): not stored; counted on the rule and in the audit event.
@@ -923,11 +996,15 @@ def import_results(
                 cvss_vector=scoring.soft_cvss_vector(nf.cvss_vector),
                 first_seen=now,
                 last_seen=now,
+                dedup_confidence=match_confidence,
+                dedup_rationale=(match_rationale or "new")[:500],
             )
             f.asset = asset
             _apply_owasp(f)
             s.add(f)
+            s.flush()  # need finding.id for observation FK
             existing[fp] = f
+            existing_rows.append(f)
             new += 1
         else:
             # Same issue seen again (another tool or a rescan): merge, keep the higher severity.
@@ -937,6 +1014,9 @@ def import_results(
                 f.tools = [*f.tools, nf.tool]
             if nf.rule_id and nf.rule_id not in f.rule_ids:
                 f.rule_ids = [*f.rule_ids, nf.rule_id]
+            if match_confidence is not None:
+                f.dedup_confidence = match_confidence
+                f.dedup_rationale = (match_rationale or "")[:500]
             if is_cert_expiry_variant(variant):
                 # Band change (30→14→7) updates the same row: title and severity in place.
                 f.title = nf.title[:500]
@@ -961,6 +1041,16 @@ def import_results(
                 f.status = "validated" if f.validated_by else "triaged"
                 audit.record(s, actor, "finding.reopened", "finding", f.id, import_run=run.id)
             updated += 1
+            if f.id is None:
+                s.flush()
+        _record_observation(
+            f,
+            nf,
+            fp=fp,
+            match_confidence=match_confidence if match_confidence is not None else 0.0,
+            match_rationale=match_rationale or ("new" if possible_dup is None else f"ambiguous:{match_rationale}"),
+            possible_duplicate_of=possible_dup,
+        )
         rescore(f)
 
     # Renewed cert (>30 days left): close open expiry findings for this target.

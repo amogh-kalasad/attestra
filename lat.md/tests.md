@@ -1923,4 +1923,44 @@ New-engagement form requires Industry/Country selects and shows **Compliance Fra
 
 [[attestra/compliance/recommend.py#recommendation_to_dict]] includes status, reason, and rule metadata.
 
+## Cross-tool deduplication
+
+Master Phase 6: confidence-based cross-tool consolidation and observation retention (`tests/test_cross_tool_dedup.py`).
+
+### Detected by labels
+
+[[attestra/dedup.py#detected_by_label]] maps tool ids such as `zap` to readable names like `OWASP ZAP`.
+
+### Soft match zap nuclei
+
+ZAP and Nuclei on the same endpoint, CWE, and parameter score at or above the merge threshold.
+
+### Different param stays separate
+
+Same CWE and location with different parameters does not merge.
+
+### CVE alone insufficient
+
+Matching CVE without shared location/package/asset does not merge.
+
+### Import merges tools and observations
+
+Importing ZAP then Nuclei for the same issue yields one finding, both tools, and multiple [[attestra/models.py#FindingObservation]] rows.
+
+### Reimport idempotent
+
+Re-importing the same scanner file updates observations without creating duplicate canonical findings.
+
+### Observations API
+
+`GET /api/findings/{fid}/observations` returns detected_by and observation rows.
+
+### Historical suggestions non destructive
+
+[[attestra/dedup.py#suggest_historical_duplicates]] proposes merge/review pairs without deleting findings.
+
+### Ambiguous flagged
+
+Mid-confidence matches remain separate findings or are flagged rather than force-merged.
+
 

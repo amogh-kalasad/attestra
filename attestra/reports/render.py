@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from attestra import __version__, audit, config, services
 from attestra.compliance import load_library, objectives_for
+from attestra.dedup import detected_by_label
 from attestra.models import (
     DISPLAY_LABELS,
     OPEN_STATUSES,
@@ -457,6 +458,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "eng": eng,
         "tenant": eng.tenant.name,
         "type_label": engagement_type_label(eng.type),
+        "detected_by": detected_by_label,
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
         "tls_summaries": services.tls_summaries(s, engagement_id),

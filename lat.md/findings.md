@@ -25,11 +25,17 @@ Stable fingerprint so the same issue from two tools or two runs merges.
 - Else normalized title + location + param
 - When `variant` is non-empty, append `v=<variant>` (lowercased). Empty variant keeps the exact pre-variant key.
 
-[[attestra/importers/base.py#NormalizedFinding]] carries optional `variant` (for example ZAP `alertRef` when it differs from `pluginid`). [[attestra/services.py#import_results]] runs [[attestra/fingerprint.py#canonicalize_for_merge]] before hashing so webcheck `dns-caa` and testssl `DNS_CAArecord` (R15) share [[attestra/fingerprint.py#CAA_VARIANT]] (`dns-caa`), CWE-16, bare host, and empty param. If that key misses, import still tries the raw key, a legacy empty-variant key (same normalized title), and [[attestra/fingerprint.py#caa_legacy_fingerprints]] (older testssl `host:port` + `DNS_CAArecord` shapes), then upgrades the stored fingerprint.
+[[attestra/importers/base.py#NormalizedFinding]] carries optional `variant` (for example ZAP `alertRef` when it differs from `pluginid`) plus optional observation fields (`tool_version`, `original_id`, `package_version`, …). [[attestra/services.py#import_results]] runs [[attestra/fingerprint.py#canonicalize_for_merge]] before hashing so webcheck `dns-caa` and testssl `DNS_CAArecord` (R15) share [[attestra/fingerprint.py#CAA_VARIANT]] (`dns-caa`), CWE-16, bare host, and empty param. If that key misses, import still tries the raw key, a legacy empty-variant key (same normalized title), and [[attestra/fingerprint.py#caa_legacy_fingerprints]] (older testssl `host:port` + `DNS_CAArecord` shapes), then upgrades the stored fingerprint.
 
 Location normalization: [[attestra/fingerprint.py#normalize_location]]. Title: [[attestra/fingerprint.py#normalize_title]].
 
 On re-import of the same fingerprint, [[attestra/services.py#import_results]] merges tools/rule_ids, keeps higher severity, and reopens if status was `fixed`.
+
+### Cross-tool deduplication
+
+Confidence-based consolidation across scanners within one engagement.
+
+When the exact fingerprint misses, [[attestra/dedup.py#find_best_soft_match]] scores candidates (asset, location, CVE/package, CWE+param, cross-tool). Scores at or above [[attestra/dedup.py#MERGE_THRESHOLD]] merge into the canonical finding; mid-band scores stay separate and set `possible_duplicate_of` on the new [[attestra/models.py#FindingObservation]]; low scores create a new finding. Title, CVE, CWE, severity, or hostname alone never merge. Every import stores a [[attestra/models.py#FindingObservation]] (migration `0025_finding_observations`). UI/API show **Detected by** via [[attestra/dedup.py#detected_by_label]]. Historical review uses [[attestra/dedup.py#suggest_historical_duplicates]] / `GET /api/engagements/{eid}/dedup-suggestions` without automatic destructive merges.
 
 ## Certificate expiry warning
 

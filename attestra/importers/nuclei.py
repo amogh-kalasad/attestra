@@ -25,6 +25,8 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             NormalizedFinding(
                 tool="nuclei",
                 rule_id=rec.get("template-id", ""),
+                original_id=str(rec.get("template-id") or rec.get("template-path") or ""),
+                tool_version=str(info.get("version") or rec.get("template-version") or ""),
                 title=info.get("name") or rec.get("template-id", "nuclei finding"),
                 severity=norm_severity(info.get("severity")),
                 location=rec.get("matched-at") or rec.get("host", ""),

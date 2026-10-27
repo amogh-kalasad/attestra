@@ -202,6 +202,40 @@ def _eng_dict(e) -> dict:
     }
 
 
+def _detected_by(f) -> str:
+    from attestra.dedup import detected_by_label
+
+    return detected_by_label(f.tools)
+
+
+def _observation_dict(o) -> dict:
+    from attestra.dedup import tool_display_name
+
+    return {
+        "id": o.id,
+        "tool": o.tool,
+        "tool_label": tool_display_name(o.tool),
+        "tool_version": o.tool_version,
+        "original_id": o.original_id,
+        "title": o.title,
+        "severity": o.severity,
+        "confidence": o.confidence,
+        "location": o.location,
+        "param": o.param,
+        "package": o.package,
+        "package_version": o.package_version,
+        "fixed_version": o.fixed_version,
+        "cwe": o.cwe,
+        "cves": list(o.cves or []),
+        "rule_ids": list(o.rule_ids or []),
+        "match_confidence": o.match_confidence,
+        "match_rationale": o.match_rationale,
+        "possible_duplicate_of": o.possible_duplicate_of,
+        "import_run_id": o.import_run_id,
+        "observed_at": o.observed_at,
+    }
+
+
 def _finding_dict(f, fix: dict | None = None) -> dict:
     from attestra.library.fix_snippets import empty_fix_fields
 
@@ -222,6 +256,9 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         "affected_urls": list(f.affected_urls or []),
         "references": list(f.references or []),
         "tools": f.tools,
+        "detected_by": _detected_by(f),
+        "dedup_confidence": f.dedup_confidence,
+        "dedup_rationale": f.dedup_rationale or "",
         "occurrences": f.occurrences,
         "sla_due": f.sla_due,
         "validated_by": f.validated_by,
@@ -616,6 +653,51 @@ def scope_suggestions_fetch(
     def fn(s):
         services.get_engagement(s, eid, principal)
         return suggestions_for_engagement(s, eid, apex, actor=principal.actor)
+
+    return _run(fn)
+
+
+@app.get("/api/findings/{fid}/observations")
+def list_finding_observations(fid: int, principal: Principal = Depends(require("finding.read"))):
+    """Scanner observations retained under a canonical finding (Phase 6)."""
+    from sqlalchemy import select
+
+    from attestra.models import Finding, FindingObservation
+
+    def fn(s):
+        f = s.get(Finding, fid)
+        if not f:
+            raise LookupError(f"finding {fid} not found")
+        services.assert_engagement_access(s, f.engagement_id, principal)
+        rows = list(
+            s.scalars(
+                select(FindingObservation)
+                .where(FindingObservation.finding_id == fid)
+                .order_by(FindingObservation.id)
+            )
+        )
+        return {
+            "finding_id": fid,
+            "detected_by": _detected_by(f),
+            "tools": list(f.tools or []),
+            "observations": [_observation_dict(o) for o in rows],
+        }
+
+    return _run(fn)
+
+
+@app.get("/api/engagements/{eid}/dedup-suggestions")
+def engagement_dedup_suggestions(eid: int, principal: Principal = Depends(require("finding.read"))):
+    """Non-destructive historical duplicate suggestions within one engagement."""
+    from sqlalchemy import select
+
+    from attestra.dedup import suggest_historical_duplicates
+    from attestra.models import Finding
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        rows = list(s.scalars(select(Finding).where(Finding.engagement_id == eid)))
+        return {"engagement_id": eid, "suggestions": suggest_historical_duplicates(rows)}
 
     return _run(fn)
 

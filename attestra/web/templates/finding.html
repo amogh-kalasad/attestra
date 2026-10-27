@@ -63,6 +63,30 @@
   <p class="meta" style="margin:16px 0 0"><a href="/library?tenant_id={{ e.tenant_id }}">Apply a library writeup</a> if this finding needs a standard description.</p>
 </div>
 
+{% if observations %}
+<div class="card" id="observations">
+  <h2>Tool observations <span class="meta" style="font-weight:400">{{ observations|length }}</span></h2>
+  <p class="meta">Individual scanner results consolidated into this finding. Original evidence is retained.</p>
+  {% for o in observations %}
+  <details class="obs" {{ "open" if loop.first }}>
+    <summary><b>{{ detected_by([o.tool]) }}</b>{% if o.original_id %} <span class="meta">· {{ o.original_id }}</span>{% endif %}
+      <span class="pill {{ o.severity }}">{{ o.severity or "-" }}</span>
+      {% if o.match_rationale %}<span class="meta">{{ o.match_rationale }}</span>{% endif %}
+    </summary>
+    <div class="kv" style="margin-top:8px">
+      <div><span class="k">Title</span><span class="v">{{ o.title or "-" }}</span></div>
+      <div><span class="k">Location</span><span class="v mono">{{ o.location or "-" }}{% if o.param %} [param: {{ o.param }}]{% endif %}</span></div>
+      {% if o.package %}<div><span class="k">Package</span><span class="v">{{ o.package }}{% if o.package_version %} {{ o.package_version }}{% endif %}{% if o.fixed_version %} → {{ o.fixed_version }}{% endif %}</span></div>{% endif %}
+      <div><span class="k">CWE / CVE</span><span class="v">{% if o.cwe %}CWE-{{ o.cwe }}{% endif %} {{ (o.cves or [])|join(" ") or "-" }}</span></div>
+      {% if o.description %}<div style="grid-column:1/-1"><span class="k">Description</span><span class="v prose">{{ o.description }}</span></div>{% endif %}
+      {% if o.possible_duplicate_of %}<div><span class="k">Possible duplicate of</span><span class="v">F-{{ o.possible_duplicate_of }}</span></div>{% endif %}
+      <div><span class="k">Observed</span><span class="v">{{ o.observed_at|dt }}{% if o.import_run_id %} · import {{ o.import_run_id }}{% endif %}</span></div>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+
   {% if f.recommendation %}
   <div class="card">
     <h2>Recommendation</h2>
@@ -145,7 +169,8 @@
       <div><span class="k">Status</span><span class="v"><span class="fs fs-{{ f.status }}">{{ f.status|label }}</span></span></div>
       <div><span class="k">Severity</span><span class="v"><span class="pill {{ f.severity }}">{{ f.severity }}</span> <b style="margin-left:6px">Risk {{ "%.1f"|format(f.risk_score) }}</b></span></div>
       <div><span class="k">Location</span><span class="v mono">{{ f.location or "-" }}</span></div>
-      <div><span class="k">Tools</span><span class="v">{{ f.tools|join(", ") or "-" }}</span></div>
+      <div><span class="k">Detected by</span><span class="v">{{ detected_by(f.tools) }}</span></div>
+      {% if f.dedup_rationale %}<div><span class="k">Dedup</span><span class="v meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</span></div>{% endif %}
       <div><span class="k">CWE / CVE</span><span class="v">{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</span></div>
       <div><span class="k">Fix by</span><span class="v">{{ f.sla_due or "-" }}</span></div>
       <div><span class="k">First / last seen</span><span class="v">{{ f.first_seen|dt }} &middot; {{ f.last_seen|dt }}</span></div>
