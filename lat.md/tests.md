@@ -1775,6 +1775,10 @@ Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead
 
 [[attestra/config.py#validate_runtime_config]] refreshes the module-level flag from the environment and raises on invalid values for API/CLI/worker startup.
 
+### Entrypoints share validate
+
+API lifespan, CLI `init`/`serve`/`worker`, and related entrypoints all call [[attestra/config.py#validate_runtime_config]] so ON/OFF parsing stays consistent across paths.
+
 ## Organization test-run credits
 
 Master Phase 2: shared tenant credit balance, single admission charge, renewal request, and admin allocation (`tests/test_subscription_credits.py`).
@@ -1810,6 +1814,30 @@ Renewal approval and [[attestra/credits/service.py#allocate_credits]] increase b
 ### API exhausted
 
 `POST /api/engagements/{eid}/scans` returns 402 when enforcement is on and the organization balance is zero.
+
+### Pre-start refund
+
+[[attestra/credits/service.py#refund_for_scan]] restores one credit for a pre-execution failure when the refund policy allows it, and repeats are idempotent.
+
+### Post-start refund off by default
+
+After a scan has started, refund is refused unless the configured post-start refund policy is enabled.
+
+### Tenant balances isolated
+
+Debiting one tenant leaves another tenant’s credit balance unchanged.
+
+### Non-admin allocate denied
+
+`POST /api/credits/allocate` returns 403 for non-admin roles (`credits.allocate` is admin-only).
+
+### Admin allocate audited
+
+Admin allocate via the API succeeds and writes an audited `credits.allocate` event.
+
+### Cross-tenant credits read denied
+
+Reading another organization’s credit balance returns 403.
 
 ## Super Admin authorization documents
 
@@ -1931,6 +1959,14 @@ Missing Industry/Country returns HTTP 400.
 
 Engagement create persists tenant `country`, `regulatory_status`, and `technical_scope`.
 
+### Invalid framework rejected
+
+Engagement create / framework selection rejects unknown framework ids that are outside the configured catalogue.
+
+### Optional fields refine
+
+Regulatory status and technical scope are optional; when present they refine recommendation status and rationale without inventing frameworks.
+
 ### UI has catalogues
 
 New-engagement form requires Industry/Country selects and shows **Compliance Frameworks to Report Against**.
@@ -1954,6 +1990,14 @@ ZAP and Nuclei on the same endpoint, CWE, and parameter score at or above the me
 ### Different param stays separate
 
 Same CWE and location with different parameters does not merge.
+
+### Different endpoints stay separate
+
+Same title or CWE on distinct vulnerable endpoints does not automatically merge into one finding.
+
+### Cross engagement never merges
+
+Findings from unrelated engagements are never merged even when titles, CWEs, and locations look alike.
 
 ### CVE alone insufficient
 
@@ -1998,6 +2042,10 @@ Capture-failure evidence appears as limitations text; no fabricated screenshot i
 ### Markdown export consolidated findings
 
 [[attestra/reports/markdown_export.py#export_engagement_markdown]] lists each canonical finding once with tools, observations, and evidence references.
+
+### Merged finding one top-level
+
+A soft/exact cross-tool merge appears once in JSON, Markdown, and HTML with both detecting tools and evidence under that single canonical finding.
 
 ### Markdown export no public evidence URL
 
@@ -2070,5 +2118,11 @@ Role `client_viewer` receives 403 for scanner kinds and 200 only for `client_upl
 ### Dedup soft merge audited
 
 Cross-tool import merges emit `finding.dedup` audit events (`soft`, `ambiguous`, or `exact_cross_tool`).
+
+## Phase 11 automated testing
+
+Master Phase 11: execute and extend automated coverage for Phases 1–9 areas (`docs/MASTER_IMPL_PHASE11_TESTING.md`).
+
+Leaf specs stay under the Phase 1–9 sections above. Phase 11 added refund, allocate RBAC/isolation, endpoint/cross-engagement dedup, invalid framework, entrypoint validate, and merged-report one-top-level leaves.
 
 
