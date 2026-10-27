@@ -162,7 +162,7 @@
   <h2>Signed authorization</h2>
   <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Scans and imports are only allowed for targets in an authorized environment.</p>
   <table>
-    <tr><th>Document</th><th>Signed by</th><th>Valid</th><th>Environments approved</th><th>Rules of engagement</th><th>SHA-256</th></tr>
+    <tr><th>Document</th><th>Signed by</th><th>Valid</th><th>Environments approved</th><th>Rules of engagement</th><th>SHA-256</th><th></th></tr>
     {% for a in e.authorizations %}
     <tr>
       <td>{{ a.document_name }}</td><td>{{ a.signer }}</td>
@@ -175,8 +175,15 @@
       </td>
       <td class="meta">{{ a.rules_of_engagement or "-" }}</td>
       <td class="mono">{{ a.sha256[:16] }}&hellip;</td>
+      <td>
+        {% if can(prole, "authorization.document") %}
+        <a class="btn secondary" href="/engagements/{{ e.id }}/authorizations/{{ a.id }}/document">Download</a>
+        {% else %}
+        <span class="meta">File: Super Admin only</span>
+        {% endif %}
+      </td>
     </tr>
-    {% else %}<tr><td colspan="6" class="st-not_met">No signed authorization yet. Record one below; scans and imports are blocked until then.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7" class="st-not_met">No signed authorization yet. Record one below; scans and imports are blocked until then.</td></tr>{% endfor %}
   </table>
   <details {{ "open" if not e.authorizations }}>
     <summary>+ Record a signed authorization</summary>

@@ -328,7 +328,44 @@ async def add_authorization(
         )
 
     a = _run(fn)
-    return {"id": a.id, "sha256": a.sha256, "valid": a.is_valid(), "environments": a.environments}
+    return services.authorization_public_dict(a, include_document_access=principal.role == "admin")
+
+
+@app.get("/api/engagements/{eid}/authorizations")
+def list_authorizations(eid: int, principal: Principal = Depends(require("engagement.read"))):
+    """List authorization metadata for an engagement. Never returns document_path."""
+
+    def fn(s):
+        eng = services.get_engagement(s, eid, principal)
+        admin = principal.role == "admin"
+        return [
+            services.authorization_public_dict(a, include_document_access=admin)
+            for a in eng.authorizations
+        ]
+
+    return _run(fn)
+
+
+@app.get("/api/authorizations/{aid}/document")
+def download_authorization_document(aid: int, principal: Principal = Depends(require("authorization.document"))):
+    """Download the signed authorization file. Super Admin only; path never in the JSON error body."""
+    from fastapi.responses import FileResponse
+
+    try:
+        with db.session() as s:
+            a, path = services.open_authorization_document(s, aid, principal=principal)
+            filename = a.document_name or "authorization"
+            # Read path while session is open; FileResponse needs a stable path string.
+            return FileResponse(
+                str(path),
+                filename=filename,
+                media_type="application/octet-stream",
+                headers={"Cache-Control": "no-store"},
+            )
+    except LookupError as e:
+        raise HTTPException(404, str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
 
 
 @app.post("/api/engagements/{eid}/assets", status_code=201)

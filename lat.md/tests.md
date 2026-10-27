@@ -1795,4 +1795,36 @@ Renewal approval and [[attestra/credits/service.py#allocate_credits]] increase b
 
 `POST /api/engagements/{eid}/scans` returns 402 when enforcement is on and the organization balance is zero.
 
+## Super Admin authorization documents
+
+Master Phase 3: only role `admin` may download signed authorization files (`tests/test_authorization_document_access.py`).
+
+### Admin can download
+
+[[attestra/services.py#open_authorization_document]] and `GET /api/authorizations/{aid}/document` succeed for Super Admin.
+
+### Lead cannot download
+
+Organizational lead receives 403 on the document download API.
+
+### Tester cannot download
+
+Tester role receives 403 on the document download API.
+
+### No path in list API
+
+`GET /api/engagements/{eid}/authorizations` returns metadata without `document_path`.
+
+### Cross tenant denied
+
+A lead from another tenant cannot open another organization's authorization document.
+
+### Unknown id 404
+
+Missing authorization ids return 404 without storage paths in the body.
+
+### OFF still enforces
+
+`SUBSCRIPTION_SERVICE=OFF` does not allow lead/tester document download.
+
 

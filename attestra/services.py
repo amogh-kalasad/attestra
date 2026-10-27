@@ -338,6 +338,70 @@ def add_authorization(
     return a
 
 
+def authorization_public_dict(a: Authorization, *, include_document_access: bool = False) -> dict:
+    """Safe authorization metadata for API/UI. Never includes ``document_path``."""
+    out = {
+        "id": a.id,
+        "engagement_id": a.engagement_id,
+        "document_name": a.document_name,
+        "signer": a.signer,
+        "signed_on": a.signed_on,
+        "expires_on": a.expires_on,
+        "environments": list(a.environments or []),
+        "rules_of_engagement": a.rules_of_engagement or "",
+        "sha256": a.sha256,
+        "valid": a.is_valid(),
+        "document_available": True,
+    }
+    if include_document_access:
+        out["document_download"] = True
+    return out
+
+
+def open_authorization_document(
+    s: Session,
+    authorization_id: int,
+    *,
+    principal,
+) -> tuple[Authorization, Path]:
+    """Return the authorization row and on-disk path for Super Admin download only.
+
+    Enforces ``authorization.document`` (admin), engagement tenant access, and
+    path containment under the tenant data root. Does not put storage paths in
+    raised error messages. Remains enforced when ``SUBSCRIPTION_SERVICE=OFF``.
+    """
+    # @lat: [[authorization#Authorization record#Super Admin document access]]
+    from attestra.auth.roles import has_permission
+
+    if principal is None or not has_permission(getattr(principal, "role", ""), "authorization.document"):
+        raise PermissionError("only a Super Admin can access signed authorization documents")
+    a = s.get(Authorization, authorization_id)
+    if a is None:
+        raise LookupError("authorization not found")
+    eng = get_engagement(s, a.engagement_id, principal)
+    raw = Path(a.document_path)
+    try:
+        path = raw.resolve()
+    except OSError as exc:
+        raise LookupError("authorization document not found") from exc
+    tenant_root = (config.DATA_DIR / "tenants" / str(eng.tenant_id)).resolve()
+    data_root = config.DATA_DIR.resolve()
+    if not (path.is_relative_to(tenant_root) or path.is_relative_to(data_root)):
+        raise LookupError("authorization document not found")
+    if not path.is_file():
+        raise LookupError("authorization document not found")
+    audit.record(
+        s,
+        getattr(principal, "actor", None) or getattr(principal, "username", "unknown"),
+        "authorization.document_download",
+        "authorization",
+        a.id,
+        engagement_id=eng.id,
+        sha256=a.sha256,
+    )
+    return a, path
+
+
 def authorized_environments(eng: Engagement, on: date | None = None) -> set[str]:
     envs: set[str] = set()
     for a in eng.authorizations:

@@ -17,6 +17,12 @@ Validity: [[attestra/models.py#Authorization#is_valid]]. Environment coverage: [
 
 Created through [[attestra/services.py#add_authorization]].
 
+### Super Admin document access
+
+Only role `admin` may download or open the signed authorization file bytes.
+
+[[attestra/auth/roles.py]] permission `authorization.document` is admin-only. [[attestra/services.py#open_authorization_document]] checks that permission, engagement tenant access, and path containment under the tenant data root; errors never include `document_path`. API: `GET /api/authorizations/{aid}/document` and list metadata via `GET /api/engagements/{eid}/authorizations` using [[attestra/services.py#authorization_public_dict]] (no storage path). UI download: `/engagements/{eid}/authorizations/{aid}/document`. Lead and tester may record authorizations and see non-file metadata; they cannot retrieve file contents. Remains enforced when `SUBSCRIPTION_SERVICE=OFF`.
+
 ## Import gate
 
 Business rule that blocks result ingestion without a live authorization.

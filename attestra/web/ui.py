@@ -643,6 +643,31 @@ def fetch_ct_suggestions_ui(request: Request, eid: int, apex: str = Form(...)):
         return _back(f"/engagements/{eid}", error=str(e), anchor="#targets")
 
 
+@router.get("/engagements/{eid}/authorizations/{aid}/document")
+def ui_download_authorization_document(request: Request, eid: int, aid: int):
+    """Super Admin-only download of the signed authorization file."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "authorization.document"):
+        return _back(f"/engagements/{eid}", error="Only a Super Admin can download signed authorization documents.", anchor="#scope")
+    try:
+        with db.session() as s:
+            a, path = services.open_authorization_document(s, aid, principal=principal)
+            if a.engagement_id != eid:
+                raise LookupError("authorization not found")
+            return FileResponse(
+                str(path),
+                filename=a.document_name or "authorization",
+                media_type="application/octet-stream",
+                headers={"Cache-Control": "no-store"},
+            )
+    except LookupError:
+        return _back(f"/engagements/{eid}", error="Authorization document not found.", anchor="#scope")
+    except PermissionError:
+        return _back(f"/engagements/{eid}", error="Only a Super Admin can download signed authorization documents.", anchor="#scope")
+
+
 @router.post("/engagements/{eid}/authorizations")
 async def add_authorization(
     request: Request,

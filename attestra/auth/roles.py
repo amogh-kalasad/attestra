@@ -10,6 +10,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "engagement.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
     "engagement.write": frozenset({"admin", "lead", "tester"}),
     "authorization.add": frozenset({"admin", "lead"}),
+    # Signed authorization file contents: Super Admin only (master Phase 3).
+    "authorization.document": frozenset({"admin"}),
     "asset.write": frozenset({"admin", "lead", "tester"}),
     "asset.verify_ownership": frozenset({"admin", "lead"}),
     "import.create": frozenset({"admin", "lead", "tester"}),
