@@ -85,4 +85,4 @@ The confirmation sets `ownership_verified_at` and is audited as `asset.ownership
 
 A lead or admin can paste another target's token on the target page so several hosts share one DNS TXT or well-known file.
 
-[[attestra/web/ui.py#set_target_ownership_token]] calls [[attestra/services.py#set_ownership_token]], which validates format via [[attestra/runner/ownership.py#set_token]] (16–64 urlsafe characters). Changing the token clears `ownership_verified_at` so the proof must be checked again. Audit `asset.ownership_token_set` stores only a four-character suffix, never the full token. [[attestra/web/ui.py#verify_target_ownership_now]] runs the same check as engagement Check now and returns to the target page.
+[[attestra/services.py#set_ownership_token]] validates format via [[attestra/runner/ownership.py#set_token]] (16–64 urlsafe characters). Changing the token clears `ownership_verified_at` so the proof must be checked again. Audit `asset.ownership_token_set` stores only a four-character suffix, never the full token. [[attestra/web/ui.py#verify_target_ownership]] runs the ownership check from the target page.

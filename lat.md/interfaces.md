@@ -66,7 +66,7 @@ Server-rendered UI served alongside the API. Login at `/login` ([[attestra/web/u
 
 Report lifecycle buttons post to `/engagements/{eid}/reports/{rid}/submit`, `/qa-approve`, `/qa-reject` and `/sign`; see [[reports#Workflow]]. Report links open `/reports/{rid}` in a new tab with the sign-off record on top ([[reports#Sign-off record]]).
 
-When [[attestra/config.py#AUTH_WEB_ENABLED]] is on, engagement pages link to authenticated coverage ([[attestra/web/ui.py#ui_auth_coverage]]) and accept profile creates via [[attestra/web/ui.py#ui_create_auth_profile]]; when off those routes return 404. See [[architecture#Authenticated website testing]].
+When [[attestra/config.py#AUTH_WEB_ENABLED]] is on, engagement pages link to authenticated coverage (`engagement_auth_coverage.html`) and profile creates go through [[attestra/auth_web/routes.py#create_auth_profile]]; when off those routes return 404. See [[architecture#Authenticated website testing]].
 
 Staff SEBI CSCRF security-testing timeline is at `GET /engagements/{eid}/sebi-timeline` ([[attestra/web/sebi_routes.py#ui_sebi_timeline]], included from [[attestra/api.py]]); see [[compliance#SEBI security testing timeline]].
 
@@ -80,7 +80,7 @@ Tenant-wide list of every target with grade, open counts, last scan, and score t
 
 Staff roll-up of open severity, SLA ageing, weekly inflow, and worst/best site grades.
 
-`GET /dashboard` ([[attestra/web/ui.py#metrics_dashboard]], template `dashboard.html`) calls [[attestra/dashboards.py#summary_for_principal]]. Keys: `open_by_severity`, `sla_ageing` (`ok` / `due_soon` within 7d / `overdue` via `Finding.sla_due`), `trend` (last N weeks opened plus current vs previous open), and `site_grades` (worst/best from [[attestra/services.py#list_tenant_sites]]). Read-only roles redirect to `/portal`. Nav links Dashboard; the page links to `/sites`.
+`GET /dashboard` (template `dashboard.html`) calls [[attestra/dashboards.py#summary_for_principal]]. Keys: `open_by_severity`, `sla_ageing` (`ok` / `due_soon` within 7d / `overdue` via `Finding.sla_due`), `trend` (last N weeks opened plus current vs previous open), and `site_grades` (worst/best from [[attestra/services.py#list_tenant_sites]]). Read-only roles redirect to `/portal`. Nav links Dashboard; the page links to `/sites`.
 
 ### Finding comments
 
@@ -98,7 +98,7 @@ Staff can cancel a queued or running scan from the scan list or the scan page.
 
 Finding detail and per-tool false-positive lists finish the partly-done UI audit items.
 
-[[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence and status change (UI audit #55). Evidence cards link to [[attestra/web/ui.py#ui_download_evidence]] (`GET /engagements/{eid}/evidence/{evid}/download`, session auth, same path checks as the API) and show the latest [[attestra/models.py#ProofReplay]] status per item. False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
+[[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence and status change (UI audit #55). Evidence cards use [[attestra/api.py#download_evidence]] (`GET /api/evidence/{eid}/download`, auth required) and show the latest [[attestra/models.py#ProofReplay]] status per item. False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
 
 ### Findings filter on the engagement page
 
@@ -190,6 +190,15 @@ Environment variables and on-disk data layout.
 - `ATTESTRA_GSB_API_KEY` — Safe Browsing API key; required with the flag; never logged or stored in reports
 - `ATTESTRA_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_FROM` / `_TLS` (or `_STARTTLS`) — optional SMTP for invites and email alerts; off when host is unset; password never logged
 - `ATTESTRA_PUBLIC_URL` (or `ATTESTRA_URL`) — base URL used in alert email links to findings and targets
+- `SUBSCRIPTION_SERVICE` — see [[interfaces#Configuration#Subscription service flag]]
+
+Template: `.env.example`.
+
+### Subscription service flag
+
+Centralized ON/OFF switch for organization test-run credit enforcement.
+
+[[attestra/config.py#parse_subscription_service]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#subscription_enforcement_enabled]] is the single helper later credit admission uses. [[attestra/config.py#validate_runtime_config]] runs at API lifespan ([[attestra/api.py]]), `attestra init`, `attestra serve`, and `attestra worker` so API, CLI, schedules, and workers share one path. Changing the variable requires restarting the API and workers; Attestra does not hot-reload subscription mode. `OFF` bypasses only subscription credit checks; auth, tenant isolation, scope, SSRF, signed authorization, and audit stay enforced. Credit ledger behaviour lands in a later phase.
 
 ## Product marketing page
 

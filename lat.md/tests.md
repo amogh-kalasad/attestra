@@ -1309,7 +1309,9 @@ On a temp copy of the live ui_data database, HarmonyPM engagement findings expor
 
 ## Phase 6 auth web
 
-Authenticated website testing: Fernet credential store, profiles, crawl scope, evidence redaction, checklists, and coverage ([[tests/test_phase6_credentials.py]], [[tests/test_phase6_auth_web_crawl.py]], [[tests/test_phase6_checklists_coverage.py]], [[tests/test_phase6_auth_profiles_api.py]], [[tests/test_phase6_auth_mock_smoke.py]], [[tests/test_phase6_screenshot_redact.py]]).
+Authenticated website testing: credential store, profiles, crawl, checklists, coverage, and screenshot redaction.
+
+Covered by `tests/test_phase6_credentials.py`, `tests/test_phase6_auth_web_crawl.py`, `tests/test_phase6_checklists_coverage.py`, `tests/test_phase6_auth_profiles_api.py`, `tests/test_phase6_auth_mock_smoke.py`, and `tests/test_phase6_screenshot_redact.py`.
 
 ### Credential put/get round-trip
 
@@ -1429,7 +1431,7 @@ An engagement with no inventories reports zero `coverage_pct` and `incomplete` t
 
 ### Mock login succeeds
 
-[[tests/fixtures/auth_web_mock_app.py#create_app]] accepts synthetic viewer credentials and grants `/app` after form login.
+The local auth-web mock app (`tests/fixtures/auth_web_mock_app.py`) accepts synthetic viewer credentials and grants `/app` after form login.
 
 ### Unauthenticated app gate
 
@@ -1445,11 +1447,11 @@ Viewer sessions receive 403 on `/admin`; admin sessions receive 200.
 
 ## Phase 7 testing depth
 
-CLI scan queue path, ZAP auth contexts, multi-role comparison, gated intrusive IDOR probes, auto screenshots on findings, and checklist rows in technical reports ([[tests/test_phase7_checklist_report.py]], [[tests/test_phase7_screenshots.py]]).
+CLI scan queue path, ZAP auth contexts, multi-role comparison, gated intrusive IDOR probes, auto screenshots on findings, and checklist rows in technical reports (`tests/test_phase7_checklist_report.py`, `tests/test_phase7_screenshots.py`).
 
 ### Multi-role comparison
 
-[[attestra/auth_web/role_scan.py#run_role_comparison]] loads two [[attestra/models.py#AuthCredentialProfile]] roles, captures read-only snapshots (mock fetcher or prebuilt), and calls [[attestra/auth_web/roles.py#compare_roles]] with ``intrusive=False`` ([[tests/test_phase7_role_scan.py]]).
+[[attestra/auth_web/role_scan.py#run_role_comparison]] loads two [[attestra/models.py#AuthCredentialProfile]] roles, captures read-only snapshots (mock fetcher or prebuilt), and calls [[attestra/auth_web/roles.py#compare_roles]] with ``intrusive=False`` (`tests/test_phase7_role_scan.py`).
 
 ### Multi-role same responses no findings
 
@@ -1533,7 +1535,7 @@ Expired authorization yields `status=refused` with a refuse reason and `scan.ref
 
 ### ZAP auth contexts
 
-[[attestra/auth_web/zap_auth.py]] builds mounted ZAP auth config from credential profiles without putting secrets on argv or in ScanRun rows ([[tests/test_phase7_zap_auth.py]]).
+[[attestra/auth_web/zap_auth.py]] builds mounted ZAP auth config from credential profiles without putting secrets on argv or in ScanRun rows (`tests/test_phase7_zap_auth.py`).
 
 #### Form header cookie omit secret
 
@@ -1601,7 +1603,7 @@ Valid verify HTML includes an inline SVG QR and the absolute `/verify/reports/{r
 
 ### Client remediation portal
 
-Portal P6-2: client_viewer comment, fix evidence, retest, branding; auditor read-only ([[tests/test_phase8_portal_remediation.py]], [[interfaces#Client remediation portal]]).
+Portal P6-2: client_viewer comment, fix evidence, retest, branding; auditor read-only (`tests/test_phase8_portal_remediation.py`, [[interfaces#Client remediation portal]]).
 
 #### Client can comment
 
@@ -1641,7 +1643,7 @@ Timeline milestones expose planning through retest statuses; the SEBI pack still
 
 ### Metrics dashboard
 
-Phase 8 P6-3 staff metrics page: open-by-severity, SLA ageing, trend, site grades ([[tests/test_phase8_dashboard.py]], [[attestra/dashboards.py#summary_for_principal]]).
+Phase 8 P6-3 staff metrics page: open-by-severity, SLA ageing, trend, site grades (`tests/test_phase8_dashboard.py`, [[attestra/dashboards.py#summary_for_principal]]).
 
 #### Empty tenant zeros
 
@@ -1729,6 +1731,32 @@ The public verify page embeds a QR SVG pointing at the verify URL.
 
 ### Library seed import and CERT-In
 
-[[tests/test_phase8_library_certin.py]] checks CERT-In 2022 pack titles (Dir.(i)/(ii)/(iv)/(v), Annex I), compliance on a `cert_in_2022` engagement, JSON/CSV template convert, oversized reject, idempotent [[attestra/library/service.py#seed_defaults]], and `POST /api/library/import` with `library.import` audit.
+CERT-In pack titles, `cert_in_2022` compliance, library template import, and idempotent seed.
+
+`tests/test_phase8_library_certin.py` covers Dir.(i)/(ii)/(iv)/(v) and Annex I titles, JSON/CSV convert, oversized reject, [[attestra/library/service.py#seed_defaults]], and `POST /api/library/import` with `library.import` audit.
+
+## Subscription service flag
+
+Master Phase 1: `SUBSCRIPTION_SERVICE` ON/OFF parsing, defaults, and startup validation in [[attestra/config.py]].
+
+### Missing defaults to ON
+
+Unset or blank `SUBSCRIPTION_SERVICE` resolves to `ON` and enables enforcement via [[attestra/config.py#subscription_enforcement_enabled]].
+
+### ON enforces
+
+Explicit `ON` (any case) keeps [[attestra/config.py#subscription_enforcement_enabled]] true for later credit admission.
+
+### OFF bypasses subscription only
+
+`OFF` makes [[attestra/config.py#subscription_enforcement_enabled]] false so credit checks can be skipped without disabling other security controls.
+
+### Invalid fails validation
+
+Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead of choosing a silent mode.
+
+### Validate runtime config
+
+[[attestra/config.py#validate_runtime_config]] refreshes the module-level flag from the environment and raises on invalid values for API/CLI/worker startup.
 
 

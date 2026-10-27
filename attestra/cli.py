@@ -59,6 +59,9 @@ def _resolve_actor(args) -> tuple[str, int | None]:
 
 
 def cmd_init(args) -> None:
+    from attestra import config
+
+    config.validate_runtime_config()
     db.init(use_migrations=True)
     print("Database ready.")
 
@@ -576,6 +579,9 @@ def cmd_demo(args) -> None:
 
 
 def cmd_serve(args) -> None:
+    from attestra import config
+
+    config.validate_runtime_config()
     import uvicorn
 
     uvicorn.run("attestra.api:app", host=args.host, port=args.port, reload=False)
@@ -583,8 +589,10 @@ def cmd_serve(args) -> None:
 
 def cmd_worker(args) -> None:
     """Claim and run scan jobs until interrupted (or run a Temporal worker, Phase 6.2)."""
+    from attestra import config
     from attestra.orchestration import orchestrator
 
+    config.validate_runtime_config()
     if orchestrator() == "temporal":
         import asyncio
 

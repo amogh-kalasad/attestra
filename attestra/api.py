@@ -36,6 +36,8 @@ from attestra.reports import (
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # @lat: [[interfaces#Configuration#Subscription service flag]]
+    config.validate_runtime_config()
     db.init(use_migrations=True)
     observability.instrument_engine(db._engine)
     yield

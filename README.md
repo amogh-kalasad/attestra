@@ -129,6 +129,7 @@ Settings are read from environment variables. The most used ones are:
 
 | Variable | Purpose |
 | --- | --- |
+| `SUBSCRIPTION_SERVICE` | `ON` (default when unset) or `OFF`. When credit accounting is active, `ON` enforces organization test-run credits; `OFF` bypasses only those checks. Invalid values fail startup. Restart API and workers after changing. See `.env.example` |
 | `ATTESTRA_DATA_DIR` | Folder for the database, evidence, reports and signing key (default `./data`) |
 | `ATTESTRA_DATABASE_URL` | Use another database, for example PostgreSQL (`pip install -e ".[postgres]"`). On Postgres, run Alembic to head (migration `0022_auth_web` adds auth-web tables) |
 | `ATTESTRA_PUBLIC_URL` | The address users open, used in links, emails and public verify QR URLs |

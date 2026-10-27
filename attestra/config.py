@@ -108,3 +108,62 @@ AUTH_WEB_MAX_DURATION_S = int(os.environ.get("ATTESTRA_AUTH_WEB_MAX_DURATION_S",
 AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST", "2"))
 AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
 # Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).
+
+# Organization test-run credit enforcement (master Phase 1).
+# SUBSCRIPTION_SERVICE=ON|OFF. Missing defaults to ON. Invalid values fail startup.
+# Changing this variable requires restarting the API process and any workers;
+# Attestra does not hot-reload subscription mode mid-process.
+_SUBSCRIPTION_SERVICE_VALUES = frozenset({"ON", "OFF"})
+
+
+class ConfigurationError(ValueError):
+    """Invalid runtime configuration that must stop process startup."""
+
+
+def parse_subscription_service(value: str | None = None) -> str:
+    """Return ``ON`` or ``OFF`` for ``SUBSCRIPTION_SERVICE``.
+
+    Missing or blank values default to ``ON``. Any other value raises
+    [[attestra/config.py#ConfigurationError]] so callers fail closed.
+    """
+    if value is None:
+        value = os.environ.get("SUBSCRIPTION_SERVICE")
+    if value is None or not str(value).strip():
+        return "ON"
+    normalized = str(value).strip().upper()
+    if normalized not in _SUBSCRIPTION_SERVICE_VALUES:
+        raise ConfigurationError(
+            f"SUBSCRIPTION_SERVICE must be ON or OFF, got {value!r}. "
+            "Fix the environment variable and restart the application or worker."
+        )
+    return normalized
+
+
+def get_subscription_service() -> str:
+    """Current ``SUBSCRIPTION_SERVICE`` value (``ON`` or ``OFF``), re-read from the environment."""
+    return parse_subscription_service()
+
+
+def subscription_enforcement_enabled() -> bool:
+    """True when organization test-run credit limits must be enforced.
+
+    When False (``SUBSCRIPTION_SERVICE=OFF``), credit balance checks and
+    consumption are bypassed. Authentication, tenant isolation, scope
+    validation, SSRF protections, signed-authorization rules, audit logging,
+    and other non-subscription controls remain enforced.
+    """
+    return get_subscription_service() == "ON"
+
+
+def validate_runtime_config() -> None:
+    """Validate env-backed settings that must fail startup on error.
+
+    Call from API lifespan and CLI serve/worker/init so API, workers,
+    schedules, and CLI share one configuration path. Re-reads
+    ``SUBSCRIPTION_SERVICE`` from the environment.
+    """
+    global SUBSCRIPTION_SERVICE
+    SUBSCRIPTION_SERVICE = parse_subscription_service()
+
+
+SUBSCRIPTION_SERVICE = parse_subscription_service()
