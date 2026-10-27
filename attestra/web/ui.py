@@ -396,9 +396,16 @@ def new_engagement_form(request: Request):
     if not has_permission(principal.role, "engagement.create"):
         return _back("/", error="Only leads and admins can create engagements. Ask your lead to set one up.")
     lib = load_library()
+    from attestra.compliance.recommend import catalogues
+
+    cats = catalogues()
     return _render(request, "new_engagement.html", {
         "types": new_engagement_type_labels(),
         "frameworks": {k: v["name"] for k, v in lib.frameworks.items()},
+        "industries": cats["industries"],
+        "countries": cats["countries"],
+        "technical_scopes": cats["technical_scopes"],
+        "recommend_disclaimer": cats["disclaimer"],
         "today": date.today(),
     })
 
@@ -408,6 +415,9 @@ def create_engagement(
     request: Request,
     tenant: str = Form(...),
     industry: str = Form(""),
+    country: str = Form(""),
+    regulatory_status: str = Form(""),
+    technical_scope: list[str] = Form([]),
     contact_name: str = Form(""),
     contact_email: str = Form(""),
     name: str = Form(...),
@@ -429,9 +439,21 @@ def create_engagement(
     try:
         with db.session() as s:
             e = services.create_engagement(
-                s, tenant=tenant, name=name, type=type, frameworks=frameworks, window_start=ws, window_end=we,
-                industry=industry, contact_name=contact_name, contact_email=contact_email,
-                actor=principal.actor, principal=principal,
+                s,
+                tenant=tenant,
+                name=name,
+                type=type,
+                frameworks=frameworks,
+                window_start=ws,
+                window_end=we,
+                industry=industry,
+                country=country,
+                regulatory_status=regulatory_status,
+                technical_scope=technical_scope,
+                contact_name=contact_name,
+                contact_email=contact_email,
+                actor=principal.actor,
+                principal=principal,
             )
             eid = e.id
     except (services.ServiceError, ValueError) as e:

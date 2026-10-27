@@ -173,7 +173,11 @@ class Tenant(Base):
     __tablename__ = "tenants"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), unique=True)
+    # industry / country are catalogue keys (see compliance/data/industries.yaml, countries.yaml).
     industry: Mapped[str] = mapped_column(String(100), default="")
+    country: Mapped[str] = mapped_column(String(8), default="")
+    regulatory_status: Mapped[str] = mapped_column(Text, default="")
+    technical_scope: Mapped[list] = mapped_column(JSON, default=list)
     contact_name: Mapped[str] = mapped_column(String(200), default="")
     contact_email: Mapped[str] = mapped_column(String(200), default="")
     data_region: Mapped[str] = mapped_column(String(50), default="default")

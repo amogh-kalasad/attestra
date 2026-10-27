@@ -15,6 +15,12 @@ How framework and CWE YAML become the in-memory Library.
 
 Cached as [[attestra/compliance/engine.py#Library]] with [[attestra/compliance/engine.py#CweMapping]] entries.
 
+## Framework recommendations
+
+Advisory profile matching that recommends only frameworks already in the configured catalogue.
+
+[[attestra/compliance/recommend.py#recommend_frameworks]] requires catalogue Industry and Country keys from `attestra/compliance/data/industries.yaml` and `countries.yaml`. Optional regulatory status and technical scope refine rules in `recommend_rules.yaml`. API: `POST /api/frameworks/recommend` and catalogues via `GET /api/profile/catalogues` / `/api/catalog`. New-engagement UI heading is **Compliance Frameworks to Report Against**. Tenant profile fields `country`, `regulatory_status`, `technical_scope` (migration `0024_tenant_profile_recommend`) store the inputs. One primary country is stored; multi-country operation is not modeled yet. Confirmed user selections are preserved as `user_added` / `user_excluded` on refresh. Recommendations never invent framework IDs outside [[attestra/compliance/engine.py#load_library]].
+
 ## ASVS 4.0 pack
 
 Chapter-level OWASP ASVS 4.0 register loaded as framework key `asvs_4_0`.

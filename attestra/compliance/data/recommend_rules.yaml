@@ -1,0 +1,192 @@
+# Configurable framework recommendation rules (master Phase 5).
+# Only frameworks present in the Attestra catalogue may appear as rule targets.
+# Statuses: recommended | applicable | requires_review | not_applicable
+version: "2026.10.27"
+reviewed_on: "2026-10-27"
+disclaimer: >
+  Recommendations are advisory profile matches against Attestra's configured
+  catalogue. They are not a legal determination of regulatory applicability.
+eu_eea_codes:
+  - AT
+  - BE
+  - BG
+  - HR
+  - CY
+  - CZ
+  - DK
+  - EE
+  - FI
+  - FR
+  - DE
+  - GR
+  - HU
+  - IE
+  - IT
+  - LV
+  - LT
+  - LU
+  - MT
+  - NL
+  - PL
+  - PT
+  - RO
+  - SK
+  - SI
+  - ES
+  - SE
+  - IS
+  - LI
+  - NO
+rules:
+  - id: iso27001.baseline
+    framework: iso_27001_2022
+    status: recommended
+    reason: ISO/IEC 27001 is a common baseline information-security management standard for most industries.
+    when: {}
+  - id: nist.csf.applicable
+    framework: nist_csf_2
+    status: applicable
+    reason: NIST CSF 2.0 is a flexible risk framework useful across industries and jurisdictions.
+    when: {}
+  - id: soc2.tech
+    framework: soc2
+    status: recommended
+    reason: SOC 2 is commonly requested for technology, SaaS, cloud, and professional service providers.
+    when:
+      industries_any:
+        - it_software
+        - cloud_data
+        - professional_services
+        - ai_emerging
+        - gaming_entertainment
+  - id: soc2.review.other
+    framework: soc2
+    status: requires_review
+    reason: SOC 2 may apply when customers or contracts require a service-organization report; confirm with the client.
+    when:
+      industries_any:
+        - other_mixed
+        - consumer_services
+        - retail_ecommerce
+  - id: pci.payments.scope
+    framework: pci_dss_4
+    status: recommended
+    reason: Payment applications or card-data handling in scope typically require PCI DSS consideration.
+    when:
+      technical_scope_any:
+        - payments
+  - id: pci.fintech.industry
+    framework: pci_dss_4
+    status: recommended
+    reason: Payments and FinTech organizations often handle or influence cardholder data flows.
+    when:
+      industries_any:
+        - payments_fintech
+  - id: pci.banking.review
+    framework: pci_dss_4
+    status: requires_review
+    reason: Banking and capital-markets entities may have PCI obligations when card data is in scope; confirm with the QSA or compliance lead.
+    when:
+      industries_any:
+        - banking_financial
+        - capital_markets_insurance
+        - retail_ecommerce
+  - id: asvs.web_api
+    framework: asvs_4_0
+    status: recommended
+    reason: OWASP ASVS fits engagements that assess web applications or APIs.
+    when:
+      technical_scope_any:
+        - web_apps
+        - apis
+  - id: asvs.software.industry
+    framework: asvs_4_0
+    status: applicable
+    reason: Software and digital product organizations commonly report against application security controls.
+    when:
+      industries_any:
+        - it_software
+        - gaming_entertainment
+        - ai_emerging
+  - id: iso42001.ai.scope
+    framework: iso_42001_2023
+    status: recommended
+    reason: AI systems in technical scope support considering ISO/IEC 42001 AI management controls.
+    when:
+      technical_scope_any:
+        - ai
+  - id: iso42001.ai.industry
+    framework: iso_42001_2023
+    status: recommended
+    reason: AI, data, and emerging-technology organizations are primary candidates for ISO/IEC 42001.
+    when:
+      industries_any:
+        - ai_emerging
+  - id: cert_in.india
+    framework: cert_in_2022
+    status: requires_review
+    reason: CERT-In Directions 2022 can apply to entities providing digital services in India; confirm entity class and duties with counsel.
+    when:
+      countries_any:
+        - IN
+  - id: rbi.banks.in
+    framework: rbi_csf_2016
+    status: recommended
+    reason: RBI Cyber Security Framework targets banks regulated in India.
+    when:
+      countries_any:
+        - IN
+      industries_any:
+        - banking_financial
+  - id: rbi.fintech.review
+    framework: rbi_csf_2016
+    status: requires_review
+    reason: Some Indian payments/FinTech entities may fall under RBI supervision; confirm licence and entity type before treating RBI CSF as in-scope.
+    when:
+      countries_any:
+        - IN
+      industries_any:
+        - payments_fintech
+  - id: sebi.capital.in
+    framework: sebi_cscrf_2024
+    status: recommended
+    reason: SEBI CSCRF applies to SEBI-regulated entities in Indian capital markets.
+    when:
+      countries_any:
+        - IN
+      industries_any:
+        - capital_markets_insurance
+  - id: sebi.fintech.review
+    framework: sebi_cscrf_2024
+    status: requires_review
+    reason: Confirm whether the Indian organization is a SEBI-regulated entity before applying SEBI CSCRF.
+    when:
+      countries_any:
+        - IN
+      industries_any:
+        - payments_fintech
+        - banking_financial
+  - id: dora.eu.financial
+    framework: dora_2022
+    status: requires_review
+    reason: DORA applies to defined financial entities and critical ICT providers in the EU/EEA, not to every European organization. Confirm entity class and legal scope.
+    when:
+      countries_eu_eea: true
+      industries_any:
+        - banking_financial
+        - payments_fintech
+        - capital_markets_insurance
+        - cloud_data
+        - it_software
+  - id: dora.eu.not_default
+    framework: dora_2022
+    status: not_applicable
+    reason: Country alone does not make DORA applicable; no financial-entity or critical-ICT signal was present in the profile.
+    when:
+      countries_eu_eea: true
+      industries_none_of:
+        - banking_financial
+        - payments_fintech
+        - capital_markets_insurance
+        - cloud_data
+        - it_software

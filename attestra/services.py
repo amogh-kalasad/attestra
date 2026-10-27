@@ -163,13 +163,41 @@ def assert_engagement_access(s: Session, engagement_id: int, principal) -> Engag
 
 
 def get_or_create_tenant(
-    s: Session, name: str, actor: str, *, industry: str = "", contact_name: str = "", contact_email: str = ""
+    s: Session,
+    name: str,
+    actor: str,
+    *,
+    industry: str = "",
+    country: str = "",
+    regulatory_status: str = "",
+    technical_scope: list[str] | None = None,
+    contact_name: str = "",
+    contact_email: str = "",
 ) -> Tenant:
     name = name.strip()
     if not name:
         raise ServiceError("client name is required")
     if contact_email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", contact_email.strip()):
         raise ServiceError("contact email looks invalid")
+    # Validate catalogue keys when provided (legacy free-text industry remains readable).
+    from attestra.compliance.recommend import load_countries, load_industries, load_technical_scopes
+
+    ind = (industry or "").strip()
+    cty = (country or "").strip().upper()
+    reg = (regulatory_status or "").strip()
+    scopes = list(dict.fromkeys((technical_scope or []) or []))
+    industries = load_industries()
+    countries = load_countries()
+    known_scopes = load_technical_scopes()
+    if ind and ind not in industries:
+        # Allow legacy free-text until the client is edited onto a catalogue key.
+        pass
+    if cty and cty not in countries:
+        raise ServiceError(f"unknown country {cty!r}; choose from the country catalogue")
+    bad_scopes = [x for x in scopes if x not in known_scopes]
+    if bad_scopes:
+        raise ServiceError(f"unknown technical scope {bad_scopes}; choose from {sorted(known_scopes)}")
+
     t = s.scalar(select(Tenant).where(Tenant.name == name))
     if t is None:
         t = Tenant(name=name)
@@ -180,10 +208,19 @@ def get_or_create_tenant(
 
         ensure_account(s, t.id, actor=actor)
     changed = {}
-    for field, value in (("industry", industry), ("contact_name", contact_name), ("contact_email", contact_email)):
-        if value and value.strip() != getattr(t, field):
-            setattr(t, field, value.strip())
-            changed[field] = value.strip()
+    for field, value in (
+        ("industry", ind),
+        ("country", cty),
+        ("regulatory_status", reg),
+        ("contact_name", contact_name),
+        ("contact_email", contact_email),
+    ):
+        if value and value != getattr(t, field):
+            setattr(t, field, value)
+            changed[field] = value
+    if scopes and list(t.technical_scope or []) != scopes:
+        t.technical_scope = scopes
+        changed["technical_scope"] = scopes
     if changed:
         audit.record(s, actor, "tenant.update", "tenant", t.id, **changed)
     return t
@@ -200,6 +237,9 @@ def create_engagement(
     window_end: date | None,
     actor: str,
     industry: str = "",
+    country: str = "",
+    regulatory_status: str = "",
+    technical_scope: list[str] | None = None,
     contact_name: str = "",
     contact_email: str = "",
     principal=None,
@@ -221,7 +261,17 @@ def create_engagement(
         raise ServiceError(f"unknown frameworks {bad}; choose from {known}")
     if window_start and window_end and window_end < window_start:
         raise ServiceError("window_end is before window_start")
-    t = get_or_create_tenant(s, tenant, actor, industry=industry, contact_name=contact_name, contact_email=contact_email)
+    t = get_or_create_tenant(
+        s,
+        tenant,
+        actor,
+        industry=industry,
+        country=country,
+        regulatory_status=regulatory_status,
+        technical_scope=technical_scope,
+        contact_name=contact_name,
+        contact_email=contact_email,
+    )
     ensure_tenant_membership(s, principal, t.id)
     e = Engagement(
         tenant_id=t.id, name=name.strip(), type=type, frameworks=frameworks, window_start=window_start, window_end=window_end

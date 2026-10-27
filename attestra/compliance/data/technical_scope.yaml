@@ -1,0 +1,19 @@
+# Optional technical-scope catalogue for framework recommendations.
+version: 1
+scopes:
+  web_apps:
+    label: Web applications
+  apis:
+    label: APIs
+  cloud:
+    label: Cloud infrastructure
+  network:
+    label: Network infrastructure
+  payments:
+    label: Payment applications
+  source_code:
+    label: Source code
+  ai:
+    label: AI systems
+  other:
+    label: Other supported technical assets

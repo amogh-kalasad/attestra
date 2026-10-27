@@ -21,17 +21,35 @@
   </div>
 </div>
 
-<form method="post" action="/engagements/new">
+<form method="post" action="/engagements/new" id="new_eng_form">
   <div class="card">
     <h2>Client</h2>
-    <p class="hint" style="margin-top:0;margin-bottom:14px">Who the engagement is for.</p>
+    <p class="hint" style="margin-top:0;margin-bottom:14px">Who the engagement is for. Industry and country drive compliance framework recommendations.</p>
     <div class="fields">
       <div><label for="tenant">Client / company name <span style="color:var(--danger)">*</span></label><input type="text" id="tenant" name="tenant" required placeholder="Example Retail Pvt Ltd"></div>
-      <div><label for="industry">Industry</label><input type="text" id="industry" name="industry" placeholder="Retail, BFSI, SaaS…"></div>
+      <div><label for="industry">Industry <span style="color:var(--danger)">*</span></label>
+        <select id="industry" name="industry" required>
+          <option value="">Select industry</option>
+          {% for k, meta in industries.items() %}<option value="{{ k }}">{{ meta.label }}</option>{% endfor %}
+        </select></div>
+      <div><label for="country">Country <span style="color:var(--danger)">*</span></label>
+        <select id="country" name="country" required>
+          <option value="">Select country</option>
+          {% for code, label in countries.items() %}<option value="{{ code }}">{{ label }} ({{ code }})</option>{% endfor %}
+        </select>
+        <div class="hint">Primary country of incorporation / jurisdiction. Multi-country operations are not modeled yet.</div></div>
       <div><label for="contact_name">Client contact</label><input type="text" id="contact_name" name="contact_name" placeholder="Name, role"></div>
       <div><label for="contact_email">Contact email</label><input type="email" id="contact_email" name="contact_email" placeholder="security@client.com"></div>
     </div>
-    <p class="hint">An existing client name reuses that client; filled-in contact details update it.</p>
+    <label for="regulatory_status">Regulatory status / jurisdiction (optional)</label>
+    <textarea id="regulatory_status" name="regulatory_status" rows="2" placeholder="Licence, regulated-entity category, applicable jurisdictions…"></textarea>
+    <label id="scope_label">Technical scope (optional)</label>
+    <div class="checks" role="group" aria-labelledby="scope_label">
+      {% for k, meta in technical_scopes.items() %}
+      <label><input type="checkbox" name="technical_scope" value="{{ k }}" class="tscope"> {{ meta.label }}</label>
+      {% endfor %}
+    </div>
+    <p class="hint">An existing client name reuses that client; filled-in profile details update it.</p>
   </div>
 
   <div class="card">
@@ -45,13 +63,32 @@
       <div><label for="window_end">Test window end</label><input type="date" id="window_end" name="window_end" min="{{ today }}">
         <div class="hint">Must be on or after the start date.</div></div>
     </div>
-    <label id="fw_label">Compliance frameworks to report against</label>
-    <div class="checks label-chips" role="group" aria-labelledby="fw_label">
-      <label><input type="checkbox" id="fw_all" class="fw-all"> Select all</label>
-      <button type="button" id="fw_clear" class="secondary" style="margin-left:8px">Clear</button>
-      {% for k, n in frameworks.items() %}<label><input type="checkbox" name="frameworks" value="{{ k }}" class="fw"> {{ n }}</label>{% endfor %}
+
+    <h2 id="fw_heading">Compliance Frameworks to Report Against</h2>
+    <p class="hint" style="margin-top:0">Recommendations use only frameworks already configured in Attestra. They are advisory, not a legal conclusion.</p>
+    {% if recommend_disclaimer %}<p class="meta">{{ recommend_disclaimer }}</p>{% endif %}
+    <div class="form-actions" style="margin:10px 0 14px">
+      <button type="button" id="fw_recommend" class="secondary">Generate recommendations</button>
+      <button type="button" id="fw_add_more" class="secondary">Add more frameworks</button>
+      <button type="button" id="fw_clear" class="secondary">Clear</button>
     </div>
-    <p class="hint">Tick only the frameworks this client asked for; each one adds a compliance report. Use Select all for all {{ frameworks|length }} frameworks.</p>
+    <div class="flash err" id="fw_rec_error" hidden></div>
+    <div id="fw_recommendations" class="meta" style="margin-bottom:12px" hidden></div>
+    <label id="fw_label" class="meta">Selected frameworks</label>
+    <div class="checks label-chips" role="group" aria-labelledby="fw_label" id="fw_selected">
+      {% for k, n in frameworks.items() %}
+      <label data-fw="{{ k }}" hidden><input type="checkbox" name="frameworks" value="{{ k }}" class="fw"> {{ n }}</label>
+      {% endfor %}
+    </div>
+    <details id="fw_all_panel" style="margin-top:10px">
+      <summary>All configured frameworks</summary>
+      <div class="checks label-chips" id="fw_all_list">
+        {% for k, n in frameworks.items() %}
+        <label><input type="checkbox" value="{{ k }}" class="fw-pick"> {{ n }} <span class="meta">({{ k }})</span></label>
+        {% endfor %}
+      </div>
+    </details>
+    <p class="hint">Tick frameworks to include on this engagement. Previously confirmed selections are kept when you refresh recommendations.</p>
   </div>
 
   <div class="form-actions">
@@ -62,32 +99,110 @@
 <script>
 (function () {
   function fwBoxes() { return Array.from(document.querySelectorAll('input.fw[name="frameworks"]')); }
-  var all = document.getElementById('fw_all');
+  function selectedKeys() {
+    return fwBoxes().filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+  }
+  function showSelectedLabels() {
+    fwBoxes().forEach(function (cb) {
+      var lab = cb.closest('label');
+      if (lab) lab.hidden = !cb.checked;
+    });
+  }
+  function setChecked(keys) {
+    var want = {};
+    (keys || []).forEach(function (k) { want[k] = true; });
+    fwBoxes().forEach(function (cb) { cb.checked = !!want[cb.value]; });
+    document.querySelectorAll('input.fw-pick').forEach(function (cb) { cb.checked = !!want[cb.value]; });
+    showSelectedLabels();
+  }
   var clearBtn = document.getElementById('fw_clear');
-  function syncAll() {
-    var boxes = fwBoxes();
-    if (!all || !boxes.length) return;
-    all.checked = boxes.every(function (cb) { return cb.checked; });
-  }
-  if (all) {
-    all.addEventListener('change', function () {
-      fwBoxes().forEach(function (cb) { cb.checked = all.checked; });
-    });
-    all.addEventListener('click', function () {
-      // Some browsers only toggle the master; force children on click too (P1-5).
-      var on = all.checked;
-      fwBoxes().forEach(function (cb) { cb.checked = on; });
-    });
-  }
   if (clearBtn) {
-    clearBtn.addEventListener('click', function () {
-      fwBoxes().forEach(function (cb) { cb.checked = false; });
-      if (all) all.checked = false;
-    });
+    clearBtn.addEventListener('click', function () { setChecked([]); });
   }
-  fwBoxes().forEach(function (cb) { cb.addEventListener('change', syncAll); });
+  document.querySelectorAll('input.fw-pick').forEach(function (pick) {
+    pick.addEventListener('change', function () {
+      var box = document.querySelector('input.fw[value="' + pick.value + '"]');
+      if (box) box.checked = pick.checked;
+      showSelectedLabels();
+    });
+  });
+  fwBoxes().forEach(function (cb) {
+    cb.addEventListener('change', function () {
+      var pick = document.querySelector('input.fw-pick[value="' + cb.value + '"]');
+      if (pick) pick.checked = cb.checked;
+      showSelectedLabels();
+    });
+  });
+  var addMore = document.getElementById('fw_add_more');
+  var allPanel = document.getElementById('fw_all_panel');
+  if (addMore && allPanel) {
+    addMore.addEventListener('click', function () { allPanel.open = true; allPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
+  }
+
+  var recBtn = document.getElementById('fw_recommend');
+  var recErr = document.getElementById('fw_rec_error');
+  var recBox = document.getElementById('fw_recommendations');
+  function scopes() {
+    return Array.from(document.querySelectorAll('input.tscope:checked')).map(function (cb) { return cb.value; });
+  }
+  function showRecError(msg) {
+    if (!recErr) return;
+    if (!msg) { recErr.hidden = true; recErr.textContent = ''; return; }
+    recErr.hidden = false;
+    recErr.textContent = msg;
+  }
+  async function recommend() {
+    showRecError('');
+    var industry = (document.getElementById('industry') || {}).value || '';
+    var country = (document.getElementById('country') || {}).value || '';
+    if (!industry || !country) {
+      showRecError('Select Industry and Country before generating recommendations.');
+      return;
+    }
+    var body = {
+      industry: industry,
+      country: country,
+      regulatory_status: (document.getElementById('regulatory_status') || {}).value || '',
+      technical_scope: scopes(),
+      engagement_type: (document.getElementById('type') || {}).value || '',
+      confirmed_frameworks: selectedKeys(),
+      excluded_frameworks: []
+    };
+    var r = await fetch('/api/frameworks/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      showRecError((data && data.detail) || 'Could not generate recommendations.');
+      return;
+    }
+    var rows = (data && data.recommendations) || [];
+    var html = ['<table><tr><th>Framework</th><th>Status</th><th>Why</th></tr>'];
+    var auto = selectedKeys().slice();
+    rows.forEach(function (row) {
+      if (row.status === 'not_applicable' || row.status === 'user_excluded') return;
+      html.push('<tr><td>' + (row.name || row.framework_id) +
+        '<div class="meta">' + row.framework_id + ' · ' + (row.rule_id || '') + '</div></td>' +
+        '<td>' + row.status + '</td><td>' + (row.reason || '') + '</td></tr>');
+      if ((row.status === 'recommended' || row.status === 'applicable' || row.status === 'user_added') && auto.indexOf(row.framework_id) < 0) {
+        auto.push(row.framework_id);
+      }
+    });
+    html.push('</table>');
+    if (recBox) {
+      recBox.hidden = false;
+      recBox.innerHTML = html.join('');
+    }
+    setChecked(auto);
+  }
+  if (recBtn) recBtn.addEventListener('click', function () { recommend().catch(function (e) { showRecError(String(e)); }); });
+
   var ws = document.getElementById('window_start'), we = document.getElementById('window_end');
   if (ws && we) ws.addEventListener('change', function () { we.min = ws.value; });
+  showSelectedLabels();
 })();
 </script>
 {% endblock %}

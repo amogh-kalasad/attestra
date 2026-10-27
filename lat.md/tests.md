@@ -1871,4 +1871,56 @@ PT engagements default planned tests to `manual_pt` and reject scanner-only type
 
 `vapt` engagements keep combined VA and PT defaults from [[attestra/models.py#DEFAULT_TESTS]].
 
+## Framework recommendations
+
+Master Phase 5: industry/country catalogues and catalogue-only framework recommendations (`tests/test_framework_recommend.py`).
+
+### Catalogues load
+
+[[attestra/compliance/recommend.py#catalogues]] exposes industries, countries, technical scopes, and rule metadata.
+
+### Missing mandatory 400
+
+[[attestra/compliance/recommend.py#recommend_frameworks]] requires Industry and Country.
+
+### Only catalogue frameworks
+
+Every recommendation framework_id exists in [[attestra/compliance/engine.py#load_library]].
+
+### India payments rules
+
+Indian payments/FinTech profiles recommend PCI and require review for CERT-In / RBI.
+
+### DORA not for all Europe
+
+DORA is `not_applicable` for ordinary EU retail and `requires_review` for EU financial/ICT signals.
+
+### Preserves confirmed
+
+Confirmed frameworks stay as `user_added` when the profile would not otherwise recommend them.
+
+### API recommend
+
+`POST /api/frameworks/recommend` returns catalogue-only rows for a valid profile.
+
+### API missing fields
+
+Missing Industry/Country returns HTTP 400.
+
+### Catalog endpoint
+
+`GET /api/profile/catalogues` and `/api/catalog` include industry and country catalogues.
+
+### Create stores profile
+
+Engagement create persists tenant `country`, `regulatory_status`, and `technical_scope`.
+
+### UI has catalogues
+
+New-engagement form requires Industry/Country selects and shows **Compliance Frameworks to Report Against**.
+
+### Dict shape
+
+[[attestra/compliance/recommend.py#recommendation_to_dict]] includes status, reason, and rule metadata.
+
 

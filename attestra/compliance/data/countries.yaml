@@ -1,0 +1,82 @@
+# ISO 3166-1 alpha-2 country/territory catalogue for organization profiles.
+# Single mandatory Country field on Tenant (country of incorporation / primary jurisdiction).
+# Multi-country operation is not modeled yet; document that limitation in lat.md.
+version: 1
+limitation: >
+  Attestra stores one primary country code per organization. Countries of operation,
+  customer markets, and data locations are not separate fields in this release.
+countries:
+  IN: India
+  US: United States of America
+  GB: United Kingdom
+  IE: Ireland
+  DE: Germany
+  FR: France
+  NL: Netherlands
+  BE: Belgium
+  LU: Luxembourg
+  IT: Italy
+  ES: Spain
+  PT: Portugal
+  AT: Austria
+  SE: Sweden
+  FI: Finland
+  DK: Denmark
+  PL: Poland
+  CZ: Czechia
+  RO: Romania
+  HU: Hungary
+  GR: Greece
+  HR: Croatia
+  SK: Slovakia
+  SI: Slovenia
+  BG: Bulgaria
+  LT: Lithuania
+  LV: Latvia
+  EE: Estonia
+  CY: Cyprus
+  MT: Malta
+  CH: Switzerland
+  NO: Norway
+  IS: Iceland
+  LI: Liechtenstein
+  AE: United Arab Emirates
+  SA: Saudi Arabia
+  SG: Singapore
+  MY: Malaysia
+  AU: Australia
+  NZ: New Zealand
+  CA: Canada
+  JP: Japan
+  KR: Korea, Republic of
+  CN: China
+  HK: Hong Kong
+  TW: Taiwan
+  BR: Brazil
+  MX: Mexico
+  ZA: South Africa
+  NG: Nigeria
+  KE: Kenya
+  IL: Israel
+  TR: Türkiye
+  PH: Philippines
+  ID: Indonesia
+  TH: Thailand
+  VN: Viet Nam
+  BD: Bangladesh
+  LK: Sri Lanka
+  PK: Pakistan
+  NP: Nepal
+  BH: Bahrain
+  QA: Qatar
+  KW: Kuwait
+  OM: Oman
+  EG: Egypt
+  MA: Morocco
+  AR: Argentina
+  CL: Chile
+  CO: Colombia
+  PE: Peru
+  UA: Ukraine
+  RU: Russian Federation
+  OTHER: Other / not listed

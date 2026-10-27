@@ -1,0 +1,70 @@
+# Configurable industry catalogue for organization profiles and framework recommendations.
+# Keys are stable identifiers stored on Tenant.industry; labels are UI-facing.
+version: 1
+industries:
+  banking_financial:
+    label: Banking and Financial Services
+    category: Financial services
+  payments_fintech:
+    label: Payments and FinTech
+    category: Financial services
+  capital_markets_insurance:
+    label: Capital Markets and Insurance
+    category: Financial services
+  it_software:
+    label: IT and Software
+    category: Technology
+  telecom_media:
+    label: Telecommunications and Media
+    category: Technology
+  cloud_data:
+    label: Cloud and Data Infrastructure
+    category: Technology
+  retail_ecommerce:
+    label: Retail and E-commerce
+    category: Commerce
+  manufacturing:
+    label: Manufacturing
+    category: Industry
+  energy_utilities:
+    label: Energy and Utilities
+    category: Industry
+  healthcare_life_sciences:
+    label: Healthcare and Life Sciences
+    category: Public interest
+  education_research:
+    label: Education and Research
+    category: Public interest
+  government_public:
+    label: Government and Public Sector
+    category: Public interest
+  transport_logistics:
+    label: Transportation and Logistics
+    category: Industry
+  travel_hospitality:
+    label: Travel and Hospitality
+    category: Commerce
+  agriculture_food:
+    label: Agriculture and Food
+    category: Industry
+  real_estate_construction:
+    label: Real Estate and Construction
+    category: Industry
+  professional_services:
+    label: Professional Services
+    category: Services
+  consumer_services:
+    label: Consumer Services
+    category: Services
+  nonprofit:
+    label: Nonprofit Organizations
+    category: Public interest
+  gaming_entertainment:
+    label: Gaming and Digital Entertainment
+    category: Technology
+  ai_emerging:
+    label: AI, Data and Emerging Technology
+    category: Technology
+  other_mixed:
+    label: Other or Mixed Industry
+    category: Other

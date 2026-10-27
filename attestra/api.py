@@ -130,8 +130,21 @@ class EngagementIn(BaseModel):
     window_start: date | None = None
     window_end: date | None = None
     industry: str = ""
+    country: str = ""
+    regulatory_status: str = ""
+    technical_scope: list[str] = []
     contact_name: str = ""
     contact_email: str = ""
+
+
+class RecommendIn(BaseModel):
+    industry: str
+    country: str
+    regulatory_status: str = ""
+    technical_scope: list[str] = []
+    engagement_type: str = ""
+    confirmed_frameworks: list[str] = []
+    excluded_frameworks: list[str] = []
 
 
 class AssetIn(BaseModel):
@@ -268,12 +281,15 @@ def health():
 
 @app.get("/api/catalog")
 def catalog():
+    from attestra.compliance.recommend import catalogues
+
     return {
         "environments": ENVIRONMENTS,
         "asset_kinds": ASSET_KINDS,
         "test_types": TEST_TYPES,
         "new_engagement_types": new_engagement_type_labels(),
         "new_engagement_type_keys": list(NEW_ENGAGEMENT_TYPES),
+        **catalogues(),
     }
 
 
@@ -281,6 +297,29 @@ def catalog():
 def frameworks():
     lib = load_library()
     return {k: v["name"] for k, v in lib.frameworks.items()}
+
+
+@app.get("/api/profile/catalogues")
+def profile_catalogues():
+    """Industry, country, and technical-scope catalogues for organization profiles."""
+    from attestra.compliance.recommend import catalogues
+
+    return catalogues()
+
+
+@app.post("/api/frameworks/recommend")
+def recommend_frameworks_api(body: RecommendIn, principal: Principal = Depends(require("engagement.create"))):
+    """Recommend configured catalogue frameworks from industry + country (and optional profile)."""
+    from attestra.compliance.recommend import RecommendError, recommend_frameworks, recommendation_to_dict
+
+    try:
+        rows = recommend_frameworks(**body.model_dump())
+    except RecommendError as e:
+        raise HTTPException(400, str(e)) from e
+    return {
+        "recommendations": [recommendation_to_dict(r) for r in rows],
+        "actor": principal.actor,
+    }
 
 
 @app.get("/api/me")
