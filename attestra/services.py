@@ -693,7 +693,10 @@ def verify_asset_ownership(s: Session, engagement_id: int, asset_id: int, *, act
     scope, scope_error = None, ""
     try:
         scope = scope_for_engagement(s, engagement_id)
-        if a.environment not in authorized_environments(a.engagement):
+        if (
+            config.signed_authorization_required()
+            and a.environment not in authorized_environments(a.engagement)
+        ):
             raise AuthorizationError(f"the {a.environment} environment is not authorized")
         authorize_target(scope, ownership.well_known_url(a), "url")
     except AuthorizationError as exc:
@@ -740,7 +743,10 @@ def confirm_private_ownership(
             "Owner confirmation is only for private network addresses such as 192.168.x.x or 10.x.x.x. "
             "For this target, use the DNS record or the file."
         )
-    if a.environment not in authorized_environments(eng):
+    if (
+        config.signed_authorization_required()
+        and a.environment not in authorized_environments(eng)
+    ):
         raise ServiceError(
             f"The {a.environment} environment is not covered by a valid signed authorization. "
             "Add or renew the signed authorization first."
@@ -808,15 +814,16 @@ def import_results(
     actor: str,
     default_asset_id: int | None = None,
 ) -> ImportRun:
-    """Import a scanner result file. Requires a currently valid signed authorization.
+    """Import a scanner result file.
 
-    ``default_asset_id`` is the scanned target of a queued scan: findings whose location names no
-    target (for example a repo-relative file path) are linked to it.
+    When ``SIGNED_AUTHORIZATION=ON`` (default), requires a currently valid
+    signed authorization and refuses findings in unauthorized environments.
     """
     # @lat: [[authorization#Import gate]]
     # @lat: [[import-pipeline#Import run]]
     eng = get_engagement(s, engagement_id)
-    if not any(a.is_valid() for a in eng.authorizations):
+    auth_required = config.signed_authorization_required()
+    if auth_required and not any(a.is_valid() for a in eng.authorizations):
         raise ServiceError("record a currently valid signed authorization before importing results")
     try:
         parsed = importers.parse(tool, data)
@@ -824,7 +831,7 @@ def import_results(
         raise ServiceError(f"could not parse {tool} file: {exc}") from exc
 
     # Every finding that lands on a target must be in an environment the client authorized.
-    allowed_envs = authorized_environments(eng)
+    allowed_envs = authorized_environments(eng) if auth_required else None
     assets = list(eng.assets)
     fallback = next((a for a in assets if default_asset_id is not None and a.id == default_asset_id), None)
     matched = [(nf, match_asset(assets, nf.location) or fallback) for nf in parsed]
@@ -834,12 +841,19 @@ def import_results(
         kept = [(nf, a) for nf, a in matched if a is not None]
         skipped_hosts = len(matched) - len(kept)
         matched = kept
-    outside = sorted({f"{a.identifier} ({a.environment})" for _, a in matched if a and a.environment not in allowed_envs})
-    if outside:
-        raise ServiceError(
-            "results include targets in environments the client has not authorized: "
-            + ", ".join(outside) + ". Add a signed authorization covering them first."
+    if allowed_envs is not None:
+        outside = sorted(
+            {
+                f"{a.identifier} ({a.environment})"
+                for _, a in matched
+                if a and a.environment not in allowed_envs
+            }
         )
+        if outside:
+            raise ServiceError(
+                "results include targets in environments the client has not authorized: "
+                + ", ".join(outside) + ". Add a signed authorization covering them first."
+            )
 
     from attestra.evidence.mask import mask_bytes
 

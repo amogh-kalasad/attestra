@@ -18,6 +18,8 @@
 #   rate_limit             number (config.SCAN_RATE_PER_ASSET)
 #   asset_kind             string
 #   ownership_verified     bool
+#   ownership_required     bool  (OWNERSHIP_VERIFICATION=ON → true)
+#   authorization_required bool  (SIGNED_AUTHORIZATION=ON → true)
 #
 # Checks are ordered exactly as in the Phase 1 gate; `reason` is the first failure.
 package attestra.scope
@@ -40,7 +42,7 @@ intrusive_requested if {
 checks := [
 	{"ok": input.asset_found == true, "reason": "asset not found for engagement"},
 	{"ok": input.engagement_status != "halted", "reason": "engagement is halted"},
-	{"ok": input.asset_environment in input.authorized_environments, "reason": "no valid authorization for asset environment"},
+	{"ok": authorization_ok, "reason": "no valid authorization for asset environment"},
 	{"ok": not_before_window, "reason": "before engagement window"},
 	{"ok": not_after_window, "reason": "after engagement window"},
 	{"ok": intrusive_ok, "reason": "intrusive/active profile not allowed on asset"},
@@ -69,9 +71,17 @@ intrusive_ok := false if {
 	not input.intrusive_allowed
 }
 
+default authorization_ok := true
+
+authorization_ok := false if {
+	input.authorization_required
+	not input.asset_environment in input.authorized_environments
+}
+
 default ownership_ok := true
 
 ownership_ok := false if {
+	input.ownership_required
 	not input.ownership_verified
 	input.asset_kind in ownership_kinds
 }
@@ -80,6 +90,7 @@ required_fields := {
 	"asset_found", "engagement_status", "asset_environment", "authorized_environments",
 	"today", "window_start", "window_end", "tool", "profile", "intrusive_allowed",
 	"recent_scan_count", "rate_limit", "asset_kind", "ownership_verified",
+	"ownership_required", "authorization_required",
 }
 
 # Fail closed: any missing field means the request is refused.
@@ -93,6 +104,8 @@ input_valid if {
 	is_boolean(input.asset_found)
 	is_boolean(input.intrusive_allowed)
 	is_boolean(input.ownership_verified)
+	is_boolean(input.ownership_required)
+	is_boolean(input.authorization_required)
 	is_array(input.authorized_environments)
 	is_number(input.recent_scan_count)
 	is_number(input.rate_limit)

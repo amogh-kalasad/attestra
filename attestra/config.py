@@ -112,15 +112,29 @@ AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST",
 AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
 # Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).
 
-# Organization test-run credit enforcement (master Phase 1).
-# SUBSCRIPTION_SERVICE=ON|OFF. Missing defaults to ON. Invalid values fail startup.
-# Changing this variable requires restarting the API process and any workers;
-# Attestra does not hot-reload subscription mode mid-process.
-_SUBSCRIPTION_SERVICE_VALUES = frozenset({"ON", "OFF"})
+# Feature flags: ON|OFF. Missing defaults to ON. Invalid values fail startup.
+# Changing these requires restarting the API process and any workers;
+# Attestra does not hot-reload them mid-process.
+_ON_OFF_VALUES = frozenset({"ON", "OFF"})
 
 
 class ConfigurationError(ValueError):
     """Invalid runtime configuration that must stop process startup."""
+
+
+def _parse_on_off(name: str, value: str | None = None) -> str:
+    """Return ``ON`` or ``OFF`` for an env flag. Missing/blank → ``ON``; else fail closed."""
+    if value is None:
+        value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return "ON"
+    normalized = str(value).strip().upper()
+    if normalized not in _ON_OFF_VALUES:
+        raise ConfigurationError(
+            f"{name} must be ON or OFF, got {value!r}. "
+            "Fix the environment variable and restart the application or worker."
+        )
+    return normalized
 
 
 def parse_subscription_service(value: str | None = None) -> str:
@@ -129,17 +143,7 @@ def parse_subscription_service(value: str | None = None) -> str:
     Missing or blank values default to ``ON``. Any other value raises
     [[attestra/config.py#ConfigurationError]] so callers fail closed.
     """
-    if value is None:
-        value = os.environ.get("SUBSCRIPTION_SERVICE")
-    if value is None or not str(value).strip():
-        return "ON"
-    normalized = str(value).strip().upper()
-    if normalized not in _SUBSCRIPTION_SERVICE_VALUES:
-        raise ConfigurationError(
-            f"SUBSCRIPTION_SERVICE must be ON or OFF, got {value!r}. "
-            "Fix the environment variable and restart the application or worker."
-        )
-    return normalized
+    return _parse_on_off("SUBSCRIPTION_SERVICE", value)
 
 
 def get_subscription_service() -> str:
@@ -158,18 +162,74 @@ def subscription_enforcement_enabled() -> bool:
     return get_subscription_service() == "ON"
 
 
+def parse_signed_authorization(value: str | None = None) -> str:
+    """Return ``ON`` or ``OFF`` for ``SIGNED_AUTHORIZATION``.
+
+    Missing or blank defaults to ``ON``. Invalid values raise
+    [[attestra/config.py#ConfigurationError]].
+    """
+    return _parse_on_off("SIGNED_AUTHORIZATION", value)
+
+
+def get_signed_authorization() -> str:
+    """Current ``SIGNED_AUTHORIZATION`` value (``ON`` or ``OFF``), re-read from the environment."""
+    return parse_signed_authorization()
+
+
+def signed_authorization_required() -> bool:
+    """True when imports/scans must have a currently valid signed authorization.
+
+    When False (``SIGNED_AUTHORIZATION=OFF``), only the signed-authorization
+    gates are skipped (import/scan env authorization, empty-auth refusal).
+    Document download RBAC, tenant isolation, ownership verification,
+    SSRF/allow-list checks, and audit stay enforced. UI may still record
+    authorizations.
+    """
+    return get_signed_authorization() == "ON"
+
+
+def parse_ownership_verification(value: str | None = None) -> str:
+    """Return ``ON`` or ``OFF`` for ``OWNERSHIP_VERIFICATION``.
+
+    Missing or blank defaults to ``ON``. Invalid values raise
+    [[attestra/config.py#ConfigurationError]].
+    """
+    return _parse_on_off("OWNERSHIP_VERIFICATION", value)
+
+
+def get_ownership_verification() -> str:
+    """Current ``OWNERSHIP_VERIFICATION`` value (``ON`` or ``OFF``), re-read from the environment."""
+    return parse_ownership_verification()
+
+
+def ownership_verification_required() -> bool:
+    """True when web/api/host targets must have ownership verified before scan.
+
+    When False (``OWNERSHIP_VERIFICATION=OFF``), only the dispatch ownership gate
+    is skipped. UI verify/confirm, token storage, and ownership audit events stay
+    available. Auth, tenant isolation, scope, SSRF, signed authorization, rate
+    limits, and other non-ownership controls remain enforced.
+    """
+    return get_ownership_verification() == "ON"
+
+
 def validate_runtime_config() -> None:
     """Validate env-backed settings that must fail startup on error.
 
     Call from API lifespan and CLI serve/worker/init so API, workers,
     schedules, and CLI share one configuration path. Re-reads
-    ``SUBSCRIPTION_SERVICE`` from the environment.
+    ``SUBSCRIPTION_SERVICE``, ``SIGNED_AUTHORIZATION``, and
+    ``OWNERSHIP_VERIFICATION`` from the environment.
     """
-    global SUBSCRIPTION_SERVICE
+    global SUBSCRIPTION_SERVICE, SIGNED_AUTHORIZATION, OWNERSHIP_VERIFICATION
     SUBSCRIPTION_SERVICE = parse_subscription_service()
+    SIGNED_AUTHORIZATION = parse_signed_authorization()
+    OWNERSHIP_VERIFICATION = parse_ownership_verification()
 
 
 SUBSCRIPTION_SERVICE = parse_subscription_service()
+SIGNED_AUTHORIZATION = parse_signed_authorization()
+OWNERSHIP_VERIFICATION = parse_ownership_verification()
 
 # Organization test-run credits (master Phase 2). Initial allocation is configurable.
 INITIAL_TEST_RUN_CREDITS = max(0, int(os.environ.get("ATTESTRA_INITIAL_TEST_RUN_CREDITS", "3")))

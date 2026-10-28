@@ -200,14 +200,28 @@ Environment variables and on-disk data layout.
 - `ATTESTRA_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_FROM` / `_TLS` (or `_STARTTLS`) — optional SMTP for invites and email alerts; off when host is unset; password never logged
 - `ATTESTRA_PUBLIC_URL` (or `ATTESTRA_URL`) — base URL used in alert email links to findings and targets
 - `SUBSCRIPTION_SERVICE` — see [[interfaces#Configuration#Subscription service flag]]
+- `SIGNED_AUTHORIZATION` — see [[interfaces#Configuration#Signed authorization flag]]
+- `OWNERSHIP_VERIFICATION` — see [[interfaces#Configuration#Ownership verification flag]]
 
-Template: `.env.example`.
+Template: `.env.example`. Operator checklist of where the ownership and signed-authorization flags reflect: `docs/OWNERSHIP_AND_AUTHORIZATION_FLAGS.md`.
 
 ### Subscription service flag
 
 Centralized ON/OFF switch for organization test-run credit enforcement.
 
 [[attestra/config.py#parse_subscription_service]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#subscription_enforcement_enabled]] is the single helper credit admission uses. [[attestra/config.py#validate_runtime_config]] runs at API lifespan ([[attestra/api.py]]), `attestra init`, `attestra serve`, and `attestra worker` so API, CLI, schedules, and workers share one path. Changing the variable requires restarting the API and workers; Attestra does not hot-reload subscription mode. `OFF` bypasses only subscription credit checks; auth, tenant isolation, scope, SSRF, signed authorization, and audit stay enforced.
+
+### Signed authorization flag
+
+ON/OFF switch for import/scan signed-authorization environment gates.
+
+See [[authorization#Signed authorization flag]]. [[attestra/config.py#parse_signed_authorization]] / [[attestra/config.py#signed_authorization_required]] mirror the subscription ON/OFF pattern. Documented in `.env.example` and `README.md`.
+
+### Ownership verification flag
+
+ON/OFF switch for the dispatch gate ownership check on web_app/api/host targets.
+
+[[attestra/config.py#parse_ownership_verification]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#ownership_verification_required]] is the helper [[attestra/runner/gate.py#policy_input]] passes as `ownership_required` into [[attestra/runner/policy.py#build_input]] / `policy/scope.rego`. [[attestra/config.py#validate_runtime_config]] refreshes it with the other ON/OFF flags. `OFF` skips only that ownership gate; UI verify/confirm, token storage, and ownership audit stay available. Restart API and workers after changing.
 
 ### Organization test-run credits
 

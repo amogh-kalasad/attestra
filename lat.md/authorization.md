@@ -1,6 +1,6 @@
 # Authorization and scope
 
-No valid signed client authorization means no import. Runner dispatch adds URL/path/image checks, deny rules, and ownership verification ([[runner#Scope authorization]]).
+No valid signed client authorization means no import when `SIGNED_AUTHORIZATION=ON` (default). Runner dispatch adds URL/path/image checks, deny rules, and ownership verification ([[runner#Scope authorization]]).
 
 ## Authorization record
 
@@ -17,6 +17,8 @@ Validity: [[attestra/models.py#Authorization#is_valid]]. Environment coverage: [
 
 Created through [[attestra/services.py#add_authorization]].
 
+A demo upload file for AntHive is served at `/static/samples/anthive-signed-authorization.pdf` (file under `attestra/web/static/samples/`); the engagement Signed authorization panel links to it.
+
 ### Super Admin document access
 
 Only role `admin` may download or open the signed authorization file bytes.
@@ -27,9 +29,13 @@ Only role `admin` may download or open the signed authorization file bytes.
 
 Business rule that blocks result ingestion without a live authorization.
 
-[[attestra/services.py#import_results]] fails if no currently valid authorization exists on the engagement.
+When [[attestra/config.py#signed_authorization_required]] is true, [[attestra/services.py#import_results]] fails if no currently valid authorization exists on the engagement. Findings matched to assets must land in environments covered by [[attestra/services.py#authorized_environments]]. Otherwise the import is rejected. When `SIGNED_AUTHORIZATION=OFF`, those checks are skipped; document download RBAC, tenant isolation, ownership, and SSRF stay enforced. UI may still record authorizations.
 
-Findings matched to assets must land in environments covered by [[attestra/services.py#authorized_environments]]. Otherwise the import is rejected.
+## Signed authorization flag
+
+ON/OFF switch for import and scan signed-authorization gates.
+
+[[attestra/config.py#parse_signed_authorization]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#signed_authorization_required]] drives import gates, [[attestra/runner/authorization.py#scope_for_engagement]] empty-auth refusal, and `authorization_required` in [[attestra/runner/gate.py#policy_input]] / [[attestra/runner/policy.py#build_input]] / `policy/scope.rego`. Env check is `not authorization_required OR asset_environment in authorized_environments`. [[attestra/config.py#validate_runtime_config]] refreshes it with subscription and ownership flags. Restart API and workers after changing.
 
 ## Assets as allow-list
 
@@ -71,7 +77,7 @@ Passive Certificate Transparency suggestions for an in-scope apex; never auto-ad
 
 Before the first scan, a lead or admin must prove the client controls each target. Three ways: DNS TXT record, well-known file, or owner confirm for private IPs.
 
-Only users with the `asset.verify_ownership` permission (lead and admin, see [[attestra/auth/roles.py#ROLES]]) can check or confirm ownership. Each target gets a token from [[attestra/runner/ownership.py#ensure_token]]. The page shows what to publish using [[attestra/runner/ownership.py#instructions]].
+Only users with the `asset.verify_ownership` permission (lead and admin, see [[attestra/auth/roles.py#ROLES]]) can check or confirm ownership. Each target gets a token from [[attestra/runner/ownership.py#ensure_token]]. The page shows what to publish using [[attestra/runner/ownership.py#instructions]]. When `OWNERSHIP_VERIFICATION=OFF` ([[interfaces#Configuration#Ownership verification flag]]), the dispatch gate skips the ownership check via `ownership_required=false`; UI verify buttons and audit remain.
 
 ### DNS or file check
 

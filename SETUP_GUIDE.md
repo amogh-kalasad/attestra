@@ -23,7 +23,7 @@ If your system drive is low on space, point the temp and pip cache folders to an
 
 The database is stored at `data\attestra.db` inside the repo folder. Set `ATTESTRA_DATA_DIR` to keep it somewhere else.
 
-Optional environment template: copy `.env.example` and set values in the shell (or a process manager). `SUBSCRIPTION_SERVICE` must be `ON` or `OFF` (default `ON` when unset). Invalid values stop `init` / `serve` / `worker` at startup. Restart the API and any workers after changing it. New organizations receive `ATTESTRA_INITIAL_TEST_RUN_CREDITS` (default 3). On Postgres, migrate to head including `0023_subscription_credits`.
+Optional environment template: copy `.env.example` and set values in the shell (or a process manager). `SUBSCRIPTION_SERVICE`, `SIGNED_AUTHORIZATION`, and `OWNERSHIP_VERIFICATION` must each be `ON` or `OFF` (default `ON` when unset). Invalid values stop `init` / `serve` / `worker` at startup. Restart the API and any workers after changing them. New organizations receive `ATTESTRA_INITIAL_TEST_RUN_CREDITS` (default 3). On Postgres, migrate to head including `0023_subscription_credits`.
 
 Optional: load sample data with `python -m attestra.cli demo`.
 

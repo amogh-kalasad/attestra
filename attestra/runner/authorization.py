@@ -71,12 +71,18 @@ class AuthorizedScope:
 
 
 def scope_for_engagement(s: Session, engagement_id: int, on: date | None = None) -> AuthorizedScope:
-    eng = services.get_engagement(s, engagement_id)
-    envs = services.authorized_environments(eng, on)
-    if not envs:
-        raise AuthorizationError("no valid authorization")
+    from attestra import config
 
-    assets = [a for a in eng.assets if a.environment in envs]
+    eng = services.get_engagement(s, engagement_id)
+    if config.signed_authorization_required():
+        envs = services.authorized_environments(eng, on)
+        if not envs:
+            raise AuthorizationError("no valid authorization")
+        assets = [a for a in eng.assets if a.environment in envs]
+    else:
+        # SIGNED_AUTHORIZATION=OFF: still build allow-list from engagement assets
+        # for SSRF/path/image checks; skip the empty-authorization refusal.
+        assets = list(eng.assets)
     hosts: set[str] = set()
     urls: list[str] = []
     paths: list[str] = []

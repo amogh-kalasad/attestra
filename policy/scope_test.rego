@@ -20,6 +20,8 @@ base := {
 	"rate_limit": 10,
 	"asset_kind": "web_app",
 	"ownership_verified": true,
+	"ownership_required": true,
+	"authorization_required": true,
 }
 
 reason_for(patch) := r if {
@@ -37,6 +39,10 @@ test_refuse_halted if reason_for({"engagement_status": "halted"}) == "engagement
 test_refuse_expired_auth if reason_for({"authorized_environments": []}) == "no valid authorization for asset environment"
 
 test_refuse_wrong_env if reason_for({"asset_environment": "production"}) == "no valid authorization for asset environment"
+
+test_authorization_not_required_allows if {
+	scope.allow with input as object.union(base, {"authorization_required": false, "authorized_environments": []})
+}
 
 test_refuse_before_window if reason_for({"today": "2026-10-01"}) == "before engagement window"
 
@@ -71,6 +77,10 @@ test_refuse_unverified_ownership if reason_for({"ownership_verified": false}) ==
 
 test_repo_skips_ownership if {
 	scope.allow with input as object.union(base, {"ownership_verified": false, "asset_kind": "repo"})
+}
+
+test_ownership_not_required_allows if {
+	scope.allow with input as object.union(base, {"ownership_required": false, "ownership_verified": false})
 }
 
 test_order_halted_before_window if {

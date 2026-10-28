@@ -94,6 +94,8 @@ def policy_input(
         rate_limit=config.SCAN_RATE_PER_ASSET,
         asset_kind=asset.kind if found else "",
         ownership_verified=is_verified(asset) if found else False,
+        ownership_required=config.ownership_verification_required(),
+        authorization_required=config.signed_authorization_required(),
     )
 
 

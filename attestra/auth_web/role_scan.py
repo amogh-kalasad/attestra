@@ -407,10 +407,12 @@ def run_role_comparison(
     ``intrusive=True``). Secrets are loaded via [[attestra.credentials.store.get_secret]]
     for the default fetcher path and are never written into findings or logs.
     """
+    from attestra import config
+
     _require_enabled()
     _check_write(principal)
     eng = services.get_engagement(session, engagement_id, principal)
-    if not any(a.is_valid() for a in eng.authorizations):
+    if config.signed_authorization_required() and not any(a.is_valid() for a in eng.authorizations):
         raise services.ServiceError(
             "record a currently valid signed authorization before running role comparison"
         )

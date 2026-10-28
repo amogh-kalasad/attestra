@@ -1779,6 +1779,74 @@ Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead
 
 API lifespan, CLI `init`/`serve`/`worker`, and related entrypoints all call [[attestra/config.py#validate_runtime_config]] so ON/OFF parsing stays consistent across paths.
 
+## Signed authorization flag
+
+`SIGNED_AUTHORIZATION` ON/OFF parsing, defaults, startup validation, and gate skip when OFF (`tests/test_signed_authorization_flag.py`).
+
+### Missing defaults to ON
+
+Unset or blank `SIGNED_AUTHORIZATION` resolves to `ON` and [[attestra/config.py#signed_authorization_required]] is true.
+
+### ON requires
+
+Explicit `ON` (any case) keeps signed authorization required for imports and scan env gates.
+
+### OFF skips gates only
+
+`OFF` makes [[attestra/config.py#signed_authorization_required]] false so import/scope empty-auth and policy env checks can be skipped without disabling document RBAC or SSRF.
+
+### Invalid fails validation
+
+Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead of choosing a silent mode.
+
+### Validate runtime config
+
+[[attestra/config.py#validate_runtime_config]] refreshes `SIGNED_AUTHORIZATION` from the environment and raises on invalid values.
+
+### Import without auth when OFF
+
+[[attestra/services.py#import_results]] succeeds without a valid authorization when the flag is `OFF`.
+
+### Scope empty auth when OFF
+
+[[attestra/runner/authorization.py#scope_for_engagement]] builds an asset allow-list without raising when no authorization exists and the flag is `OFF`.
+
+### Gate passes authorization_required
+
+[[attestra/runner/gate.py#policy_input]] sets `authorization_required` from [[attestra/config.py#signed_authorization_required]] so OFF is honored at admission.
+
+## Ownership verification flag
+
+`OWNERSHIP_VERIFICATION` ON/OFF parsing, defaults, startup validation, and gate skip when OFF (`tests/test_ownership_verification_flag.py`).
+
+### Missing defaults to ON
+
+Unset or blank `OWNERSHIP_VERIFICATION` resolves to `ON` and [[attestra/config.py#ownership_verification_required]] is true.
+
+### ON requires
+
+Explicit `ON` (any case) keeps ownership required for web_app/api/host before scan admission.
+
+### OFF skips gate only
+
+`OFF` makes [[attestra/config.py#ownership_verification_required]] false so the policy ownership check can be skipped without disabling UI verify or other controls.
+
+### Invalid fails validation
+
+Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead of choosing a silent mode.
+
+### Validate runtime config
+
+[[attestra/config.py#validate_runtime_config]] refreshes `OWNERSHIP_VERIFICATION` from the environment and raises on invalid values.
+
+### OFF allows unverified web_app
+
+With `ownership_required=false`, [[attestra/runner/policy.py#evaluate_python]] allows an unverified `web_app` that would otherwise be refused.
+
+### Gate passes ownership_required
+
+[[attestra/runner/gate.py#policy_input]] sets `ownership_required` from [[attestra/config.py#ownership_verification_required]] so OFF is honored at admission.
+
 ## Organization test-run credits
 
 Master Phase 2: shared tenant credit balance, single admission charge, renewal request, and admin allocation (`tests/test_subscription_credits.py`).

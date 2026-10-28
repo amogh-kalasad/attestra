@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, audit, db, services
+from attestra import __version__, ai_narratives, audit, config, db, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -303,23 +303,32 @@ def logout(next: str = Form("/")):
 
 
 _STATIC_DIR = Path(__file__).parent / "static"
-_STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".woff2": "font/woff2"}
+_STATIC_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".woff2": "font/woff2",
+    ".pdf": "application/pdf",
+}
 _STATIC_FILES = {
     "attestra.css": _STATIC_DIR / "attestra.css",
     "attestra.js": _STATIC_DIR / "attestra.js",
     "fonts/Inter.woff2": _STATIC_DIR / "fonts" / "Inter.woff2",
     "fonts/Fraunces.woff2": _STATIC_DIR / "fonts" / "Fraunces.woff2",
     "fonts/JetBrainsMono.woff2": _STATIC_DIR / "fonts" / "JetBrainsMono.woff2",
+    "samples/anthive-signed-authorization.pdf": _STATIC_DIR / "samples" / "anthive-signed-authorization.pdf",
 }
 
 
 @router.get("/static/{name:path}", include_in_schema=False)
 def static_asset(name: str):
-    """Serve the UI stylesheet and self-hosted fonts (fixed allow-list, same origin for the CSP)."""
+    """Serve the UI stylesheet, fonts, and allow-listed sample downloads (same origin for the CSP)."""
     path = _STATIC_FILES.get(name)
     if path is None or not path.is_file():
         raise HTTPException(status_code=404)
-    return FileResponse(path, media_type=_STATIC_TYPES[path.suffix], headers={"Cache-Control": "public, max-age=86400"})
+    headers = {"Cache-Control": "public, max-age=86400"}
+    if path.suffix == ".pdf":
+        headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
+    return FileResponse(path, media_type=_STATIC_TYPES[path.suffix], headers=headers)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -563,6 +572,7 @@ def _engagement_ctx(
         "ownership_kinds": OWNERSHIP_KINDS,
         "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
         "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
+        "ownership_verification_required": config.ownership_verification_required(),
         "ov_open": int(ov) if ov.isdigit() else None,
         "ov_message": request.query_params.get("ovmsg", ""),
         "scan_tools": SCAN_TOOLS,
@@ -594,6 +604,7 @@ def _engagement_ctx(
         "counts": Counter(r.status for r in results),
         "sev": Counter(f.severity for f in findings if f.status in OPEN_STATUSES),
         "authorized_envs": authorized,
+        "signed_authorization_required": config.signed_authorization_required(),
         "plan": _test_plan(e),
         "environments": ENVIRONMENTS,
         "asset_kinds": ASSET_KINDS,
@@ -823,8 +834,12 @@ def target_page(request: Request, eid: int, aid: int):
         history = services.asset_scan_history(s, aid, principal)
         site_grade = services.asset_site_grade(s, aid, principal)
         from attestra.cert_expiry import asset_cert_status
+        from attestra.runner import ownership
+        from attestra.runner.policy import OWNERSHIP_KINDS
 
+        services.ensure_ownership_tokens(e)
         cert_status = asset_cert_status(s, aid)
+        needs_ownership = asset.kind in OWNERSHIP_KINDS
         return _render(
             request,
             "asset.html",
@@ -834,6 +849,10 @@ def target_page(request: Request, eid: int, aid: int):
                 "history": history,
                 "site_grade": site_grade,
                 "cert_status": cert_status,
+                "ownership_kinds": OWNERSHIP_KINDS,
+                "ownership_info": ownership.instructions(asset) if needs_ownership else None,
+                "ownership_method": services.ownership_methods(s, [asset.id]).get(asset.id, ""),
+                "ownership_verification_required": config.ownership_verification_required(),
             },
         )
 
@@ -895,6 +914,58 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
                      anchor="#targets")
     msg = "Not verified yet. " + result.message
     return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
+
+
+@router.post("/engagements/{eid}/targets/{aid}/ownership-token")
+def set_target_ownership_token(request: Request, eid: int, aid: int, token: str = Form(...)):
+    """Lead/admin: set or reuse an ownership token on the target page."""
+    url = f"/engagements/{eid}/targets/{aid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can set the ownership token.", anchor="#ownership")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            a = services.set_ownership_token(s, eid, aid, token, actor=principal.actor)
+            ident = a.identifier
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#ownership")
+    return _back(
+        url,
+        msg=f"Ownership token saved for {ident}. Publish the new value, then click Verify now.",
+        anchor="#ownership",
+    )
+
+
+@router.post("/engagements/{eid}/targets/{aid}/verify-ownership-now")
+def verify_target_ownership_now(request: Request, eid: int, aid: int):
+    """Verify now from the target page: same check as engagement Check now, returns to the target."""
+    url = f"/engagements/{eid}/targets/{aid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.verify_ownership"):
+        return _back(url, error="Only a lead or admin can check target ownership.", anchor="#ownership")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
+            from attestra.models import Asset
+
+            ident = s.get(Asset, aid).identifier
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#ownership")
+    except Exception:  # noqa: BLE001 - the check must never end in a 500 page
+        return _back(url, error="The ownership check could not run just now. Try again in a minute.",
+                     anchor="#ownership")
+    if result.ok:
+        how = {"dns": "the DNS TXT record", "file": "the verification file",
+               "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
+        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
+                     anchor="#ownership")
+    return _back(url, error="Not verified yet. " + result.message, anchor="#ownership")
 
 
 @router.post("/engagements/{eid}/targets/{aid}/confirm-ownership")

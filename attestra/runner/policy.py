@@ -43,6 +43,8 @@ REQUIRED_FIELDS = (
     "rate_limit",
     "asset_kind",
     "ownership_verified",
+    "ownership_required",
+    "authorization_required",
 )
 OWNERSHIP_KINDS = frozenset({"web_app", "api", "host"})
 ACTIVE_PROFILES = frozenset({"active", "intrusive"})
@@ -99,6 +101,8 @@ def build_input(
     rate_limit: int,
     asset_kind: str,
     ownership_verified: bool,
+    ownership_required: bool,
+    authorization_required: bool,
 ) -> dict[str, Any]:
     return {
         "asset_found": bool(asset_found),
@@ -115,6 +119,8 @@ def build_input(
         "rate_limit": int(rate_limit),
         "asset_kind": asset_kind or "",
         "ownership_verified": bool(ownership_verified),
+        "ownership_required": bool(ownership_required),
+        "authorization_required": bool(authorization_required),
     }
 
 
@@ -125,7 +131,16 @@ def _valid(inp: Any) -> bool:
     if not isinstance(inp, dict) or any(f not in inp for f in REQUIRED_FIELDS):
         return False
     return (
-        all(isinstance(inp[f], bool) for f in ("asset_found", "intrusive_allowed", "ownership_verified"))
+        all(
+            isinstance(inp[f], bool)
+            for f in (
+                "asset_found",
+                "intrusive_allowed",
+                "ownership_verified",
+                "ownership_required",
+                "authorization_required",
+            )
+        )
         and isinstance(inp["authorized_environments"], list)
         and all(isinstance(inp[f], (int, float)) and not isinstance(inp[f], bool) for f in ("recent_scan_count", "rate_limit"))
         and isinstance(inp["today"], str)
@@ -140,18 +155,23 @@ def evaluate_python(inp: dict[str, Any]) -> Decision:
     intrusive = inp["profile"] == "active" or (
         inp["tool"] == "nuclei" and str(inp["profile"]).lower() in ACTIVE_PROFILES
     )
+    auth_ok = (not inp["authorization_required"]) or (
+        inp["asset_environment"] in inp["authorized_environments"]
+    )
+    ownership_ok = not (
+        inp["ownership_required"]
+        and not inp["ownership_verified"]
+        and inp["asset_kind"] in OWNERSHIP_KINDS
+    )
     checks = (
         (inp["asset_found"] is True, "asset not found for engagement"),
         (inp["engagement_status"] != "halted", "engagement is halted"),
-        (inp["asset_environment"] in inp["authorized_environments"], "no valid authorization for asset environment"),
+        (auth_ok, "no valid authorization for asset environment"),
         (not (inp["window_start"] is not None and today < inp["window_start"]), "before engagement window"),
         (not (inp["window_end"] is not None and today > inp["window_end"]), "after engagement window"),
         (not (intrusive and not inp["intrusive_allowed"]), "intrusive/active profile not allowed on asset"),
         (inp["recent_scan_count"] < inp["rate_limit"], "scan rate limit exceeded for asset"),
-        (
-            not (not inp["ownership_verified"] and inp["asset_kind"] in OWNERSHIP_KINDS),
-            "asset ownership not verified",
-        ),
+        (ownership_ok, "asset ownership not verified"),
     )
     for ok, reason in checks:
         if not ok:
