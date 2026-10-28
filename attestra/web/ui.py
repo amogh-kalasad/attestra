@@ -1327,7 +1327,7 @@ def edit_engagement(
             )
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#edit")
-    return _back(url, msg="Engagement updated.")
+    return _back(url, msg="Engagement updated.", anchor="#edit")
 
 
 _TEXT_PREVIEW_KINDS = frozenset({"http_pair", "log", "code", "note", "package", "capture_failure"})

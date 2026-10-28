@@ -404,10 +404,112 @@
     showSelectedLabels();
   }
 
+  /* Open <details id="…"> when the URL hash points at it (e.g. Edit engagement → #edit). */
+  function openDetailsFromHash() {
+    var hash = (location.hash || "").replace(/^#/, "");
+    if (!hash) return;
+    var el = document.getElementById(hash);
+    if (!el) return;
+    var details = el.tagName === "DETAILS" ? el : (el.closest && el.closest("details"));
+    if (details && details.tagName === "DETAILS") {
+      details.open = true;
+      try { details.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch (e) { details.scrollIntoView(true); }
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (href.length < 2 || href.indexOf("#") !== 0) return;
+    var id = href.slice(1);
+    if (!id || id.indexOf("/") >= 0) return;
+    var el = document.getElementById(id);
+    if (!el) return;
+    var details = el.tagName === "DETAILS" ? el : (el.closest && el.closest("details"));
+    if (details && details.tagName === "DETAILS") {
+      details.open = true;
+    }
+  });
+  window.addEventListener("hashchange", openDetailsFromHash);
+
+  /* Engagement detail page helpers (inline classic scripts are blocked by CSP). */
+  function readJsonScript(id, fallback) {
+    var el = document.getElementById(id);
+    if (!el) return fallback;
+    try { return JSON.parse(el.textContent || ""); } catch (e) { return fallback; }
+  }
+  function initEngagementPage() {
+    if (!document.getElementById("engagement-default-tests") && !document.getElementById("edit")) return;
+    var defaults = readJsonScript("engagement-default-tests", {}) || {};
+    var authorized = readJsonScript("engagement-authorized-envs", []) || [];
+
+    var kind = document.getElementById("kind");
+    var ident = document.getElementById("identifier");
+    var hints = {
+      web_app: "https://staging.client.com",
+      api: "https://api.staging.client.com/v1",
+      host: "10.0.4.0/24 or app01.client.internal",
+      repo: "github.com/client/payments-service",
+      image: "registry.client.com/shop/api",
+      cloud_account: "AWS 123456789012",
+      mobile_app: "com.client.app (Android) / id123456 (iOS)"
+    };
+    if (kind) {
+      kind.addEventListener("change", function () {
+        var want = defaults[kind.value] || [];
+        document.querySelectorAll("#test-types input[name=test_types]").forEach(function (cb) {
+          cb.checked = want.indexOf(cb.value) >= 0;
+        });
+        if (ident) ident.placeholder = hints[kind.value] || "";
+      });
+    }
+
+    var envSel = document.getElementById("environment");
+    var envHint = document.getElementById("env_hint");
+    function envCheck() {
+      if (!envSel || !envHint) return;
+      envHint.hidden = authorized.indexOf(envSel.value) >= 0;
+    }
+    if (envSel) { envSel.addEventListener("change", envCheck); envCheck(); }
+
+    var authForm = document.getElementById("auth_form");
+    if (authForm) {
+      authForm.addEventListener("submit", function (ev) {
+        var any = authForm.querySelectorAll("input[name=environments]:checked").length > 0;
+        var err = document.getElementById("env_error");
+        if (err) err.hidden = any;
+        if (!any) ev.preventDefault();
+      });
+    }
+
+    var scanAsset = document.getElementById("scan_asset");
+    var scanProfile = document.getElementById("scan_profile");
+    function profileCheck() {
+      if (!scanAsset || !scanProfile) return;
+      var opt = scanAsset.options[scanAsset.selectedIndex];
+      var intrusive = opt && opt.dataset.intrusive === "1";
+      var active = scanProfile.querySelector("option[value=active]");
+      if (active) active.disabled = !intrusive;
+      if (!intrusive && scanProfile.value === "active") scanProfile.value = "baseline";
+      var ph = document.getElementById("profile_hint");
+      if (ph) ph.hidden = !!intrusive;
+    }
+    if (scanAsset) { scanAsset.addEventListener("change", profileCheck); profileCheck(); }
+
+    /* Keep edit window end min in sync with start. */
+    var editWs = document.getElementById("edit_ws");
+    var editWe = document.getElementById("edit_we");
+    if (editWs && editWe) {
+      editWs.addEventListener("change", function () { editWe.min = editWs.value; });
+    }
+  }
+
   function init() {
     document.documentElement.classList.add("js-asel");
     enhance(document);
     initNewEngagementFrameworks();
+    initEngagementPage();
+    openDetailsFromHash();
     new MutationObserver(function (muts) {
       muts.forEach(function (m) {
         Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1 && !n.closest(".asel")) enhance(n); });

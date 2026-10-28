@@ -1915,6 +1915,10 @@ PT engagements default planned tests to `manual_pt` and reject scanner-only type
 
 `vapt` engagements keep combined VA and PT defaults from [[attestra/models.py#DEFAULT_TESTS]].
 
+### Edit opens and saves
+
+`POST /engagements/{eid}/edit` renames and updates frameworks; the engagement page opens `#edit` via [[attestra/web/static/attestra.js]] because CSP blocks inline script.
+
 ## Framework recommendations
 
 Master Phase 5: industry/country catalogues and catalogue-only framework recommendations (`tests/test_framework_recommend.py`).

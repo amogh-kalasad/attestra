@@ -646,43 +646,8 @@
 </div>
 </div>
 
-<script>
-  // Pre-tick the usual tests for the chosen target type; the tester can still change them.
-  const defaults = {{ default_tests|tojson }};
-  const kind = document.getElementById('kind');
-  const ident = document.getElementById('identifier');
-  const hints = {web_app: 'https://staging.client.com', api: 'https://api.staging.client.com/v1', host: '10.0.4.0/24 or app01.client.internal',
-                 repo: 'github.com/client/payments-service', image: 'registry.client.com/shop/api', cloud_account: 'AWS 123456789012',
-                 mobile_app: 'com.client.app (Android) / id123456 (iOS)'};
-  if (kind) kind.addEventListener('change', () => {
-    const want = defaults[kind.value] || [];
-    document.querySelectorAll('#test-types input[name=test_types]').forEach(cb => { cb.checked = want.includes(cb.value); });
-    ident.placeholder = hints[kind.value] || '';
-  });
-  // Warn before adding a target in an environment that is not authorized.
-  const authorized = {{ authorized_envs|list|tojson }};
-  const envSel = document.getElementById('environment'), envHint = document.getElementById('env_hint');
-  function envCheck() { if (envSel) envHint.hidden = authorized.includes(envSel.value); }
-  if (envSel) { envSel.addEventListener('change', envCheck); envCheck(); }
-  // At least one environment on the authorization form.
-  const authForm = document.getElementById('auth_form');
-  if (authForm) authForm.addEventListener('submit', ev => {
-    const any = authForm.querySelectorAll('input[name=environments]:checked').length > 0;
-    document.getElementById('env_error').hidden = any;
-    if (!any) ev.preventDefault();
-  });
-  // Active profile only for targets that allow intrusive tests.
-  const scanAsset = document.getElementById('scan_asset'), scanProfile = document.getElementById('scan_profile');
-  function profileCheck() {
-    if (!scanAsset || !scanProfile) return;
-    const opt = scanAsset.options[scanAsset.selectedIndex];
-    const intrusive = opt && opt.dataset.intrusive === '1';
-    const active = scanProfile.querySelector('option[value=active]');
-    active.disabled = !intrusive;
-    if (!intrusive && scanProfile.value === 'active') scanProfile.value = 'baseline';
-    document.getElementById('profile_hint').hidden = intrusive;
-  }
-  if (scanAsset) { scanAsset.addEventListener('change', profileCheck); profileCheck(); }
-</script>
+{# Engagement page handlers live in /static/attestra.js (CSP blocks inline classic scripts). #}
+<script type="application/json" id="engagement-default-tests">{{ default_tests|tojson }}</script>
+<script type="application/json" id="engagement-authorized-envs">{{ authorized_envs|list|tojson }}</script>
 </div>
 {% endblock %}

@@ -103,6 +103,12 @@ Finding detail and per-tool false-positive lists finish the partly-done UI audit
 
 [[attestra/web/ui.py#finding_page]] at `/engagements/{eid}/findings/{fid}` shows description, recommendation, evidence gallery and status change (UI audit #55). Evidence cards come from [[attestra/evidence/gallery.py#build_gallery]] (roles, capture failures, visually-verified badge), download via [[attestra/web/ui.py#ui_download_evidence]] (`GET /engagements/{eid}/evidence/{evid}/download`) or [[attestra/api.py#download_evidence]], and show the latest [[attestra/models.py#ProofReplay]] status per item. False-positive rates link each tool to `/tuning/false-positives/{tool}` ([[attestra/web/ui.py#false_positive_tool_findings]], [[attestra/tuning.py#findings_for_tool]], UI audit #87). Edit engagement also renames the client ([[attestra/services.py#update_engagement]]); HTML read-only POSTs redirect to `/portal?error=...` ([[attestra/web/errors.py#install]], UI audit #6).
 
+### Edit engagement under CSP
+
+`Edit engagement` links to `<details id="edit">` inside the Overview tab; Save is a normal form POST.
+
+CSS tab panels use `:target` / `:has(:target)` so `#edit` reveals Overview without JS. Native hash navigation does not open `<details>`, so [[attestra/web/static/attestra.js]] `openDetailsFromHash` (and the hash-link click handler) sets `details.open` on load and click. Page helpers (auth env check, target-kind defaults, scan profile gate, edit window min sync) also live in `attestra.js` via `initEngagementPage`; the template only ships `application/json` data blocks because [[attestra/api_security.py#SecurityHeadersMiddleware]] uses `default-src 'self'` (no `script-src 'unsafe-inline'`). POST `/engagements/{eid}/edit` ([[attestra/web/ui.py#edit_engagement]]) updates name, client name, window, and frameworks through [[attestra/services.py#update_engagement]].
+
 ### Findings filter on the engagement page
 
 Client-side severity/status/tool/target filters on the findings card; the API supports the same filters.
