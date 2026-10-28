@@ -88,7 +88,7 @@
         {% endfor %}
       </div>
     </details>
-    <p class="hint">Tick frameworks to include on this engagement. Previously confirmed selections are kept when you refresh recommendations.</p>
+    <p class="hint">Selecting Industry and Country auto-fills recommended frameworks (Type of test and technical scope refine when set). Use Generate to refresh, Add more to pick from the full catalogue, and Clear to reset. Confirmed ticks are kept on refresh.</p>
   </div>
 
   <div class="form-actions">
@@ -96,113 +96,5 @@
     <a class="btn secondary" href="/">Cancel</a>
   </div>
 </form>
-<script>
-(function () {
-  function fwBoxes() { return Array.from(document.querySelectorAll('input.fw[name="frameworks"]')); }
-  function selectedKeys() {
-    return fwBoxes().filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
-  }
-  function showSelectedLabels() {
-    fwBoxes().forEach(function (cb) {
-      var lab = cb.closest('label');
-      if (lab) lab.hidden = !cb.checked;
-    });
-  }
-  function setChecked(keys) {
-    var want = {};
-    (keys || []).forEach(function (k) { want[k] = true; });
-    fwBoxes().forEach(function (cb) { cb.checked = !!want[cb.value]; });
-    document.querySelectorAll('input.fw-pick').forEach(function (cb) { cb.checked = !!want[cb.value]; });
-    showSelectedLabels();
-  }
-  var clearBtn = document.getElementById('fw_clear');
-  if (clearBtn) {
-    clearBtn.addEventListener('click', function () { setChecked([]); });
-  }
-  document.querySelectorAll('input.fw-pick').forEach(function (pick) {
-    pick.addEventListener('change', function () {
-      var box = document.querySelector('input.fw[value="' + pick.value + '"]');
-      if (box) box.checked = pick.checked;
-      showSelectedLabels();
-    });
-  });
-  fwBoxes().forEach(function (cb) {
-    cb.addEventListener('change', function () {
-      var pick = document.querySelector('input.fw-pick[value="' + cb.value + '"]');
-      if (pick) pick.checked = cb.checked;
-      showSelectedLabels();
-    });
-  });
-  var addMore = document.getElementById('fw_add_more');
-  var allPanel = document.getElementById('fw_all_panel');
-  if (addMore && allPanel) {
-    addMore.addEventListener('click', function () { allPanel.open = true; allPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
-  }
-
-  var recBtn = document.getElementById('fw_recommend');
-  var recErr = document.getElementById('fw_rec_error');
-  var recBox = document.getElementById('fw_recommendations');
-  function scopes() {
-    return Array.from(document.querySelectorAll('input.tscope:checked')).map(function (cb) { return cb.value; });
-  }
-  function showRecError(msg) {
-    if (!recErr) return;
-    if (!msg) { recErr.hidden = true; recErr.textContent = ''; return; }
-    recErr.hidden = false;
-    recErr.textContent = msg;
-  }
-  async function recommend() {
-    showRecError('');
-    var industry = (document.getElementById('industry') || {}).value || '';
-    var country = (document.getElementById('country') || {}).value || '';
-    if (!industry || !country) {
-      showRecError('Select Industry and Country before generating recommendations.');
-      return;
-    }
-    var body = {
-      industry: industry,
-      country: country,
-      regulatory_status: (document.getElementById('regulatory_status') || {}).value || '',
-      technical_scope: scopes(),
-      engagement_type: (document.getElementById('type') || {}).value || '',
-      confirmed_frameworks: selectedKeys(),
-      excluded_frameworks: []
-    };
-    var r = await fetch('/api/frameworks/recommend', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(body)
-    });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok) {
-      showRecError((data && data.detail) || 'Could not generate recommendations.');
-      return;
-    }
-    var rows = (data && data.recommendations) || [];
-    var html = ['<table><tr><th>Framework</th><th>Status</th><th>Why</th></tr>'];
-    var auto = selectedKeys().slice();
-    rows.forEach(function (row) {
-      if (row.status === 'not_applicable' || row.status === 'user_excluded') return;
-      html.push('<tr><td>' + (row.name || row.framework_id) +
-        '<div class="meta">' + row.framework_id + ' · ' + (row.rule_id || '') + '</div></td>' +
-        '<td>' + row.status + '</td><td>' + (row.reason || '') + '</td></tr>');
-      if ((row.status === 'recommended' || row.status === 'applicable' || row.status === 'user_added') && auto.indexOf(row.framework_id) < 0) {
-        auto.push(row.framework_id);
-      }
-    });
-    html.push('</table>');
-    if (recBox) {
-      recBox.hidden = false;
-      recBox.innerHTML = html.join('');
-    }
-    setChecked(auto);
-  }
-  if (recBtn) recBtn.addEventListener('click', function () { recommend().catch(function (e) { showRecError(String(e)); }); });
-
-  var ws = document.getElementById('window_start'), we = document.getElementById('window_end');
-  if (ws && we) ws.addEventListener('change', function () { we.min = ws.value; });
-  showSelectedLabels();
-})();
-</script>
+{# Framework recommend/clear/add-more handlers live in /static/attestra.js (CSP blocks inline script). #}
 {% endblock %}

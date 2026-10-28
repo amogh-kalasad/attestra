@@ -157,7 +157,15 @@ def validate_profile(
     return ind, cty, scopes
 
 
-def _rule_matches(rule: dict, *, industry: str, country: str, scopes: list[str], eu_eea: set[str]) -> bool:
+def _rule_matches(
+    rule: dict,
+    *,
+    industry: str,
+    country: str,
+    scopes: list[str],
+    eu_eea: set[str],
+    engagement_type: str = "",
+) -> bool:
     when = rule.get("when") or {}
     if not when:
         return True
@@ -175,6 +183,12 @@ def _rule_matches(rule: dict, *, industry: str, country: str, scopes: list[str],
     scope_any = when.get("technical_scope_any")
     if scope_any and not any(s in scopes for s in scope_any):
         return False
+    engagement_types_any = when.get("engagement_types_any")
+    if engagement_types_any:
+        et = (engagement_type or "").strip().lower()
+        allowed = [str(t).strip().lower() for t in engagement_types_any]
+        if et not in allowed:
+            return False
     return True
 
 
@@ -215,7 +229,14 @@ def recommend_frameworks(
         fw = str(rule.get("framework") or "")
         if fw not in catalogue:
             continue  # never invent; skip stale rule targets
-        if not _rule_matches(rule, industry=ind, country=cty, scopes=scopes, eu_eea=eu_eea):
+        if not _rule_matches(
+            rule,
+            industry=ind,
+            country=cty,
+            scopes=scopes,
+            eu_eea=eu_eea,
+            engagement_type=inputs["engagement_type"],
+        ):
             continue
         status = str(rule.get("status") or "requires_review")
         if status not in RECOMMENDATION_STATUSES:

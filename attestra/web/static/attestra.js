@@ -235,9 +235,179 @@
     btn.setAttribute("aria-pressed", show ? "true" : "false");
   });
 
+  /* New engagement: framework recommend / clear / add-more (inline template script is blocked by CSP). */
+  function initNewEngagementFrameworks() {
+    var form = document.getElementById("new_eng_form");
+    if (!form) return;
+
+    function fwBoxes() { return Array.from(document.querySelectorAll('input.fw[name="frameworks"]')); }
+    function selectedKeys() {
+      return fwBoxes().filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; });
+    }
+    function showSelectedLabels() {
+      fwBoxes().forEach(function (cb) {
+        var lab = cb.closest("label");
+        if (lab) lab.hidden = !cb.checked;
+      });
+    }
+    function setChecked(keys) {
+      var want = {};
+      (keys || []).forEach(function (k) { want[k] = true; });
+      fwBoxes().forEach(function (cb) { cb.checked = !!want[cb.value]; });
+      document.querySelectorAll("input.fw-pick").forEach(function (cb) { cb.checked = !!want[cb.value]; });
+      showSelectedLabels();
+    }
+    function scopes() {
+      return Array.from(document.querySelectorAll("input.tscope:checked")).map(function (cb) { return cb.value; });
+    }
+    function formatDetail(detail) {
+      if (!detail) return "";
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        return detail.map(function (d) {
+          if (typeof d === "string") return d;
+          if (d && d.msg) return d.msg;
+          return JSON.stringify(d);
+        }).join("; ");
+      }
+      if (typeof detail === "object" && detail.msg) return detail.msg;
+      try { return JSON.stringify(detail); } catch (e) { return String(detail); }
+    }
+
+    var clearBtn = document.getElementById("fw_clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        setChecked([]);
+        var recBox = document.getElementById("fw_recommendations");
+        if (recBox) { recBox.hidden = true; recBox.innerHTML = ""; }
+        showRecError("");
+      });
+    }
+    document.querySelectorAll("input.fw-pick").forEach(function (pick) {
+      pick.addEventListener("change", function () {
+        var box = document.querySelector('input.fw[value="' + pick.value + '"]');
+        if (box) box.checked = pick.checked;
+        showSelectedLabels();
+      });
+    });
+    fwBoxes().forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        var pick = document.querySelector('input.fw-pick[value="' + cb.value + '"]');
+        if (pick) pick.checked = cb.checked;
+        showSelectedLabels();
+      });
+    });
+    var addMore = document.getElementById("fw_add_more");
+    var allPanel = document.getElementById("fw_all_panel");
+    if (addMore && allPanel) {
+      addMore.addEventListener("click", function () {
+        allPanel.open = true;
+        allPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
+
+    var recBtn = document.getElementById("fw_recommend");
+    var recErr = document.getElementById("fw_rec_error");
+    var recBox = document.getElementById("fw_recommendations");
+    var autoTimer = null;
+    var recommendInFlight = null;
+
+    function showRecError(msg) {
+      if (!recErr) return;
+      if (!msg) { recErr.hidden = true; recErr.textContent = ""; return; }
+      recErr.hidden = false;
+      recErr.textContent = msg;
+    }
+
+    async function recommend(opts) {
+      opts = opts || {};
+      showRecError("");
+      var industry = (document.getElementById("industry") || {}).value || "";
+      var country = (document.getElementById("country") || {}).value || "";
+      if (!industry || !country) {
+        if (!opts.silent) showRecError("Select Industry and Country before generating recommendations.");
+        return;
+      }
+      var body = {
+        industry: industry,
+        country: country,
+        regulatory_status: (document.getElementById("regulatory_status") || {}).value || "",
+        technical_scope: scopes(),
+        engagement_type: (document.getElementById("type") || {}).value || "",
+        confirmed_frameworks: selectedKeys(),
+        excluded_frameworks: []
+      };
+      var run = fetch("/api/frameworks/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          return { ok: r.ok, status: r.status, data: data };
+        });
+      });
+      recommendInFlight = run;
+      var result = await run;
+      if (recommendInFlight !== run) return;
+      if (!result.ok) {
+        showRecError(formatDetail(result.data && result.data.detail) || "Could not generate recommendations.");
+        return;
+      }
+      var rows = (result.data && result.data.recommendations) || [];
+      var html = ["<table><tr><th>Framework</th><th>Status</th><th>Why</th></tr>"];
+      var auto = selectedKeys().slice();
+      rows.forEach(function (row) {
+        if (row.status === "not_applicable" || row.status === "user_excluded") return;
+        html.push(
+          "<tr><td>" + (row.name || row.framework_id) +
+          '<div class="meta">' + row.framework_id + " · " + (row.rule_id || "") + "</div></td>" +
+          "<td>" + row.status + "</td><td>" + (row.reason || "") + "</td></tr>"
+        );
+        if ((row.status === "recommended" || row.status === "applicable" || row.status === "user_added") && auto.indexOf(row.framework_id) < 0) {
+          auto.push(row.framework_id);
+        }
+      });
+      html.push("</table>");
+      if (recBox) {
+        recBox.hidden = false;
+        recBox.innerHTML = html.join("");
+      }
+      setChecked(auto);
+    }
+
+    function scheduleAutoRecommend() {
+      if (autoTimer) clearTimeout(autoTimer);
+      autoTimer = setTimeout(function () {
+        recommend({ silent: true }).catch(function (e) { showRecError(String(e)); });
+      }, 250);
+    }
+
+    if (recBtn) {
+      recBtn.addEventListener("click", function () {
+        recommend({}).catch(function (e) { showRecError(String(e)); });
+      });
+    }
+
+    ["industry", "country", "type"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener("change", scheduleAutoRecommend);
+    });
+    document.querySelectorAll("input.tscope").forEach(function (cb) {
+      cb.addEventListener("change", scheduleAutoRecommend);
+    });
+    var reg = document.getElementById("regulatory_status");
+    if (reg) reg.addEventListener("change", scheduleAutoRecommend);
+
+    var ws = document.getElementById("window_start"), we = document.getElementById("window_end");
+    if (ws && we) ws.addEventListener("change", function () { we.min = ws.value; });
+    showSelectedLabels();
+  }
+
   function init() {
     document.documentElement.classList.add("js-asel");
     enhance(document);
+    initNewEngagementFrameworks();
     new MutationObserver(function (muts) {
       muts.forEach(function (m) {
         Array.prototype.forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1 && !n.closest(".asel")) enhance(n); });

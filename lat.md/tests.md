@@ -1967,9 +1967,19 @@ Engagement create / framework selection rejects unknown framework ids that are o
 
 Regulatory status and technical scope are optional; when present they refine recommendation status and rationale without inventing frameworks.
 
+### Engagement type soft filter
+
+Optional `engagement_type` with `when.engagement_types_any` soft-strengthens ASVS for `pt`/`vapt` software profiles without excluding ISO or SOC 2 by type.
+
 ### UI has catalogues
 
 New-engagement form requires Industry/Country selects and shows **Compliance Frameworks to Report Against**.
+
+Handlers for Generate / Add more / Clear and auto-recommend live in [[attestra/web/static/attestra.js]] because CSP blocks inline script.
+
+### Session cookie recommend
+
+Logged-in browser session can `POST /api/frameworks/recommend` with the session cookie (no Bearer key); CSP keeps scripts external under `default-src 'self'`.
 
 ### Dict shape
 

@@ -1,6 +1,8 @@
 # Configurable framework recommendation rules (master Phase 5).
 # Only frameworks present in the Attestra catalogue may appear as rule targets.
 # Statuses: recommended | applicable | requires_review | not_applicable
+# Optional when.engagement_types_any (va|pt|vapt) may soft-refine a rule; frameworks
+# are never exclusive to an engagement type (ISO/SOC2 stay type-agnostic).
 version: "2026.10.27"
 reviewed_on: "2026-10-27"
 disclaimer: >
@@ -104,6 +106,18 @@ rules:
     status: applicable
     reason: Software and digital product organizations commonly report against application security controls.
     when:
+      industries_any:
+        - it_software
+        - gaming_entertainment
+        - ai_emerging
+  - id: asvs.pt_vapt.software
+    framework: asvs_4_0
+    status: recommended
+    reason: PT and VA+PT engagements for software and digital products commonly map findings to OWASP ASVS.
+    when:
+      engagement_types_any:
+        - pt
+        - vapt
       industries_any:
         - it_software
         - gaming_entertainment
