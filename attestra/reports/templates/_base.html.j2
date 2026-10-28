@@ -52,20 +52,27 @@
 {% if kind not in ("closure_letter", "attestation_letter") %}
 {% if is_draft|default(true) %}<div class="draft-mark" aria-hidden="true">DRAFT</div>{% endif %}
 <section class="cover" id="cover">
-  {% if logo %}<img src="{{ logo }}" alt="{{ tenant }} logo">{% endif %}
-  <div class="meta"><span class="brand">ATTESTRA</span> · {{ tenant }}</div>
+  {% if logo %}<img src="{{ logo }}" alt="{{ (ca.legal_name if ca and ca.legal_name else tenant) }} logo">{% endif %}
+  <div class="meta"><span class="brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span> · {{ tenant }}</div>
   <h1>{{ cover_title or (kind_meta.label if kind_meta and kind_meta.label else (kind|replace("_", " ")|title ~ " report")) }}</h1>
   <p>{{ eng.name }}</p>
   <p class="meta">Client: {{ tenant }}{% if contact_name %} · {{ contact_name }}{% endif %}{% if contact_email %} &lt;{{ contact_email }}&gt;{% endif %}</p>
+  {% if ca and (ca.contact_name or ca.contact_email or ca.contact_phone or ca.website or ca.address_formatted) %}
+  <p class="meta">Prepared by{% if ca.contact_name %} {{ ca.contact_name }}{% elif ca.legal_name %} {{ ca.legal_name }}{% endif %}{% if ca.contact_email %} · <a href="mailto:{{ ca.contact_email }}">{{ ca.contact_email }}</a>{% endif %}{% if ca.contact_phone %} · {{ ca.contact_phone }}{% endif %}{% if ca.website %} · {{ ca.website }}{% endif %}{% if ca.address_formatted %}<br>{{ ca.address_formatted }}{% endif %}</p>
+  {% endif %}
   <p class="meta">Assessment type: {{ type_label }} · Date: {{ today }} · Document version {{ version }}</p>
   <p class="meta">Engagement #{{ eng.id }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
 </section>
 {% else %}
-<div class="meta"><span class="brand">ATTESTRA</span> · {{ tenant }} · Engagement #{{ eng.id }} · {{ kind|capitalize }} report v{{ version }}</div>
+<div class="meta"><span class="brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span> · {{ tenant }} · Engagement #{{ eng.id }} · {{ kind|capitalize }} report v{{ version }}</div>
 {% endif %}
 {% block body %}{% endblock %}
 <footer>
   Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }} by {{ generated_by }} with Attestra {{ version_str }}.
+  {% if ca and (ca.legal_name or ca.address_formatted or ca.contact_email or ca.contact_phone) %}
+  {% if ca.legal_name %}{{ ca.legal_name }}. {% endif %}{% if ca.address_formatted %}{{ ca.address_formatted }}. {% endif %}{% if ca.contact_email %}{{ ca.contact_email }}{% endif %}{% if ca.contact_phone %}{% if ca.contact_email %} · {% endif %}{{ ca.contact_phone }}{% endif %}{% if ca.website %}{% if ca.contact_email or ca.contact_phone %} · {% endif %}{{ ca.website }}{% endif %}
+  <br>
+  {% endif %}
   QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
   shown when you open this report in Attestra; check the SHA-256 and signature with
   <span class="mono">attestra verify-report</span>. Confidential.

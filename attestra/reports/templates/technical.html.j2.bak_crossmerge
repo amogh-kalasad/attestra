@@ -1,0 +1,434 @@
+{% extends "_base.html.j2" %}
+{% block title %}Technical security testing report{% endblock %}
+{% block body %}
+<nav class="toc" id="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#document-control">Document control</a></li>
+    <li><a href="#distribution">Distribution list</a></li>
+    <li><a href="#list-of-figures">List of figures</a></li>
+    <li><a href="#scope">Scope and authorization</a></li>
+    <li><a href="#methodology">Methodology and data sources</a></li>
+    <li><a href="#standards">Standards and test types</a></li>
+    <li><a href="#risk-legend">Risk Rating Legend</a></li>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#findings-overview">Findings overview</a></li>
+    <li><a href="#passed-checks">Passed checks</a></li>
+    {% if auth_checklist %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
+    <li><a href="#site-grades">Site grades</a></li>
+    <li><a href="#tls">TLS summary</a></li>
+    <li><a href="#findings">Detailed findings</a></li>
+    <li><a href="#disclaimer">Assumptions, limitations and confidentiality</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+    <li><a href="#sign-off">Sign-off</a></li>
+    <li><a href="#appendix">Appendix</a></li>
+  </ol>
+</nav>
+
+<h2 id="document-control">1. Document control</h2>
+<table>
+  <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th><th>Change</th><th>SHA-256</th></tr>
+  <tr>
+    <td>v{{ version }}</td>
+    <td>draft (this generation)</td>
+    <td>{{ generated_at.strftime('%Y-%m-%d') }}</td>
+    <td>{{ generated_by }}</td>
+    <td>—</td>
+    <td>—</td>
+    <td>Draft generated</td>
+    <td class="mono">pending freeze</td>
+  </tr>
+  {% for r in report_history %}
+  <tr>
+    <td>v{{ r.version }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.generated_at.strftime('%Y-%m-%d') if r.generated_at else "—" }}</td>
+    <td>{{ r.generated_by }}</td>
+    <td>{{ r.qa_by or "—" }}</td>
+    <td>{{ r.approved_by or "—" }}</td>
+    <td>{{ r.change or "—" }}</td>
+    <td class="mono">{{ r.sha256[:16] }}…</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if contact_name or contact_email %}
+<p class="meta">Tester / client contact: {{ contact_name or "—" }}{% if contact_email %} · {{ contact_email }}{% endif %}</p>
+{% endif %}
+
+<h2 id="distribution">2. Distribution list</h2>
+<p class="meta">This report is confidential. Distribute only to the parties below and other recipients authorized in writing by {{ tenant }}.</p>
+<table>
+  <tr><th>Role</th><th>Name / organization</th><th>Email</th><th>Copies</th></tr>
+  {% for d in distribution %}
+  <tr>
+    <td>{{ d.role }}</td>
+    <td>{{ d.name }}</td>
+    <td>{% if d.email and d.email != "—" %}<span class="mono">{{ d.email }}</span>{% else %}—{% endif %}</td>
+    <td>{{ d.copies }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">No distribution entries recorded. Limit circulation to authorized client contacts.</td></tr>
+  {% endfor %}
+</table>
+
+<h2 id="list-of-figures">3. List of figures</h2>
+{% if figures %}
+<table>
+  <tr><th>Figure</th><th>Caption</th><th>Finding</th></tr>
+  {% for fig in figures %}
+  <tr>
+    <td class="mono">Fig. {{ fig.id }}</td>
+    <td>{{ fig.caption }}</td>
+    <td class="mono"><a href="#finding-{{ fig.finding_id }}">F-{{ fig.finding_id }}</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No screenshot figures in this report.</p>
+{% endif %}
+
+<h2 id="scope">4. Scope and authorization</h2>
+<div class="meta">Type: {{ type_label }} · Window: {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }} · Frameworks: {{ eng.frameworks|join(", ") or "none" }}</div>
+<table>
+  <tr><th>Asset</th><th>Kind</th><th>Environment</th><th>Criticality</th><th>Exposure</th><th>PCI CDE</th><th>Test types</th></tr>
+  {% for a in eng.assets %}
+  <tr>
+    <td class="mono">{{ a.identifier }}</td>
+    <td>{{ a.kind }}</td>
+    <td>{{ a.environment }}</td>
+    <td>{{ a.criticality }}/5</td>
+    <td>{{ a.exposure }}</td>
+    <td>{{ "Yes" if a.in_cde else "No" }}</td>
+    <td>{% if a.test_types %}{{ a.test_types|join(", ") }}{% else %}—{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="7">No assets recorded.</td></tr>{% endfor %}
+</table>
+<table>
+  <tr><th>Authorization document</th><th>Signer</th><th>Valid</th><th>Environments</th><th>SHA-256</th></tr>
+  {% for a in authorizations %}
+  <tr>
+    <td>{{ a.document_name }}</td>
+    <td>{{ a.signer }}</td>
+    <td>{{ a.signed_on }} to {{ a.expires_on }}</td>
+    <td>{% if a.environments %}{{ a.environments|join(", ") }}{% else %}all{% endif %}</td>
+    <td class="mono">{{ a.sha256 }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2 id="methodology">5. Methodology and data sources</h2>
+<ol>
+  {% for phase in methodology_phases %}
+  <li>{{ phase }}</li>
+  {% endfor %}
+</ol>
+<p>Automated assessment results were imported from the tools below, normalized to a common schema, de-duplicated by fingerprint
+and ranked by risk (CVSS × (1 + EPSS) × KEV × asset criticality × exposure). Manual validation follows the OWASP Web Security
+Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named tester confirms it with evidence.</p>
+{% if feed_catalog and (feed_catalog.kev_date or feed_catalog.epss_date) %}
+<p class="meta">Threat intel catalogs: KEV {{ feed_catalog.kev_date or "n/a" }} · EPSS {{ feed_catalog.epss_date or "n/a" }}</p>
+{% endif %}
+<table>
+  <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
+  {% for i in imports %}
+  <tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.imported_at.strftime('%Y-%m-%d') }} by {{ i.imported_by }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }}</td><td class="mono">{{ i.sha256 }}</td></tr>
+  {% else %}<tr><td colspan="6">No results imported.</td></tr>{% endfor %}
+</table>
+{% if scan_history %}
+<p class="meta">Scan runs recorded for this engagement (newest first; failed or incomplete scans are not evidence of absence of vulnerabilities).</p>
+<table>
+  <tr><th>Scan</th><th>Tool</th><th>Status</th><th>Started</th><th>Ended</th><th>Refuse reason</th></tr>
+  {% for run in scan_history[:20] %}
+  <tr>
+    <td>{{ run.id }}</td>
+    <td>{{ run.tool }}</td>
+    <td>{{ run.status }}</td>
+    <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else "—" }}</td>
+    <td>{{ run.ended_at.strftime('%Y-%m-%d %H:%M') if run.ended_at else "—" }}</td>
+    <td>{{ run.refuse_reason or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2 id="standards">6. Standards and test types</h2>
+{% if test_types %}
+<table>
+  <tr><th>Test type</th><th>Label</th><th>Standard</th></tr>
+  {% for t in test_types %}
+  <tr><td class="mono">{{ t.key }}</td><td>{{ t.label }}</td><td>{{ t.standard }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No explicit test types recorded on assets; defaults apply per asset kind when scans run.</p>
+{% endif %}
+{% if standards %}
+<p><b>Standards referenced:</b> {{ standards|join("; ") }}</p>
+{% endif %}
+
+<h2 id="risk-legend">7. Risk Rating Legend</h2>
+<table>
+  <tr><th>Severity</th><th>CVSS range</th><th>Open count</th></tr>
+  {% for s in severities %}
+  <tr>
+    <td><span class="sev sev-{{ s }}">{{ s }}</span></td>
+    <td>{{ cvss_legend.get(s, "—") }}</td>
+    <td>{{ by_sev.get(s, 0) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="meta">Risk score also factors EPSS, CISA KEV, asset criticality and exposure. CVSS vector strings appear on individual findings when available.</p>
+
+<h2 id="summary">8. Summary</h2>
+<div class="kpis">
+  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+  <div class="kpi">False positives<b>{{ false_positives }}</b>excluded</div>
+</div>
+{% if trend_svg %}
+<div>{{ trend_svg|safe }}</div>
+{% endif %}
+
+<h2 id="findings-overview">9. Findings overview</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Retest result</th><th>Asset</th></tr>
+  {% for f in findings %}
+  {% set rt = latest_retest(f.id) %}
+  <tr>
+    <td class="mono">F-{{ f.id }}</td>
+    <td>{{ f.title }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.status|replace("_", " ") }}</td>
+    <td>{% if rt %}{{ rt.result or "requested" }}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }}){% endif %}{% else %}—{% endif %}</td>
+    <td class="mono">{% if f.asset %}{{ f.asset.identifier }}{% else %}—{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="6">No findings.</td></tr>{% endfor %}
+</table>
+
+<h2 id="passed-checks">10. Passed checks</h2>
+<p class="meta">Checks that ran clean (green) sit next to checks that failed. Skipped means the check was not run for this target.</p>
+<table>
+  <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
+  {% for c in passed_checks %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
+    <td>{{ c.source }}</td>
+    <td class="mono">{{ c.evidence or "—" }}</td>
+  </tr>
+  {% else %}<tr><td colspan="4">No check list stored yet. Re-import a ZAP or webcheck report, or run a new scan.</td></tr>{% endfor %}
+</table>
+
+{% if auth_checklist %}
+<h2 id="auth-checklist">Authenticated security testing checklist</h2>
+<p class="meta">WSTG/ASVS checks performed during authenticated security testing. Skipped and blocked items are not treated as passed.</p>
+{% if auth_coverage and auth_coverage.exclusions_note %}
+<p class="meta">{{ auth_coverage.exclusions_note }}</p>
+{% endif %}
+<table>
+  <tr><th>Ref</th><th>Title</th><th>Status</th><th>Notes</th></tr>
+  {% for item in auth_checklist %}
+  <tr>
+    <td class="mono">{{ item.ref }}</td>
+    <td>{{ item.title }}</td>
+    <td>{% if item.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif item.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">{{ item.status|replace("_", " ") }}</span>{% endif %}</td>
+    <td>{{ item.notes or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2 id="site-grades">11. Site grades</h2>
+<p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>
+{% for g in site_grades %}
+  <h3>{{ g.identifier }} — <b>{{ g.grade }}</b> (score {{ g.score }})</h3>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    {% for row in g.breakdown %}
+    <tr>
+      <td class="mono">{{ row.check }}</td>
+      <td>{{ row.result }}</td>
+      <td>{% if row.points > 0 %}+{{ row.points }}{% else %}{{ row.points }}{% endif %}</td>
+      <td>{{ row.reason }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+{% else %}
+<p>No targets graded.</p>
+{% endfor %}
+
+<h2 id="tls">12. TLS summary</h2>
+<p class="meta">Protocols, ciphers, certificate and OCSP from the latest testssl result for each target.</p>
+{% for t in tls_summaries %}
+  {% if not t.scanned %}
+  <p><b>{{ t.asset or "Target" }}:</b> not scanned</p>
+  {% else %}
+  <table>
+    <tr><th style="width:180px">Target</th><td class="mono">{{ t.asset or t.host }}</td></tr>
+    <tr><th>Protocols</th><td>{{ t.protocols|join("; ") }}</td></tr>
+    <tr><th>Best cipher</th><td class="mono">{{ t.best_cipher }}</td></tr>
+    <tr><th>Weakest cipher</th><td class="mono">{{ t.weakest_cipher }}</td></tr>
+    <tr><th>Certificate expiry</th><td>{{ t.cert_expiry }}{% if t.days_left is defined and t.days_left is not none %} ({{ t.days_left }} days left){% endif %}</td></tr>
+    <tr><th>Chain of trust</th><td>{{ t.chain_ok }}</td></tr>
+    <tr><th>Certificate signature</th><td class="mono">{{ t.cert_signature }}</td></tr>
+    <tr><th>Handshake signatures</th><td class="mono">{{ t.handshake_signatures }}</td></tr>
+    <tr><th>OCSP</th><td>{{ t.ocsp }}</td></tr>
+  </table>
+  {% endif %}
+{% else %}
+<p>not scanned</p>
+{% endfor %}
+
+<h2 id="findings">13. Detailed findings</h2>
+{% for f in findings %}
+<div class="finding" id="finding-{{ f.id }}">
+  <h3>F-{{ f.id }} · {{ f.title }}</h3>
+  <div><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+    {% if f.asset and f.asset.exposure == "internet" %}&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}
+    &nbsp;Status: <b>{{ f.status|replace("_", " ") }}</b>
+    &nbsp;· Risk {{ "%.1f"|format(f.risk_score) }}
+    {% if f.cvss_score is not none %}&nbsp;· CVSS {{ f.cvss_score }}{% endif %}
+    {% if f.cvss_vector %}&nbsp;· <span class="mono">{{ f.cvss_vector }}</span>{% endif %}
+    {% if f.epss is not none %}&nbsp;· EPSS {{ "%.3f"|format(f.epss) }}{% endif %}
+    {% if f.kev %}&nbsp;· <b>CISA KEV</b>{% endif %}
+    {% if f.sla_due %}&nbsp;· Fix by {{ f.sla_due }}{% endif %}
+  </div>
+  {% set rt = latest_retest(f.id) %}
+  {% if rt %}
+  <p class="meta">Latest retest: {{ rt.result or "requested" }}{% if rt.note %} — {{ rt.note }}{% endif %}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }} by {{ rt.finalized_by }}){% endif %}</p>
+  {% endif %}
+  <table>
+    <tr><th style="width:150px">Location</th><td class="mono">{{ f.location }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed below){% endif %}</td></tr>
+    {% if f.cwe %}<tr><th>CWE</th><td>CWE-{{ f.cwe }}</td></tr>{% endif %}
+    {% if f.cves %}<tr><th>CVE</th><td>{{ f.cves|join(", ") }}</td></tr>{% endif %}
+    {% if f.owasp_top10 %}<tr><th>OWASP Top 10</th><td>{{ f.owasp_top10 }}</td></tr>{% endif %}
+    {% if f.asvs_ref %}<tr><th>ASVS</th><td>{{ f.asvs_ref }}</td></tr>{% endif %}
+    {% if f.wstg_ref %}<tr><th>WSTG</th><td>{{ f.wstg_ref }}</td></tr>{% endif %}
+    <tr><th>Detected by</th><td>{{ detected_by(f.tools) }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
+    {% if f.dedup_rationale %}<tr><th>Dedup</th><td class="meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</td></tr>{% endif %}
+    {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
+    <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
+  </table>
+  {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
+  {% if f.impact %}<p><b>Impact.</b> {{ f.impact }}</p>{% endif %}
+  {% if f.affected_urls %}
+  <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
+  <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u }}</li>{% endfor %}{% endif %}</ul>
+  {% endif %}
+  {% if f.references %}
+  <p><b>References.</b></p>
+  <ul>{% if f.references is string %}<li>{{ f.references }}</li>{% else %}{% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}{% endif %}</ul>
+  {% endif %}
+  {% if f.recommendation %}<p><b>Recommendation.</b> {{ f.recommendation }}</p>{% endif %}
+  {% set fix = fix_by_id.get(f.id) if fix_by_id is defined else none %}
+  {% if fix %}
+  <p><b>How to fix.</b>
+    {% if fix.importance %}Importance: {{ fix.importance }}.{% endif %}
+    {% if fix.effort %} Effort: {{ fix.effort }}.{% endif %}
+  </p>
+  {% if fix.fix_steps %}<p style="white-space:pre-wrap">{{ fix.fix_steps }}</p>{% endif %}
+  {% set snips = report_snippets_by_id.get(f.id, []) if report_snippets_by_id is defined else [] %}
+  {% for name, text in snips %}
+  <p><b>{{ name }} config.</b></p>
+  <pre class="mono" style="white-space:pre-wrap">{{ text }}</pre>
+  {% endfor %}
+  {% endif %}
+  {% if ai_narratives and ai_narratives.get(f.id) %}<p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>{% endif %}
+  {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
+  {% if obs %}
+  <p><b>Scanner observations.</b></p>
+  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.evidence_refs %} &middot; <span class="mono">{{ o.evidence_refs|join(" | ")|truncate(300) }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+  {% set embeds = evidence_embeds.get(f.id, []) %}
+  {% if embeds %}
+  <p><b>Evidence (screenshots).</b></p>
+  {% for e in embeds %}
+  <figure>
+    {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
+    <figcaption class="fig-caption">Fig. F-{{ f.id }}-{{ loop.index }}: {{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
+  </figure>
+  {% endfor %}
+  {% endif %}
+  {% set pairs = http_pairs.get(f.id, []) if http_pairs is defined else [] %}
+  {% if pairs %}
+  <p><b>Evidence (HTTP request/response).</b></p>
+  {% for p in pairs %}
+  <pre class="http-pair mono">{{ p.display }}</pre>
+  {% endfor %}
+  {% endif %}
+  {% set limits = evidence_limitations.get(f.id, []) if evidence_limitations is defined else [] %}
+  {% if limits %}
+  <p><b>Evidence capture limitations.</b></p>
+  <ul>{% for note in limits %}<li>{{ note }}</li>{% endfor %}</ul>
+  <p class="meta">No screenshot was fabricated. Other available evidence is listed below.</p>
+  {% endif %}
+  {% if f.evidence %}<p><b>Evidence register.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}{% if e.role and e.role != "original" %} ({{ e.role }}){% endif %}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.source_tool %} · {{ e.source_tool }}{% endif %}{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  {% if include_comments and comments_by_finding.get(f.id) %}
+  <p><b>Comments.</b></p>
+  <ul>{% for c in comments_by_finding[f.id] %}<li style="white-space:pre-wrap">{{ c.body }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% else %}
+<p>No findings.</p>
+{% endfor %}
+
+<h2 id="disclaimer">14. Assumptions, limitations and confidentiality</h2>
+<p>{{ disclaimer }}</p>
+<p class="meta">Copyright and distribution: this report is confidential to {{ tenant }} and authorized recipients. Do not redistribute without client approval.</p>
+
+<h2 id="conclusion">15. Conclusion</h2>
+<p>This {{ type_label }} engagement identified {{ findings|length }} reportable finding{{ "s" if findings|length != 1 }}
+({% for s in severities %}{{ by_sev.get(s, 0) }} {{ s }}{% if not loop.last %}, {% endif %}{% endfor %} open at generation time; {{ false_positives }} false positive{{ "s" if false_positives != 1 }} excluded).
+Remediate critical and high issues first, then retest. Control statuses in any compliance pack remain proposals until a named assessor confirms them.</p>
+
+<h2 id="sign-off">16. Sign-off</h2>
+<p class="meta">Draft generations leave QA and approval blank. Live status, hash check and signature validity appear in the Attestra sign-off record when you open the report in the product; the sealed file below stays unchanged.</p>
+{% if ca and ca.authorization_statement %}<p class="meta">{{ ca.authorization_statement }}</p>{% endif %}
+<table>
+  <tr><th>Role</th><th>Name</th><th>Date</th><th>Signature / mark</th></tr>
+  <tr>
+    <td>Author</td>
+    <td>{{ generated_by }}</td>
+    <td>{{ generated_at.strftime('%Y-%m-%d') }}</td>
+    <td>Generated (draft)</td>
+  </tr>
+  <tr>
+    <td>QA reviewer</td>
+    <td>—</td>
+    <td>—</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>Approved / signed</td>
+    <td>{% if ca and ca.signer_name %}{{ ca.signer_name }}{% if ca.signer_title %}, {{ ca.signer_title }}{% endif %}{% else %}—{% endif %}</td>
+    <td>—</td>
+    <td>{% if ca and ca.legal_name %}{{ ca.legal_name }}{% else %}—{% endif %}</td>
+  </tr>
+</table>
+
+<h2 id="appendix">17. Appendix</h2>
+<p class="meta">Tool imports and scan runs that contributed evidence to this report. Failed or incomplete scans are not evidence of absence of vulnerabilities.</p>
+<h3>A. Tool imports</h3>
+<table>
+  <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
+  {% for i in imports %}
+  <tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.imported_at.strftime('%Y-%m-%d') }} by {{ i.imported_by }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }}</td><td class="mono">{{ i.sha256 }}</td></tr>
+  {% else %}<tr><td colspan="6">No results imported.</td></tr>{% endfor %}
+</table>
+{% if scan_history %}
+<h3>B. Scan runs</h3>
+<table>
+  <tr><th>Scan</th><th>Tool</th><th>Status</th><th>Started</th><th>Ended</th><th>Refuse reason</th></tr>
+  {% for run in scan_history[:20] %}
+  <tr>
+    <td>{{ run.id }}</td>
+    <td>{{ run.tool }}</td>
+    <td>{{ run.status }}</td>
+    <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else "—" }}</td>
+    <td>{{ run.ended_at.strftime('%Y-%m-%d %H:%M') if run.ended_at else "—" }}</td>
+    <td>{{ run.refuse_reason or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+<p class="meta">Attestra {{ version_str }} · Engagement #{{ eng.id }} · Report v{{ version }}.</p>
+{% endblock %}

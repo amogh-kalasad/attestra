@@ -1,0 +1,269 @@
+{% extends "_layout.html" %}
+{% block title %}F-{{ f.id }} {{ f.title }} &middot; Attestra{% endblock %}
+{% block main %}
+{% set prole = principal.role if principal else "" %}
+{% set flow = ["new", "triaged", "validated", "fixed", "retest_passed"] %}
+{% set cur_idx = flow.index(f.status) if f.status in flow else -1 %}
+{% set fl = siblings or [] %}{% set cur_fid = f.id %}
+<div class="md">
+{% include "_findings_list.html" %}
+<div class="md-detail">
+<nav class="breadcrumb back-link" aria-label="Breadcrumb"><a href="/">Engagements</a><span aria-hidden="true">/</span><a href="/engagements/{{ e.id }}#findings">&larr; {{ e.name }}</a><span aria-hidden="true">/</span><span class="current">F-{{ f.id }}</span></nav>
+<div class="page-head">
+  <div>
+    <div class="meta-row"><span class="id-tag">F-{{ f.id }}</span><span class="sep">&middot;</span><span>ENG-{{ e.id }} {{ e.name }}</span></div>
+    <div class="title-row"><span class="pill {{ f.severity }}">{{ f.severity }}</span><h1>F-{{ f.id }}: {{ f.title }}</h1></div>
+    <p class="lede">
+      Risk {{ "%.1f"|format(f.risk_score) }}
+      &middot; <span class="st fs fs-{{ f.status }}">{{ f.status|label }}</span>
+      {% if f.asset %} &middot; {{ f.asset.name or f.asset.identifier }}{% endif %}
+    </p>
+  </div>
+  {% if can(prole, "finding.write") %}
+  <div class="actions">
+    {% if "risk_accepted" in transitions.get(f.status, []) %}<a class="btn secondary" href="#accept-risk">Accept risk</a>{% endif %}
+    {% if transitions.get(f.status) %}<a class="btn" href="#status">Change status</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card wf" aria-label="Status workflow">
+  {% for st in flow %}
+  <div class="wf-step{{ ' done' if cur_idx >= 0 and loop.index0 < cur_idx }}{{ ' cur' if loop.index0 == cur_idx }}">{{ st|label }}</div>
+  {% endfor %}
+  {% if cur_idx < 0 %}<div class="wf-step cur side">{{ f.status|label }}</div>{% endif %}
+</div>
+
+<div class="split">
+<div class="col">
+  {% if f.description %}
+  <div class="card">
+    <h2>Description</h2>
+    <p class="prose">{{ f.description }}</p>
+  </div>
+  {% endif %}
+
+<div class="card" id="evidence">
+  <h2>Proof &amp; evidence <span class="meta" style="font-weight:400">{{ (gallery.counts.total if gallery else f.evidence|length) }} item{{ "s" if (gallery.counts.total if gallery else f.evidence|length) != 1 }}</span>
+    {% if gallery and gallery.visually_verified %}<span class="pill info" title="At least one successful application screenshot is attached">{{ "visually_verified"|label }}</span>{% endif %}
+  </h2>
+  {% if f.location %}<pre class="proof" style="margin-bottom:16px">{{ f.location }}</pre>{% endif %}
+  {% if gallery and gallery.capture_failures %}
+  <div class="ev-fail" role="status">
+    <strong>Screenshot capture did not succeed.</strong>
+    <ul style="margin:8px 0 0;padding-left:18px">
+      {% for fail in gallery.capture_failures %}
+      <li class="meta">{{ fail.capture_failure_reason or fail.note or "Capture unavailable" }}{% if fail.source_tool_label %} · {{ fail.source_tool_label }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+    <p class="meta" style="margin:8px 0 0">The finding and other evidence are unchanged. No screenshot was fabricated.</p>
+  </div>
+  {% endif %}
+  {% set gallery_cards = (gallery["items"] if gallery else [])|rejectattr("kind", "equalto", "capture_failure")|list %}
+  {% if gallery_cards %}
+  <div class="ev-grid">
+    {% for card in gallery_cards %}
+    {% set replay = (latest_replay or {}).get(card.id) %}
+    <div class="ev{{ ' ev-annotated' if card.role == 'annotated' }}">
+      <div class="ev-chips">
+        <span class="chip">{{ card.kind|label }}</span>
+        {% if card.role and card.role != "original" %}<span class="chip">{{ card.role|label }}</span>{% endif %}
+        {% if card.redaction_status %}<span class="chip meta">{{ card.redaction_status }}</span>{% endif %}
+      </div>
+      <span class="mono" title="{{ card.filename }}">{{ card.filename }}</span>
+      <span style="font-size:13.5px">{{ card.note or "-" }}</span>
+      {% if card.source_tool_label %}<span class="meta">Source: {{ card.source_tool_label }}</span>{% elif card.source_tool %}<span class="meta">Source: {{ card.source_tool }}</span>{% endif %}
+      {% if card.parent_evidence_id %}<span class="meta">Derivative of evidence #{{ card.parent_evidence_id }}</span>{% endif %}
+      <span class="meta">{{ card.captured_by }} &middot; {{ card.captured_at|dt }}</span>
+      {% if can(prole, "finding.read") %}
+      <a class="btn secondary" href="/engagements/{{ e.id }}/evidence/{{ card.id }}/download" style="align-self:flex-start">Download</a>
+      {% endif %}
+      {% set preview = (text_previews or {}).get(card.id) %}
+      {% if preview %}
+      <details class="ev-preview">
+        <summary class="meta">Show content</summary>
+        <pre class="proof" style="margin-top:8px;max-height:280px;overflow:auto">{{ preview }}</pre>
+      </details>
+      {% endif %}
+      {% if replay %}
+      <div class="meta" style="margin-top:4px">
+        Replay:
+        {% if replay.confirmed_result %}
+          <span class="st fs">confirmed {{ replay.confirmed_result|label }}</span>
+        {% elif replay.suggested %}
+          <span class="st fs">suggested {{ replay.suggested|label }}</span>
+        {% else %}
+          <span class="meta">recorded</span>
+        {% endif %}
+        {% if replay.reason %}<div class="meta">{{ replay.reason }}</div>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% elif gallery and gallery.capture_failures %}
+  <p class="meta" style="margin:0">No successful evidence items yet.</p>
+  {% else %}
+  <p class="meta" style="margin:0">No evidence yet.</p>
+  {% endif %}
+  <p class="meta" style="margin:16px 0 0"><a href="/library?tenant_id={{ e.tenant_id }}">Apply a library writeup</a> if this finding needs a standard description.</p>
+</div>
+
+{% if observations %}
+<div class="card" id="observations">
+  <h2>Tool observations <span class="meta" style="font-weight:400">{{ observations|length }}</span></h2>
+  <p class="meta">Individual scanner results consolidated into this finding. Original evidence is retained.</p>
+  {% for o in observations %}
+  <details class="obs" {{ "open" if loop.first }}>
+    <summary><b>{{ detected_by([o.tool]) }}</b>{% if o.original_id %} <span class="meta">· {{ o.original_id }}</span>{% endif %}
+      <span class="pill {{ o.severity }}">{{ o.severity or "-" }}</span>
+      {% if o.match_rationale %}<span class="meta">{{ o.match_rationale }}</span>{% endif %}
+    </summary>
+    <div class="kv" style="margin-top:8px">
+      <div><span class="k">Title</span><span class="v">{{ o.title or "-" }}</span></div>
+      <div><span class="k">Location</span><span class="v mono">{{ o.location or "-" }}{% if o.param %} [param: {{ o.param }}]{% endif %}</span></div>
+      {% if o.package %}<div><span class="k">Package</span><span class="v">{{ o.package }}{% if o.package_version %} {{ o.package_version }}{% endif %}{% if o.fixed_version %} → {{ o.fixed_version }}{% endif %}</span></div>{% endif %}
+      <div><span class="k">CWE / CVE</span><span class="v">{% if o.cwe %}CWE-{{ o.cwe }}{% endif %} {{ (o.cves or [])|join(" ") or "-" }}</span></div>
+      {% if o.description %}<div style="grid-column:1/-1"><span class="k">Description</span><span class="v prose">{{ o.description }}</span></div>{% endif %}
+      {% if o.possible_duplicate_of %}<div><span class="k">Possible duplicate of</span><span class="v">F-{{ o.possible_duplicate_of }}</span></div>{% endif %}
+      <div><span class="k">Observed</span><span class="v">{{ o.observed_at|dt }}{% if o.import_run_id %} · import {{ o.import_run_id }}{% endif %}</span></div>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+
+  {% if f.recommendation %}
+  <div class="card">
+    <h2>Recommendation</h2>
+    <p class="prose">{{ f.recommendation }}</p>
+  </div>
+  {% endif %}
+
+{% set snip_texts = (fix.snippets.values()|list) if fix and fix.snippets else [] %}
+{% if fix and (fix.importance or fix.effort or fix.fix_steps or (snip_texts|select|list)) %}
+<div class="card" id="fix-guidance">
+  <h2>How to fix</h2>
+  <p class="meta">
+    {% if fix.importance %}<span class="pill info">Importance: {{ fix.importance }}</span>{% endif %}
+    {% if fix.effort %} &middot; <span class="pill info">Effort: {{ fix.effort }}</span>{% endif %}
+  </p>
+  {% if fix.fix_steps %}
+  <h3>Steps</h3>
+  <p class="prose">{{ fix.fix_steps }}</p>
+  {% endif %}
+  {% if fix.snippets and (fix.snippets.values()|select|list) %}
+  <h3>Config snippets</h3>
+  <nav class="tabs" aria-label="Server config snippets" id="snippet-tabs">
+    {% for name, text in fix.snippets.items() if text %}
+    <a href="#snip-{{ name }}" data-snip="{{ name }}" {% if loop.first %}aria-current="page"{% endif %}>{{ name }}</a>
+    {% endfor %}
+  </nav>
+  <div class="snips">
+  {% for name, text in fix.snippets.items() if text %}
+  <div class="snip-panel" id="snip-{{ name }}">
+    <pre class="proof">{{ text }}</pre>
+  </div>
+  {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+
+<div class="card" id="comments">
+  <h2>Comments</h2>
+  <p class="meta">Plain text only. Times shown in {{ tz_label }}.</p>
+  {% if comments %}
+  <ul class="comment-list" style="list-style:none;padding:0;margin:0 0 16px">
+    {% for c in comments %}
+    <li class="comment">
+      <span class="avatar" aria-hidden="true">{{ (c.author_name or "?")[:2]|upper }}</span>
+      <div style="flex:1;min-width:0">
+      <div><b>{{ c.author_name }}</b> <span class="meta">&middot; {{ c.created_at|dt }}</span></div>
+      <p style="white-space:pre-wrap;margin:6px 0 0;color:var(--ink-2)">{{ c.body }}</p>
+      {% if c.can_delete %}
+      <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/comments/{{ c.id }}/delete" style="margin-top:8px">
+        <button type="submit" class="secondary">Delete</button>
+      </form>
+      {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="meta">No comments yet.</p>
+  {% endif %}
+  {% if can_add_comment %}
+  <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/comments">
+    <div class="fields">
+      <div style="grid-column:1/-1">
+        <label for="comment_body">Add a comment</label>
+        <textarea id="comment_body" name="body" rows="3" maxlength="5000" required placeholder="Plain text, up to 5000 characters"></textarea>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">Post comment</button></div>
+  </form>
+  {% endif %}
+</div>
+</div>
+
+<aside class="side">
+  <div class="card">
+    <h2>Finding</h2>
+    <div class="kv">
+      <div><span class="k">Status</span><span class="v"><span class="fs fs-{{ f.status }}">{{ f.status|label }}</span></span></div>
+      <div><span class="k">Severity</span><span class="v"><span class="pill {{ f.severity }}">{{ f.severity }}</span> <b style="margin-left:6px">Risk {{ "%.1f"|format(f.risk_score) }}</b></span></div>
+      <div><span class="k">Location</span><span class="v mono">{{ f.location or "-" }}</span></div>
+      <div><span class="k">Detected by</span><span class="v">{{ detected_by(f.tools) }}</span></div>
+      {% if f.dedup_rationale %}<div><span class="k">Dedup</span><span class="v meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</span></div>{% endif %}
+      <div><span class="k">CWE / CVE</span><span class="v">{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</span></div>
+      <div><span class="k">Fix by</span><span class="v">{{ f.sla_due or "-" }}</span></div>
+      <div><span class="k">First / last seen</span><span class="v">{{ f.first_seen|dt }} &middot; {{ f.last_seen|dt }}</span></div>
+      {% if f.asset %}<div><span class="k">Target</span><span class="v">{{ f.asset.name or f.asset.identifier }}</span></div>{% endif %}
+    </div>
+  </div>
+{% if can(prole, "finding.write") %}
+  <div class="card" id="status">
+    <h2>Change status</h2>
+    {% set nexts = transitions.get(f.status, []) %}
+    {% if nexts %}
+    <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/status">
+      <div class="fields">
+        <div><label for="to">Move to</label>
+          <select id="to" name="to">{% for t in nexts %}<option value="{{ t }}">{{ t|label }}</option>{% endfor %}</select>
+        </div>
+        <div style="grid-column:span 2"><label for="note">Reason</label>
+          <input id="note" name="note" type="text" placeholder="Needed for false positive" autocomplete="off">
+        </div>
+      </div>
+      <p class="meta">Choosing <b>Risk accepted</b> opens the risk-acceptance form (owner, expiry, rationale) instead of a bare status change.</p>
+      <div class="form-actions"><button type="submit">Save status</button></div>
+    </form>
+    {% else %}
+    <p class="meta">No further status moves from {{ f.status|label }}.</p>
+    {% endif %}
+  </div>
+  {% if show_accept_risk or "risk_accepted" in transitions.get(f.status, []) %}
+  <div class="card" id="accept-risk">
+    <h2>Risk acceptance</h2>
+    <p class="meta">Creates a risk-acceptance record and moves the finding to risk accepted in one step.</p>
+    <form method="post" action="/engagements/{{ e.id }}/findings/{{ f.id }}/accept-risk">
+      <div class="fields">
+        <div><label for="expires_on">Expires on *</label>
+          <input id="expires_on" name="expires_on" type="date" required>
+        </div>
+        <div style="grid-column:span 2"><label for="rationale">Rationale *</label>
+          <input id="rationale" name="rationale" type="text" required maxlength="2000" placeholder="Why this risk is accepted and by whom" autocomplete="off">
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit">Accept risk</button></div>
+    </form>
+  </div>
+  {% endif %}
+  {% endif %}
+</aside>
+</div>
+</div>
+</div>
+{% endblock %}

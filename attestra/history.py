@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import importers
-from attestra.fingerprint import fingerprint
+from attestra.fingerprint import fingerprint, group_kwargs
 from attestra.models import SEVERITIES, Asset, ImportRun, ScanRun
 
 # Statuses that contribute a history row (finished runs with usable results).
@@ -157,16 +157,22 @@ def _fingerprints_and_sev(
     by_sev: Counter = Counter()
     for nf in parsed:
         loc = nf.location or location_fallback
+        param = nf.param
+        variant = getattr(nf, "variant", "") or ""
+        # Same grouping as import (ZAP: one finding per rule per origin).
+        grp = group_kwargs(tool=nf.tool, location=loc, param=param, variant=variant, rule_key=nf.rule_id or "")
+        if grp is not None:
+            loc, param, variant = grp
         try:
             fp = fingerprint(
                 location=loc,
                 cwe=nf.cwe,
                 cves=nf.cves,
                 title=nf.title,
-                param=nf.param,
+                param=param,
                 package=nf.package,
                 asset_id=asset_id,
-                variant=getattr(nf, "variant", "") or "",
+                variant=variant,
             )
         except (ValueError, TypeError):
             # Masked/redacted locations in stored evidence can break URL parsing.
@@ -175,11 +181,13 @@ def _fingerprints_and_sev(
                 cwe=nf.cwe,
                 cves=nf.cves,
                 title=nf.title,
-                param=nf.param,
+                param=param,
                 package=nf.package,
                 asset_id=asset_id,
-                variant=getattr(nf, "variant", "") or "",
+                variant=variant,
             )
+        if grp is not None and fp in fps:
+            continue  # another URL of an already-counted grouped finding
         fps.add(fp)
         by_sev[nf.severity] += 1
     return fps, by_sev

@@ -1,2 +1,2 @@
 kind=attestation_letter
-sha256=cf2c0a39e53c46199e25c0ffe3bf2dfe60fc48cf92f9ad6fc2d203cb3206aaae
+sha256=b346cb6253ef9e2fb4bd603faf9c305a262d55c5f2b6252b3277e43ddcfd3ffe

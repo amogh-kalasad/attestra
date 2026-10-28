@@ -550,7 +550,10 @@ def _engagement_ctx(
     lib = load_library()
     fw = framework if framework in lib.frameworks else (e.frameworks[0] if e.frameworks else "pci_dss_4")
     results = services.compliance(s, eid, fw)
-    findings = services.list_findings(s, eid)
+    from attestra import crossmerge
+
+    # Cross-tool merge: one row per issue; related rows are listed under Sources.
+    findings = crossmerge.collapse(s, services.list_findings(s, eid))
     imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
     reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
     scans = services.list_scans(s, eid)
@@ -580,6 +583,8 @@ def _engagement_ctx(
         "ov_message": request.query_params.get("ovmsg", ""),
         "scan_tools": SCAN_TOOLS,
         "scan_tool_labels": SCAN_TOOL_LABELS,
+        "tool_asset_kinds": _tool_asset_kinds(),
+        "worker_concurrency": _worker_concurrency(),
         "import_labels": IMPORT_FORMAT_LABELS,
         "asset_findings": asset_findings,
         "asset_schedules": asset_schedules,
@@ -1019,14 +1024,38 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
     return _back(url, msg=msg + ".", anchor="#findings")
 
 
+def _tool_asset_kinds() -> dict[str, tuple[str, ...]]:
+    from attestra.runner.gate import TOOL_ASSET_KINDS
+
+    return dict(TOOL_ASSET_KINDS)
+
+
+def _worker_concurrency() -> int:
+    from attestra.jobs.pool import resolve_concurrency
+
+    return resolve_concurrency()
+
+
+def _back_both(url: str, *, msg: str = "", error: str = "", anchor: str = "") -> RedirectResponse:
+    """Redirect with a success and an error flash at the same time (multi-tool queue)."""
+    parts = [f"msg={quote(msg)}"] if msg else []
+    if error:
+        parts.append(f"error={quote(error)}")
+    if not parts:
+        return RedirectResponse(f"{url}{anchor}", status_code=303)
+    sep = "&" if "?" in url else "?"
+    return RedirectResponse(f"{url}{sep}{'&'.join(parts)}{anchor}", status_code=303)
+
+
 @router.post("/engagements/{eid}/scans")
 def queue_scan(
     request: Request,
     eid: int,
     asset_id: str = Form(""),
-    tool: str = Form(...),
+    tool: list[str] = Form([]),
     profile: str = Form("baseline"),
 ):
+    """Queue one scan per selected tool; each goes through the gate and credits on its own."""
     principal = _principal(request)
     who = principal.username if principal else None
     url = f"/engagements/{eid}"
@@ -1034,24 +1063,44 @@ def queue_scan(
         return _login_redirect(url)
     if not asset_id.strip().isdigit():
         return _back(url, error="Add a target in 2. Targets in scope first, then choose it here.", anchor="#scans")
-    if tool not in SCAN_TOOLS:
+    tools = list(dict.fromkeys(t.strip() for t in tool if t and t.strip()))
+    if not tools:
+        return _back(url, error="Choose at least one tool.", anchor="#scans")
+    if any(t not in SCAN_TOOLS for t in tools):
         return _back(url, error=f"Choose a tool from the list ({', '.join(SCAN_TOOLS)}).", anchor="#scans")
-    try:
-        with db.session() as s:
-            run = services.request_scan(
-                s,
-                eid,
-                asset_id=int(asset_id),
-                tool=tool,
-                profile=profile,
-                actor=who,
-                user_id=principal.user_id if principal else None,
-            )
-            if run.status == "refused":
-                return _back(url, error=run.refuse_reason or "scan refused", anchor="#scans")
-    except (services.ServiceError, LookupError) as e:
-        return _back(url, error=str(e), anchor="#scans")
-    return _back(url, msg=f"Scan #{run.id} queued ({tool}/{profile}).", anchor="#scans")
+    queued: list[tuple[str, int]] = []
+    refused: list[tuple[str, str]] = []
+    for t in tools:
+        # One session per tool: a refusal or error for one tool never undoes another.
+        try:
+            with db.session() as s:
+                run = services.request_scan(
+                    s,
+                    eid,
+                    asset_id=int(asset_id),
+                    tool=t,
+                    profile=profile,
+                    actor=who,
+                    user_id=principal.user_id if principal else None,
+                )
+                if run.status == "refused":
+                    refused.append((t, run.refuse_reason or "scan refused"))
+                else:
+                    queued.append((t, run.id))
+        except (services.ServiceError, LookupError) as e:
+            refused.append((t, str(e)))
+    if len(tools) == 1:
+        if refused:
+            return _back(url, error=refused[0][1], anchor="#scans")
+        return _back(url, msg=f"Scan #{queued[0][1]} queued ({tools[0]}/{profile}).", anchor="#scans")
+    msg = ""
+    if queued:
+        listed = ", ".join(f"#{sid} {t}" for t, sid in queued)
+        msg = f"{len(queued)} scan{'s' if len(queued) != 1 else ''} queued ({profile}): {listed}."
+    error = ""
+    if refused:
+        error = "Not queued: " + "; ".join(f"{t}: {why}" for t, why in refused)
+    return _back_both(url, msg=msg, error=error, anchor="#scans")
 
 
 @router.get("/engagements/{eid}/scans/{sid}", response_class=HTMLResponse)
@@ -1472,11 +1521,14 @@ def finding_page(request: Request, eid: int, fid: int):
             c["can_delete"] = can_delete_comment(
                 principal.role, author_user_id=c["author_user_id"], actor_user_id=principal.user_id
             )
+        from attestra import crossmerge
+
         return _render(request, "finding.html", {
             "e": e,
             "f": f,
             "observations": observations,
-            "siblings": services.list_findings(s, eid),
+            "siblings": crossmerge.collapse(s, services.list_findings(s, eid)),
+            **crossmerge.group_view(s, f),
             "fix": lib.guidance_for_finding(s, f),
             "transitions": {k: sorted(v) for k, v in services.TRANSITIONS.items()},
             "comments": comments,
@@ -1563,6 +1615,30 @@ def ui_delete_finding_comment(request: Request, eid: int, fid: int, cid: int):
     except (services.ServiceError, LookupError) as e:
         return _back(detail, error=str(e), anchor="#comments")
     return _back(detail, msg="Comment deleted.", anchor="#comments")
+
+
+@router.post("/engagements/{eid}/findings/cross-merge")
+def recompute_cross_merge(request: Request, eid: int):
+    """Re-link the same issue across tools for one engagement (rows linked, never deleted)."""
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "finding.write"):
+        return _back(url, error="Your role can't change findings.", anchor="#findings")
+    from attestra import crossmerge
+
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            res = crossmerge.recompute(s, eid, actor=principal.actor)
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#findings")
+    return _back(
+        url,
+        msg=f"Cross-tool merge recomputed: {res['groups']} merged issue(s), {res['related']} related finding(s).",
+        anchor="#findings",
+    )
 
 
 @router.post("/engagements/{eid}/findings/{fid}/status")

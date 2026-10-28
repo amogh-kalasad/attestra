@@ -402,18 +402,25 @@ def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
 
 
 def _branding(s: Session, tenant_id: int | None, kind: str) -> dict:
-    """Cover title, logo and optional disclaimer from the tenant report template."""
+    """Cover title, logo and optional disclaimer from the tenant report template.
+
+    When the tenant template has no logo, fall back to the platform Certification
+    Authority brand logo so issuer branding still appears on built-in reports.
+    """
     empty = {"cover_title": "", "logo": "", "disclaimer": ""}
+    from attestra.certification.service import report_branding as ca_branding
+
+    ca = ca_branding(s)
     if tenant_id is None:
-        return empty
+        return {**empty, "logo": ca.get("logo") or ""}
     from attestra.library.templates import _pick
 
     t = _pick(s, tenant_id, kind)
     if t is None:
-        return empty
+        return {**empty, "logo": ca.get("logo") or ""}
     return {
         "cover_title": t.cover_title or "",
-        "logo": t.logo or "",
+        "logo": (t.logo or "") or (ca.get("logo") or ""),
         "disclaimer": (getattr(t, "disclaimer", None) or "").strip(),
     }
 
@@ -494,7 +501,11 @@ def _sebi_timeline_report_context(s: Session, eng: Engagement) -> dict:
 
 def _context(s: Session, engagement_id: int, framework: str = "", *, include_comments: bool = False, kind: str = "") -> dict:
     eng = services.get_engagement(s, engagement_id)
-    findings = services.list_findings(s, engagement_id)
+    from attestra import crossmerge
+
+    all_findings = services.list_findings(s, engagement_id)
+    # Cross-tool merge: one entry per issue; related rows are listed under Sources.
+    findings = crossmerge.collapse(s, all_findings)
     reportable = [f for f in findings if f.status != "false_positive"]
     open_f = [f for f in reportable if f.status in OPEN_STATUSES]
     by_sev = Counter(f.severity for f in open_f)
@@ -545,7 +556,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "trend_svg": _trend_svg(by_sev, prev_by_sev),
         "severities": SEVERITIES,
         "status_counts": Counter(f.status for f in reportable),
-        "false_positives": sum(1 for f in findings if f.status == "false_positive"),
+        "false_positives": sum(1 for f in all_findings if f.status == "false_positive"),
         "imports": imports,
         "authorizations": eng.authorizations,
         "frameworks": frameworks,
@@ -584,11 +595,20 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "contact_name": eng.tenant.contact_name or "",
         "contact_email": eng.tenant.contact_email or "",
         "distribution": _distribution_list(eng),
+        "ca": _ca_report_context(s),
         **_ai_context(engagement_id, eng.tenant_id),
         **_auth_web_report_context(s, eng),
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }
+
+
+def _ca_report_context(s: Session) -> dict:
+    """Platform Certification Authority fields for report templates (safe when empty)."""
+    # @lat: [[reports#Certification Authority branding]]
+    from attestra.certification.service import report_branding
+
+    return report_branding(s)
 
 
 def _ai_context(engagement_id: int, tenant_id: int | None) -> dict:

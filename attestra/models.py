@@ -441,6 +441,10 @@ class Finding(Base):
     # Phase 6: last successful cross-tool / fingerprint merge metadata.
     dedup_confidence: Mapped[float | None] = mapped_column(Float)
     dedup_rationale: Mapped[str] = mapped_column(String(500), default="")
+    # Cross-tool merge (crossmerge.py): a related row points at its group's primary row.
+    # Rows are linked, never deleted; each keeps its own severity, status and evidence.
+    merged_into_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    merge_rationale: Mapped[str] = mapped_column(String(500), default="")
 
     engagement: Mapped[Engagement] = relationship(back_populates="findings")
     asset: Mapped[Asset | None] = relationship()
@@ -1153,3 +1157,39 @@ class CreditTransaction(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(200), unique=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- Certification Authority (platform issuer branding)
+
+
+class CertificationAuthority(Base):
+    """Singleton platform Certification Authority (issuer) branding for reports.
+
+    Super Admin only. Distinct from per-engagement client signed authorizations
+    ([[Authorization]]) and per-tenant [[ReportTemplate]] cover logos.
+    """
+
+    __tablename__ = "certification_authority"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Signed Authorization (issuer identity) section
+    legal_name: Mapped[str] = mapped_column(String(200), default="")
+    signer_name: Mapped[str] = mapped_column(String(200), default="")
+    signer_title: Mapped[str] = mapped_column(String(200), default="")
+    authorization_statement: Mapped[str] = mapped_column(Text, default="")
+    # Brand logo (data: URI; same pattern as ReportTemplate.logo)
+    logo: Mapped[str] = mapped_column(Text, default="")
+    # Company address
+    address_line1: Mapped[str] = mapped_column(String(300), default="")
+    address_line2: Mapped[str] = mapped_column(String(300), default="")
+    city: Mapped[str] = mapped_column(String(120), default="")
+    state: Mapped[str] = mapped_column(String(120), default="")
+    postal_code: Mapped[str] = mapped_column(String(40), default="")
+    country: Mapped[str] = mapped_column(String(120), default="")
+    # Company contact
+    contact_name: Mapped[str] = mapped_column(String(200), default="")
+    contact_email: Mapped[str] = mapped_column(String(200), default="")
+    contact_phone: Mapped[str] = mapped_column(String(80), default="")
+    website: Mapped[str] = mapped_column(String(300), default="")
+    updated_by: Mapped[str] = mapped_column(String(200), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

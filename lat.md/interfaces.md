@@ -16,6 +16,8 @@ Notable routes:
 | GET | `/api/catalog` | Asset kinds + test types |
 | POST/GET | `/api/engagements` | Create / list |
 | POST | `/api/engagements/{eid}/authorizations` | Upload signed auth |
+| GET/PUT | `/api/certification-authority` | Super Admin Certification Authority settings |
+| POST | `/api/certification-authority/logo` | Super Admin brand logo upload |
 | POST | `/api/engagements/{eid}/assets` | Add target |
 | POST | `/api/engagements/{eid}/imports` | Import scanner file |
 | GET | `/api/engagements/{eid}/findings` | List findings |

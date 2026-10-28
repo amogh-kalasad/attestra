@@ -7,6 +7,18 @@ import json
 from attestra.importers.base import NormalizedFinding, norm_severity, parse_cwe
 
 
+# Templates whose matchers/extractors are separate issues (one per missing header or
+# per deprecated protocol). The sub-check name becomes the variant so they do not
+# collapse into one finding, and "template:sub" is kept as the observation id.
+SUBCHECK_TEMPLATES = frozenset({"http-missing-security-headers", "deprecated-tls"})
+
+
+def _subcheck(rec: dict) -> str:
+    if str(rec.get("template-id") or "") not in SUBCHECK_TEMPLATES:
+        return ""
+    return str(rec.get("matcher-name") or rec.get("extractor-name") or "").strip()
+
+
 def _as_list(v) -> list[str]:
     if not v:
         return []
@@ -21,11 +33,16 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
         info = rec.get("info", {}) or {}
         cls = info.get("classification", {}) or {}
         cvss = cls.get("cvss-score")
+        sub = _subcheck(rec)
         out.append(
             NormalizedFinding(
                 tool="nuclei",
                 rule_id=rec.get("template-id", ""),
-                original_id=str(rec.get("template-id") or rec.get("template-path") or ""),
+                original_id=(
+                    f"{rec.get('template-id')}:{sub}" if sub
+                    else str(rec.get("template-id") or rec.get("template-path") or "")
+                ),
+                variant=sub,
                 tool_version=str(info.get("version") or rec.get("template-version") or ""),
                 title=info.get("name") or rec.get("template-id", "nuclei finding"),
                 severity=norm_severity(info.get("severity")),

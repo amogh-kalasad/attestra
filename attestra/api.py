@@ -254,6 +254,8 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         "location": f.location,
         "impact": f.impact or "",
         "affected_urls": list(f.affected_urls or []),
+        "merged_into_id": getattr(f, "merged_into_id", None),
+        "merge_rationale": getattr(f, "merge_rationale", "") or "",
         "references": list(f.references or []),
         "tools": f.tools,
         "detected_by": _detected_by(f),
@@ -588,6 +590,19 @@ def findings(
             s, eid, status, severity, tool=tool, asset_id=asset_id,
         )
         return [_finding_dict(f, lib.finding_api_fix_fields(s, f)) for f in rows]
+
+    return _run(fn)
+
+
+@app.post("/api/engagements/{eid}/findings/cross-merge")
+def findings_cross_merge(eid: int, principal: Principal = Depends(require("finding.write"))):
+    """Recompute cross-tool links (same issue, different tools) for one engagement."""
+
+    def fn(s):
+        from attestra import crossmerge
+
+        services.get_engagement(s, eid, principal)
+        return crossmerge.recompute(s, eid, actor=principal.actor)
 
     return _run(fn)
 
@@ -1774,6 +1789,12 @@ from attestra.alerts.routes import ui_router as alerts_ui_router  # noqa: E402
 
 app.include_router(alerts_api_router)
 app.include_router(alerts_ui_router)
+
+from attestra.certification.routes import api_router as ca_api_router  # noqa: E402
+from attestra.certification.routes import ui_router as ca_ui_router  # noqa: E402
+
+app.include_router(ca_api_router)
+app.include_router(ca_ui_router)
 
 
 # ---------------------------------------------------------------- C9 / C10: PCI calendar, ASV import, ISO records

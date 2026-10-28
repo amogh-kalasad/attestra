@@ -1959,6 +1959,42 @@ Admin allocate via the API succeeds and writes an audited `credits.allocate` eve
 
 Reading another organization’s credit balance returns 403.
 
+## Certification Authority
+
+Super Admin platform issuer branding for reports (`tests/test_certification_authority.py`).
+
+### Admin can save and retrieve settings
+
+[[attestra/certification/service.py#update_settings]] persists legal name, signer, logo, address and contact for role `admin`.
+
+### Non-admin cannot mutate
+
+Lead (and other non-admin) principals raise [[attestra/certification/service.py#CertificationError]] on update.
+
+### Invalid logo rejected
+
+Non-image bytes are rejected with a logo validation error (PNG/JPEG/GIF, ≤500 KB).
+
+### Partial update preserves fields
+
+Unset fields on a later update keep previously saved values.
+
+### API enforces Super Admin
+
+`GET`/`PUT /api/certification-authority` returns 403 for lead and succeeds for admin.
+
+### UI page Super Admin only
+
+`/settings/certification-authority` renders for admin and redirects others.
+
+### Reports use CA branding
+
+Technical and attestation reports include configured legal name, address, contact, logo and signer when set.
+
+### Reports work without CA config
+
+Report generation still succeeds and keeps the default ATTESTRA brand when no CA row is configured.
+
 ## Super Admin authorization documents
 
 Master Phase 3: only role `admin` may download signed authorization files (`tests/test_authorization_document_access.py`).

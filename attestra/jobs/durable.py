@@ -6,6 +6,7 @@ import hashlib
 import json
 import threading
 import uuid
+from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path
 
@@ -54,25 +55,63 @@ def enqueue(s: Session, scan_run_id: int) -> Job:
     return job
 
 
-def claim_job(s: Session, worker_id: str) -> Job | None:
-    """Atomically claim the next queued job."""
-    job = s.scalars(select(Job).where(Job.status == "queued").order_by(Job.id).limit(1)).first()
-    if not job:
-        return None
+def claim_job(s: Session, worker_id: str, *, exclude_tools: Iterable[str] = ()) -> Job | None:
+    """Atomically claim the next queued job.
+
+    The conditional UPDATE (``status == 'queued'``) is the lock: when two threads or
+    processes pick the same row only one UPDATE matches, and the loser tries the next
+    candidate. ``exclude_tools`` skips jobs for tools this worker is already running and
+    must not run twice at once (shared template cache).
+    """
+    q = select(Job).where(Job.status == "queued")
+    skip = sorted({t for t in exclude_tools if t})
+    if skip:
+        q = q.join(ScanRun, Job.scan_run_id == ScanRun.id).where(ScanRun.tool.not_in(skip))
+    for job in s.scalars(q.order_by(Job.id).limit(5)).all():
+        result = s.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == "queued")
+            .values(
+                status="running",
+                worker_id=worker_id,
+                heartbeat_at=utcnow(),
+                attempts=Job.attempts + 1,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            s.refresh(job)
+            return job
+    return None
+
+
+def touch_heartbeats(s: Session, job_ids: Iterable[int], worker_id: str) -> int:
+    """Refresh heartbeat_at for jobs this worker is running (long scans are not 'stale')."""
+    ids = [int(j) for j in job_ids]
+    if not ids:
+        return 0
     result = s.execute(
         update(Job)
-        .where(Job.id == job.id, Job.status == "queued")
-        .values(
-            status="running",
-            worker_id=worker_id,
-            heartbeat_at=utcnow(),
-            attempts=job.attempts + 1,
-        )
+        .where(Job.id.in_(ids), Job.status == "running", Job.worker_id == worker_id)
+        .values(heartbeat_at=utcnow())
+        .execution_options(synchronize_session=False)
     )
-    if result.rowcount != 1:
-        return None
-    s.refresh(job)
-    return job
+    return int(result.rowcount or 0)
+
+
+class JobCancel(threading.Event):
+    """Cancel flag for one job that also trips when its engagement is halted.
+
+    Cancelling one scan must not stop the other scans of the same engagement that run
+    in parallel, so each job gets its own flag instead of sharing the engagement Event.
+    """
+
+    def __init__(self, engagement_event: threading.Event):
+        super().__init__()
+        self._engagement_event = engagement_event
+
+    def is_set(self) -> bool:  # type: ignore[override]
+        return super().is_set() or self._engagement_event.is_set()
 
 
 def mark_job_running(s: Session, job: Job) -> None:
@@ -106,10 +145,13 @@ def request_cancel(s: Session, job_id: int) -> Job:
     return job
 
 
-def recover_interrupted_jobs(s: Session) -> int:
-    """Requeue jobs with stale heartbeats."""
+def recover_interrupted_jobs(s: Session, *, exclude_worker_id: str | None = None) -> int:
+    """Requeue jobs with stale heartbeats (never the ones ``exclude_worker_id`` is running)."""
     cutoff = utcnow() - timedelta(seconds=config.JOB_STALE_HEARTBEAT_S)
-    jobs = list(s.scalars(select(Job).where(Job.status == "running", Job.heartbeat_at < cutoff)))
+    q = select(Job).where(Job.status == "running", Job.heartbeat_at < cutoff)
+    if exclude_worker_id:
+        q = q.where(Job.worker_id != exclude_worker_id)
+    jobs = list(s.scalars(q))
     for job in jobs:
         job.status = "queued"
         job.worker_id = ""
@@ -164,7 +206,7 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     s.commit()
     adapter = get_adapter(run.tool)
     out_dir = config.DATA_DIR / "raw" / f"scan-{run.id}"
-    cancel = cancel or cancel_event_for(run.engagement_id)
+    cancel = cancel or JobCancel(cancel_event_for(run.engagement_id))
     _ACTIVE_JOB_CANCEL[job.id] = cancel
     if job.cancel_requested:
         cancel.set()

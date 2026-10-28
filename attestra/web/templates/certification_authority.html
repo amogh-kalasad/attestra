@@ -1,0 +1,88 @@
+{% extends "_layout.html" %}
+{% block title %}Certification Authority &middot; Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <h1>Certification Authority</h1>
+    <p class="lede">Platform issuer identity, logo, address and contact used on reports. Super Admin only. Client signed authorizations for each engagement stay on the engagement Scope tab.</p>
+  </div>
+</div>
+
+<form method="post" action="/settings/certification-authority" enctype="multipart/form-data">
+
+<div class="card" id="signed-authorization">
+  <h2>Signed Authorization</h2>
+  <p class="meta">Issuer identity shown on attestation letters and report sign-off. This is the certifying firm, not a client engagement authorization document.</p>
+  <div class="fields">
+    <div><label for="legal_name">Authority / company legal name</label>
+      <input type="text" id="legal_name" name="legal_name" value="{{ settings.legal_name }}" maxlength="200" placeholder="Shieldbyte Security Pvt Ltd"></div>
+    <div><label for="signer_name">Authorized signer name</label>
+      <input type="text" id="signer_name" name="signer_name" value="{{ settings.signer_name }}" maxlength="200" placeholder="Alex Rivera"></div>
+    <div><label for="signer_title">Authorized signer title</label>
+      <input type="text" id="signer_title" name="signer_title" value="{{ settings.signer_title }}" maxlength="200" placeholder="Principal Security Consultant"></div>
+  </div>
+  <div class="fields" style="grid-template-columns:1fr">
+    <div><label for="authorization_statement">Authorization statement (optional)</label>
+      <textarea id="authorization_statement" name="authorization_statement" rows="3" maxlength="4000" placeholder="Testing performed under the firm's accredited processes and engagement authorization.">{{ settings.authorization_statement }}</textarea>
+      <div class="hint">Shown near attestation / sign-off when set. Leave empty to omit.</div></div>
+  </div>
+</div>
+
+<div class="card" id="brand-logo">
+  <h2>Brand Logo</h2>
+  <p class="meta">Company logo for report covers and letterheads when a tenant report template does not supply its own logo.</p>
+  <div class="logo-drop">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+    <input type="file" id="logo" name="logo" accept="image/png,image/jpeg,image/gif" style="max-width:280px">
+    <span class="hint">PNG, JPEG or GIF, up to 500 KB</span>
+  </div>
+  {% if settings.has_logo %}
+  <div class="row" style="margin-top:10px">
+    <img src="{{ settings.logo }}" alt="current brand logo" style="max-height:48px;max-width:220px;object-fit:contain">
+    <label style="margin:0"><input type="checkbox" name="clear_logo" value="1"> Remove logo</label>
+  </div>
+  {% else %}
+  <p class="hint" style="margin-top:10px">No logo configured yet.</p>
+  {% endif %}
+</div>
+
+<div class="card" id="company-address">
+  <h2>Company Address</h2>
+  <p class="meta">Printed in report footers and letterheads. Empty lines are omitted.</p>
+  <div class="fields">
+    <div><label for="address_line1">Address line 1</label>
+      <input type="text" id="address_line1" name="address_line1" value="{{ settings.address_line1 }}" maxlength="300" placeholder="12 Example Street"></div>
+    <div><label for="address_line2">Address line 2 (optional)</label>
+      <input type="text" id="address_line2" name="address_line2" value="{{ settings.address_line2 }}" maxlength="300" placeholder="Suite 400"></div>
+    <div><label for="city">City</label>
+      <input type="text" id="city" name="city" value="{{ settings.city }}" maxlength="120"></div>
+    <div><label for="state">State or province</label>
+      <input type="text" id="state" name="state" value="{{ settings.state }}" maxlength="120"></div>
+    <div><label for="postal_code">Postal code</label>
+      <input type="text" id="postal_code" name="postal_code" value="{{ settings.postal_code }}" maxlength="40"></div>
+    <div><label for="country">Country</label>
+      <input type="text" id="country" name="country" value="{{ settings.country }}" maxlength="120"></div>
+  </div>
+</div>
+
+<div class="card" id="company-contact">
+  <h2>Company Contact</h2>
+  <p class="meta">Vendor / tester contact block on reports. Optional fields are omitted when empty.</p>
+  <div class="fields">
+    <div><label for="contact_name">Company contact name</label>
+      <input type="text" id="contact_name" name="contact_name" value="{{ settings.contact_name }}" maxlength="200" placeholder="Security Desk"></div>
+    <div><label for="contact_email">Official email address</label>
+      <input type="email" id="contact_email" name="contact_email" value="{{ settings.contact_email }}" maxlength="200" placeholder="vapt@example.com"></div>
+    <div><label for="contact_phone">Contact phone number</label>
+      <input type="text" id="contact_phone" name="contact_phone" value="{{ settings.contact_phone }}" maxlength="80" placeholder="+1 555 0100"></div>
+    <div><label for="website">Company website (optional)</label>
+      <input type="url" id="website" name="website" value="{{ settings.website }}" maxlength="300" placeholder="https://example.com"></div>
+  </div>
+</div>
+
+<div class="actions-split" style="margin-bottom:32px">
+  <button type="submit">Save Certification Authority</button>
+  {% if settings.updated_at %}<span class="meta">Last saved {{ settings.updated_at }}{% if settings.updated_by %} by {{ settings.updated_by }}{% endif %}</span>{% endif %}
+</div>
+</form>
+{% endblock %}

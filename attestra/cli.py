@@ -9,6 +9,17 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
+# Load the local .env (repo root or current folder) BEFORE any attestra module
+# reads os.environ, so `attestra serve` and `attestra worker` pick up APP_ENV,
+# BYPASS_*, SUBSCRIPTION_SERVICE, ATTESTRA_IMAGE_* etc. without $env: lines.
+# Real environment variables still win. Skipped under pytest so tests keep
+# their own environment; set ATTESTRA_DOTENV=0 to disable, or
+# ATTESTRA_ENV_FILE=<path> to use a different file.
+if "pytest" not in sys.modules:
+    from attestra.env_loader import load_env_file as _load_env_file
+
+    _load_env_file()
+
 from attestra import audit, db, services
 from attestra.reports import (
     approve_report,
@@ -604,16 +615,9 @@ def cmd_worker(args) -> None:
         except KeyboardInterrupt:
             print("worker stopping")
         return
-    import time
-
-    from attestra.jobs.durable import (
-        claim_job,
-        new_worker_id,
-        recover_interrupted_jobs,
-        resume_queued_jobs,
-        run_one_job,
-    )
+    from attestra.jobs.durable import new_worker_id
     from attestra.jobs.instance_lock import InstanceLock
+    from attestra.jobs.pool import WorkerPool, resolve_concurrency
 
     db.init(use_migrations=True)
     lock = InstanceLock("worker")
@@ -621,22 +625,15 @@ def cmd_worker(args) -> None:
         print("another worker holds the instance lock", file=sys.stderr)
         sys.exit(1)
     worker_id = new_worker_id()
-    print(f"worker {worker_id} started")
+    concurrency = resolve_concurrency(getattr(args, "concurrency", None))
+    print(f"worker {worker_id} started (runs up to {concurrency} scan(s) at the same time)")
     try:
-        while True:
-            with db.session() as s:
-                recover_interrupted_jobs(s)
-                resume_queued_jobs(s)
-                services.enqueue_due_schedules(s, actor=f"worker:{worker_id}")
-                job = claim_job(s, worker_id)
-                if job:
-                    run_one_job(s, job)
-                    continue
-            time.sleep(args.poll)
+        WorkerPool(worker_id=worker_id, concurrency=concurrency, poll=args.poll).run_forever()
     except KeyboardInterrupt:
         print("worker stopping")
     finally:
         lock.release()
+    print("worker stopped")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -835,6 +832,12 @@ def main(argv: list[str] | None = None) -> None:
 
     sp = sub.add_parser("worker", help="run the durable scan job worker")
     sp.add_argument("--poll", type=float, default=2.0, help="seconds between idle polls")
+    sp.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="scans to run at the same time (default: ATTESTRA_WORKER_CONCURRENCY or 2, max 8)",
+    )
     sp.set_defaults(fn=cmd_worker)
 
     args = p.parse_args(argv)

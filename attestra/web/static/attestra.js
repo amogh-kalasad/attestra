@@ -499,6 +499,35 @@
     }
     if (scanAsset) { scanAsset.addEventListener("change", profileCheck); profileCheck(); }
 
+    /* Multi-tool scan queue: show only tools that can scan the chosen target; need >= 1. */
+    var scanTools = document.getElementById("scan_tools");
+    function toolFilter() {
+      if (!scanAsset || !scanTools) return;
+      var opt = scanAsset.options[scanAsset.selectedIndex];
+      var kind = opt ? (opt.dataset.kind || "") : "";
+      var labels = scanTools.querySelectorAll("label[data-kinds]");
+      for (var i = 0; i < labels.length; i++) {
+        var kinds = (labels[i].dataset.kinds || "").split(" ").filter(Boolean);
+        var ok = !kind || !kinds.length || kinds.indexOf(kind) !== -1;
+        var box = labels[i].querySelector("input[type=checkbox]");
+        labels[i].style.display = ok ? "" : "none";
+        if (box) { box.disabled = !ok; if (!ok) box.checked = false; }
+      }
+    }
+    if (scanAsset && scanTools) {
+      scanAsset.addEventListener("change", toolFilter);
+      toolFilter();
+      var scanForm = scanTools.closest("form");
+      if (scanForm) {
+        scanForm.addEventListener("submit", function (ev) {
+          var any = scanTools.querySelectorAll("input[name=tool]:checked").length > 0;
+          var err = document.getElementById("scan_tools_error");
+          if (err) err.hidden = any;
+          if (!any) ev.preventDefault();
+        });
+      }
+    }
+
     /* Keep edit window end min in sync with start. */
     var editWs = document.getElementById("edit_ws");
     var editWe = document.getElementById("edit_we");

@@ -4,9 +4,12 @@
 <h1>Attestation letter</h1>
 <div class="meta">{{ tenant }} · {{ eng.name }} · {{ today }}</div>
 
-<p>Attestra records that security testing activities for
+<p>{{ ca.legal_name if ca and ca.legal_name else "Attestra" }} records that security testing activities for
 <strong>{{ eng.name }}</strong> ({{ type_label }}) were performed under a
 signed client authorization covering the approved environments for this engagement.</p>
+{% if ca and ca.authorization_statement %}
+<p>{{ ca.authorization_statement }}</p>
+{% endif %}
 
 <p>This attestation does <strong>not</strong> list individual vulnerabilities,
 proof-of-concept details, or remediation guidance. Those appear only in the
@@ -45,5 +48,16 @@ technical report under dual-control approval.</p>
 </section>
 {% endif %}
 
+{% if ca and (ca.signer_name or ca.signer_title or ca.address_formatted or ca.contact_email) %}
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  {% if ca.legal_name %}<tr><td>Certification Authority</td><td>{{ ca.legal_name }}</td></tr>{% endif %}
+  {% if ca.signer_name %}<tr><td>Authorized signer</td><td>{{ ca.signer_name }}{% if ca.signer_title %}, {{ ca.signer_title }}{% endif %}</td></tr>{% endif %}
+  {% if ca.address_formatted %}<tr><td>Address</td><td>{{ ca.address_formatted }}</td></tr>{% endif %}
+  {% if ca.contact_email %}<tr><td>Email</td><td>{{ ca.contact_email }}</td></tr>{% endif %}
+  {% if ca.contact_phone %}<tr><td>Phone</td><td>{{ ca.contact_phone }}</td></tr>{% endif %}
+  {% if ca.website %}<tr><td>Website</td><td>{{ ca.website }}</td></tr>{% endif %}
+</table>
+{% endif %}
 <p>Prepared by {{ generated_by }} on {{ generated_at }}.</p>
 {% endblock %}

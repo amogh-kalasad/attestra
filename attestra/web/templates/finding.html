@@ -43,6 +43,17 @@
   </div>
   {% endif %}
 
+{% if cross_sources is defined and cross_sources|length > 1 %}
+<div class="card" id="sources">
+  <h2>Sources <span class="meta" style="font-weight:400">{{ severity_label }}</span></h2>
+  {% if cross_primary_id != f.id %}<p class="meta">Shown in the findings list as part of <a href="/engagements/{{ e.id }}/findings/{{ cross_primary_id }}">F-{{ cross_primary_id }}</a>. This row keeps its own severity, status and evidence.</p>{% else %}<p class="meta">The same issue was reported by more than one tool. Each source keeps its own severity, status and evidence.</p>{% endif %}
+  <table>
+    <tr><th>Tool</th><th>Severity</th><th>Finding</th><th>Status</th><th>Evidence</th></tr>
+    {% for src in cross_sources %}<tr><td>{{ src.tool_label }}</td><td><span class="pill {{ src.severity }}">{{ src.severity_label }}</span></td><td><a href="/engagements/{{ e.id }}/findings/{{ src.finding_id }}">F-{{ src.finding_id }}</a> {{ src.title }}</td><td>{{ src.status_label }}</td><td class="mono meta">{{ src.evidence|join(" | ")|truncate(200) if src.evidence else "-" }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+
 <div class="card" id="evidence">
   <h2>Proof &amp; evidence <span class="meta" style="font-weight:400">{{ (gallery.counts.total if gallery else f.evidence|length) }} item{{ "s" if (gallery.counts.total if gallery else f.evidence|length) != 1 }}</span>
     {% if gallery and gallery.visually_verified %}<span class="pill info" title="At least one successful application screenshot is attached">{{ "visually_verified"|label }}</span>{% endif %}

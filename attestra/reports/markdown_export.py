@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import __version__, audit
+from attestra.crossmerge import collapse
 from attestra.dedup import detected_by_label, tool_display_name
 from attestra.models import Evidence, FindingObservation, engagement_type_label
 from attestra.services import get_engagement, list_findings
@@ -32,7 +33,8 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
     """Build a Markdown document for consolidated findings and evidence metadata."""
     eng = get_engagement(s, engagement_id)
     tenant_name = eng.tenant.name if eng.tenant is not None else ""
-    findings = [f for f in list_findings(s, engagement_id) if f.status != "false_positive"]
+    # Cross-tool merge: one entry per issue; related rows are listed under Sources.
+    findings = [f for f in collapse(s, list_findings(s, engagement_id)) if f.status != "false_positive"]
     finding_ids = [f.id for f in findings]
 
     evidence_rows: list[Evidence] = []
@@ -88,6 +90,9 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
                 f"- Detected by: {detected_by_label(f.tools)}",
             ]
         )
+        sources = getattr(f, "cross_sources", None) or []
+        if len(sources) > 1:
+            lines.append(f"- Severity by tool: {f.severity_label}")
         if f.cwe:
             lines.append(f"- CWE: CWE-{f.cwe}")
         if f.cves:
@@ -108,6 +113,12 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
             lines.extend(["### Impact", "", f.impact.strip(), ""])
         if f.recommendation:
             lines.extend(["### Remediation", "", f.recommendation.strip(), ""])
+        if f.affected_urls and not isinstance(f.affected_urls, str):
+            lines.append(f"### Affected URLs ({len(f.affected_urls)})")
+            lines.append("")
+            for u in f.affected_urls:
+                lines.append(f"- `{u}`")
+            lines.append("")
         if f.references:
             lines.append("### References")
             lines.append("")
@@ -124,6 +135,22 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
                 oid = f" · {o.original_id}" if o.original_id else ""
                 loc = f" · `{o.location}`" if o.location else ""
                 lines.append(f"- {label}{oid}{loc}")
+            lines.append("")
+
+        if len(sources) > 1:
+            lines.append(f"### Sources ({len(sources)})")
+            lines.append("")
+            for src in sources:
+                bits = [
+                    f"{src['tool_label']}: {src['severity_label']}",
+                    f"F-{src['finding_id']} {src['title']}",
+                    src["status_label"],
+                ]
+                if src["location"]:
+                    bits.append(f"`{src['location']}`")
+                if src["evidence"]:
+                    bits.append("evidence: `" + " | ".join(src["evidence"])[:300].replace("`", "'") + "`")
+                lines.append("- " + "; ".join(bits))
             lines.append("")
 
         evs = evidence_by_finding.get(f.id) or []

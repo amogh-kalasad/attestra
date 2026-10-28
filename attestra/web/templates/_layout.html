@@ -685,7 +685,7 @@
   }
 </style>
 <link rel="stylesheet" href="/static/attestra.css?v=13">
-<script src="/static/attestra.js?v=10" defer></script>
+<script src="/static/attestra.js?v=11" defer></script>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">
 {% set role = principal.role if principal else None %}
@@ -699,7 +699,7 @@
 {% endif %}
 
 {% if use_shell %}
-{% set more_current = path.startswith('/library') or path.startswith('/tuning') or path.startswith('/users') or path.startswith('/settings') %}
+{% set more_current = path.startswith('/library') or path.startswith('/tuning') or path.startswith('/users') or path.startswith('/settings') or path.startswith('/settings/certification-authority') %}
 <div class="app">
   <header class="rail" aria-label="Attestra">
     <a class="rail-brand" href="{% if staff %}/{% else %}/portal{% endif %}" title="Attestra v{{ version }}"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="sr">Attestra v{{ version }}</span></a>
@@ -724,6 +724,9 @@
           {% if role in ("admin", "lead") %}
           <a href="/users" {{ 'aria-current=page' if path == '/users' or path.startswith('/users/') }}>Users</a>
           <a href="/settings/alerts" {{ 'aria-current=page' if path.startswith('/settings/alerts') }}>Email alerts</a>
+          {% endif %}
+          {% if can(role, "certification.manage") %}
+          <a href="/settings/certification-authority" {{ 'aria-current=page' if path.startswith('/settings/certification-authority') }}>Certification Authority</a>
           {% endif %}
           {% if can(role, "credits.read") %}
           <a href="/credits" {{ 'aria-current=page' if path.startswith('/credits') }}>Organization credits</a>

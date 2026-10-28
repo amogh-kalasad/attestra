@@ -70,7 +70,9 @@ def init(url: str | None = None, *, use_migrations: bool = False) -> None:
     config.ensure_dirs()
     url = normalize_url(url or config.DATABASE_URL)
     if url.startswith("sqlite"):
-        kwargs = {"connect_args": {"check_same_thread": False}}
+        # timeout: wait up to 30 s for a write lock instead of failing at once when the
+        # worker runs several scans in parallel (and the web server writes too).
+        kwargs = {"connect_args": {"check_same_thread": False, "timeout": 30}}
     else:
         kwargs = {"pool_pre_ping": True}
     _engine = create_engine(url, **kwargs)

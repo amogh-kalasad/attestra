@@ -87,6 +87,9 @@
     <a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal-poam">OSCAL POA&amp;M</a>
     {% for k in e.frameworks %}<a class="btn secondary" href="/engagements/{{ e.id }}/export/oscal?framework={{ k|urlencode }}">OSCAL results · {{ k|fw_name }}</a>{% endfor %}
     {% endif %}
+    {% if can(prole, "finding.write") %}
+    <form method="post" action="/engagements/{{ e.id }}/findings/cross-merge" style="display:inline;margin:0"><button type="submit" class="secondary" title="Link the same issue reported by different tools into one finding. Rows are linked, never deleted.">Recompute Cross-Tool Merge</button></form>
+    {% endif %}
   </div>
   {% if can(prole, "finding.write") %}<p class="meta">Change a finding's status here. To reuse a standard writeup, open the <a href="/library?tenant_id={{ e.tenant_id }}">findings library</a> and apply it to a finding.</p>{% endif %}
   <table>
@@ -94,9 +97,9 @@
     {% for f in findings %}
     <tr id="f-{{ f.id }}">
       <td><a href="/engagements/{{ e.id }}/findings/{{ f.id }}">F-{{ f.id }}</a></td>
-      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}</td>
+      <td><span class="pill {{ f.severity }}">{{ f.severity }}</span>{% if f.asset and f.asset.exposure == "internet" %} <span class="pill" title="Target is internet-facing" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}{% if f.cross_sources is defined and f.cross_sources|length > 1 %}<div class="meta cross-sev">{{ f.severity_label }}</div>{% endif %}</td>
       <td>{{ "%.1f"|format(f.risk_score) }}{% if f.kev %} <b title="CISA Known Exploited">KEV</b>{% endif %}</td>
-      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Detected by: {{ detected_by(f.tools) }}</div>{% endif %}</td>
+      <td>{{ f.title }}<div class="mono meta">{{ f.location[:80] }}</div>{% if f.tools %}<div class="meta finding-tools">Detected by: {{ detected_by(f.tools) }}</div>{% endif %}{% if f.cross_sources is defined and f.cross_sources|length > 1 %}<div class="meta cross-sources">Sources: {% for src in f.cross_sources %}<a href="/engagements/{{ e.id }}/findings/{{ src.finding_id }}">F-{{ src.finding_id }}</a> ({{ src.tool_label }}: {{ src.severity_label }}){{ ", " if not loop.last }}{% endfor %}</div>{% endif %}</td>
       <td>{% if f.asset %}<span class="env env-{{ f.asset.environment or 'production' }}">{{ f.asset.environment or "production" }}</span><div class="meta">{{ f.asset.name or f.asset.identifier }}</div>{% else %}<span class="meta">Unmatched</span>{% endif %}</td>
       <td>{% if f.cwe %}CWE-{{ f.cwe }}{% endif %} {{ f.cves|join(" ") }}{% if f.owasp_top10 %}<div class="meta">{{ f.owasp_top10 }}</div>{% endif %}</td>
       <td>
@@ -425,19 +428,20 @@
       <div class="fields">
         <div><label for="scan_asset">Target *</label>
           <select id="scan_asset" name="asset_id" required>
-            {% for a in e.assets %}<option value="{{ a.id }}" data-intrusive="{{ 1 if a.intrusive_allowed else 0 }}">{{ a.identifier }} ({{ a.kind }}) &middot; {{ "verified" if a.ownership_verified_at else ("bypassed (local testing)" if ownership_bypass else "not verified") }} &middot; {{ "intrusive allowed" if a.intrusive_allowed else "non-intrusive only" }}{% if (a.environment or "production") not in authorized_envs %} &middot; {{ "environment not authorized" if auth_required else ("no auth record (bypassed)" if auth_bypass else "no auth record") }}{% endif %}</option>
+            {% for a in e.assets %}<option value="{{ a.id }}" data-kind="{{ a.kind }}" data-intrusive="{{ 1 if a.intrusive_allowed else 0 }}">{{ a.identifier }} ({{ a.kind }}) &middot; {{ "verified" if a.ownership_verified_at else ("bypassed (local testing)" if ownership_bypass else "not verified") }} &middot; {{ "intrusive allowed" if a.intrusive_allowed else "non-intrusive only" }}{% if (a.environment or "production") not in authorized_envs %} &middot; {{ "environment not authorized" if auth_required else ("no auth record (bypassed)" if auth_bypass else "no auth record") }}{% endif %}</option>
             {% else %}<option value="">No targets in scope</option>{% endfor %}
           </select>
-        </div>
-        <div><label for="scan_tool">Tool *</label>
-          <select id="scan_tool" name="tool" required>{% for t in scan_tools %}<option value="{{ t }}">{{ (scan_tool_labels or {}).get(t, t) }}</option>{% endfor %}</select>
         </div>
         <div><label for="scan_profile">Profile</label>
           <select id="scan_profile" name="profile"><option value="baseline">Baseline (non-intrusive)</option><option value="active">Active (intrusive)</option></select>
           <div class="hint" id="profile_hint" hidden>Active needs "Intrusive tests allowed" on the chosen target.</div>
         </div>
       </div>
-      <div class="form-actions"><button type="submit" id="scan_submit" {{ "disabled" if not scan_ready }}>Queue scan</button></div>
+      <label>Tools * <span class="meta">Pick one or more. Tools that cannot scan the chosen target are hidden.</span></label>
+      <div class="checks" id="scan_tools">{% for t in scan_tools %}<label data-kinds="{{ (tool_asset_kinds or {}).get(t, ())|join(' ') }}"><input type="checkbox" name="tool" value="{{ t }}"> {{ (scan_tool_labels or {}).get(t, t) }}</label>{% endfor %}</div>
+      <div class="warn" id="scan_tools_error" role="alert" hidden>Choose at least one tool.</div>
+      <p class="hint">Each tool is queued as its own scan and passes the scan checks{% if org_credits and org_credits.enforcement %} and uses one credit{% endif %} separately. The worker runs up to {{ worker_concurrency or 2 }} scans at the same time (<span class="mono">ATTESTRA_WORKER_CONCURRENCY</span> in .env, or <span class="mono">attestra worker --concurrency N</span>); nuclei scans run one at a time.</p>
+      <div class="form-actions"><button type="submit" id="scan_submit" {{ "disabled" if not scan_ready }}>Queue selected scans</button></div>
       </fieldset>
     </form>
   </details>

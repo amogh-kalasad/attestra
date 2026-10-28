@@ -19,7 +19,11 @@ from sqlalchemy.orm import Session
 from attestra import audit, config, importers, scoring
 from attestra.fingerprint import (
     caa_legacy_fingerprints,
+    AFFECTED_URLS_CAP,
+    GROUPED_TOOLS,
+    affected_entry,
     canonicalize_for_merge,
+    group_kwargs,
     fingerprint,
     is_caa_variant,
     is_cert_expiry_variant,
@@ -921,6 +925,9 @@ def import_results(
 
     rules = tuning.active_suppressions(s, eng.tenant_id, engagement_id)
     known_fps = set(existing)
+    # Grouped tools (ZAP): count each finding once per import, not once per URL.
+    run_new_ids: set[int] = set()
+    run_updated_ids: set[int] = set()
 
     def _record_observation(
         finding: Finding,
@@ -952,7 +959,10 @@ def import_results(
             rule_ids=[nf.rule_id] if nf.rule_id else [],
             line_start=getattr(nf, "line_start", None),
             line_end=getattr(nf, "line_end", None),
-            evidence_refs=list(getattr(nf, "evidence_refs", None) or []),
+            evidence_refs=[
+                mask_bytes(str(r).encode("utf-8"), "text/plain")[0].decode("utf-8", errors="replace")[:1000]
+                for r in (getattr(nf, "evidence_refs", None) or [])
+            ],
             fingerprint=fp,
             match_confidence=match_confidence,
             match_rationale=(match_rationale or "")[:500],
@@ -975,7 +985,12 @@ def import_results(
             variant=variant,
         )
         # CAA: webcheck dns-caa and testssl DNS_CAArecord share one merge key (R15).
-        merge_kwargs = canonicalize_for_merge(**raw_kwargs)
+        # ZAP: one finding per rule per origin; each URL is an observation + affected URL.
+        merge_kwargs = canonicalize_for_merge(**raw_kwargs, tool=nf.tool, rule_key=nf.rule_id or "")
+        grp = group_kwargs(
+            tool=nf.tool, location=nf.location, param=nf.param, variant=variant, rule_key=nf.rule_id or ""
+        )
+        group_origin = grp[0] if grp is not None else ""
         fp = fingerprint(**merge_kwargs)
         f = existing.get(fp)
         match_confidence = 1.0 if f is not None else None
@@ -1066,7 +1081,8 @@ def import_results(
                 rule_ids=[nf.rule_id] if nf.rule_id else [],
                 cwe=nf.cwe,
                 cves=nf.cves,
-                location=(nf.location + (f" [param: {nf.param}]" if nf.param else ""))[:1000],
+                location=(group_origin or (nf.location + (f" [param: {nf.param}]" if nf.param else "")))[:1000],
+                affected_urls=[affected_entry(nf.location, nf.param)[:1000]] if group_origin else [],
                 severity=nf.severity,
                 cvss_score=nf.cvss_score,
                 cvss_vector=scoring.soft_cvss_vector(nf.cvss_vector),
@@ -1082,6 +1098,7 @@ def import_results(
             existing[fp] = f
             existing_rows.append(f)
             new += 1
+            run_new_ids.add(f.id)
         else:
             # Same issue seen again (another tool or a rescan): merge, keep the higher severity.
             if nf.tool and nf.tool not in (f.tools or []):
@@ -1095,6 +1112,18 @@ def import_results(
             if match_confidence is not None:
                 f.dedup_confidence = match_confidence
                 f.dedup_rationale = (match_rationale or "")[:500]
+            if group_origin:
+                urls = list(f.affected_urls or [])
+                zap_only = set(f.tools or []) <= GROUPED_TOOLS
+                if zap_only and not urls and f.location and f.location != group_origin:
+                    # Adopted pre-grouping per-URL row: keep its URL in the list.
+                    urls.append(f.location)
+                entry = affected_entry(nf.location, nf.param)[:1000]
+                if entry and entry not in urls and len(urls) < AFFECTED_URLS_CAP:
+                    urls.append(entry)
+                f.affected_urls = urls
+                if zap_only:
+                    f.location = group_origin[:1000]
             if is_cert_expiry_variant(variant):
                 # Band change (30→14→7) updates the same row: title and severity in place.
                 f.title = nf.title[:500]
@@ -1118,7 +1147,11 @@ def import_results(
                 # Reappeared after being marked fixed: reopen.
                 f.status = "validated" if f.validated_by else "triaged"
                 audit.record(s, actor, "finding.reopened", "finding", f.id, import_run=run.id)
-            updated += 1
+            if not group_origin:
+                updated += 1
+            elif f.id not in run_new_ids and f.id not in run_updated_ids:
+                updated += 1
+                run_updated_ids.add(f.id)
             if f.id is None:
                 s.flush()
         _record_observation(
@@ -1195,6 +1228,10 @@ def import_results(
     from attestra.proof.hooks import after_import
 
     after_import(s, engagement_id, tool, data, [existing[fp] for fp in existing if fp not in known_fps], actor=actor)
+    # Cross-tool merge: link the same issue reported by different tools (never deletes rows).
+    from attestra import crossmerge
+
+    crossmerge.recompute_safely(s, engagement_id, actor=actor)
     audit.record(
         s, actor, "import.create", "import_run", run.id,
         engagement_id=engagement_id, tool=tool, sha256=sha, parsed=len(parsed), new=new, updated=updated,

@@ -63,6 +63,54 @@ def is_cert_expiry_variant(variant: str) -> bool:
 CERT_EXPIRY_VARIANT = "cert_expirationStatus"
 
 
+# DAST tools that report one alert instance per crawled URL (ZAP). Their findings
+# are grouped: one finding per rule (pluginid / alertRef) per origin, and every
+# URL stays on the finding (affected_urls) and as its own observation.
+GROUPED_TOOLS = frozenset({"zap"})
+AFFECTED_URLS_CAP = 500
+
+
+def is_grouped_tool(tool: str) -> bool:
+    return (tool or "").strip().lower() in GROUPED_TOOLS
+
+
+def url_origin(location: str) -> str:
+    """``scheme://host[:port]/`` for a URL, or "" when ``location`` is not a URL."""
+    loc = (location or "").strip()
+    if "://" not in loc:
+        return ""
+    try:
+        parts = urlsplit(loc)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}/"
+
+
+def group_kwargs(
+    *, tool: str, location: str, param: str = "", variant: str = "", rule_key: str = ""
+) -> tuple[str, str, str] | None:
+    """(location, param, variant) for the grouped fingerprint, or None when not grouped.
+
+    The rule id goes into the variant so two rules that share a CWE on one host
+    (e.g. two missing-header alerts, both CWE-693) stay separate findings.
+    """
+    if not is_grouped_tool(tool):
+        return None
+    origin = url_origin(location)
+    if not origin:
+        return None
+    v = variant or (f"{tool.strip().lower()}-{rule_key}" if rule_key else "")
+    return origin, "", v
+
+
+def affected_entry(location: str, param: str = "") -> str:
+    """One affected-URL line, in the same ``url [param: x]`` shape as Finding.location."""
+    loc = (location or "").strip()
+    return f"{loc} [param: {param}]" if param else loc
+
+
 def canonicalize_for_merge(
     *,
     location: str,
@@ -73,8 +121,13 @@ def canonicalize_for_merge(
     package: str = "",
     asset_id: int | None = None,
     variant: str = "",
+    tool: str = "",
+    rule_key: str = "",
 ) -> dict[str, Any]:
-    """Return fingerprint kwargs; align CAA and cert-expiry fields across tools."""
+    """Return fingerprint kwargs; align CAA and cert-expiry fields across tools.
+
+    For grouped DAST tools (ZAP) the key is rule + origin, not the per-URL location.
+    """
     if is_caa_variant(variant):
         return {
             "location": caa_host(location),
@@ -99,6 +152,9 @@ def canonicalize_for_merge(
             "asset_id": asset_id,
             "variant": CERT_EXPIRY_VARIANT,
         }
+    grp = group_kwargs(tool=tool, location=location, param=param, variant=variant, rule_key=rule_key)
+    if grp is not None:
+        location, param, variant = grp
     return {
         "location": location,
         "cwe": cwe,

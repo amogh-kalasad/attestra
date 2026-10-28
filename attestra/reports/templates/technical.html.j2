@@ -297,13 +297,14 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   <p class="meta">Latest retest: {{ rt.result or "requested" }}{% if rt.note %} — {{ rt.note }}{% endif %}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }} by {{ rt.finalized_by }}){% endif %}</p>
   {% endif %}
   <table>
-    <tr><th style="width:150px">Location</th><td class="mono">{{ f.location }}</td></tr>
+    <tr><th style="width:150px">Location</th><td class="mono">{{ f.location }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed below){% endif %}</td></tr>
     {% if f.cwe %}<tr><th>CWE</th><td>CWE-{{ f.cwe }}</td></tr>{% endif %}
     {% if f.cves %}<tr><th>CVE</th><td>{{ f.cves|join(", ") }}</td></tr>{% endif %}
     {% if f.owasp_top10 %}<tr><th>OWASP Top 10</th><td>{{ f.owasp_top10 }}</td></tr>{% endif %}
     {% if f.asvs_ref %}<tr><th>ASVS</th><td>{{ f.asvs_ref }}</td></tr>{% endif %}
     {% if f.wstg_ref %}<tr><th>WSTG</th><td>{{ f.wstg_ref }}</td></tr>{% endif %}
     <tr><th>Detected by</th><td>{{ detected_by(f.tools) }} ({{ f.occurrences }} observation{{ "s" if f.occurrences != 1 }})</td></tr>
+    {% if f.cross_sources is defined and f.cross_sources|length > 1 %}<tr><th>Severity by tool</th><td>{{ f.severity_label }}</td></tr>{% endif %}
     {% if f.dedup_rationale %}<tr><th>Dedup</th><td class="meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</td></tr>{% endif %}
     {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
     <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
@@ -311,7 +312,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
   {% if f.impact %}<p><b>Impact.</b> {{ f.impact }}</p>{% endif %}
   {% if f.affected_urls %}
-  <p><b>Affected URLs.</b></p>
+  <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
   <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u }}</li>{% endfor %}{% endif %}</ul>
   {% endif %}
   {% if f.references %}
@@ -336,7 +337,11 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
   {% if obs %}
   <p><b>Scanner observations.</b></p>
-  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
+  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.evidence_refs %} &middot; <span class="mono">{{ o.evidence_refs|join(" | ")|truncate(300) }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if f.cross_sources is defined and f.cross_sources|length > 1 %}
+  <p><b>Sources.</b> ({{ f.cross_sources|length }})</p>
+  <ul>{% for src in f.cross_sources %}<li>{{ src.tool_label }}: {{ src.severity_label }} &middot; F-{{ src.finding_id }} {{ src.title }} &middot; {{ src.status_label }}{% if src.location %} &middot; <span class="mono">{{ src.location }}</span>{% endif %}{% if src.evidence %} &middot; <span class="mono">{{ src.evidence|join(" | ")|truncate(300) }}</span>{% endif %}</li>{% endfor %}</ul>
   {% endif %}
   {% set embeds = evidence_embeds.get(f.id, []) %}
   {% if embeds %}
@@ -382,6 +387,7 @@ Remediate critical and high issues first, then retest. Control statuses in any c
 
 <h2 id="sign-off">16. Sign-off</h2>
 <p class="meta">Draft generations leave QA and approval blank. Live status, hash check and signature validity appear in the Attestra sign-off record when you open the report in the product; the sealed file below stays unchanged.</p>
+{% if ca and ca.authorization_statement %}<p class="meta">{{ ca.authorization_statement }}</p>{% endif %}
 <table>
   <tr><th>Role</th><th>Name</th><th>Date</th><th>Signature / mark</th></tr>
   <tr>
@@ -398,9 +404,9 @@ Remediate critical and high issues first, then retest. Control statuses in any c
   </tr>
   <tr>
     <td>Approved / signed</td>
+    <td>{% if ca and ca.signer_name %}{{ ca.signer_name }}{% if ca.signer_title %}, {{ ca.signer_title }}{% endif %}{% else %}—{% endif %}</td>
     <td>—</td>
-    <td>—</td>
-    <td>—</td>
+    <td>{% if ca and ca.legal_name %}{{ ca.legal_name }}{% else %}—{% endif %}</td>
   </tr>
 </table>
 

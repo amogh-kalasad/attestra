@@ -35,6 +35,12 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
             variant = str(alert_ref) if alert_ref is not None and str(alert_ref) != pluginid else ""
             instances = alert.get("instances") or [{"uri": site.get("@name", "")}]
             for inst in instances:
+                # Per-URL evidence is kept on that URL's observation (grouping keeps all of them).
+                refs: list[str] = []
+                for key in ("attack", "evidence", "otherinfo"):
+                    val = str(inst.get(key) or "").strip()
+                    if val:
+                        refs.append(f"{key}: {val[:500]}")
                 out.append(
                     NormalizedFinding(
                         tool="zap",
@@ -49,6 +55,7 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                         recommendation=_text(alert.get("solution")),
                         cwe=parse_cwe(alert.get("cweid")),
                         variant=variant,
+                        evidence_refs=refs,
                     )
                 )
     return out

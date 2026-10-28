@@ -43,6 +43,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "credits.read": frozenset({"admin", "lead", "tester", "reviewer", "auditor"}),
     "credits.request": frozenset({"admin", "lead", "tester"}),
     "credits.allocate": frozenset({"admin"}),
+    # Platform Certification Authority issuer branding (Super Admin only).
+    "certification.manage": frozenset({"admin"}),
 }
 
 
