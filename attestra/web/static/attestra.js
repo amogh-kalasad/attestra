@@ -321,6 +321,7 @@
 
     async function recommend(opts) {
       opts = opts || {};
+      var replace = opts.replace !== false;
       showRecError("");
       var industry = (document.getElementById("industry") || {}).value || "";
       var country = (document.getElementById("country") || {}).value || "";
@@ -328,13 +329,15 @@
         if (!opts.silent) showRecError("Select Industry and Country before generating recommendations.");
         return;
       }
+      /* Profile-driven refresh (replace): drop prior ticks; merge mode keeps confirmed_frameworks. */
+      if (replace && recBox) { recBox.hidden = true; recBox.innerHTML = ""; }
       var body = {
         industry: industry,
         country: country,
         regulatory_status: (document.getElementById("regulatory_status") || {}).value || "",
         technical_scope: scopes(),
         engagement_type: (document.getElementById("type") || {}).value || "",
-        confirmed_frameworks: selectedKeys(),
+        confirmed_frameworks: replace ? [] : selectedKeys(),
         excluded_frameworks: []
       };
       var run = fetch("/api/frameworks/recommend", {
@@ -356,7 +359,7 @@
       }
       var rows = (result.data && result.data.recommendations) || [];
       var html = ["<table><tr><th>Framework</th><th>Status</th><th>Why</th></tr>"];
-      var auto = selectedKeys().slice();
+      var auto = replace ? [] : selectedKeys().slice();
       rows.forEach(function (row) {
         if (row.status === "not_applicable" || row.status === "user_excluded") return;
         html.push(
@@ -364,7 +367,7 @@
           '<div class="meta">' + row.framework_id + " · " + (row.rule_id || "") + "</div></td>" +
           "<td>" + row.status + "</td><td>" + (row.reason || "") + "</td></tr>"
         );
-        if ((row.status === "recommended" || row.status === "applicable" || row.status === "user_added") && auto.indexOf(row.framework_id) < 0) {
+        if ((row.status === "recommended" || row.status === "applicable") && auto.indexOf(row.framework_id) < 0) {
           auto.push(row.framework_id);
         }
       });
@@ -379,13 +382,13 @@
     function scheduleAutoRecommend() {
       if (autoTimer) clearTimeout(autoTimer);
       autoTimer = setTimeout(function () {
-        recommend({ silent: true }).catch(function (e) { showRecError(String(e)); });
+        recommend({ silent: true, replace: true }).catch(function (e) { showRecError(String(e)); });
       }, 250);
     }
 
     if (recBtn) {
       recBtn.addEventListener("click", function () {
-        recommend({}).catch(function (e) { showRecError(String(e)); });
+        recommend({ replace: true }).catch(function (e) { showRecError(String(e)); });
       });
     }
 

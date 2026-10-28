@@ -1947,9 +1947,19 @@ DORA is `not_applicable` for ordinary EU retail and `requires_review` for EU fin
 
 Confirmed frameworks stay as `user_added` when the profile would not otherwise recommend them.
 
+### Without confirmed profile only
+
+Calling [[attestra/compliance/recommend.py#recommend_frameworks]] without `confirmed_frameworks` returns only profile/rule matches — no `user_added` sticky rows.
+
 ### API recommend
 
 `POST /api/frameworks/recommend` returns catalogue-only rows for a valid profile.
+
+### UI replace on refresh
+
+New-engagement [[attestra/web/static/attestra.js]] `recommend(opts)` defaults `replace` true so auto-refresh and Generate rebuild ticks from `recommended` | `applicable` only.
+
+Industry, Country, Type, technical-scope (`.tscope`), and regulatory_status changes call `scheduleAutoRecommend` with `replace: true`; Generate does the same.
 
 ### API missing fields
 
@@ -1971,15 +1981,27 @@ Engagement create / framework selection rejects unknown framework ids that are o
 
 Regulatory status and technical scope are optional; when present they refine recommendation status and rationale without inventing frameworks.
 
+### Technical scope changes auto-selected
+
+For `banking_financial`+IN+`vapt`, empty scopes vs `payments` differ (`pci_dss_4` enters auto-checked via `pci.payments.scope`); `cloud` adds `soc2` via `soc2.cloud.scope`. ISO/RBI/ASVS baselines stay selected.
+
 ### Engagement type soft filter
 
-Optional `engagement_type` with `when.engagement_types_any` soft-strengthens ASVS for `pt`/`vapt` software profiles without excluding ISO or SOC 2 by type.
+Optional `engagement_type` with `when.engagement_types_any` soft-strengthens ASVS for `pt`/`vapt` without excluding ISO or SOC 2 by type.
+
+Industry-only/VA leaves ASVS as `requires_review` (not auto-checked); `asvs.pt_vapt.software` / `asvs.pt_vapt.digital` raise it to `recommended`.
+
+### VA vs PT auto-selected differ
+
+VA vs PT/VAPT differ on auto-checked sets for common profiles: PT/VAPT auto-check ASVS; VA keeps it at `requires_review`.
+
+Covers `it_software`+US (`asvs.pt_vapt.software`), `banking_financial`+IN and `retail_ecommerce`+US (`asvs.pt_vapt.digital`). ISO/SOC 2 and RBI stay type-agnostic.
 
 ### UI has catalogues
 
 New-engagement form requires Industry/Country selects and shows **Compliance Frameworks to Report Against**.
 
-Handlers for Generate / Add more / Clear and auto-recommend live in [[attestra/web/static/attestra.js]] because CSP blocks inline script.
+Handlers for Generate / Add more / Clear and auto-recommend live in [[attestra/web/static/attestra.js]] because CSP blocks inline script. The form hint states that Industry, Country, Type, or technical scope — or Generate — replaces the checked set.
 
 ### Session cookie recommend
 

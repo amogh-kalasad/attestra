@@ -5,6 +5,8 @@ scopes:
     label: Web applications
   apis:
     label: APIs
+  mobile:
+    label: Mobile applications
   cloud:
     label: Cloud infrastructure
   network:

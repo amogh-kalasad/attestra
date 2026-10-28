@@ -3,8 +3,12 @@
 # Statuses: recommended | applicable | requires_review | not_applicable
 # Optional when.engagement_types_any (va|pt|vapt) may soft-refine a rule; frameworks
 # are never exclusive to an engagement type (ISO/SOC2 stay type-agnostic).
-version: "2026.10.27"
-reviewed_on: "2026-10-27"
+# Soft type refinement: ASVS stays requires_review for industry-only VA matches
+# (not auto-checked); PT/VA+PT soft-strengthen ASVS to recommended for appsec-relevant
+# industries. Web/API/mobile technical scope still recommends ASVS regardless of type.
+# Soft scope rules: payments→PCI recommended; cloud→SOC 2 recommended; ai→ISO 42001.
+version: "2026.10.28"
+reviewed_on: "2026-10-28"
 disclaimer: >
   Recommendations are advisory profile matches against Attestra's configured
   catalogue. They are not a legal determination of regulatory applicability.
@@ -70,6 +74,13 @@ rules:
         - other_mixed
         - consumer_services
         - retail_ecommerce
+  - id: soc2.cloud.scope
+    framework: soc2
+    status: recommended
+    reason: Cloud infrastructure in technical scope commonly drives SOC 2 Trust Services Criteria consideration.
+    when:
+      technical_scope_any:
+        - cloud
   - id: pci.payments.scope
     framework: pci_dss_4
     status: recommended
@@ -101,15 +112,41 @@ rules:
       technical_scope_any:
         - web_apps
         - apis
+  - id: asvs.mobile.scope
+    framework: asvs_4_0
+    status: recommended
+    reason: OWASP ASVS fits engagements that assess mobile application security.
+    when:
+      technical_scope_any:
+        - mobile
+  - id: asvs.source_code.scope
+    framework: asvs_4_0
+    status: recommended
+    reason: Source-code review in scope commonly maps findings to OWASP ASVS application security controls.
+    when:
+      technical_scope_any:
+        - source_code
   - id: asvs.software.industry
     framework: asvs_4_0
-    status: applicable
-    reason: Software and digital product organizations commonly report against application security controls.
+    status: requires_review
+    reason: Software and digital product organizations commonly report against application security controls; confirm whether ASVS mapping is in scope for this engagement type.
     when:
       industries_any:
         - it_software
         - gaming_entertainment
         - ai_emerging
+  - id: asvs.digital.industry
+    framework: asvs_4_0
+    status: requires_review
+    reason: Digital, payments, and customer-facing industries often map findings to application security controls; confirm whether OWASP ASVS is in scope for this engagement.
+    when:
+      industries_any:
+        - payments_fintech
+        - banking_financial
+        - cloud_data
+        - retail_ecommerce
+        - professional_services
+        - telecom_media
   - id: asvs.pt_vapt.software
     framework: asvs_4_0
     status: recommended
@@ -122,6 +159,21 @@ rules:
         - it_software
         - gaming_entertainment
         - ai_emerging
+  - id: asvs.pt_vapt.digital
+    framework: asvs_4_0
+    status: recommended
+    reason: PT and VA+PT engagements in payments, banking, retail, cloud, and customer-facing digital industries commonly map findings to OWASP ASVS.
+    when:
+      engagement_types_any:
+        - pt
+        - vapt
+      industries_any:
+        - payments_fintech
+        - banking_financial
+        - cloud_data
+        - retail_ecommerce
+        - professional_services
+        - telecom_media
   - id: iso42001.ai.scope
     framework: iso_42001_2023
     status: recommended
