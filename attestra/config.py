@@ -112,10 +112,27 @@ AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST",
 AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
 # Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).
 
-# Feature flags: ON|OFF. Missing defaults to ON. Invalid values fail startup.
-# Changing these requires restarting the API process and any workers;
-# Attestra does not hot-reload them mid-process.
+# Feature flags. Changing these requires restarting the API and any workers
+# (no hot reload). Bypass flags default to false and only activate in an
+# allowlisted APP_ENV (local / test / development).
 _ON_OFF_VALUES = frozenset({"ON", "OFF"})
+_APP_ENV_KNOWN = frozenset({"local", "test", "development", "staging", "production"})
+_APP_ENV_BYPASS_ALLOWLIST = frozenset({"local", "test", "development"})
+_APP_ENV_PROHIBITED_BYPASS = frozenset({"staging", "production"})
+_BOOL_TRUE = frozenset({"1", "true", "yes"})
+_BOOL_FALSE = frozenset({"0", "false", "no"})
+BYPASS_STATUS = "BYPASSED_LOCAL"
+
+_REMOVED_OWNERSHIP = (
+    "OWNERSHIP_VERIFICATION was removed. Use APP_ENV with "
+    "BYPASS_TARGET_OWNERSHIP_VERIFICATION (default false; allowlisted "
+    "APP_ENV: local, test, development)."
+)
+_REMOVED_SIGNED_AUTH = (
+    "SIGNED_AUTHORIZATION was removed. Use APP_ENV with "
+    "BYPASS_SIGNED_AUTHORIZATION_VERIFICATION (default false; allowlisted "
+    "APP_ENV: local, test, development)."
+)
 
 
 class ConfigurationError(ValueError):
@@ -123,7 +140,7 @@ class ConfigurationError(ValueError):
 
 
 def _parse_on_off(name: str, value: str | None = None) -> str:
-    """Return ``ON`` or ``OFF`` for an env flag. Missing/blank → ``ON``; else fail closed."""
+    """Return ``ON`` or ``OFF``. Missing/blank → ``ON``; else fail closed."""
     if value is None:
         value = os.environ.get(name)
     if value is None or not str(value).strip():
@@ -135,6 +152,23 @@ def _parse_on_off(name: str, value: str | None = None) -> str:
             "Fix the environment variable and restart the application or worker."
         )
     return normalized
+
+
+def _parse_bool_default_false(name: str, value: str | None = None) -> bool:
+    """Parse a boolean env flag. Missing/blank → False. Malformed → ConfigurationError."""
+    if value is None:
+        value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        return False
+    normalized = str(value).strip().lower()
+    if normalized in _BOOL_TRUE:
+        return True
+    if normalized in _BOOL_FALSE:
+        return False
+    raise ConfigurationError(
+        f"{name} must be true/false/1/0/yes/no (case-insensitive), got {value!r}. "
+        "Fix the environment variable and restart the application or worker."
+    )
 
 
 def parse_subscription_service(value: str | None = None) -> str:
@@ -162,55 +196,76 @@ def subscription_enforcement_enabled() -> bool:
     return get_subscription_service() == "ON"
 
 
-def parse_signed_authorization(value: str | None = None) -> str:
-    """Return ``ON`` or ``OFF`` for ``SIGNED_AUTHORIZATION``.
+def parse_app_env(value: str | None = None) -> str | None:
+    """Return normalized ``APP_ENV`` or ``None`` when unset/blank.
 
-    Missing or blank defaults to ``ON``. Invalid values raise
-    [[attestra/config.py#ConfigurationError]].
+    Unknown non-empty values raise [[attestra/config.py#ConfigurationError]].
     """
-    return _parse_on_off("SIGNED_AUTHORIZATION", value)
+    if value is None:
+        value = os.environ.get("APP_ENV")
+    if value is None or not str(value).strip():
+        return None
+    normalized = str(value).strip().lower()
+    if normalized not in _APP_ENV_KNOWN:
+        raise ConfigurationError(
+            f"APP_ENV must be one of {sorted(_APP_ENV_KNOWN)}, got {value!r}. "
+            "Fix the environment variable and restart the application or worker."
+        )
+    return normalized
 
 
-def get_signed_authorization() -> str:
-    """Current ``SIGNED_AUTHORIZATION`` value (``ON`` or ``OFF``), re-read from the environment."""
-    return parse_signed_authorization()
+def get_app_env() -> str | None:
+    """Current ``APP_ENV`` (normalized) or ``None`` when unset."""
+    return parse_app_env()
 
 
-def signed_authorization_required() -> bool:
-    """True when imports/scans must have a currently valid signed authorization.
-
-    When False (``SIGNED_AUTHORIZATION=OFF``), only the signed-authorization
-    gates are skipped (import/scan env authorization, empty-auth refusal).
-    Document download RBAC, tenant isolation, ownership verification,
-    SSRF/allow-list checks, and audit stay enforced. UI may still record
-    authorizations.
-    """
-    return get_signed_authorization() == "ON"
+def parse_bypass_target_ownership_verification(value: str | None = None) -> bool:
+    """Requested ownership bypass. Default **false** when unset."""
+    return _parse_bool_default_false("BYPASS_TARGET_OWNERSHIP_VERIFICATION", value)
 
 
-def parse_ownership_verification(value: str | None = None) -> str:
-    """Return ``ON`` or ``OFF`` for ``OWNERSHIP_VERIFICATION``.
-
-    Missing or blank defaults to ``ON``. Invalid values raise
-    [[attestra/config.py#ConfigurationError]].
-    """
-    return _parse_on_off("OWNERSHIP_VERIFICATION", value)
+def parse_bypass_signed_authorization_verification(value: str | None = None) -> bool:
+    """Requested signed-authorization bypass. Default **false** when unset."""
+    return _parse_bool_default_false("BYPASS_SIGNED_AUTHORIZATION_VERIFICATION", value)
 
 
-def get_ownership_verification() -> str:
-    """Current ``OWNERSHIP_VERIFICATION`` value (``ON`` or ``OFF``), re-read from the environment."""
-    return parse_ownership_verification()
+def ownership_bypass_active() -> bool:
+    """True only when ownership bypass is requested and ``APP_ENV`` is allowlisted."""
+    if not parse_bypass_target_ownership_verification():
+        return False
+    env = parse_app_env()
+    return env in _APP_ENV_BYPASS_ALLOWLIST
+
+
+def signed_authorization_bypass_active() -> bool:
+    """True only when signed-auth bypass is requested and ``APP_ENV`` is allowlisted."""
+    if not parse_bypass_signed_authorization_verification():
+        return False
+    env = parse_app_env()
+    return env in _APP_ENV_BYPASS_ALLOWLIST
 
 
 def ownership_verification_required() -> bool:
     """True when web/api/host targets must have ownership verified before scan.
 
-    When False (``OWNERSHIP_VERIFICATION=OFF``), only the dispatch ownership gate
-    is skipped. UI verify/confirm, token storage, and ownership audit events stay
-    available. Auth, tenant isolation, scope, SSRF, signed authorization, rate
-    limits, and other non-ownership controls remain enforced.
+    When False, only the local-testing ownership gate is skipped
+    (``BYPASS_TARGET_OWNERSHIP_VERIFICATION`` in an allowlisted ``APP_ENV``).
+    UI verify/confirm, token storage, and ownership audit stay available.
+    Auth, tenant isolation, scope, SSRF, rate limits, and other controls remain enforced.
+    Never fabricates ``ownership_verified_at``.
     """
-    return get_ownership_verification() == "ON"
+    return not ownership_bypass_active()
+
+
+def signed_authorization_required() -> bool:
+    """True when imports/scans must have a currently valid signed authorization.
+
+    When False, only the local-testing signed-authorization gates are skipped
+    (``BYPASS_SIGNED_AUTHORIZATION_VERIFICATION`` in an allowlisted ``APP_ENV``).
+    Document download RBAC, tenant isolation, ownership verification, SSRF,
+    and audit stay enforced. UI may still record authorizations.
+    """
+    return not signed_authorization_bypass_active()
 
 
 def validate_runtime_config() -> None:
@@ -218,18 +273,73 @@ def validate_runtime_config() -> None:
 
     Call from API lifespan and CLI serve/worker/init so API, workers,
     schedules, and CLI share one configuration path. Re-reads
-    ``SUBSCRIPTION_SERVICE``, ``SIGNED_AUTHORIZATION``, and
-    ``OWNERSHIP_VERIFICATION`` from the environment.
+    ``SUBSCRIPTION_SERVICE``, ``APP_ENV``, and both ``BYPASS_*`` flags.
+    Bypass flags default to false; enabling them outside an allowlisted
+    ``APP_ENV`` rejects startup.
     """
-    global SUBSCRIPTION_SERVICE, SIGNED_AUTHORIZATION, OWNERSHIP_VERIFICATION
+    global SUBSCRIPTION_SERVICE, APP_ENV
+    global BYPASS_TARGET_OWNERSHIP_VERIFICATION, BYPASS_SIGNED_AUTHORIZATION_VERIFICATION
+
     SUBSCRIPTION_SERVICE = parse_subscription_service()
-    SIGNED_AUTHORIZATION = parse_signed_authorization()
-    OWNERSHIP_VERIFICATION = parse_ownership_verification()
+    APP_ENV = parse_app_env()
+    own_req = parse_bypass_target_ownership_verification()
+    auth_req = parse_bypass_signed_authorization_verification()
+    BYPASS_TARGET_OWNERSHIP_VERIFICATION = own_req
+    BYPASS_SIGNED_AUTHORIZATION_VERIFICATION = auth_req
+
+    if own_req or auth_req:
+        if APP_ENV is None:
+            raise ConfigurationError(
+                "BYPASS_* flags require APP_ENV to be set to an allowlisted value "
+                f"({sorted(_APP_ENV_BYPASS_ALLOWLIST)}). Missing APP_ENV fails closed."
+            )
+        if APP_ENV in _APP_ENV_PROHIBITED_BYPASS:
+            raise ConfigurationError(
+                f"Bypass flags must not be enabled when APP_ENV={APP_ENV!r}. "
+                "Set BYPASS_TARGET_OWNERSHIP_VERIFICATION and "
+                "BYPASS_SIGNED_AUTHORIZATION_VERIFICATION to false in staging/production."
+            )
+        if APP_ENV not in _APP_ENV_BYPASS_ALLOWLIST:
+            raise ConfigurationError(
+                f"Bypass flags are not allowed for APP_ENV={APP_ENV!r}. "
+                f"Allowlist: {sorted(_APP_ENV_BYPASS_ALLOWLIST)}."
+            )
 
 
 SUBSCRIPTION_SERVICE = parse_subscription_service()
-SIGNED_AUTHORIZATION = parse_signed_authorization()
-OWNERSHIP_VERIFICATION = parse_ownership_verification()
+APP_ENV = parse_app_env()
+BYPASS_TARGET_OWNERSHIP_VERIFICATION = parse_bypass_target_ownership_verification()
+BYPASS_SIGNED_AUTHORIZATION_VERIFICATION = parse_bypass_signed_authorization_verification()
+
+
+def parse_ownership_verification(value: str | None = None) -> str:
+    """Removed. Raises [[attestra/config.py#ConfigurationError]] directing callers to migrate."""
+    raise ConfigurationError(_REMOVED_OWNERSHIP)
+
+
+def get_ownership_verification() -> str:
+    """Removed. Raises [[attestra/config.py#ConfigurationError]] directing callers to migrate."""
+    raise ConfigurationError(_REMOVED_OWNERSHIP)
+
+
+def parse_signed_authorization(value: str | None = None) -> str:
+    """Removed. Raises [[attestra/config.py#ConfigurationError]] directing callers to migrate."""
+    raise ConfigurationError(_REMOVED_SIGNED_AUTH)
+
+
+def get_signed_authorization() -> str:
+    """Removed. Raises [[attestra/config.py#ConfigurationError]] directing callers to migrate."""
+    raise ConfigurationError(_REMOVED_SIGNED_AUTH)
+
+
+def __getattr__(name: str):
+    """Reject legacy ``OWNERSHIP_VERIFICATION`` / ``SIGNED_AUTHORIZATION`` module globals."""
+    if name == "OWNERSHIP_VERIFICATION":
+        raise ConfigurationError(_REMOVED_OWNERSHIP)
+    if name == "SIGNED_AUTHORIZATION":
+        raise ConfigurationError(_REMOVED_SIGNED_AUTH)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Organization test-run credits (master Phase 2). Initial allocation is configurable.
 INITIAL_TEST_RUN_CREDITS = max(0, int(os.environ.get("ATTESTRA_INITIAL_TEST_RUN_CREDITS", "3")))

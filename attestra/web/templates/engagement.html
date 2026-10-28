@@ -4,6 +4,9 @@
 {% set prole = principal.role if principal else "" %}
 {% set has_auth = authorized_envs|length > 0 %}
 {% set auth_required = signed_authorization_required if signed_authorization_required is defined else true %}
+{% set ownership_bypass = ownership_bypass_active if ownership_bypass_active is defined else false %}
+{% set auth_bypass = signed_authorization_bypass_active if signed_authorization_bypass_active is defined else false %}
+{% set local_bypass_status = bypass_status if bypass_status is defined else "BYPASSED_LOCAL" %}
 {% set plan_done = plan and plan|selectattr('findings')|list %}
 {% set fl = findings %}{% set cur_fid = None %}
 <div class="md">
@@ -170,8 +173,8 @@
 <div class="card" id="scope">
   <h2>Signed authorization</h2>
   <p class="meta">The client's signed letter or rules of engagement, and the environments it approves. Scans and imports are only allowed for targets in an authorized environment.</p>
-  {% if not auth_required %}
-  <p class="hint" role="status">Signed authorization is not required for scans or imports on this deployment (<span class="mono">SIGNED_AUTHORIZATION=OFF</span>). You can still record authorizations for the engagement record.</p>
+  {% if auth_bypass %}
+  <p class="hint" role="status"><b>Signature verification bypassed (local testing)</b>. Signed authorization gate bypassed (local testing) — <span class="mono">{{ local_bypass_status }}</span>. This does not mean a signature was cryptographically verified. You can still record authorizations for the engagement record.</p>
   {% endif %}
   <p class="hint">Need a sample for demos? <a href="/static/samples/anthive-signed-authorization.pdf" download="anthive-signed-authorization.pdf">Download AntHive sample signed authorization (PDF)</a> — upload it below; suggested signer <span class="mono">Priya Sharma, CISO</span>, environments <span class="mono">staging</span> and <span class="mono">uat</span>.</p>
   <table>
@@ -196,7 +199,7 @@
         {% endif %}
       </td>
     </tr>
-    {% else %}<tr><td colspan="7" class="st-not_met">No signed authorization yet.{% if auth_required %} Record one below; scans and imports are blocked until then.{% else %} Recording one is optional while signed authorization is not required.{% endif %}</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="7" class="st-not_met">No signed authorization yet.{% if auth_required %} Record one below; scans and imports are blocked until then.{% elif auth_bypass %} Recording one is optional while the signed authorization gate is bypassed (local testing).{% else %} Recording one is optional while signed authorization is not required.{% endif %}</td></tr>{% endfor %}
   </table>
   <details {{ "open" if not e.authorizations }}>
     <summary>+ Record a signed authorization</summary>
@@ -231,7 +234,7 @@
       <td><a href="/engagements/{{ e.id }}/targets/{{ a.id }}" class="mono">{{ a.identifier }}</a>{% if a.name %}<div class="meta">{{ a.name }}</div>{% endif %}
           <div class="meta"><a href="/engagements/{{ e.id }}/targets/{{ a.id }}">History and trends</a></div></td>
       <td><span class="env env-{{ a.environment or 'production' }}">{{ a.environment or "production" }}</span>
-          {% if auth_required and (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">Not authorized</div>{% elif not auth_required and (a.environment or "production") not in authorized_envs %}<div class="meta" style="font-size:12px">No auth record (gate OFF)</div>{% endif %}</td>
+          {% if auth_required and (a.environment or "production") not in authorized_envs %}<div class="st-not_met" style="font-size:12px">Not authorized</div>{% elif auth_bypass and (a.environment or "production") not in authorized_envs %}<div class="meta" style="font-size:12px">No auth record (gate bypassed)</div>{% elif not auth_required and (a.environment or "production") not in authorized_envs %}<div class="meta" style="font-size:12px">No auth record (gate OFF)</div>{% endif %}</td>
       <td>{{ asset_kinds.get(a.kind, a.kind) }}</td>
       <td>{% for t in (a.test_types or default_tests.get(a.kind, [])) %}<span class="chip">{{ test_types[t].label if t in test_types else t }}</span>{% endfor %}
           <div class="meta">{{ "Intrusive tests allowed" if a.intrusive_allowed else "Non-intrusive only" }}</div></td>
@@ -239,8 +242,9 @@
       <td>{% set om = ownership_methods.get(a.id, "") %}
         {% if a.ownership_verified_at %}<span class="st-met">Verified{% if om == "dns" %} (DNS){% elif om == "file" %} (file){% elif om == "owner_confirmed" %} (owner confirmed){% endif %}</span><div class="meta">{{ a.ownership_verified_at|dt }}</div>
         {% elif a.kind not in ownership_kinds %}<span class="meta">Not needed for this kind</span>
-        {% else %}{% set oi = ownership_info[a.id] %}<span class="st-not_met">Not verified</span>
-        {% if not ownership_verification_required %}<div class="meta">Ownership verification not required (OWNERSHIP_VERIFICATION=OFF)</div>{% endif %}
+        {% else %}{% set oi = ownership_info[a.id] %}
+        {% if ownership_bypass %}<span class="st-partial"><b>Bypassed (local testing)</b></span><div class="meta mono">{{ local_bypass_status }}</div>
+        {% else %}<span class="st-not_met">Not verified</span>{% endif %}
         <details id="ov-{{ a.id }}" class="ownership" {{ "open" if ov_open == a.id }} style="max-width:440px">
           <summary>Verify ownership</summary>
           {% if ov_open == a.id and ov_message %}<div class="flash err" role="alert" style="margin:6px 0">{{ ov_message }}</div>{% endif %}
@@ -292,7 +296,7 @@
         <div><label for="tname">Friendly name</label><input type="text" id="tname" name="name" placeholder="Customer portal (staging)"></div>
         <div><label for="environment">Environment *</label>
           <select id="environment" name="environment">{% for env in environments %}<option value="{{ env }}" {{ "selected" if env == "staging" }}>{{ env|capitalize }}{{ "" if env in authorized_envs else " (not authorized)" }}</option>{% endfor %}</select>
-          <div class="hint" id="env_hint" hidden>{% if auth_required %}This environment is not in a valid signed authorization. You can add the target, but scans and imports for it will be refused.{% else %}This environment is not covered by a recorded authorization. Signed authorization is not required on this deployment (<span class="mono">SIGNED_AUTHORIZATION=OFF</span>), so scans and imports can still proceed.{% endif %}</div></div>
+          <div class="hint" id="env_hint" hidden>{% if auth_required %}This environment is not in a valid signed authorization. You can add the target, but scans and imports for it will be refused.{% elif auth_bypass %}This environment is not covered by a recorded authorization. Signed authorization gate bypassed (local testing) — <span class="mono">{{ local_bypass_status }}</span> — so scans and imports can still proceed.{% else %}This environment is not covered by a recorded authorization. Signed authorization is not required on this deployment, so scans and imports can still proceed.{% endif %}</div></div>
         <div><label for="criticality">Business criticality</label>
           <select id="criticality" name="criticality">{% for c, lbl in [(5, "crown jewel"), (4, "high"), (3, "medium"), (2, "low-medium"), (1, "low")] %}<option value="{{ c }}" {{ "selected" if c == 3 }}>{{ c }} ({{ lbl }})</option>{% endfor %}</select></div>
         <div><label for="exposure">Exposure</label>
@@ -376,7 +380,7 @@
 <!-- ============================================================ SCANS -->
 <div class="card" id="scans">
   <h2>Automated scans</h2>
-  <p class="meta">Run a scanner against one target in scope. A scan needs the test window{% if auth_required %}, a valid signed authorization for the target's environment{% endif %}{% if ownership_verification_required %}, verified ownership for web/API/host targets{% endif %}, and, for the active profile, intrusive tests allowed on the target.{% if not auth_required or not ownership_verification_required %} Optional gates are off in this deployment:{% if not auth_required %} <span class="mono">SIGNED_AUTHORIZATION=OFF</span>{% endif %}{% if not auth_required and not ownership_verification_required %};{% endif %}{% if not ownership_verification_required %} <span class="mono">OWNERSHIP_VERIFICATION=OFF</span>{% endif %}.{% endif %}</p>
+  <p class="meta">Run a scanner against one target in scope. A scan needs the test window{% if auth_required %}, a valid signed authorization for the target's environment{% endif %}{% if ownership_verification_required %}, verified ownership for web/API/host targets{% endif %}, and, for the active profile, intrusive tests allowed on the target.{% if auth_bypass or ownership_bypass %} Local testing gates are bypassed (<span class="mono">{{ local_bypass_status }}</span>):{% if auth_bypass %} signed authorization{% endif %}{% if auth_bypass and ownership_bypass %} and{% endif %}{% if ownership_bypass %} ownership verification{% endif %}. Bypass is not cryptographic verification.{% elif not auth_required or not ownership_verification_required %} Optional gates are off in this deployment.{% endif %}</p>
   <div class="row" style="margin-bottom:10px">
     {% if e.status != 'halted' %}<form method="post" action="/engagements/{{ e.id }}/halt" onsubmit="return confirm('Halt all jobs for this engagement? Running and queued scans stop until you resume.')"><button type="submit" class="danger">Halt engagement</button></form>{% endif %}
     {% if e.status == 'halted' %}<form method="post" action="/engagements/{{ e.id }}/resume"><button type="submit">Resume engagement</button></form>{% endif %}
@@ -421,7 +425,7 @@
       <div class="fields">
         <div><label for="scan_asset">Target *</label>
           <select id="scan_asset" name="asset_id" required>
-            {% for a in e.assets %}<option value="{{ a.id }}" data-intrusive="{{ 1 if a.intrusive_allowed else 0 }}">{{ a.identifier }} ({{ a.kind }}) &middot; {{ "verified" if a.ownership_verified_at else "not verified" }} &middot; {{ "intrusive allowed" if a.intrusive_allowed else "non-intrusive only" }}{% if (a.environment or "production") not in authorized_envs %} &middot; environment not authorized{% endif %}</option>
+            {% for a in e.assets %}<option value="{{ a.id }}" data-intrusive="{{ 1 if a.intrusive_allowed else 0 }}">{{ a.identifier }} ({{ a.kind }}) &middot; {{ "verified" if a.ownership_verified_at else ("bypassed (local testing)" if ownership_bypass else "not verified") }} &middot; {{ "intrusive allowed" if a.intrusive_allowed else "non-intrusive only" }}{% if (a.environment or "production") not in authorized_envs %} &middot; {{ "environment not authorized" if auth_required else ("no auth record (bypassed)" if auth_bypass else "no auth record") }}{% endif %}</option>
             {% else %}<option value="">No targets in scope</option>{% endfor %}
           </select>
         </div>

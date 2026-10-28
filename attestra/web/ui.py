@@ -573,6 +573,9 @@ def _engagement_ctx(
         "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
         "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
         "ownership_verification_required": config.ownership_verification_required(),
+        "ownership_bypass_active": config.ownership_bypass_active(),
+        "signed_authorization_bypass_active": config.signed_authorization_bypass_active(),
+        "bypass_status": config.BYPASS_STATUS,
         "ov_open": int(ov) if ov.isdigit() else None,
         "ov_message": request.query_params.get("ovmsg", ""),
         "scan_tools": SCAN_TOOLS,
@@ -853,6 +856,9 @@ def target_page(request: Request, eid: int, aid: int):
                 "ownership_info": ownership.instructions(asset) if needs_ownership else None,
                 "ownership_method": services.ownership_methods(s, [asset.id]).get(asset.id, ""),
                 "ownership_verification_required": config.ownership_verification_required(),
+                "ownership_bypass_active": config.ownership_bypass_active(),
+                "signed_authorization_bypass_active": config.signed_authorization_bypass_active(),
+                "bypass_status": config.BYPASS_STATUS,
             },
         )
 

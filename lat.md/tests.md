@@ -1781,71 +1781,123 @@ API lifespan, CLI `init`/`serve`/`worker`, and related entrypoints all call [[at
 
 ## Signed authorization flag
 
-`SIGNED_AUTHORIZATION` ON/OFF parsing, defaults, startup validation, and gate skip when OFF (`tests/test_signed_authorization_flag.py`).
+`BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` + `APP_ENV` parsing, defaults, startup validation, and gate skip when local bypass is active (`tests/test_signed_authorization_flag.py`).
 
-### Missing defaults to ON
+### Both unset mandatory
 
-Unset or blank `SIGNED_AUTHORIZATION` resolves to `ON` and [[attestra/config.py#signed_authorization_required]] is true.
+Unset bypasses default to false so [[attestra/config.py#signed_authorization_required]] and ownership stay mandatory.
 
-### ON requires
+### Both false mandatory
 
-Explicit `ON` (any case) keeps signed authorization required for imports and scan env gates.
+Explicit false bypasses with allowlisted `APP_ENV` keep both checks required.
 
-### OFF skips gates only
+### Signed bypass local
 
-`OFF` makes [[attestra/config.py#signed_authorization_required]] false so import/scope empty-auth and policy env checks can be skipped without disabling document RBAC or SSRF.
+`BYPASS_SIGNED_AUTHORIZATION_VERIFICATION=true` with `APP_ENV=local` makes [[attestra/config.py#signed_authorization_required]] false while ownership stays required.
 
-### Invalid fails validation
+### Both bypass local
 
-Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead of choosing a silent mode.
+Both bypasses true in an allowlisted `APP_ENV` skip signed-auth and ownership gates together.
+
+### Production rejects bypass
+
+`APP_ENV=production` with signed bypass true raises [[attestra/config.py#ConfigurationError]] at [[attestra/config.py#validate_runtime_config]].
+
+### Staging rejects bypass
+
+`APP_ENV=staging` with signed bypass true raises [[attestra/config.py#ConfigurationError]] at startup validation.
+
+### Unknown env fail closed
+
+Unknown `APP_ENV` raises [[attestra/config.py#ConfigurationError]] even when bypasses are false.
+
+### Missing APP_ENV with bypass
+
+Missing `APP_ENV` with signed bypass true fails closed at [[attestra/config.py#validate_runtime_config]].
+
+### Malformed boolean
+
+Malformed `BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` values raise [[attestra/config.py#ConfigurationError]].
 
 ### Validate runtime config
 
-[[attestra/config.py#validate_runtime_config]] refreshes `SIGNED_AUTHORIZATION` from the environment and raises on invalid values.
+[[attestra/config.py#validate_runtime_config]] refreshes `APP_ENV` and both `BYPASS_*` flags and rejects disallowed combinations.
 
-### Import without auth when OFF
+### Legacy flag removed
 
-[[attestra/services.py#import_results]] succeeds without a valid authorization when the flag is `OFF`.
+Legacy `SIGNED_AUTHORIZATION` helpers and module globals raise [[attestra/config.py#ConfigurationError]] pointing at the bypass flags.
 
-### Scope empty auth when OFF
+### Import without auth when bypassed
 
-[[attestra/runner/authorization.py#scope_for_engagement]] builds an asset allow-list without raising when no authorization exists and the flag is `OFF`.
+[[attestra/services.py#import_results]] succeeds without a valid authorization when local signed bypass is active.
+
+### Scope empty auth when bypassed
+
+[[attestra/runner/authorization.py#scope_for_engagement]] builds an asset allow-list without raising when no authorization exists and signed bypass is active.
 
 ### Gate passes authorization_required
 
-[[attestra/runner/gate.py#policy_input]] sets `authorization_required` from [[attestra/config.py#signed_authorization_required]] so OFF is honored at admission.
+[[attestra/runner/gate.py#policy_input]] sets `authorization_required` from [[attestra/config.py#signed_authorization_required]] so local bypass is honored at admission.
 
 ## Ownership verification flag
 
-`OWNERSHIP_VERIFICATION` ON/OFF parsing, defaults, startup validation, and gate skip when OFF (`tests/test_ownership_verification_flag.py`).
+`BYPASS_TARGET_OWNERSHIP_VERIFICATION` + `APP_ENV` parsing, defaults, startup validation, and gate skip when local bypass is active (`tests/test_ownership_verification_flag.py`).
 
-### Missing defaults to ON
+### Both unset mandatory
 
-Unset or blank `OWNERSHIP_VERIFICATION` resolves to `ON` and [[attestra/config.py#ownership_verification_required]] is true.
+Unset bypasses default to false so [[attestra/config.py#ownership_verification_required]] and signed-auth stay mandatory.
 
-### ON requires
+### Both false mandatory
 
-Explicit `ON` (any case) keeps ownership required for web_app/api/host before scan admission.
+Explicit false bypasses with allowlisted `APP_ENV` keep both checks required.
 
-### OFF skips gate only
+### Ownership bypass local
 
-`OFF` makes [[attestra/config.py#ownership_verification_required]] false so the policy ownership check can be skipped without disabling UI verify or other controls.
+`BYPASS_TARGET_OWNERSHIP_VERIFICATION=true` with `APP_ENV=local` makes [[attestra/config.py#ownership_verification_required]] false while signed-auth stays required.
 
-### Invalid fails validation
+### Both bypass local
 
-Values other than ON/OFF raise [[attestra/config.py#ConfigurationError]] instead of choosing a silent mode.
+Both bypasses true in an allowlisted `APP_ENV` skip ownership and signed-auth gates together.
+
+### Production rejects bypass
+
+`APP_ENV=production` with ownership bypass true raises [[attestra/config.py#ConfigurationError]] at [[attestra/config.py#validate_runtime_config]].
+
+### Staging rejects bypass
+
+`APP_ENV=staging` with ownership bypass true raises [[attestra/config.py#ConfigurationError]] at startup validation.
+
+### Unknown env fail closed
+
+Unknown `APP_ENV` raises [[attestra/config.py#ConfigurationError]] even when bypasses are false.
+
+### Missing APP_ENV with bypass
+
+Missing `APP_ENV` with ownership bypass true fails closed at [[attestra/config.py#validate_runtime_config]].
+
+### Malformed boolean
+
+Malformed `BYPASS_TARGET_OWNERSHIP_VERIFICATION` values raise [[attestra/config.py#ConfigurationError]].
 
 ### Validate runtime config
 
-[[attestra/config.py#validate_runtime_config]] refreshes `OWNERSHIP_VERIFICATION` from the environment and raises on invalid values.
+[[attestra/config.py#validate_runtime_config]] refreshes `APP_ENV` and both `BYPASS_*` flags and rejects disallowed combinations.
 
-### OFF allows unverified web_app
+### Legacy flag removed
 
-With `ownership_required=false`, [[attestra/runner/policy.py#evaluate_python]] allows an unverified `web_app` that would otherwise be refused.
+Legacy `OWNERSHIP_VERIFICATION` helpers and module globals raise [[attestra/config.py#ConfigurationError]] pointing at the bypass flags.
+
+### Bypass allows unverified web_app
+
+With `ownership_required=false` from local bypass, [[attestra/runner/policy.py#evaluate_python]] allows an unverified `web_app` that would otherwise be refused.
 
 ### Gate passes ownership_required
 
-[[attestra/runner/gate.py#policy_input]] sets `ownership_required` from [[attestra/config.py#ownership_verification_required]] so OFF is honored at admission.
+[[attestra/runner/gate.py#policy_input]] sets `ownership_required` from [[attestra/config.py#ownership_verification_required]] so local bypass is honored at admission.
+
+### Bypass never sets verified_at
+
+Local ownership bypass never invents or sets `ownership_verified_at`; UI may show bypassed status without claiming Verified.
 
 ## Organization test-run credits
 

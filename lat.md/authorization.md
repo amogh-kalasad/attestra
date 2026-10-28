@@ -1,6 +1,6 @@
 # Authorization and scope
 
-No valid signed client authorization means no import when `SIGNED_AUTHORIZATION=ON` (default). Runner dispatch adds URL/path/image checks, deny rules, and ownership verification ([[runner#Scope authorization]]).
+No valid signed client authorization means no import when [[attestra/config.py#signed_authorization_required]] is true (default). Runner dispatch adds URL/path/image checks, deny rules, and ownership verification ([[runner#Scope authorization]]).
 
 ## Authorization record
 
@@ -29,13 +29,13 @@ Only role `admin` may download or open the signed authorization file bytes.
 
 Business rule that blocks result ingestion without a live authorization.
 
-When [[attestra/config.py#signed_authorization_required]] is true, [[attestra/services.py#import_results]] fails if no currently valid authorization exists on the engagement. Findings matched to assets must land in environments covered by [[attestra/services.py#authorized_environments]]. Otherwise the import is rejected. When `SIGNED_AUTHORIZATION=OFF`, those checks are skipped; document download RBAC, tenant isolation, ownership, and SSRF stay enforced. UI may still record authorizations.
+When [[attestra/config.py#signed_authorization_required]] is true, [[attestra/services.py#import_results]] fails if no currently valid authorization exists on the engagement. Findings matched to assets must land in environments covered by [[attestra/services.py#authorized_environments]]. Otherwise the import is rejected. When [[attestra/config.py#signed_authorization_bypass_active]] is true, those checks are skipped; document download RBAC, tenant isolation, ownership, and SSRF stay enforced. UI may still record authorizations and never claims cryptographic signature verification for a bypass.
 
 ## Signed authorization flag
 
-ON/OFF switch for import and scan signed-authorization gates.
+APP_ENV-gated local-testing bypass for import and scan signed-authorization gates.
 
-[[attestra/config.py#parse_signed_authorization]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#signed_authorization_required]] drives import gates, [[attestra/runner/authorization.py#scope_for_engagement]] empty-auth refusal, and `authorization_required` in [[attestra/runner/gate.py#policy_input]] / [[attestra/runner/policy.py#build_input]] / `policy/scope.rego`. Env check is `not authorization_required OR asset_environment in authorized_environments`. [[attestra/config.py#validate_runtime_config]] refreshes it with subscription and ownership flags. Restart API and workers after changing.
+[[attestra/config.py#parse_bypass_signed_authorization_verification]] accepts true/false/1/0/yes/no (default false). [[attestra/config.py#signed_authorization_bypass_active]] requires the requested flag and allowlisted `APP_ENV` (`local`/`test`/`development`). [[attestra/config.py#signed_authorization_required]] drives import gates, [[attestra/runner/authorization.py#scope_for_engagement]] empty-auth refusal, and `authorization_required` in [[attestra/runner/gate.py#policy_input]]. Engagement UI shows **Signature verification bypassed (local testing)** / signed authorization gate bypassed with [[attestra/config.py#BYPASS_STATUS]] when active. [[attestra/config.py#validate_runtime_config]] rejects bypass when `APP_ENV` is missing, unknown, or `staging`/`production`. Restart API and workers after changing.
 
 ## Assets as allow-list
 
@@ -77,7 +77,7 @@ Passive Certificate Transparency suggestions for an in-scope apex; never auto-ad
 
 Before the first scan, a lead or admin must prove the client controls each target. Three ways: DNS TXT record, well-known file, or owner confirm for private IPs.
 
-Only users with the `asset.verify_ownership` permission (lead and admin, see [[attestra/auth/roles.py#ROLES]]) can check or confirm ownership. Each target gets a token from [[attestra/runner/ownership.py#ensure_token]]. The page shows what to publish using [[attestra/runner/ownership.py#instructions]]. When `OWNERSHIP_VERIFICATION=OFF` ([[interfaces#Configuration#Ownership verification flag]]), the dispatch gate skips the ownership check via `ownership_required=false`; UI verify buttons and audit remain.
+Only users with the `asset.verify_ownership` permission (lead and admin, see [[attestra/auth/roles.py#ROLES]]) can check or confirm ownership. Each target gets a token from [[attestra/runner/ownership.py#ensure_token]]. The page shows what to publish using [[attestra/runner/ownership.py#instructions]]. When [[attestra/config.py#ownership_bypass_active]] ([[interfaces#Configuration#Ownership verification flag]]), the dispatch gate skips ownership via `ownership_required=false`; UI verify/confirm and audit remain. Engagement and asset pages show **Bypassed (local testing)** with [[attestra/config.py#BYPASS_STATUS]] when bypass is active and `ownership_verified_at` is unset — never as Verified — and keep Verify ownership details available. Bypass never invents `ownership_verified_at`. [[attestra/web/ui.py]] passes `ownership_bypass_active`, `signed_authorization_bypass_active`, and `bypass_status` into those templates; scan intro copy still branches on `*_required` helpers.
 
 ### DNS or file check
 

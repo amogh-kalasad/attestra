@@ -200,10 +200,10 @@ Environment variables and on-disk data layout.
 - `ATTESTRA_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_FROM` / `_TLS` (or `_STARTTLS`) — optional SMTP for invites and email alerts; off when host is unset; password never logged
 - `ATTESTRA_PUBLIC_URL` (or `ATTESTRA_URL`) — base URL used in alert email links to findings and targets
 - `SUBSCRIPTION_SERVICE` — see [[interfaces#Configuration#Subscription service flag]]
-- `SIGNED_AUTHORIZATION` — see [[interfaces#Configuration#Signed authorization flag]]
-- `OWNERSHIP_VERIFICATION` — see [[interfaces#Configuration#Ownership verification flag]]
+- `APP_ENV` / `BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` — see [[interfaces#Configuration#Signed authorization flag]]
+- `APP_ENV` / `BYPASS_TARGET_OWNERSHIP_VERIFICATION` — see [[interfaces#Configuration#Ownership verification flag]]
 
-Template: `.env.example`. Operator checklist of where the ownership and signed-authorization flags reflect: `docs/OWNERSHIP_AND_AUTHORIZATION_FLAGS.md`.
+Template: `.env.example`. Operator checklist of where the ownership and signed-authorization bypasses reflect: `docs/OWNERSHIP_AND_AUTHORIZATION_FLAGS.md`.
 
 ### Subscription service flag
 
@@ -213,15 +213,15 @@ Centralized ON/OFF switch for organization test-run credit enforcement.
 
 ### Signed authorization flag
 
-ON/OFF switch for import/scan signed-authorization environment gates.
+Local-testing bypass for import/scan signed-authorization environment gates.
 
-See [[authorization#Signed authorization flag]]. [[attestra/config.py#parse_signed_authorization]] / [[attestra/config.py#signed_authorization_required]] mirror the subscription ON/OFF pattern. Documented in `.env.example` and `README.md`.
+See [[authorization#Signed authorization flag]]. [[attestra/config.py#signed_authorization_required]] is false only when [[attestra/config.py#signed_authorization_bypass_active]] (requested `BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` and allowlisted `APP_ENV`). Documented in `.env.example` and `README.md`.
 
 ### Ownership verification flag
 
-ON/OFF switch for the dispatch gate ownership check on web_app/api/host targets.
+Local-testing bypass for the dispatch gate ownership check on web_app/api/host targets.
 
-[[attestra/config.py#parse_ownership_verification]] accepts only `ON` and `OFF` (case-insensitive). Missing or blank defaults to `ON`. Invalid values raise [[attestra/config.py#ConfigurationError]]. [[attestra/config.py#ownership_verification_required]] is the helper [[attestra/runner/gate.py#policy_input]] passes as `ownership_required` into [[attestra/runner/policy.py#build_input]] / `policy/scope.rego`. [[attestra/config.py#validate_runtime_config]] refreshes it with the other ON/OFF flags. `OFF` skips only that ownership gate; UI verify/confirm, token storage, and ownership audit stay available. Restart API and workers after changing.
+[[attestra/config.py#parse_bypass_target_ownership_verification]] accepts true/false/1/0/yes/no (default false). Bypass activates only with allowlisted `APP_ENV` (`local`/`test`/`development`). [[attestra/config.py#ownership_verification_required]] is the helper [[attestra/runner/gate.py#policy_input]] passes as `ownership_required`. [[attestra/config.py#validate_runtime_config]] rejects bypass outside the allowlist. Bypass skips only that ownership gate; UI verify/confirm and audit stay available. Engagement/asset UI shows **Bypassed (local testing)** via [[attestra/config.py#ownership_bypass_active]] and [[attestra/config.py#BYPASS_STATUS]], never as Verified.
 
 ### Organization test-run credits
 

@@ -15,17 +15,20 @@
 
 {% if ownership_info %}
 {% set oi = ownership_info %}
+{% set ownership_bypass = ownership_bypass_active if ownership_bypass_active is defined else false %}
+{% set local_bypass_status = bypass_status if bypass_status is defined else "BYPASSED_LOCAL" %}
 <div class="card" id="ownership">
   <h2>Ownership verification</h2>
   {% if asset.ownership_verified_at %}
   <p><span class="st-met">Verified{% if ownership_method == "dns" %} (DNS){% elif ownership_method == "file" %} (file){% elif ownership_method == "owner_confirmed" %} (owner confirmed){% endif %}</span>
     <span class="meta"> · {{ asset.ownership_verified_at|dt }}</span></p>
+  {% elif ownership_bypass %}
+  <p><span class="st-partial"><b>Bypassed (local testing)</b></span>
+    <span class="meta mono"> · {{ local_bypass_status }}</span></p>
+  <p class="meta">Ownership gate bypassed for local testing — this is not verified ownership. Verify details below remain available.</p>
   {% else %}
   <p class="st-not_met">Not verified</p>
   <p class="meta">Ask the client to publish one of these proofs, then click Verify now. Changing the token clears verification.</p>
-  {% endif %}
-  {% if not ownership_verification_required %}
-  <p class="meta">Ownership verification not required (OWNERSHIP_VERIFICATION=OFF)</p>
   {% endif %}
   <p style="margin:10px 0 4px"><b>DNS TXT value</b></p>
   <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">

@@ -130,8 +130,9 @@ Settings are read from environment variables. The most used ones are:
 | Variable | Purpose |
 | --- | --- |
 | `SUBSCRIPTION_SERVICE` | `ON` (default when unset) or `OFF`. When credit accounting is active, `ON` enforces organization test-run credits; `OFF` bypasses only those checks. Invalid values fail startup. Restart API and workers after changing. See `.env.example` |
-| `SIGNED_AUTHORIZATION` | `ON` (default when unset) or `OFF`. When `ON`, imports and scans require a currently valid signed authorization covering the target environment. `OFF` skips only those gates; document download RBAC, tenant isolation, ownership, SSRF, and audit stay enforced. Invalid values fail startup. |
-| `OWNERSHIP_VERIFICATION` | `ON` (default when unset) or `OFF`. When `ON`, web/api/host scans require verified ownership. `OFF` skips only that policy gate; UI verify/confirm remains available. Invalid values fail startup. |
+| `APP_ENV` | Deployment environment: `local`, `test`, `development`, `staging`, or `production`. Bypass flags only activate in `local` / `test` / `development`. Unknown values fail startup. Unset is allowed when both bypasses are false. |
+| `BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` | `false` (default when unset) or `true`. When active with an allowlisted `APP_ENV`, skips only signed-authorization import/scan gates; document download RBAC, tenant isolation, ownership, SSRF, and audit stay enforced. Staging/production (or missing `APP_ENV`) with `true` fails startup. |
+| `BYPASS_TARGET_OWNERSHIP_VERIFICATION` | `false` (default when unset) or `true`. When active with an allowlisted `APP_ENV`, skips only the ownership policy gate; UI verify/confirm remains available and never fabricates `ownership_verified_at`. Staging/production (or missing `APP_ENV`) with `true` fails startup. |
 | `ATTESTRA_INITIAL_TEST_RUN_CREDITS` | Starting organization test-run credits for a new tenant (default `3`) |
 | `ATTESTRA_CREDIT_REFUND_ON_PRE_START_FAILURE` | Refund a consumed credit if queue/dispatch fails before the run starts (default `ON`) |
 | `ATTESTRA_CREDIT_REFUND_ON_POST_START_FAILURE` | Auto-refund when a started scan later fails (default `OFF`) |

@@ -80,7 +80,7 @@ def scope_for_engagement(s: Session, engagement_id: int, on: date | None = None)
             raise AuthorizationError("no valid authorization")
         assets = [a for a in eng.assets if a.environment in envs]
     else:
-        # SIGNED_AUTHORIZATION=OFF: still build allow-list from engagement assets
+        # Signed-auth bypass active: still build allow-list from engagement assets
         # for SSRF/path/image checks; skip the empty-authorization refusal.
         assets = list(eng.assets)
     hosts: set[str] = set()

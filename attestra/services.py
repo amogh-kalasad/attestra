@@ -816,7 +816,7 @@ def import_results(
 ) -> ImportRun:
     """Import a scanner result file.
 
-    When ``SIGNED_AUTHORIZATION=ON`` (default), requires a currently valid
+    When signed authorization is required (default), requires a currently valid
     signed authorization and refuses findings in unauthorized environments.
     """
     # @lat: [[authorization#Import gate]]
