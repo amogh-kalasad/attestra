@@ -562,6 +562,27 @@ def _auth_profiles_for(s, eid: int, principal) -> list[dict]:
         return []
 
 
+def _elite_test_cases() -> list[dict]:
+    try:
+        from attestra.automated_vapt.core import test_registry
+
+        return [
+            {"id": c.id, "category": c.category, "title": c.title}
+            for c in test_registry.list_test_cases()
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _elite_executions(s, eid: int, principal) -> list[dict]:
+    try:
+        from attestra.automated_vapt.core import orchestrator as orch
+
+        return [orch.execution_public_dict(r) for r in orch.list_executions(s, eid, principal=principal)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _engagement_ctx(
     request: Request,
     s,
@@ -656,10 +677,13 @@ def _engagement_ctx(
         "ct_suggestions": ct_suggestions or [],
         "ct_apex": ct_apex,
         "auth_web_enabled": config.AUTH_WEB_ENABLED,
+        "automated_vapt_enabled": config.AUTOMATED_VAPT_ENABLED,
         "can_manage_auth": has_permission(principal.role, "auth_profile.manage"),
         "auth_profiles": _auth_profiles_for(s, eid, principal),
         "auth_methods": AUTH_PROFILE_METHODS,
         "org_credits": _org_credits_for(principal, s, e.tenant_id),
+        "elite_test_cases": _elite_test_cases() if config.AUTOMATED_VAPT_ENABLED else [],
+        "elite_executions": _elite_executions(s, eid, principal) if config.AUTOMATED_VAPT_ENABLED else [],
     }
 
 

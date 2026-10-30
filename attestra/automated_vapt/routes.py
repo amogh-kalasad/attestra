@@ -1,8 +1,9 @@
-"""API routes for Elite automated security-testing executions."""
+"""API and UI routes for Elite automated security-testing executions."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from attestra import db, services
@@ -11,6 +12,7 @@ from attestra.automated_vapt.core import orchestrator as orch
 from attestra.automated_vapt.core import test_registry
 
 api_router = APIRouter(prefix="/api/automated-vapt", tags=["automated-vapt"])
+ui_router = APIRouter(tags=["automated-vapt-ui"])
 
 
 def _principal(request: Request):
@@ -147,3 +149,78 @@ def cancel_one_execution(xid: int, principal=Depends(_principal)):
             return orch.execution_public_dict(ex)
     except services.ServiceError as e:
         raise _err(e) from e
+
+
+def _ui_principal(request: Request):
+    from attestra.web.ui import _principal, _require_login
+
+    principal, redirect = _require_login(request)
+    if redirect is not None:
+        return None, redirect
+    return principal, None
+
+
+@ui_router.post("/engagements/{eid}/automated-vapt/executions")
+async def ui_create_execution(
+    request: Request,
+    eid: int,
+    asset_id: int = Form(...),
+    profile: str = Form("baseline"),
+):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    form = await request.form()
+    ids = [str(v) for v in form.getlist("test_case_id")]
+    try:
+        with db.session() as s:
+            orch.create_execution(
+                s,
+                engagement_id=eid,
+                asset_id=asset_id,
+                test_case_ids=ids,
+                actor=principal.username,
+                principal=principal,
+                profile=profile,
+            )
+        return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
+    except services.ServiceError as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/automated-vapt/executions/{xid}/run")
+def ui_run_execution(request: Request, eid: int, xid: int):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    try:
+        with db.session() as s:
+            orch.run_execution(s, xid, actor=principal.username, principal=principal)
+        return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
+    except services.ServiceError as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/automated-vapt/executions/{xid}/cancel")
+def ui_cancel_execution(request: Request, eid: int, xid: int):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    try:
+        with db.session() as s:
+            orch.cancel_execution(s, xid, actor=principal.username, principal=principal)
+        return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
+    except services.ServiceError as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",
+            status_code=303,
+        )

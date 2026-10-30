@@ -191,6 +191,14 @@ Redaction façade [[attestra/automated_vapt/evidence/evidence_redactor.py#redact
 
 [[attestra/automated_vapt/integrations/attestra_findings.py#create_finding_from_validation]] creates findings only for CONFIRMED/POTENTIAL with fingerprint dedup.
 
+### Subscription credits
+
+[[attestra/automated_vapt/integrations/subscription_adapter.py#ensure_credit_for_execution]] charges one organization credit per Elite execution when `SUBSCRIPTION_SERVICE=ON`.
+
+### Engagement UI
+
+When enabled, engagement page shows Automated security testing card (queue/run/cancel + history) via [[attestra/automated_vapt/routes.py]] UI routes.
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.
