@@ -2477,4 +2477,28 @@ Secure mock blocks cross-tenant and password listing; vulnerable mock does not.
 
 Orchestrator `T04` returns PASSED on secure and FINDING on vulnerable.
 
+## Elite Phase E7 validation
+
+Vulnerability validator and false-positive checker (`tests/automated_vapt/test_e7_validation.py`).
+
+### Http 200 alone not confirmed
+
+A lone HTTP 200 without exposure/bypass classifies as NOT_VULNERABLE.
+
+### Exposure confirms
+
+Protected-data exposure with reproducible evidence classifies as CONFIRMED.
+
+### Authorized access not vulnerable
+
+Authorized access without exposure classifies as NOT_VULNERABLE.
+
+### Fp checker empty error
+
+Empty/deny responses are likely FP; exposure is never suppressed.
+
+### Potential without evidence
+
+Exposure without supporting evidence classifies as POTENTIAL.
+
 

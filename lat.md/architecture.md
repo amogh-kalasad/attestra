@@ -171,6 +171,10 @@ Playwright (when installed) or injectable ``capture_fn`` via [[attestra/automate
 
 Elite modules under [[attestra/automated_vapt/testing/]] for authentication, BOLA/IDOR, roles, tenant isolation, and API disclosure (`T03`–`T07`). Results use ``finding_candidate``; orchestrator maps True→FINDING / False→PASSED.
 
+### Validation engine
+
+[[attestra/automated_vapt/validation/vulnerability_validator.py#validate_result]] classifies CONFIRMED/POTENTIAL/NOT_VULNERABLE/INCONCLUSIVE/NEEDS_MANUAL_REVIEW without treating HTTP 200 alone as proof. FP heuristics: [[attestra/automated_vapt/validation/false_positive_checker.py#check_false_positive]].
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.
