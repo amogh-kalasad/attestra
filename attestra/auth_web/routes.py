@@ -40,6 +40,10 @@ class ProfileCreateIn(BaseModel):
     secret_ref: str | None = None
     asset_id: int | None = None
     config: dict | None = None
+    extra_headers: str | None = Field(default=None, description="Non-secret 'Name: value' lines")
+    extra_cookies: str | None = Field(
+        default=None, description="Encrypted 'name=value; name2=value2' cookies; accepted once, never echoed"
+    )
 
 
 class RotateIn(BaseModel):
@@ -80,6 +84,8 @@ def create_auth_profile(eid: int, body: ProfileCreateIn, principal=Depends(_prin
                 secret_ref=body.secret_ref,
                 asset_id=body.asset_id,
                 config_json=body.config,
+                extra_headers=body.extra_headers,
+                extra_cookies=body.extra_cookies,
                 actor=principal.actor,
                 principal=principal,
             )

@@ -627,52 +627,7 @@
   @media (max-width: 1400px) { main { padding-left: 24px; padding-right: 24px; } .topbar { padding-left: 24px; padding-right: 24px; } }
   /* Horizontal-scroll fallback: make the scrollbar visible and tidy */
   .card { scrollbar-width: thin; scrollbar-color: #C9D3DB transparent; }
-  /* ===== Fix 3: framework status + client cards (engagement overview) ===== */
-  .grid:has(> .card > form #fw_select) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  @media (max-width: 900px) { .grid:has(> .card > form #fw_select) { grid-template-columns: minmax(0, 1fr); } }
-  .card:has(> form #fw_select) { display: flex; flex-direction: column; }
-  .card:has(> form #fw_select) > form.row {
-    flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 18px !important;
-    padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--field);
-  }
-  .card:has(> form #fw_select) > form.row label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--quiet); white-space: nowrap; }
-  .card:has(> form #fw_select) > form.row select { flex: 1; min-width: 0; height: 38px; min-height: 38px; background-color: var(--card); }
-  .card:has(> form #fw_select) > form.row button { height: 38px; min-height: 38px; }
-  .card:has(> form #fw_select) > .row:last-child { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-  @media (max-width: 1100px) { .card:has(> form #fw_select) > .row:last-child { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); } }
-  .card:has(> form #fw_select) .kpi {
-    --k: var(--quiet); --kb: #F8FAFC; --kl: var(--rule-3);
-    min-width: 0; padding: 10px 10px 10px 13px; border-radius: 10px; position: relative; overflow: hidden;
-    background: var(--kb); border: 1px solid var(--kl); display: flex; flex-direction: column; gap: 2px;
-  }
-  .card:has(> form #fw_select) .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--k); }
-  .card:has(> form #fw_select) .kpi .st { display: inline-flex; align-items: flex-start; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--k); line-height: 1.3; }
-  .card:has(> form #fw_select) .kpi .st::before { content: ""; width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--k); flex: none; }
-  .card:has(> form #fw_select) .kpi b { margin-top: auto !important; padding-top: 6px; font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; margin-top: 6px; color: var(--ink); font-variant-numeric: tabular-nums; }
-  .card:has(> form #fw_select) .kpi:has(.st-met) { --k: #15803D; --kb: #F0FBF4; --kl: #CDEFD9; }
-  .card:has(> form #fw_select) .kpi:has(.st-no_exceptions) { --k: #0369A1; --kb: #F0F8FD; --kl: #CBE6F6; }
-  .card:has(> form #fw_select) .kpi:has(.st-partial) { --k: #B45309; --kb: #FFF9EE; --kl: #F8E2B8; }
-  .card:has(> form #fw_select) .kpi:has(.st-not_met) { --k: #B91C1C; --kb: #FFF5F5; --kl: #F9D2D2; }
-  .card:has(> form #fw_select) .kpi:has(.st-not_assessed) { --k: #64748B; --kb: #F8FAFC; --kl: #E2E8F0; }
-
-  /* Client card */
-  .grid:has(#fw_select) > .card:has(#edit), .grid:has(#fw_select) > .card:nth-child(2) { display: flex; flex-direction: column; gap: 6px; }
-  .grid:has(#fw_select) > .card:nth-child(2) > h2 { margin-bottom: 12px; }
-  .grid:has(#fw_select) > .card:nth-child(2) > div:nth-of-type(1) b { font-size: 18px; font-weight: 650; letter-spacing: -.01em; color: var(--ink); }
-  .grid:has(#fw_select) > .card:nth-child(2) > div:nth-of-type(2):not(.meta) { color: var(--ink-2); font-size: 14px; }
-  .grid:has(#fw_select) > .card:nth-child(2) > div:nth-of-type(2):not(.meta)::before { content: "Contact"; display: inline-block; min-width: 76px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--quiet); }
-  .grid:has(#fw_select) > .card:nth-child(2) > div.meta {
-    margin-top: 10px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px; background: var(--field);
-    color: var(--ink-2); font-size: 13px; line-height: 1.6;
-  }
-  .grid:has(#fw_select) > .card:nth-child(2) > #edit { margin-top: 12px; }
-  .grid:has(#fw_select) > .card:nth-child(2) > #edit > summary {
-    margin: 0; height: 36px; padding: 0 14px; background: var(--card); color: var(--ink-2);
-    border: 1px solid var(--rule-3); border-radius: 8px; box-shadow: var(--shadow); font-size: 13.5px;
-  }
-  .grid:has(#fw_select) > .card:nth-child(2) > #edit > summary:hover { background: var(--field); color: var(--ink); }
-  .grid:has(#fw_select) > .card:nth-child(2) > #edit > summary::before { border-left-color: var(--quiet); }
-  .grid:has(#fw_select) > .card:nth-child(2) > #edit[open] > summary { margin-bottom: 16px; }
+  /* Engagement overview (framework status + client cards): see "Engagement overview" in /static/attestra.css */
   @media (max-width: 1100px) {
     #findings th, #findings td { padding-left: 6px; padding-right: 6px; }
     #findings th:first-child, #findings td:first-child { padding-left: 14px; }
@@ -684,7 +639,7 @@
     #findings td:nth-child(2) .pill { font-size: 11px; padding: 2px 7px; }
   }
 </style>
-<link rel="stylesheet" href="/static/attestra.css?v=13">
+<link rel="stylesheet" href="/static/attestra.css?v=15">
 <script src="/static/attestra.js?v=11" defer></script>
 </head>
 <body class="{% if (not actor) or path.startswith('/login') or path.startswith('/invite') %}is-auth{% else %}is-app{% endif %}">

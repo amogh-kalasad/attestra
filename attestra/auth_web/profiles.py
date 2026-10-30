@@ -88,6 +88,12 @@ def profile_dict(row: AuthCredentialProfile) -> dict:
         "has_secret": bool(ref),
         "secret_ref": _truncate_ref(ref),
         "config": dict(row.config_json or {}),
+        "extra_headers": getattr(row, "extra_headers", "") or "",
+        # Extra cookies are secret: only whether they exist + their NAMES, never values.
+        "has_extra_cookies": bool((getattr(row, "extra_cookies_ref", "") or "").strip()),
+        "extra_cookie_names": [
+            n.strip() for n in (getattr(row, "extra_cookie_names", "") or "").split(",") if n.strip()
+        ],
         "status": row.status or "",
         "last_validated_at": row.last_validated_at.isoformat() if row.last_validated_at else None,
         "last_validation_note": row.last_validation_note or "",
@@ -131,6 +137,8 @@ def create_profile(
     secret_ref: str | None = None,
     asset_id: int | None = None,
     config_json: dict | None = None,
+    extra_headers: str | None = None,
+    extra_cookies: str | None = None,
     actor: str | None = None,
     principal=None,
 ) -> AuthCredentialProfile:
@@ -148,6 +156,8 @@ def create_profile(
 
     if secret_value is not None and secret_ref is not None and str(secret_ref).strip():
         raise services.ServiceError("provide secret_value or secret_ref, not both")
+    extra_text = _clean_extra_headers(extra_headers, method, config_json)
+    cookie_pairs = _clean_extra_cookies(extra_cookies, method, config_json)
 
     stored_ref = ""
     if secret_value is not None:
@@ -178,6 +188,12 @@ def create_profile(
         if asset is None or asset.engagement_id != eng.id:
             raise LookupError(f"asset {asset_id} not found on engagement")
 
+    xc_ref = ""
+    if cookie_pairs:
+        xc_ref = credentials.put_secret(
+            eng.tenant_id, eng.id, f"{label} (extra cookies)", _cookie_secret_text(cookie_pairs)
+        )
+
     who = _actor_name(actor, principal)
     now = utcnow()
     row = AuthCredentialProfile(
@@ -195,6 +211,9 @@ def create_profile(
         success_url_contains=(success_url_contains or "").strip()[:500],
         secret_ref=stored_ref,
         config_json=dict(config_json or {}),
+        extra_headers=extra_text,
+        extra_cookies_ref=xc_ref,
+        extra_cookie_names=_cookie_names_text(cookie_pairs),
         status="pending",
         last_validation_note="",
         created_by=who,
@@ -214,6 +233,144 @@ def create_profile(
         label=row.label,
         method=row.method,
         has_secret=bool(stored_ref),
+        extra_header_names=_extra_names(extra_text),
+        extra_cookie_names=[k for k, _ in cookie_pairs],
+    )
+    return row
+
+
+def _clean_extra_headers(text: str | None, method: str | None, cfg: dict | None) -> str:
+    """Validate + normalize the extra headers text (ServiceError on bad input)."""
+    from attestra.auth_web import extra_headers as xh
+
+    try:
+        return xh.normalize_extra_headers(text, own_header_name=xh.own_header_name(method, cfg))
+    except xh.ExtraHeadersError as exc:
+        raise services.ServiceError(str(exc)) from exc
+
+
+def _extra_names(text: str) -> list[str]:
+    """Header NAMES only (for audit detail); values are never recorded."""
+    from attestra.auth_web import extra_headers as xh
+
+    try:
+        return [k for k, _ in xh.parse_extra_headers(text)]
+    except xh.ExtraHeadersError:
+        return []
+
+
+def update_extra_headers(
+    s: Session,
+    engagement_id: int,
+    profile_id: int,
+    *,
+    extra_headers: str | None,
+    principal,
+    actor: str | None = None,
+) -> AuthCredentialProfile:
+    """Replace a profile's non-secret extra headers (empty text clears them)."""
+    _check_write(principal)
+    row = _get_profile(s, engagement_id, profile_id, principal)
+    if row.status == "revoked":
+        raise services.ServiceError("not allowed: profile is revoked")
+    text = _clean_extra_headers(extra_headers, row.method, row.config_json)
+    who = _actor_name(actor, principal)
+    row.extra_headers = text
+    row.updated_by = who
+    row.updated_at = utcnow()
+    s.flush()
+    audit.record(
+        s,
+        who,
+        "auth_profile.extra_headers",
+        "auth_credential_profile",
+        row.id,
+        engagement_id=engagement_id,
+        extra_header_names=_extra_names(text),
+    )
+    return row
+
+
+
+def _clean_extra_cookies(text: str | None, method: str | None, cfg: dict | None) -> list[tuple[str, str]]:
+    """Validate the extra cookies text (ServiceError with a value-free message)."""
+    from attestra.auth_web import extra_cookies as xc
+
+    try:
+        pairs = xc.parse_extra_cookies(text)
+    except xc.ExtraCookiesError as exc:
+        raise services.ServiceError(str(exc)) from exc
+    m = (method or "").strip().lower()
+    if pairs and m in ("none", "sso_bootstrap"):
+        raise services.ServiceError(f"extra cookies are not used by method={m}")
+    own = xc.own_cookie_name(m, cfg)
+    if own and own in {k for k, _ in pairs}:
+        raise services.ServiceError(f"extra cookie '{own}' duplicates the profile's session cookie")
+    return pairs
+
+
+def _cookie_secret_text(pairs: list[tuple[str, str]]) -> str:
+    return "; ".join(f"{k}={v}" for k, v in pairs)
+
+
+def _cookie_names_text(pairs: list[tuple[str, str]]) -> str:
+    return ", ".join(k for k, _ in pairs)[:1200]
+
+
+def update_extra_cookies(
+    s: Session,
+    engagement_id: int,
+    profile_id: int,
+    *,
+    extra_cookies: str | None,
+    principal,
+    actor: str | None = None,
+) -> AuthCredentialProfile:
+    """Replace a profile's ENCRYPTED extra cookies (empty text clears them).
+
+    Values go only to the credential store; the row keeps the opaque ref + names.
+    """
+    _check_write(principal)
+    row = _get_profile(s, engagement_id, profile_id, principal)
+    if row.status == "revoked":
+        raise services.ServiceError("not allowed: profile is revoked")
+    pairs = _clean_extra_cookies(extra_cookies, row.method, row.config_json)
+    old = (getattr(row, "extra_cookies_ref", "") or "").strip()
+    who = _actor_name(actor, principal)
+    if pairs:
+        value = _cookie_secret_text(pairs)
+        new_ref = ""
+        if old:
+            try:
+                new_ref = credentials.rotate_secret(old, value)
+            except credentials.SecretsError:
+                new_ref = ""
+        if not new_ref:
+            new_ref = credentials.put_secret(
+                row.tenant_id, row.engagement_id, f"{row.label} (extra cookies)", value
+            )
+        row.extra_cookies_ref = new_ref
+        row.extra_cookie_names = _cookie_names_text(pairs)
+    else:
+        if old:
+            try:
+                credentials.delete_secret(old)
+            except credentials.SecretsError:
+                pass
+        row.extra_cookies_ref = ""
+        row.extra_cookie_names = ""
+    row.updated_by = who
+    row.updated_at = utcnow()
+    s.flush()
+    audit.record(
+        s,
+        who,
+        "auth_profile.extra_cookies",
+        "auth_credential_profile",
+        row.id,
+        engagement_id=engagement_id,
+        extra_cookie_names=[k for k, _ in pairs],
+        cleared=not pairs,
     )
     return row
 
@@ -364,6 +521,12 @@ def delete_profile(
     label = row.label
     if ref:
         credentials.delete_secret(ref)
+    xc_ref = (getattr(row, "extra_cookies_ref", "") or "").strip()
+    if xc_ref:
+        try:
+            credentials.delete_secret(xc_ref)
+        except credentials.SecretsError:
+            pass
     s.delete(row)
     s.flush()
     audit.record(

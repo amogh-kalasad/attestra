@@ -17,6 +17,7 @@ import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sqlalchemy.exc import OperationalError
 
@@ -58,6 +59,10 @@ class WorkerPool:
     # Test hook: replaces durable.run_one_job(s, job).
     run_job: Callable | None = None
     housekeeping: bool = True
+    # Worker instance lock file: touched with every heartbeat pass so the web page can
+    # tell an idle worker is alive. Stop file: written by the Stop Worker button.
+    lock_file: Path | None = None
+    stop_file: Path | None = None
     stop_event: threading.Event = field(default_factory=threading.Event)
     _active: dict[int, _Active] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -68,6 +73,9 @@ class WorkerPool:
     def run_forever(self) -> None:
         try:
             while not self.stop_event.is_set():
+                if self._stop_requested():
+                    self.log("worker stopping: Stop Worker was clicked on the web page")
+                    break
                 started = self.tick()
                 self.stop_event.wait(0.2 if started else self.poll)
         except KeyboardInterrupt:
@@ -119,8 +127,28 @@ class WorkerPool:
             return
         ids = self.active_job_ids()
         self._last_heartbeat = now
+        self._touch_lock()
         if ids:
             self._safe("heartbeat", self._touch, ids)
+
+    def _touch_lock(self) -> None:
+        if self.lock_file is None:
+            return
+        try:
+            os.utime(self.lock_file, None)
+        except OSError:
+            pass
+
+    def _stop_requested(self) -> bool:
+        if self.stop_file is None:
+            return False
+        try:
+            if not self.stop_file.exists():
+                return False
+            self.stop_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return True
 
     def _touch(self, ids: list[int]) -> None:
         with db.session() as s:

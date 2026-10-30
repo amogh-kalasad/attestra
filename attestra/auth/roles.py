@@ -18,6 +18,9 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "finding.read": frozenset({"admin", "lead", "tester", "reviewer", "client_viewer", "auditor"}),
     "finding.write": frozenset({"admin", "lead", "tester"}),
     "scan.start": frozenset({"admin", "lead", "tester"}),
+    # Authenticated-scan credential profiles: only lead/admin may create/edit/rotate/delete.
+    "auth_profile.manage": frozenset({"admin", "lead"}),
+    "auth_profile.read": frozenset({"admin", "lead", "tester"}),
     "scan.read": frozenset({"admin", "lead", "tester", "reviewer", "auditor"}),
     "engagement.halt": frozenset({"admin", "lead"}),
     "engagement.resume": frozenset({"admin", "lead"}),

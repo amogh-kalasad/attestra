@@ -40,11 +40,11 @@
 {% set nx = namespace(found=false) %}
 <div class="steps" aria-label="Progress">
   {% for href, done, title, meta in [
-      ("#scope", has_auth, "Signed authorization", "Complete" if has_auth else "Pending"),
-      ("#targets", e.assets, "Targets in scope", (e.assets|length ~ " target" ~ ("s" if e.assets|length != 1 else ""))),
-      ("#plan", plan_done, "Test plan", "Complete" if plan_done else "Pending"),
-      ("#scans", scans, "Automated scans", (scans|length ~ " run")),
-      ("#import", imports, "Results imported", (imports|length ~ " file" ~ ("s" if imports|length != 1 else ""))),
+      ("#scope", has_auth, "Signed Authorization", "Complete" if has_auth else "Pending"),
+      ("#targets", e.assets, "Targets in Scope", (e.assets|length ~ " target" ~ ("s" if e.assets|length != 1 else ""))),
+      ("#plan", plan_done, "Test Plan", "Complete" if plan_done else "Pending"),
+      ("#scans", scans, "Automated Scans", (scans|length ~ " run")),
+      ("#import", imports, "Results Imported", (imports|length ~ " file" ~ ("s" if imports|length != 1 else ""))),
       ("#reports", reports, "Reports", (reports|length ~ " generated")),
   ] %}
   {% set is_next = (not done) and (not nx.found) %}{% if is_next %}{% set nx.found = true %}{% endif %}
@@ -64,9 +64,9 @@
 <nav class="tabs eng-tabs" aria-label="Engagement workspace">
   <a href="#p-findings">Findings <span class="n">{{ findings|length }}</span></a>
   <a href="#p-overview">Overview</a>
-  <a href="#p-scope">Authorization &amp; targets <span class="n">{{ e.assets|length }}</span></a>
-  <a href="#p-plan">Test plan</a>
-  <a href="#p-scans">Scans &amp; imports <span class="n">{{ scans|length }}</span></a>
+  <a href="#p-scope">Authorization &amp; Targets <span class="n">{{ e.assets|length }}</span></a>
+  <a href="#p-plan">Test Plan</a>
+  <a href="#p-scans">Scans &amp; Imports <span class="n">{{ scans|length }}</span></a>
   <a href="#p-compliance">Compliance</a>
   <a href="#p-reports">Reports <span class="n">{{ reports|length }}</span></a>
 </nav>
@@ -132,25 +132,27 @@
 </div>
 </section>
 <section class="tp" id="p-overview">
-<div class="grid">
-  <div class="card">
+<div class="grid ov-grid">
+  <div class="card ov-card ov-fw">
     <h2>{{ fw_names[fw] }}</h2>
-    <form method="get" class="row" style="margin-bottom:12px">
-      <label for="fw_select" class="meta" style="margin:0">Framework</label>
+    <form method="get" class="row ov-fw-form">
+      <label for="fw_select" class="meta">Framework</label>
       <select id="fw_select" name="framework">
         {% for k, n in fw_names.items() %}<option value="{{ k }}" {{ "selected" if k == fw }}>{{ n }}</option>{% endfor %}
       </select>
       <button type="submit" class="secondary">Show</button>
     </form>
-    <div class="row">
-      {% for st in ["met","no_exceptions","partial","not_met","not_assessed"] %}<div class="kpi"><span class="st st-{{ st }}">{{ st|label }}</span><b>{{ counts.get(st, 0) }}</b></div>{% endfor %}
+    <div class="ov-kpis" role="list" aria-label="Control status counts">
+      {% for st in ["met","no_exceptions","partial","not_met","not_assessed"] %}<div class="kpi ov-kpi ov-kpi-{{ st }}" role="listitem"><span class="st st-{{ st }}">{{ st|label|title }}</span><b>{{ counts.get(st, 0) }}</b></div>{% endfor %}
     </div>
   </div>
-  <div class="card">
+  <div class="card ov-card ov-client">
     <h2>Client</h2>
-    <div><b>{{ e.tenant.name }}</b></div>
-    {% if e.tenant.contact_name or e.tenant.contact_email %}<div>{{ e.tenant.contact_name }}{% if e.tenant.contact_email %} &middot; <a href="mailto:{{ e.tenant.contact_email }}">{{ e.tenant.contact_email }}</a>{% endif %}</div>{% endif %}
-    <div class="meta">Frameworks: {% for k in e.frameworks %}{{ k|fw_name }}{{ ", " if not loop.last }}{% else %}None selected{% endfor %}</div>
+    <div class="ov-client-name">{{ e.tenant.name }}</div>
+    <dl class="ov-facts">
+      <div class="ov-fact"><dt>Contact</dt><dd>{% if e.tenant.contact_name or e.tenant.contact_email %}{% if e.tenant.contact_name %}<span class="ov-line">{{ e.tenant.contact_name }}</span>{% endif %}{% if e.tenant.contact_email %}<a class="ov-line" href="mailto:{{ e.tenant.contact_email }}">{{ e.tenant.contact_email }}</a>{% endif %}{% else %}<span class="meta">Not set</span>{% endif %}</dd></div>
+      <div class="ov-fact"><dt>Frameworks</dt><dd>{% for k in e.frameworks %}<span class="chip">{{ k|fw_name }}</span>{% else %}<span class="meta">None selected</span>{% endfor %}</dd></div>
+    </dl>
     {% if can(prole, "engagement.write") %}
     <details id="edit">
       <summary>Edit engagement</summary>
@@ -317,6 +319,20 @@
         <label><input type="checkbox" name="intrusive_allowed" value="true"> <span>Intrusive / state-changing tests allowed<small>Leave off for production unless the rules of engagement say otherwise</small></span></label>
         <label><input type="checkbox" name="in_cde" value="true"> <span>In PCI cardholder data environment (CDE)<small>Counts toward PCI DSS results</small></span></label>
       </div>
+      <details class="crawl-settings" id="crawl-settings-new">
+        <summary>Crawl Settings (Optional, Web App / API)</summary>
+        <p class="meta">ZAP starts at the site root and also crawls with a headless browser (AJAX Spider) so JavaScript routes are found. Any path in the URL above is kept as an extra start point. Add pages that nothing links to here. Same host only; checked against scope.</p>
+        <label for="crawl_seed_urls">Extra Start URLs (One Per Line)</label>
+        <textarea id="crawl_seed_urls" name="crawl_seed_urls" rows="3" placeholder="/projects&#10;/settings/profile"></textarea>
+        {% set cd = crawl_defaults() %}
+        <div class="fields">
+          <div><label for="crawl_spider_minutes">Spider Minutes</label>
+            <input type="number" id="crawl_spider_minutes" name="crawl_spider_minutes" min="1" max="{{ cd.max_minutes }}" placeholder="Default {{ cd.spider_minutes }}"></div>
+          <div><label for="crawl_ajax_minutes">AJAX Spider Minutes</label>
+            <input type="number" id="crawl_ajax_minutes" name="crawl_ajax_minutes" min="0" max="{{ cd.max_minutes }}" placeholder="Default {{ cd.ajax_minutes }}">
+            <div class="hint">0 turns the browser crawl off. Leave empty for the default.</div></div>
+        </div>
+      </details>
       <label for="notes">Notes (test accounts, exclusions, allow-listed IPs)</label>
       <textarea id="notes" name="notes" placeholder="Test user provisioned: qa-tester. Exclude /admin/payments/refund."></textarea>
       <div class="form-actions"><button type="submit">Add target</button></div>
@@ -389,6 +405,23 @@
     {% if e.status == 'halted' %}<form method="post" action="/engagements/{{ e.id }}/resume"><button type="submit">Resume engagement</button></form>{% endif %}
     <span class="meta">Status: <b class="st st-{{ e.status }}">{{ e.status|label }}</b></span>
   </div>
+  {% set wk = worker or {} %}
+  {% if wk and wk.status is defined %}
+  <div class="row" id="worker_panel" style="margin-bottom:10px">
+    {% if wk.status.running %}
+    <span class="meta" id="worker_state">Worker: <b class="st st-running">Worker Running</b>{% if wk.status.pid %} (PID {{ wk.status.pid }}){% endif %}{% if wk.status.stop_requested %} &middot; stopping{% endif %}</span>
+    {% if wk.status.stale_lock %}<span class="hint">This worker was started before the Stop Worker update, or the lock file is left over. If no worker is running, delete <span class="mono">data/.lock-worker</span>.</span>{% endif %}
+    {% if wk.show_stop %}<form method="post" action="/engagements/{{ e.id }}/worker/stop" style="margin:0"><button type="submit" class="secondary" id="stop_worker" title="Stops running scans, puts them back in the queue and exits the worker">Stop Worker</button></form>{% endif %}
+    {% elif wk.status.starting %}
+    <span class="meta" id="worker_state">Worker: <b>Worker Starting</b> (PID {{ wk.status.pid }}). Refresh in a few seconds.</span>
+    {% else %}
+    <span class="meta" id="worker_state">Worker: <b class="st st-not_met">Worker Not Running</b>{% if wk.queued %} &middot; {{ wk.queued }} queued scan{{ "s" if wk.queued != 1 }} waiting{% endif %}</span>
+    {% if wk.show_start %}<form method="post" action="/engagements/{{ e.id }}/worker/start" style="margin:0"><button type="submit" id="start_worker" title="Runs attestra worker in the background; output goes to {{ wk.status.log }}">Start Worker</button></form>
+    {% elif wk.queued %}<span class="hint">Start it in a terminal: <span class="mono">attestra worker</span>{% if not wk.allowed %}. {{ wk.why }}{% elif not wk.role_ok %}, or ask an admin or lead to click Start Worker.{% endif %}</span>{% endif %}
+    {% if wk.status.last_start_exited and wk.queued %}<span class="hint">The last worker started from this page has stopped. Check <span class="mono">{{ wk.status.log }}</span>.</span>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
   <table>
     <tr><th>ID</th><th>Tool</th><th>Target</th><th>Profile</th><th>Status</th><th>SHA-256</th><th></th></tr>
     {% for r in scans %}
@@ -436,6 +469,16 @@
           <select id="scan_profile" name="profile"><option value="baseline">Baseline (non-intrusive)</option><option value="active">Active (intrusive)</option></select>
           <div class="hint" id="profile_hint" hidden>Active needs "Intrusive tests allowed" on the chosen target.</div>
         </div>
+        {% if auth_web_enabled %}
+        <div><label for="scan_auth_profile">Authentication</label>
+          <select id="scan_auth_profile" name="auth_profile_id">
+            <option value="">Unauthenticated Scan</option>
+            {% for p in auth_profiles if p.method and p.method != "none" and p.status != "revoked" %}<option value="{{ p.id }}">{{ p.label }}{% if p.role_name %} &middot; {{ p.role_name }}{% endif %} &middot; {{ p.method }}{% if p.status and p.status != "valid" %} ({{ p.status }}){% endif %}</option>
+            {% endfor %}
+          </select>
+          <div class="hint">Only ZAP and Nuclei use the selected profile. Add or edit profiles under each target's Authentication section.</div>
+        </div>
+        {% endif %}
       </div>
       <label>Tools * <span class="meta">Pick one or more. Tools that cannot scan the chosen target are hidden.</span></label>
       <div class="checks" id="scan_tools">{% for t in scan_tools %}<label data-kinds="{{ (tool_asset_kinds or {}).get(t, ())|join(' ') }}"><input type="checkbox" name="tool" value="{{ t }}"> {{ (scan_tool_labels or {}).get(t, t) }}</label>{% endfor %}</div>

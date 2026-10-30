@@ -1,0 +1,35 @@
+{% extends "_layout.html" %}
+{% block title %}Scan #{{ run.id }} &middot; {{ e.name }} &middot; Attestra{% endblock %}
+{% block main %}
+{% set prole = principal.role if principal else "" %}
+<p class="back-link"><a href="/engagements/{{ e.id }}#scans">&larr; {{ e.name }}</a></p>
+<div class="page-head">
+  <div>
+    <h1>Scan #{{ run.id }}</h1>
+    <p class="lede">{{ run.tool }} &middot; {{ run.profile|capitalize }} &middot;
+      <span class="st st-{{ run.status }}">{{ run.status|label }}</span>
+    </p>
+  </div>
+  {% if can_cancel %}
+  <form method="post" action="/engagements/{{ e.id }}/scans/{{ run.id }}/cancel"
+        data-confirm="Cancel this scan? Queued scans never start; a running scan stops and keeps any results already saved.">
+    <button type="submit" class="danger">Cancel scan</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Details</h2>
+  <table>
+    <tr><th>Target</th><td class="mono">{{ run.asset.identifier if run.asset else run.asset_id }}</td></tr>
+    <tr><th>Tool</th><td>{{ run.tool }}</td></tr>
+    <tr><th>Profile</th><td>{{ run.profile|capitalize }}</td></tr>
+    <tr><th>Status</th><td><span class="st st-{{ run.status }}">{{ run.status|label }}</span>
+      {% if run.refuse_reason %}<div class="meta st-not_met">{{ run.refuse_reason }}</div>{% endif %}</td></tr>
+    <tr><th>Requested by</th><td>{{ run.requested_by }}</td></tr>
+    <tr><th>Started</th><td>{{ run.started_at|dt }}</td></tr>
+    <tr><th>Ended</th><td>{{ run.ended_at|dt }}</td></tr>
+    <tr><th>SHA-256</th><td class="mono">{% if run.raw_sha256 %}{{ run.raw_sha256 }}{% else %}-{% endif %}</td></tr>
+  </table>
+</div>
+{% endblock %}

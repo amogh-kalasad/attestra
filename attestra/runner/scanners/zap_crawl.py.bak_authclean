@@ -1,0 +1,305 @@
+"""ZAP crawl wiring: spider minutes, AJAX spider, extra start URLs and a URL count.
+
+``zap-baseline.py`` / ``zap-full-scan.py`` only spider from one URL. Attestra loads a small
+hook file (``--hook``) from the ``/zap/wrk`` mount that:
+
+* gives the AJAX spider (``-j --ajax-spider``, headless Firefox in the zaproxy image) its own
+  time limit instead of reusing ``-m``,
+* spiders each extra start URL (traditional spider, then AJAX for the first few) within the
+  same crawl budget, as the scan user when an auth context is loaded,
+* stops ZAP from recording other hosts the browser loads (CDNs, analytics) and removes any
+  that slipped into the site tree, so third-party URLs do not quarantine the report,
+* writes ``zap-crawl.json`` (URL count) and ``zap-urls.txt`` (in-scope URLs) for the scan page.
+
+Only file names are put on argv; URLs live in ``attestra-crawl.json`` on the mount.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import json
+from pathlib import Path
+
+HOOK_NAME = "attestra_zap_hooks.py"
+CONFIG_NAME = "attestra-crawl.json"
+RESULT_NAME = "zap-crawl.json"
+URLS_NAME = "zap-urls.txt"
+AJAX_SEED_LIMIT = 2  # AJAX-crawl at most this many extra start URLs (each one is slow)
+SHM_SIZE = "--shm-size=1g"  # headless Firefox crashes with Docker's default 64 MB /dev/shm
+
+
+def _deny_regexes(deny_urls) -> list[str]:
+    """fnmatch deny patterns (full URL or path) -> Java-compatible regexes for ZAP excludes."""
+    out: list[str] = []
+    for pat in deny_urls or ():
+        pat = str(pat).strip()
+        if not pat:
+            continue
+        rx = fnmatch.translate(pat)  # '(?s:...)\\Z' — Java supports both constructs
+        if pat.startswith("/"):
+            rx = r"^https?://[^/]+" + rx
+        out.append(rx)
+    return out
+
+
+def crawl_config(plan, *, host_header: str, scheme: str, deny_urls=()) -> dict:
+    return {
+        "root_url": plan.root_url,
+        "scheme": scheme,
+        "host": host_header.lower(),
+        "start_urls": list(plan.start_urls),
+        "spider_minutes": int(plan.spider_minutes),
+        "ajax_minutes": int(plan.ajax_minutes),
+        "ajax_seed_limit": AJAX_SEED_LIMIT,
+        "deny_regexes": _deny_regexes(deny_urls),
+    }
+
+
+def write_crawl_files(out_dir: Path, cfg: dict) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / HOOK_NAME).write_text(HOOK_SOURCE, encoding="utf-8")
+    (out_dir / CONFIG_NAME).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    for stale in (RESULT_NAME, URLS_NAME):
+        try:
+            (out_dir / stale).unlink()
+        except FileNotFoundError:
+            pass
+
+
+def crawl_args(spider_minutes: int, ajax_minutes: int, *, hook_path: str | None) -> list[str]:
+    args = ["-m", str(max(1, int(spider_minutes)))]
+    if ajax_minutes and int(ajax_minutes) > 0:
+        args += ["-j", "--ajax-spider"]
+    if hook_path:
+        args += ["--hook", hook_path]
+    return args
+
+
+def read_result(out_dir: Path) -> dict:
+    try:
+        doc = json.loads((out_dir / RESULT_NAME).read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def parse_total_urls(stdout: bytes | str) -> int | None:
+    """``Total of N URLs`` line printed by zap-baseline / zap-full-scan."""
+    import re
+
+    text = stdout.decode("utf-8", "replace") if isinstance(stdout, bytes) else str(stdout or "")
+    m = re.findall(r"Total of (\d+) URLs", text)
+    return int(m[-1]) if m else None
+
+
+# Runs inside the zaproxy container (python3 + zapv2), loaded by zap_common.load_custom_hooks.
+HOOK_SOURCE = r'''"""Attestra crawl hooks (generated; safe to delete)."""
+import json
+import logging
+import time
+from urllib.parse import urlsplit
+
+_WRK = "/zap/wrk/"
+try:
+    with open(_WRK + "attestra-crawl.json") as _f:
+        CFG = json.load(_f)
+except Exception:  # noqa: BLE001
+    CFG = {}
+
+_state = {"zap": None, "spider_t0": None, "cleaned": False}
+
+
+def _common():
+    try:
+        import zap_common
+        return zap_common
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _netloc(url):
+    p = urlsplit(url)
+    host = (p.hostname or "").lower()
+    default = 443 if p.scheme == "https" else 80
+    port = p.port or default
+    return host if port == default else "%s:%d" % (host, port)
+
+
+def _in_scope(url):
+    return _netloc(url) == CFG.get("host", "")
+
+
+def _other_host_regex():
+    host = CFG.get("host", "")
+    if not host:
+        return None
+    esc = "".join("\\" + c if not c.isalnum() else c for c in host)
+    return "^https?://(?!" + esc + "(?:[:/?#]|$)).*"
+
+
+def zap_started(zap, target):
+    _state["zap"] = zap
+    rx = _other_host_regex()
+    excludes = ([rx] if rx else []) + list(CFG.get("deny_regexes") or [])
+    for r in excludes:
+        try:
+            zap.core.exclude_from_proxy(r)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("attestra: proxy exclude failed: %s", exc)
+    for r in CFG.get("deny_regexes") or []:
+        try:
+            zap.spider.exclude_from_scan(r)
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("attestra: spider exclude failed: %s", exc)
+
+
+def zap_spider(zap, target):
+    _state["zap"] = zap
+    _state["spider_t0"] = time.time()
+
+
+def _spider_one(zap, url, deadline):
+    zc = _common()
+    try:
+        zap.urlopen(url)
+    except Exception:  # noqa: BLE001
+        pass
+    remaining = deadline - time.time()
+    try:
+        zap.spider.set_option_max_duration(str(max(1, int(remaining // 60))))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if zc is not None and getattr(zc, "scan_user", None):
+            sid = zap.spider.scan_as_user(zc.context_id, zc.scan_user["id"], url)
+        else:
+            sid = zap.spider.scan(url, contextname=getattr(zc, "context_name", None) if zc else None)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("attestra: spider of %s failed: %s", url, exc)
+        return
+    if not str(sid).isdigit():
+        return
+    while True:
+        try:
+            if int(zap.spider.status(sid)) >= 100:
+                break
+        except Exception:  # noqa: BLE001
+            break
+        if time.time() > deadline:
+            try:
+                zap.spider.stop(sid)
+            except Exception:  # noqa: BLE001
+                pass
+            break
+        time.sleep(5)
+
+
+def zap_spider_wrap(_ret=None):
+    zap = _state["zap"]
+    seeds = [u for u in CFG.get("start_urls") or [] if _in_scope(u)]
+    if zap is None or not seeds:
+        return None
+    t0 = _state["spider_t0"] or time.time()
+    deadline = t0 + int(CFG.get("spider_minutes") or 1) * 60 + 30
+    for url in seeds:
+        if deadline - time.time() < 20:
+            logging.warning("attestra: spider time used up; %s and later start URLs skipped", url)
+            break
+        logging.info("attestra: spidering start URL %s", url)
+        _spider_one(zap, url, deadline)
+    return None
+
+
+def _ajax_runs():
+    seeds = [u for u in CFG.get("start_urls") or [] if _in_scope(u)]
+    return 1 + min(len(seeds), int(CFG.get("ajax_seed_limit") or 0))
+
+
+def _ajax_minutes_each():
+    total = int(CFG.get("ajax_minutes") or 0)
+    return max(1, total // _ajax_runs())
+
+
+def zap_ajax_spider(zap, target, max_time):
+    _state["zap"] = zap
+    if CFG.get("ajax_minutes"):
+        return zap, target, _ajax_minutes_each()
+    return None
+
+
+def _ajax_one(zap, url, minutes):
+    zc = _common()
+    try:
+        zap.ajaxSpider.set_option_max_duration(str(minutes))
+        if zc is not None and getattr(zc, "scan_user", None):
+            res = zap.ajaxSpider.scan_as_user(zc.context_name, zc.scan_user["name"], url)
+        else:
+            res = zap.ajaxSpider.scan(url, contextname=getattr(zc, "context_name", None) if zc else None)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("attestra: AJAX spider of %s failed: %s", url, exc)
+        return
+    if res != "OK":
+        return
+    deadline = time.time() + minutes * 60 + 60
+    time.sleep(5)
+    while zap.ajaxSpider.status == "running":
+        if time.time() > deadline:
+            try:
+                zap.ajaxSpider.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            break
+        time.sleep(5)
+
+
+def zap_ajax_spider_wrap(_ret=None):
+    zap = _state["zap"]
+    if zap is None or not CFG.get("ajax_minutes"):
+        return None
+    seeds = [u for u in CFG.get("start_urls") or [] if _in_scope(u)]
+    for url in seeds[: int(CFG.get("ajax_seed_limit") or 0)]:
+        logging.info("attestra: AJAX spidering start URL %s", url)
+        _ajax_one(zap, url, _ajax_minutes_each())
+    return None
+
+
+def _cleanup_and_record(zap):
+    if zap is None or _state["cleaned"]:
+        return
+    _state["cleaned"] = True
+    removed = []
+    try:
+        for site in zap.core.sites:
+            if not _in_scope(site):
+                try:
+                    zap.core.delete_site_node(site)
+                    removed.append(site)
+                except Exception as exc:  # noqa: BLE001
+                    logging.warning("attestra: could not drop %s: %s", site, exc)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("attestra: site cleanup failed: %s", exc)
+    urls = []
+    try:
+        urls = [u for u in zap.core.urls() if _in_scope(u)]
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("attestra: URL list failed: %s", exc)
+    try:
+        with open(_WRK + "zap-urls.txt", "w") as f:
+            f.write("\n".join(sorted(set(urls))[:5000]))
+        with open(_WRK + "zap-crawl.json", "w") as f:
+            json.dump({"urls_discovered": len(set(urls)), "other_hosts_removed": len(removed)}, f)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("attestra: could not write crawl result: %s", exc)
+
+
+def zap_active_scan(zap, target, policy):
+    _cleanup_and_record(zap)
+
+
+def zap_get_alerts(zap, baseurl, ignore_scan_rules, out_of_scope_dict):
+    _cleanup_and_record(zap)
+
+
+def zap_pre_shutdown(zap):
+    _cleanup_and_record(zap)
+'''

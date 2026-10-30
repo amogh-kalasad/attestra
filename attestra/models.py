@@ -317,6 +317,10 @@ class Asset(Base):
     owner: Mapped[str] = mapped_column(String(200), default="")
     ownership_token: Mapped[str] = mapped_column(String(64), default="")
     ownership_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Crawl settings (ZAP / nuclei): extra start URLs, one per line (same host); minutes override env.
+    crawl_seed_urls: Mapped[str] = mapped_column(Text, default="")
+    crawl_spider_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    crawl_ajax_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     engagement: Mapped[Engagement] = relationship(back_populates="assets")
 
@@ -381,9 +385,14 @@ class ScanRun(Base):
     checks_json: Mapped[str] = mapped_column(Text, default="")
     # Scanner tool notes/warnings copied from import; not findings.
     notes_json: Mapped[str] = mapped_column(Text, default="")
+    # Authenticated scanning (auth-web): which credential profile this run used, if any.
+    auth_profile_id: Mapped[int | None] = mapped_column(ForeignKey("auth_credential_profiles.id"))
+    authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
+    auth_note: Mapped[str] = mapped_column(String(500), default="")  # redacted status only; never secrets
 
     engagement: Mapped[Engagement] = relationship()
     asset: Mapped[Asset] = relationship()
+    auth_profile: Mapped["AuthCredentialProfile | None"] = relationship()
 
 
 class Job(Base):
@@ -997,7 +1006,7 @@ class EmailAlertSent(Base):
 # ---------------------------------------------------------------- Authenticated web testing (Phase 6)
 
 
-AUTH_METHODS = ("none", "form", "header", "cookie", "sso_bootstrap")
+AUTH_METHODS = ("none", "form", "header", "cookie", "otp", "sso_bootstrap")
 AUTH_PROFILE_STATUSES = (
     "pending",
     "valid",
@@ -1033,6 +1042,14 @@ class AuthCredentialProfile(Base):
     secret_ref: Mapped[str] = mapped_column(String(300), default="")
     # Non-secret config (header names, cookie names, field map) — values that are secrets use secret_ref.
     config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Optional NON-secret extra request headers ("Name: value" per line), e.g. a tenant /
+    # portal header the site's own requests send. Clear text: secrets belong in secret_ref.
+    extra_headers: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # Optional ENCRYPTED extra cookies (credential-store ref only; plaintext never in the DB),
+    # e.g. a refreshToken cookie an API checks alongside the Bearer header. Only the cookie
+    # NAMES are kept in clear ("a, b") for the UI / audit.
+    extra_cookies_ref: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    extra_cookie_names: Mapped[str] = mapped_column(String(1200), default="", server_default="")
     status: Mapped[str] = mapped_column(String(30), default="pending")
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_validation_note: Mapped[str] = mapped_column(String(500), default="")  # redacted reason only

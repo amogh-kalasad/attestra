@@ -1,0 +1,362 @@
+{% extends "_layout.html" %}
+{% block title %}{{ asset.identifier }} · Attestra{% endblock %}
+{% block main %}
+<p class="meta"><a href="/engagements/{{ e.id }}">← {{ e.name }}</a></p>
+<h1>{{ asset.name or asset.identifier }}</h1>
+<p class="meta mono">{{ asset.identifier }} · {{ asset.kind }} · {{ asset.environment or "production" }} ·
+  Criticality {{ asset.criticality }}/5 ·
+  {{ "Internet-facing" if asset.exposure == "internet" else "Internal" if asset.exposure == "internal" else asset.exposure }}
+</p>
+
+{% set prole = principal.role if principal else "" %}
+{% if can(prole, "finding.read") %}
+<p style="margin:8px 0"><a class="btn secondary" href="/engagements/{{ e.id }}/findings/export?asset_id={{ asset.id }}">Export findings CSV for this target</a></p>
+{% endif %}
+
+{% if ownership_info %}
+{% set oi = ownership_info %}
+{% set ownership_bypass = ownership_bypass_active if ownership_bypass_active is defined else false %}
+{% set local_bypass_status = bypass_status if bypass_status is defined else "BYPASSED_LOCAL" %}
+<div class="card" id="ownership">
+  <h2>Ownership verification</h2>
+  {% if asset.ownership_verified_at %}
+  <p><span class="st-met">Verified{% if ownership_method == "dns" %} (DNS){% elif ownership_method == "file" %} (file){% elif ownership_method == "owner_confirmed" %} (owner confirmed){% endif %}</span>
+    <span class="meta"> · {{ asset.ownership_verified_at|dt }}</span></p>
+  {% elif ownership_bypass %}
+  <p><span class="st-partial"><b>Bypassed (local testing)</b></span>
+    <span class="meta mono"> · {{ local_bypass_status }}</span></p>
+  <p class="meta">Ownership gate bypassed for local testing — this is not verified ownership. Verify details below remain available.</p>
+  {% else %}
+  <p class="st-not_met">Not verified</p>
+  <p class="meta">Ask the client to publish one of these proofs, then click Verify now. Changing the token clears verification.</p>
+  {% endif %}
+  <p style="margin:10px 0 4px"><b>DNS TXT value</b></p>
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span>
+    <button type="button" class="secondary" data-copy="{{ oi.txt_value }}">Copy</button>
+  </div>
+  <p class="meta">Name: <span class="mono">{{ oi.txt_name }}</span>{% if oi.txt_short_name != "@" %} (short name <span class="mono">{{ oi.txt_short_name }}</span> in zone <span class="mono">{{ oi.txt_zone }}</span>){% endif %}</p>
+  <p style="margin:10px 0 4px"><b>Ownership token</b></p>
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <span class="mono" style="word-break:break-all">{{ oi.token }}</span>
+    <button type="button" class="secondary" data-copy="{{ oi.token }}">Copy</button>
+  </div>
+  <p style="margin:10px 0 4px"><b>Well-known file</b></p>
+  <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+    <span class="mono" style="word-break:break-all">{{ oi.file_url }}</span>
+    <button type="button" class="secondary" data-copy="{{ oi.file_url }}">Copy</button>
+  </div>
+  <p class="meta">File contents must be exactly the token above.</p>
+  {% if can(prole, "asset.verify_ownership") %}
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/ownership-token" style="margin-top:12px">
+    <label for="reuse-token">Set or reuse token</label>
+    <p class="meta">Paste a token from another target in this engagement to reuse the same DNS TXT or well-known file.</p>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <input type="text" id="reuse-token" name="token" required minlength="16" maxlength="64" pattern="[A-Za-z0-9_\-]{16,64}" placeholder="Paste ownership token" value="" autocomplete="off" style="min-width:240px;flex:1">
+      <button type="submit">Save token</button>
+    </div>
+  </form>
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/verify-ownership-now" style="margin-top:10px">
+    <button type="submit">Verify now</button>
+  </form>
+  <p class="meta">Verify now only looks up the DNS record and opens that one file. It does not scan the site.</p>
+  {% else %}
+  <p class="meta" style="margin-top:10px">Only a lead or admin can set the token or run Verify now.</p>
+  {% endif %}
+  {% if oi.private_confirm and not asset.ownership_verified_at %}
+  <p class="meta" style="margin-top:10px">This is a private address: a lead or admin can confirm ownership from the engagement page (Option C).</p>
+  {% endif %}
+</div>
+<script>
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('[data-copy]');
+    if (!btn) return;
+    const text = btn.getAttribute('data-copy') || '';
+    try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+    catch (e) {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand('copy'); document.body.removeChild(ta); btn.textContent = 'Copied';
+    }
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
+</script>
+{% endif %}
+
+{% if asset.kind in ("web_app", "api") %}
+{% set cd = crawl_defaults() %}
+<div class="card" id="crawl">
+  <h2>Crawl Settings</h2>
+  <p class="meta">Used by ZAP and nuclei. ZAP always starts at <span class="mono">{{ asset.identifier.split("/")[:3]|join("/") }}/</span>, runs the traditional spider and then the AJAX Spider (headless browser) for JavaScript routes. Any path in the target URL is kept as an extra start point. Extra Start URLs must be on the same host and inside scope. Nuclei tests the root plus up to {{ cd.nuclei_max_urls - 1 }} start URLs.</p>
+  {% if can(prole, "asset.write") %}
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/crawl-settings">
+    <label for="crawl_seed_urls">Extra Start URLs (One Per Line, Max {{ cd.max_seeds }})</label>
+    <textarea id="crawl_seed_urls" name="crawl_seed_urls" rows="4" placeholder="/projects&#10;/settings/profile">{{ asset.crawl_seed_urls or "" }}</textarea>
+    <div class="fields">
+      <div><label for="crawl_spider_minutes">Spider Minutes</label>
+        <input type="number" id="crawl_spider_minutes" name="crawl_spider_minutes" min="1" max="{{ cd.max_minutes }}" value="{{ asset.crawl_spider_minutes if asset.crawl_spider_minutes is not none else '' }}" placeholder="Default {{ cd.spider_minutes }}"></div>
+      <div><label for="crawl_ajax_minutes">AJAX Spider Minutes</label>
+        <input type="number" id="crawl_ajax_minutes" name="crawl_ajax_minutes" min="0" max="{{ cd.max_minutes }}" value="{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else '' }}" placeholder="Default {{ cd.ajax_minutes }}">
+        <div class="hint">0 turns the browser crawl off. Empty uses the default.</div></div>
+    </div>
+    <div class="form-actions"><button type="submit">Save Crawl Settings</button></div>
+  </form>
+  {% else %}
+  <table>
+    <tr><th>Extra Start URLs</th><td class="mono">{% if asset.crawl_seed_urls %}{% for u in asset.crawl_seed_urls.splitlines() %}{{ u }}<br>{% endfor %}{% else %}-{% endif %}</td></tr>
+    <tr><th>Spider Minutes</th><td>{{ asset.crawl_spider_minutes if asset.crawl_spider_minutes is not none else "Default " ~ cd.spider_minutes }}</td></tr>
+    <tr><th>AJAX Spider Minutes</th><td>{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else "Default " ~ cd.ajax_minutes }}</td></tr>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if cert_status %}
+<div class="card" id="certificate">
+  <h2>Certificate</h2>
+  <p>End date <span class="mono">{{ cert_status.end_date }}</span>
+    ·
+    {% if cert_status.days_left is not none %}
+      {% if cert_status.days_left < 0 %}
+        <span class="st-not_met">Expired {{ -cert_status.days_left }} day(s) ago</span>
+      {% elif cert_status.band == "7" %}
+        <span class="st-not_met">{{ cert_status.days_left }} days left</span>
+      {% elif cert_status.band == "14" %}
+        <span class="st-partial">{{ cert_status.days_left }} days left</span>
+      {% elif cert_status.band == "30" %}
+        <span class="st-partial">{{ cert_status.days_left }} days left</span>
+      {% else %}
+        <span class="st-met">{{ cert_status.days_left }} days left</span>
+      {% endif %}
+    {% endif %}
+  </p>
+  <p class="meta">From the latest saved {{ cert_status.tool or "TLS" }} scan (no live check on this page).</p>
+</div>
+{% endif %}
+
+{% if site_grade %}
+<div class="card" id="grade">
+  <h2>Site grade</h2>
+  <p style="font-size:2.4rem;font-weight:800;margin:8px 0;letter-spacing:.04em">{{ site_grade.grade }}
+    <span class="meta" style="font-size:1.1rem;font-weight:600"> · score {{ site_grade.score }}</span>
+  </p>
+  <p class="meta">Starts at 100. Each check adds or removes points. Bonuses only apply when the score is already 90 or more. Not-tested checks do not change the score. An expired certificate caps the grade at F.</p>
+  <table>
+    <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    {% for row in site_grade.breakdown %}
+    <tr>
+      <td class="mono">{{ row.check }}</td>
+      <td>{{ row.result }}</td>
+      <td>{% if row.points > 0 %}+{{ row.points }}{% else %}{{ row.points }}{% endif %}</td>
+      <td>{{ row.reason }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% if auth_web_enabled %}
+<div class="card" id="authentication">
+  <h2>Authentication</h2>
+  <p class="meta">
+    Set up logged-in scanning for this engagement. ZAP and Nuclei reuse the chosen profile's session so authenticated pages are tested.
+    Pick a profile in the Queue a Scan form. Secrets are encrypted at rest, masked here, and never written to exports, logs, or audit detail.
+  </p>
+  <div class="warn" role="note">
+    Use disposable test accounts authorized in the signed rules of engagement &mdash; never production passwords. A pre-scan login check runs before each authenticated scan and fails the scan with a clear message if the session is not logged in.
+  </div>
+
+  {% if auth_profiles %}
+  <table>
+    <thead><tr><th>Label</th><th>Role</th><th>Method</th><th>Status</th><th>Secret Reference</th><th>Last Validated</th>{% if can_manage_auth %}<th>Actions</th>{% endif %}</tr></thead>
+    <tbody>
+      {% for p in auth_profiles %}
+      <tr>
+        <td>{{ p.label }}</td>
+        <td>{{ p.role_name or "&mdash;"|safe }}</td>
+        <td>{{ p.method }}</td>
+        <td><span class="st st-{{ p.status }}">{{ p.status|label }}</span>{% if p.last_validation_note %}<div class="meta">{{ p.last_validation_note }}</div>{% endif %}</td>
+        <td class="mono">{{ p.secret_ref or "&mdash;"|safe }}</td>
+        <td class="meta">{% if p.last_validated_at %}{{ p.last_validated_at }}{% else %}Never{% endif %}</td>
+        {% if can_manage_auth %}
+        <td>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/revoke" class="inline">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <button type="submit" class="secondary">Revoke</button>
+            </form>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/delete" class="inline"
+                  data-confirm="Delete this profile and destroy its stored secret? This cannot be undone.">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+          </div>
+          <details style="margin-top:6px">
+            <summary>Rotate Secret</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/rotate" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <div class="fields">
+                <div>
+                  <label for="rot_secret_{{ p.id }}">New Secret</label>
+                  <input type="password" id="rot_secret_{{ p.id }}" name="secret" autocomplete="off" spellcheck="false">
+                </div>
+                {% if p.method == "otp" %}
+                <div>
+                  <label for="rot_imap_{{ p.id }}">IMAP App Password</label>
+                  <input type="password" id="rot_imap_{{ p.id }}" name="imap_app_password" autocomplete="off" spellcheck="false">
+                </div>
+                {% endif %}
+              </div>
+              <div class="form-actions"><button type="submit" class="secondary">Rotate</button></div>
+            </form>
+          </details>
+          {% if p.status != "revoked" %}
+          <details style="margin-top:6px">
+            <summary>Extra Headers{% if p.extra_headers %} ({{ p.extra_headers.splitlines()|length }}){% endif %}</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/extra-headers" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <div class="fields">
+                <div>
+                  <label for="xh_{{ p.id }}">Extra Headers</label>
+                  <textarea id="xh_{{ p.id }}" name="extra_headers" rows="3" spellcheck="false" placeholder="x-tenant-id: abc">{{ p.extra_headers }}</textarea>
+                  <div class="hint">One "Name: value" per line (max 10). Not encrypted &mdash; put secrets in Secret. Leave empty to remove.</div>
+                </div>
+              </div>
+              <div class="form-actions"><button type="submit" class="secondary">Save Extra Headers</button></div>
+            </form>
+          </details>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">No authentication profiles yet.</p>
+  {% endif %}
+
+  {% if can_manage_auth %}
+  <details style="margin-top:12px">
+    <summary>Add Authentication Profile</summary>
+    <form method="post" action="/engagements/{{ e.id }}/auth-profiles" autocomplete="off" class="form-follow">
+      <input type="hidden" name="asset_id" value="{{ asset.id }}">
+      <div class="fields">
+        <div>
+          <label for="ap_label">Profile Label *</label>
+          <input type="text" id="ap_label" name="label" required placeholder="Portal Admin (Staging)" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_role">Test Role</label>
+          <input type="text" id="ap_role" name="role_name" placeholder="admin" autocomplete="off">
+          <div class="hint">Optional. Use for separate admin / user profiles.</div>
+        </div>
+        <div>
+          <label for="ap_method">Auth Method *</label>
+          <select id="ap_method" name="method" required>
+            {% for value, text in auth_methods %}<option value="{{ value }}">{{ text }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ap_login_url">Login URL</label>
+          <input type="url" id="ap_login_url" name="login_url" placeholder="https://app.example.com/login" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_verify_url">Verify URL (Logged-In Page)</label>
+          <input type="url" id="ap_verify_url" name="verify_url" placeholder="https://app.example.com/account" autocomplete="off">
+          <div class="hint">Fetched before scanning to confirm the session is authenticated.</div>
+        </div>
+        <div>
+          <label for="ap_indicator">Logged-In Indicator</label>
+          <input type="text" id="ap_indicator" name="logged_in_indicator" placeholder="Sign out" autocomplete="off">
+          <div class="hint">Text or regex that appears only when logged in.</div>
+        </div>
+      </div>
+
+      <h3>Session Token / Cookie</h3>
+      <p class="hint">For the Session Token method, paste the full header value (e.g. a bearer token); set the header name if it is not Authorization. For the Session Cookie method, paste the cookie value, or a full "name=value; name2=value2" string.</p>
+      <div class="fields">
+        <div><label for="ap_header_name">Header Name</label><input type="text" id="ap_header_name" name="header_name" placeholder="Authorization" autocomplete="off"></div>
+        <div><label for="ap_cookie_name">Cookie Name</label><input type="text" id="ap_cookie_name" name="cookie_name" placeholder="session" autocomplete="off"></div>
+        <div>
+          <label for="ap_extra_headers">Extra Headers</label>
+          <textarea id="ap_extra_headers" name="extra_headers" rows="3" spellcheck="false" placeholder="x-tenant-id: abc"></textarea>
+          <div class="hint">Extra headers your site's requests send (e.g. x-tenant-id: abc), one "Name: value" per line, max 10. Not encrypted &mdash; put secrets in Secret.</div>
+        </div>
+      </div>
+
+      <h3>Form Login</h3>
+      <div class="fields">
+        <div><label for="ap_username">Username</label><input type="text" id="ap_username" name="username" autocomplete="off"></div>
+        <div><label for="ap_username_field">Username Field Name</label><input type="text" id="ap_username_field" name="username_field" placeholder="username" autocomplete="off"></div>
+        <div><label for="ap_password_field">Password Field Name</label><input type="text" id="ap_password_field" name="password_field" placeholder="password" autocomplete="off"></div>
+        <div><label for="ap_success">Success URL Contains</label><input type="text" id="ap_success" name="success_url_contains" placeholder="/dashboard" autocomplete="off"></div>
+      </div>
+
+      <h3>Email OTP (Test Inbox)</h3>
+      <p class="hint">For the Email OTP method, we POST the username, poll the test inbox over IMAP for the one-time code, submit it, and capture the session.</p>
+      <div class="fields">
+        <div><label for="ap_otp_request_url">OTP Request URL</label><input type="url" id="ap_otp_request_url" name="otp_request_url" autocomplete="off"></div>
+        <div><label for="ap_otp_field">OTP Field Name</label><input type="text" id="ap_otp_field" name="otp_field" placeholder="code" autocomplete="off"></div>
+        <div><label for="ap_otp_submit_url">OTP Submit URL</label><input type="url" id="ap_otp_submit_url" name="otp_submit_url" autocomplete="off"></div>
+        <div><label for="ap_imap_host">IMAP Host</label><input type="text" id="ap_imap_host" name="imap_host" placeholder="imap.example.com" autocomplete="off"></div>
+        <div><label for="ap_imap_port">IMAP Port</label><input type="text" id="ap_imap_port" name="imap_port" placeholder="993" autocomplete="off"></div>
+        <div><label for="ap_imap_user">IMAP User</label><input type="text" id="ap_imap_user" name="imap_user" autocomplete="off"></div>
+        <div><label for="ap_imap_mailbox">IMAP Mailbox</label><input type="text" id="ap_imap_mailbox" name="imap_mailbox" placeholder="INBOX" autocomplete="off"></div>
+        <div><label for="ap_sender_filter">Sender Filter</label><input type="text" id="ap_sender_filter" name="sender_filter" placeholder="no-reply@example.com" autocomplete="off"></div>
+        <div><label for="ap_subject_filter">Subject Filter</label><input type="text" id="ap_subject_filter" name="subject_filter" placeholder="Your code" autocomplete="off"></div>
+        <div><label for="ap_otp_regex">OTP Regex</label><input type="text" id="ap_otp_regex" name="otp_regex" placeholder="\b(\d{4,8})\b" autocomplete="off"></div>
+        <div><label for="ap_imap_app_password">IMAP App Password</label><input type="password" id="ap_imap_app_password" name="imap_app_password" autocomplete="off" spellcheck="false"></div>
+      </div>
+
+      <h3>Secret</h3>
+      <div class="fields">
+        <div>
+          <label for="ap_secret">Secret (Token, Cookie, or Password)</label>
+          <input type="password" id="ap_secret" name="secret" autocomplete="off" spellcheck="false">
+          <div class="hint">Stored encrypted; required for every method except None. For Email OTP this is the account password.</div>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit">Save Authentication Profile</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Scan history</h2>
+  <p class="meta">Past scans for this target. Per-scan Grade is the severity letter for that run (A = no medium/high/critical). The site grade box above is the Observatory-style score. New / fixed / still-open compare each scan to the previous same-tool run with results.</p>
+  {% if history %}
+  <table>
+    <tr>
+      <th>Date</th><th>Tool</th><th>Status</th><th>Grade</th>
+      <th>Crit</th><th>High</th><th>Med</th><th>Low</th><th>Info</th>
+      <th>New</th><th>Fixed</th><th>Still open</th>
+    </tr>
+    {% for row in history %}
+    <tr>
+      <td>{% if row.ended_at %}{{ row.ended_at|dt }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{{ row.tool }}{% if row.profile and row.profile != "baseline" %} <span class="meta">({{ row.profile }})</span>{% endif %}</td>
+      <td>{{ row.status }}</td>
+      <td><b>{{ row.grade }}</b></td>
+      <td>{{ row.by_sev.critical }}</td>
+      <td>{{ row.by_sev.high }}</td>
+      <td>{{ row.by_sev.medium }}</td>
+      <td>{{ row.by_sev.low }}</td>
+      <td>{{ row.by_sev.info }}</td>
+      <td>{% if row.new is not none %}{{ row.new }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{% if row.fixed is not none %}{{ row.fixed }}{% else %}<span class="meta">—</span>{% endif %}</td>
+      <td>{% if row.still_open is not none %}{{ row.still_open }}{% else %}<span class="meta">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if history[-1].trend_svg %}
+  <h3>Trend (latest vs previous)</h3>
+  <p class="meta">Solid bars = latest scan with results. Faded bars = previous scan with results.</p>
+  <div>{{ history[-1].trend_svg|safe }}</div>
+  {% endif %}
+  {% else %}
+  <p class="meta">No finished scans for this target yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

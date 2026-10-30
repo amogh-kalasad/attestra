@@ -82,6 +82,34 @@
 </script>
 {% endif %}
 
+{% if asset.kind in ("web_app", "api") %}
+{% set cd = crawl_defaults() %}
+<div class="card" id="crawl">
+  <h2>Crawl Settings</h2>
+  <p class="meta">Used by ZAP and nuclei. ZAP always starts at <span class="mono">{{ asset.identifier.split("/")[:3]|join("/") }}/</span>, runs the traditional spider and then the AJAX Spider (headless browser) for JavaScript routes. Any path in the target URL is kept as an extra start point. Extra Start URLs must be on the same host and inside scope. Nuclei tests the root plus up to {{ cd.nuclei_max_urls - 1 }} start URLs.</p>
+  {% if can(prole, "asset.write") %}
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/crawl-settings">
+    <label for="crawl_seed_urls">Extra Start URLs (One Per Line, Max {{ cd.max_seeds }})</label>
+    <textarea id="crawl_seed_urls" name="crawl_seed_urls" rows="4" placeholder="/projects&#10;/settings/profile">{{ asset.crawl_seed_urls or "" }}</textarea>
+    <div class="fields">
+      <div><label for="crawl_spider_minutes">Spider Minutes</label>
+        <input type="number" id="crawl_spider_minutes" name="crawl_spider_minutes" min="1" max="{{ cd.max_minutes }}" value="{{ asset.crawl_spider_minutes if asset.crawl_spider_minutes is not none else '' }}" placeholder="Default {{ cd.spider_minutes }}"></div>
+      <div><label for="crawl_ajax_minutes">AJAX Spider Minutes</label>
+        <input type="number" id="crawl_ajax_minutes" name="crawl_ajax_minutes" min="0" max="{{ cd.max_minutes }}" value="{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else '' }}" placeholder="Default {{ cd.ajax_minutes }}">
+        <div class="hint">0 turns the browser crawl off. Empty uses the default.</div></div>
+    </div>
+    <div class="form-actions"><button type="submit">Save Crawl Settings</button></div>
+  </form>
+  {% else %}
+  <table>
+    <tr><th>Extra Start URLs</th><td class="mono">{% if asset.crawl_seed_urls %}{% for u in asset.crawl_seed_urls.splitlines() %}{{ u }}<br>{% endfor %}{% else %}-{% endif %}</td></tr>
+    <tr><th>Spider Minutes</th><td>{{ asset.crawl_spider_minutes if asset.crawl_spider_minutes is not none else "Default " ~ cd.spider_minutes }}</td></tr>
+    <tr><th>AJAX Spider Minutes</th><td>{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else "Default " ~ cd.ajax_minutes }}</td></tr>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if cert_status %}
 <div class="card" id="certificate">
   <h2>Certificate</h2>
@@ -123,6 +151,197 @@
     </tr>
     {% endfor %}
   </table>
+</div>
+{% endif %}
+
+{% if auth_web_enabled %}
+<div class="card" id="authentication">
+  <h2>Authentication</h2>
+  <p class="meta">
+    Set up logged-in scanning for this engagement. ZAP and Nuclei reuse the chosen profile's session so authenticated pages are tested.
+    Pick a profile in the Queue a Scan form. Secrets are encrypted at rest, masked here, and never written to exports, logs, or audit detail.
+  </p>
+  <div class="warn" role="note">
+    Use disposable test accounts authorized in the signed rules of engagement &mdash; never production passwords. A pre-scan login check runs before each authenticated scan and fails the scan with a clear message if the session is not logged in.
+  </div>
+
+  {% if auth_profiles %}
+  <table>
+    <thead><tr><th>Label</th><th>Role</th><th>Method</th><th>Status</th><th>Secret Reference</th><th>Last Validated</th>{% if can_manage_auth %}<th>Actions</th>{% endif %}</tr></thead>
+    <tbody>
+      {% for p in auth_profiles %}
+      <tr>
+        <td>{{ p.label }}</td>
+        <td>{{ p.role_name or "&mdash;"|safe }}</td>
+        <td>{{ p.method }}</td>
+        <td><span class="st st-{{ p.status }}">{{ p.status|label }}</span>{% if p.last_validation_note %}<div class="meta">{{ p.last_validation_note }}</div>{% endif %}</td>
+        <td class="mono">{{ p.secret_ref or "&mdash;"|safe }}</td>
+        <td class="meta">{% if p.last_validated_at %}{{ p.last_validated_at }}{% else %}Never{% endif %}</td>
+        {% if can_manage_auth %}
+        <td>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/revoke" class="inline">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <button type="submit" class="secondary">Revoke</button>
+            </form>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/delete" class="inline"
+                  data-confirm="Delete this profile and destroy its stored secret? This cannot be undone.">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+          </div>
+          <details style="margin-top:6px">
+            <summary>Rotate Secret</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/rotate" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <div class="fields">
+                <div>
+                  <label for="rot_secret_{{ p.id }}">New Secret</label>
+                  <input type="password" id="rot_secret_{{ p.id }}" name="secret" autocomplete="off" spellcheck="false">
+                </div>
+                {% if p.method == "otp" %}
+                <div>
+                  <label for="rot_imap_{{ p.id }}">IMAP App Password</label>
+                  <input type="password" id="rot_imap_{{ p.id }}" name="imap_app_password" autocomplete="off" spellcheck="false">
+                </div>
+                {% endif %}
+              </div>
+              <div class="form-actions"><button type="submit" class="secondary">Rotate</button></div>
+            </form>
+          </details>
+          {% if p.status != "revoked" %}
+          <details style="margin-top:6px">
+            <summary>Extra Headers{% if p.extra_headers %} ({{ p.extra_headers.splitlines()|length }}){% endif %}</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/extra-headers" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <div class="fields">
+                <div>
+                  <label for="xh_{{ p.id }}">Extra Headers</label>
+                  <textarea id="xh_{{ p.id }}" name="extra_headers" rows="3" spellcheck="false" placeholder="x-tenant-id: abc">{{ p.extra_headers }}</textarea>
+                  <div class="hint">One "Name: value" per line (max 10). Not encrypted &mdash; put secrets in Secret. Leave empty to remove.</div>
+                </div>
+              </div>
+              <div class="form-actions"><button type="submit" class="secondary">Save Extra Headers</button></div>
+            </form>
+          </details>
+          <details style="margin-top:6px">
+            <summary>Extra Cookies{% if p.has_extra_cookies %} ({{ p.extra_cookie_names|join(", ") }}){% endif %}</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/extra-cookies" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <div class="fields">
+                <div>
+                  <label for="xc_{{ p.id }}">New Extra Cookies</label>
+                  <input type="password" id="xc_{{ p.id }}" name="extra_cookies" autocomplete="off" spellcheck="false" placeholder="refreshToken=...">
+                  <div class="hint">{% if p.has_extra_cookies %}Stored (encrypted): {{ p.extra_cookie_names|join(", ") }}. Saving replaces all of them; values are never shown.{% else %}None stored.{% endif %} Format "name=value; name2=value2" (or one per line), max 10. Encrypted like the Secret.</div>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="secondary">Save Extra Cookies</button>
+                {% if p.has_extra_cookies %}<button type="submit" name="clear" value="1" class="secondary">Clear</button>{% endif %}
+              </div>
+            </form>
+          </details>
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">No authentication profiles yet.</p>
+  {% endif %}
+
+  {% if can_manage_auth %}
+  <details style="margin-top:12px">
+    <summary>Add Authentication Profile</summary>
+    <form method="post" action="/engagements/{{ e.id }}/auth-profiles" autocomplete="off" class="form-follow">
+      <input type="hidden" name="asset_id" value="{{ asset.id }}">
+      <div class="fields">
+        <div>
+          <label for="ap_label">Profile Label *</label>
+          <input type="text" id="ap_label" name="label" required placeholder="Portal Admin (Staging)" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_role">Test Role</label>
+          <input type="text" id="ap_role" name="role_name" placeholder="admin" autocomplete="off">
+          <div class="hint">Optional. Use for separate admin / user profiles.</div>
+        </div>
+        <div>
+          <label for="ap_method">Auth Method *</label>
+          <select id="ap_method" name="method" required>
+            {% for value, text in auth_methods %}<option value="{{ value }}">{{ text }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ap_login_url">Login URL</label>
+          <input type="url" id="ap_login_url" name="login_url" placeholder="https://app.example.com/login" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_verify_url">Verify URL (Logged-In Page)</label>
+          <input type="url" id="ap_verify_url" name="verify_url" placeholder="https://app.example.com/account" autocomplete="off">
+          <div class="hint">Fetched before scanning to confirm the session is authenticated.</div>
+        </div>
+        <div>
+          <label for="ap_indicator">Logged-In Indicator</label>
+          <input type="text" id="ap_indicator" name="logged_in_indicator" placeholder="Sign out" autocomplete="off">
+          <div class="hint">Text or regex that appears only when logged in.</div>
+        </div>
+      </div>
+
+      <h3>Session Token / Cookie</h3>
+      <p class="hint">For the Session Token method, paste the full header value (e.g. a bearer token); set the header name if it is not Authorization. For the Session Cookie method, paste the cookie value, or a full "name=value; name2=value2" string.</p>
+      <div class="fields">
+        <div><label for="ap_header_name">Header Name</label><input type="text" id="ap_header_name" name="header_name" placeholder="Authorization" autocomplete="off"></div>
+        <div><label for="ap_cookie_name">Cookie Name</label><input type="text" id="ap_cookie_name" name="cookie_name" placeholder="session" autocomplete="off"></div>
+        <div>
+          <label for="ap_extra_headers">Extra Headers</label>
+          <textarea id="ap_extra_headers" name="extra_headers" rows="3" spellcheck="false" placeholder="x-tenant-id: abc"></textarea>
+          <div class="hint">Extra headers your site's requests send (e.g. x-tenant-id: abc), one "Name: value" per line, max 10. Not encrypted &mdash; put secrets in Secret.</div>
+        </div>
+        <div>
+          <label for="ap_extra_cookies">Extra Cookies</label>
+          <input type="password" id="ap_extra_cookies" name="extra_cookies" autocomplete="off" spellcheck="false" placeholder="refreshToken=...">
+          <div class="hint">Cookies the site also requires next to the token (e.g. refreshToken=...), as "name=value; name2=value2", max 10. Encrypted like the Secret and never shown again.</div>
+        </div>
+      </div>
+
+      <h3>Form Login</h3>
+      <div class="fields">
+        <div><label for="ap_username">Username</label><input type="text" id="ap_username" name="username" autocomplete="off"></div>
+        <div><label for="ap_username_field">Username Field Name</label><input type="text" id="ap_username_field" name="username_field" placeholder="username" autocomplete="off"></div>
+        <div><label for="ap_password_field">Password Field Name</label><input type="text" id="ap_password_field" name="password_field" placeholder="password" autocomplete="off"></div>
+        <div><label for="ap_success">Success URL Contains</label><input type="text" id="ap_success" name="success_url_contains" placeholder="/dashboard" autocomplete="off"></div>
+      </div>
+
+      <h3>Email OTP (Test Inbox)</h3>
+      <p class="hint">For the Email OTP method, we POST the username, poll the test inbox over IMAP for the one-time code, submit it, and capture the session.</p>
+      <div class="fields">
+        <div><label for="ap_otp_request_url">OTP Request URL</label><input type="url" id="ap_otp_request_url" name="otp_request_url" autocomplete="off"></div>
+        <div><label for="ap_otp_field">OTP Field Name</label><input type="text" id="ap_otp_field" name="otp_field" placeholder="code" autocomplete="off"></div>
+        <div><label for="ap_otp_submit_url">OTP Submit URL</label><input type="url" id="ap_otp_submit_url" name="otp_submit_url" autocomplete="off"></div>
+        <div><label for="ap_imap_host">IMAP Host</label><input type="text" id="ap_imap_host" name="imap_host" placeholder="imap.example.com" autocomplete="off"></div>
+        <div><label for="ap_imap_port">IMAP Port</label><input type="text" id="ap_imap_port" name="imap_port" placeholder="993" autocomplete="off"></div>
+        <div><label for="ap_imap_user">IMAP User</label><input type="text" id="ap_imap_user" name="imap_user" autocomplete="off"></div>
+        <div><label for="ap_imap_mailbox">IMAP Mailbox</label><input type="text" id="ap_imap_mailbox" name="imap_mailbox" placeholder="INBOX" autocomplete="off"></div>
+        <div><label for="ap_sender_filter">Sender Filter</label><input type="text" id="ap_sender_filter" name="sender_filter" placeholder="no-reply@example.com" autocomplete="off"></div>
+        <div><label for="ap_subject_filter">Subject Filter</label><input type="text" id="ap_subject_filter" name="subject_filter" placeholder="Your code" autocomplete="off"></div>
+        <div><label for="ap_otp_regex">OTP Regex</label><input type="text" id="ap_otp_regex" name="otp_regex" placeholder="\b(\d{4,8})\b" autocomplete="off"></div>
+        <div><label for="ap_imap_app_password">IMAP App Password</label><input type="password" id="ap_imap_app_password" name="imap_app_password" autocomplete="off" spellcheck="false"></div>
+      </div>
+
+      <h3>Secret</h3>
+      <div class="fields">
+        <div>
+          <label for="ap_secret">Secret (Token, Cookie, or Password)</label>
+          <input type="password" id="ap_secret" name="secret" autocomplete="off" spellcheck="false">
+          <div class="hint">Stored encrypted; required for every method except None. For Email OTP this is the account password.</div>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit">Save Authentication Profile</button></div>
+    </form>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 

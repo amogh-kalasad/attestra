@@ -27,8 +27,21 @@
     <tr><th>Status</th><td><span class="st st-{{ run.status }}">{{ run.status|label }}</span>
       {% if run.refuse_reason %}<div class="meta st-not_met">{{ run.refuse_reason }}</div>{% endif %}</td></tr>
     <tr><th>Requested by</th><td>{{ run.requested_by }}</td></tr>
+    {% if run.auth_profile_id %}
+    <tr><th>Authenticated</th><td>{% if run.authenticated %}<span class="st-met">Yes</span>{% else %}<span class="st-not_met">No</span>{% endif %}
+      {% if run.auth_note %}<div class="meta">{{ run.auth_note }}</div>{% endif %}</td></tr>
+    <tr><th>Auth profile</th><td>{% if run.auth_profile %}{{ run.auth_profile.label }}{% if run.auth_profile.role_name %} &middot; {{ run.auth_profile.role_name }}{% endif %} &middot; {{ run.auth_profile.method }}{% else %}#{{ run.auth_profile_id }}{% endif %}</td></tr>
+    {% endif %}
     <tr><th>Started</th><td>{{ run.started_at|dt }}</td></tr>
     <tr><th>Ended</th><td>{{ run.ended_at|dt }}</td></tr>
+    {% set cs = crawl_summary(run) if run.tool in ("zap", "nuclei") else none %}
+    {% if cs %}
+    {% if cs.urls_discovered is defined %}<tr><th>URLs Discovered</th><td>{{ cs.urls_discovered }}{% if cs.other_hosts_removed %} <span class="meta">({{ cs.other_hosts_removed }} other host(s) left out)</span>{% endif %}</td></tr>{% endif %}
+    {% if cs.urls_scanned is defined %}<tr><th>URLs Scanned</th><td>{{ cs.urls_scanned }}</td></tr>{% endif %}
+    {% if cs.spider_minutes is defined %}<tr><th>Crawl Time</th><td>Spider {{ cs.spider_minutes }} min{% if cs.ajax_minutes %} &middot; AJAX Spider {{ cs.ajax_minutes }} min{% else %} &middot; AJAX Spider off{% endif %}</td></tr>{% endif %}
+    <tr><th>Start URLs</th><td class="mono">{{ cs.root_url }}{% for u in cs.start_urls %}<br>{{ u }}{% endfor %}</td></tr>
+    {% if cs.notes %}<tr><th>Crawl Notes</th><td class="meta">{% for n in cs.notes %}{{ n }}<br>{% endfor %}</td></tr>{% endif %}
+    {% endif %}
     <tr><th>SHA-256</th><td class="mono">{% if run.raw_sha256 %}{{ run.raw_sha256 }}{% else %}-{% endif %}</td></tr>
   </table>
 </div>

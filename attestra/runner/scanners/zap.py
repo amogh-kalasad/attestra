@@ -4,9 +4,10 @@ The report folder is mounted at /zap/wrk, the only place zap-baseline.py / zap-f
 write their -J report. Exit codes 1 (WARN) and 2 (FAIL) still come with a valid report.
 
 Optional authenticated scans (Phase 7 / auth-web): when ``ATTESTRA_AUTH_WEB_ENABLED`` is on and
-``auth_context_path`` / ``auth_opts`` point at a prepared context under ``out_dir``, the adapter
-adds ``-n /zap/wrk/<file>`` (and optional ``-U <user>``). Secrets must already live in that
-mounted file — never pass passwords via ``-z`` or other argv that ScanRun/extra would log.
+``auth_opts`` point at a per-scan secret dir (outside ``data/raw``), the adapter mounts it
+read-only at ``/zap/attestra-secrets``; the single crawl hook injects the session headers
+from there (host-scoped Replacer rules), and a form context is passed as ``-n`` (plus optional
+``-U <user>``). Never pass secrets via ``-z`` or other argv that ScanRun/extra would log.
 Without auth opts (or with the feature flag off), behavior matches the unauthenticated baseline.
 """
 # @lat: [[runner#ZAP authentication]]
@@ -28,10 +29,16 @@ from attestra.runner.scanners.base import (
     new_container_name,
 )
 from attestra.runner.scanners.nuclei_policy import is_active_profile
+from attestra.runner.scanners import zap_crawl
 
 ZAP_WRK = "/zap/wrk"
+# Authenticated scans: the per-scan secret dir (outside data/raw) is mounted read-only here.
+# The single Attestra hook (zap_crawl.HOOK_SOURCE) reads the auth header file from it.
+ZAP_SECRETS = zap_crawl.ZAP_SECRETS
 REPORT_NAME = "zap-report.json"
-# Baseline spiders for at most 1 minute and only runs passive rules; full adds the active scan.
+OUTPUT_LOG_NAME = "zap-output.log"
+# Baseline spiders for ATTESTRA_ZAP_SPIDER_MINUTES (+ AJAX spider for ATTESTRA_ZAP_AJAX_MINUTES)
+# and only runs passive rules; full adds the active scan. See attestra/runner/crawl.py.
 SCRIPTS = {"baseline": "zap-baseline.py", "active": "zap-full-scan.py"}
 
 
@@ -70,7 +77,14 @@ def _resolve_auth_wiring(
     # Only wire -n for classic context files; never embed secrets via -z.
     if path.suffix.lower() != ".context":
         return None, zap_user
-    # Context must sit on the /zap/wrk mount (report parent).
+    # Context must sit on the secrets mount (preferred) or the /zap/wrk mount (report parent).
+    secret_dir = opts.get("secret_dir")
+    if secret_dir:
+        try:
+            path.resolve().relative_to(Path(secret_dir).resolve())
+            return f"{ZAP_SECRETS}/{path.name}", zap_user
+        except ValueError:
+            pass
     try:
         path.resolve().relative_to(out_file.parent.resolve())
     except ValueError:
@@ -78,11 +92,37 @@ def _resolve_auth_wiring(
     return f"{ZAP_WRK}/{path.name}", zap_user
 
 
+def _resolve_secret_mount(*, out_file: Path, auth_opts: dict[str, Any] | None) -> Path | None:
+    """Return the host secret dir to mount read-only at ZAP_SECRETS, or None.
+
+    No-op unless the auth-web flag is on and ``auth_opts['headers_file']`` (written by
+    auth_web.scan_auth into a per-scan secret dir) exists. The secret dir must NOT be
+    the raw report dir: secrets never land in data/raw.
+    """
+    if not config.AUTH_WEB_ENABLED:
+        return None
+    opts = dict(auth_opts or {})
+    raw = opts.get("headers_file") or opts.get("secret_dir")
+    if not raw:
+        return None
+    path = Path(raw)
+    secret_dir = path if path.is_dir() else path.parent
+    if path.is_file() and path.name != zap_crawl.AUTH_DATA_NAME:
+        return None
+    if not (secret_dir / zap_crawl.AUTH_DATA_NAME).is_file() and not opts.get("context_path"):
+        return None
+    if secret_dir.resolve() == out_file.parent.resolve():
+        raise ValueError("ZAP auth secrets must not live in the raw report dir")
+    return secret_dir
+
+
 class ZapAdapter(ScannerAdapter):
     name = "zap"
     import_tool = "zap"
     image_key = "zap"
     out_name = REPORT_NAME
+    tool_log_name = OUTPUT_LOG_NAME  # zap-baseline prints its progress + errors on stdout
+    tool_log_streams = ("stdout", "stderr")
     default_timeout_s = 1800  # the active (full) scan takes much longer than the baseline
 
     def available(self) -> bool:
@@ -101,13 +141,25 @@ class ZapAdapter(ScannerAdapter):
         name: str = "",
         auth_context_path: Path | str | None = None,
         auth_opts: dict[str, Any] | None = None,
+        crawl=None,
+        deny_urls=(),
         **_opts,
     ) -> list[str]:
         if not isinstance(target, PinnedTarget):
             raise ValueError("ZAP requires a PinnedTarget")
         image = self.image_ref()
         target_url = f"{target.scheme}://{target.host_header}/"
-        args = [zap_script(profile), "-t", target_url, "-J", out_file.name, "-m", "1", "-T", "10"]
+        # Crawl: traditional spider (-m) + AJAX spider (-j) and extra start URLs via the hook file.
+        spider_min, ajax_min, _fit_note = _crawl_minutes(self, crawl, profile)
+        zap_crawl.write_crawl_files(
+            out_file.parent,
+            zap_crawl.crawl_config(
+                _crawl_plan(target, crawl, spider_min, ajax_min),
+                host_header=target.host_header, scheme=target.scheme, deny_urls=deny_urls,
+            ),
+        )
+        crawl_opts = zap_crawl.crawl_args(spider_min, ajax_min, hook_path=f"{ZAP_WRK}/{zap_crawl.HOOK_NAME}")
+        args = [zap_script(profile), "-t", target_url, "-J", out_file.name, *crawl_opts, "-T", "10"]
         ctx_path, zap_user = _resolve_auth_wiring(
             out_file=out_file,
             auth_context_path=auth_context_path,
@@ -117,13 +169,20 @@ class ZapAdapter(ScannerAdapter):
             args += ["-n", ctx_path]
             if zap_user:
                 args += ["-U", zap_user]
+        # ZAP's scripts accept only ONE --hook (the last one wins). Auth header injection
+        # therefore lives in the crawl hook above; it reads the headers from this mount.
+        mounts: list[tuple[Path | str, str, str]] = [(out_file.parent, ZAP_WRK, "rw")]
+        secret_dir = _resolve_secret_mount(out_file=out_file, auth_opts=auth_opts)
+        if secret_dir is not None:
+            mounts.append((secret_dir, ZAP_SECRETS, "ro"))
         # The host name is always pinned to the gate's IP (--add-host) so ZAP cannot resolve elsewhere.
         return docker_run_argv(
             image,
             name=name or new_container_name(self.name),
-            mounts=[(out_file.parent, ZAP_WRK, "rw")],
+            mounts=mounts,
             add_hosts=[(target.host, target.ip)],
             args=args,
+            extra_flags=[zap_crawl.SHM_SIZE] if ajax_min else [],
         )
 
     def build_docker_argv(self, target, *, out_file: Path, profile: str = "baseline", name: str = "", **opts):
@@ -166,6 +225,8 @@ class ZapAdapter(ScannerAdapter):
         auth_opts: dict[str, Any] | None = None,
         **opts,
     ) -> ScannerResult:
+        if scope is not None and "deny_urls" not in opts:
+            opts["deny_urls"] = tuple(scope.deny_urls)
         sr = super().scan(
             pin,
             out_dir=out_dir,
@@ -180,4 +241,49 @@ class ZapAdapter(ScannerAdapter):
             if reason:
                 sr.quarantine = True
                 sr.quarantine_reason = reason
+        _record_crawl_summary(self, pin, out_dir, opts.get("crawl"), profile, sr)
         return sr
+
+
+# ------------------------------------------------------------------ crawl helpers
+
+
+def _crawl_minutes(adapter, crawl, profile: str) -> tuple[int, int, str]:
+    from attestra.runner import crawl as crawl_settings
+
+    if crawl is not None:
+        spider, ajax = int(crawl.spider_minutes), int(crawl.ajax_minutes)
+    else:
+        spider, ajax = crawl_settings.default_spider_minutes(), crawl_settings.default_ajax_minutes()
+    return crawl_settings.fit_to_timeout(spider, ajax, timeout_s=adapter.timeout_s(), active=is_active_profile(profile))
+
+
+def _crawl_plan(target, crawl, spider: int, ajax: int):
+    from attestra.runner import crawl as crawl_settings
+
+    return crawl_settings.CrawlPlan(
+        root_url=f"{target.scheme}://{target.host_header}/",
+        start_urls=list(crawl.start_urls) if crawl is not None else [],
+        spider_minutes=spider,
+        ajax_minutes=ajax,
+        notes=list(crawl.notes) if crawl is not None else [],
+    )
+
+
+def _record_crawl_summary(adapter, pin, out_dir: Path, crawl, profile: str, sr) -> None:
+    """Write crawl-summary.json (scan page) and copy it into ``sr.extra``. Never raises."""
+    try:
+        from attestra.runner import crawl as crawl_settings
+
+        if not isinstance(pin, PinnedTarget):
+            return
+        spider, ajax, fit_note = _crawl_minutes(adapter, crawl, profile)
+        plan = _crawl_plan(pin, crawl, spider, ajax)
+        summary = {"tool": "zap", **plan.as_dict()}
+        if fit_note:
+            summary["notes"] = [*summary["notes"], fit_note]
+        summary.update(zap_crawl.read_result(out_dir))
+        (out_dir / crawl_settings.SUMMARY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        sr.extra["crawl"] = summary
+    except Exception:  # noqa: BLE001 - display data only
+        pass

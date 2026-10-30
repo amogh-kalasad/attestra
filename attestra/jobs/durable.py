@@ -213,6 +213,44 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
 
     asset = run.asset
     kwargs = {"out_dir": out_dir, "cancel": cancel, "profile": run.profile}
+    if run.tool in ("zap", "nuclei"):
+        # Crawl settings: typed path + Extra Start URLs + crawl minutes (same host, in scope).
+        from attestra.runner.crawl import scan_kwargs as _crawl_scan_kwargs
+
+        kwargs.update(_crawl_scan_kwargs(s, run, target, asset))
+
+    # Authenticated scanning (auth-web): prepare per-tool session injection when a
+    # credential profile was chosen for this run. Secrets live in a per-scan temp dir
+    # OUTSIDE data/raw (mounted read-only) and are deleted in the finally below.
+    plan = None
+    if getattr(run, "auth_profile_id", None) and run.tool in ("zap", "nuclei"):
+        from attestra.runner.dns_pin import PinnedTarget
+
+        if not config.AUTH_WEB_ENABLED:
+            _fail_run(
+                s,
+                run,
+                job,
+                "this scan selected an authentication profile, but authenticated testing is off. "
+                "Set ATTESTRA_AUTH_WEB_ENABLED=true in .env and restart the worker, then re-queue.",
+            )
+            return
+        from attestra.auth_web import scan_auth
+
+        target_url = f"{target.scheme}://{target.host_header}/" if isinstance(target, PinnedTarget) else str(target)
+        try:
+            plan = scan_auth.prepare_for_run(s, run, out_dir, tool=run.tool, target_url=target_url)
+        except scan_auth.ScanAuthError as exc:
+            _fail_run(s, run, job, f"authenticated scan setup failed: {exc}")
+            return
+        except Exception as exc:  # noqa: BLE001 - never leak a secret in the message
+            _fail_run(s, run, job, f"authenticated scan setup failed: {type(exc).__name__}")
+            return
+        try:
+            _apply_auth_plan(s, run, plan, kwargs)
+        except BaseException:
+            plan.cleanup()
+            raise
     try:
         if run.tool == "nuclei":
             result = adapter.scan(target, intrusive_allowed=bool(asset.intrusive_allowed), **kwargs)  # type: ignore[call-arg]
@@ -226,6 +264,10 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
         return
     finally:
         _ACTIVE_JOB_CANCEL.pop(job.id, None)
+        # Delete the auth secret dir whether the scan succeeded, failed, timed out, was
+        # cancelled or stopped by Ctrl+C / Stop Worker (the scanner process is gone by now).
+        if plan is not None:
+            plan.cleanup()
 
     if result.extra.get("cancelled") or job.cancel_requested:
         run.status = "cancelled"
@@ -303,6 +345,39 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
         run.ended_at = utcnow()
         run.refuse_reason = f"import failed: {exc}"[:500]
         fail_job(s, job, str(exc))
+
+
+def _apply_auth_plan(s: Session, run: ScanRun, plan, kwargs: dict) -> None:
+    run.authenticated = bool(plan.authenticated)
+    run.auth_note = (plan.note or "")[:500]
+    if plan.authenticated:
+        audit.record(
+            s,
+            run.requested_by,
+            "scan.authenticated",
+            "scan_run",
+            run.id,
+            auth_profile_id=plan.profile_id,
+            method=plan.method,
+            role=plan.role_name,
+            injected=plan.injected_names,
+        )
+        kwargs.update(plan.zap_kwargs() if run.tool == "zap" else plan.nuclei_kwargs())
+    s.commit()
+
+
+def active_scan_run_ids(s: Session) -> set[int]:
+    """ScanRun ids whose job is running with a fresh heartbeat (another live worker)."""
+    cutoff = utcnow() - timedelta(seconds=config.JOB_STALE_HEARTBEAT_S)
+    q = select(Job.scan_run_id).where(Job.status == "running", Job.heartbeat_at >= cutoff)
+    return {int(x) for x in s.scalars(q) if x is not None}
+
+
+def sweep_auth_secrets(s: Session) -> list[str]:
+    """Worker start: delete auth secret files left by earlier runs (never for live scans)."""
+    from attestra.auth_web import scan_auth
+
+    return scan_auth.sweep_leftover_secrets(config.DATA_DIR / "raw", active_run_ids=active_scan_run_ids(s))
 
 
 def _fail_run(s: Session, run: ScanRun, job: Job, error: str) -> None:

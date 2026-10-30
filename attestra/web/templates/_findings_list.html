@@ -1,5 +1,5 @@
 {# Master list of an engagement's findings for the Option M list/detail split. Needs: e, fl (findings), cur_fid (or None). #}
-<aside class="card md-list" aria-label="Findings in {{ e.name }}">
+<aside class="card md-list{{ ' is-empty' if not fl }}" aria-label="Findings in {{ e.name }}">
   <div class="card-head"><h2>Findings</h2><span class="meta">{{ fl|length }} in ENG-{{ e.id }}</span></div>
   <div class="md-scroll">
   {% for x in fl %}
@@ -12,7 +12,11 @@
     </span>
   </a>
   {% else %}
-  <p class="meta" style="padding:12px 18px;margin:0">No findings yet.</p>
+  <div class="md-empty">
+    <b>No Findings Yet</b>
+    <span class="meta">Run a scan or import scanner results and findings will appear here.</span>
+    <a class="btn secondary" href="/engagements/{{ e.id }}#p-scans">Go to Scans &amp; Imports</a>
+  </div>
   {% endfor %}
   </div>
 </aside>

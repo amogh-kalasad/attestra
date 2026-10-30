@@ -1,0 +1,201 @@
+"""End-to-end authenticated-scan queueing: profile CRUD masking, request_scan carries the
+profile, run orchestration prepares artifacts + login check, and RBAC on profile management."""
+from __future__ import annotations
+
+import pytest
+
+from attestra.auth.roles import has_permission
+
+
+@pytest.fixture
+def auth_env(monkeypatch):
+    """Enable auth-web + an ephemeral (process-local) credential key for the test."""
+    import attestra.config as cfg
+
+    monkeypatch.setenv("ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL", "1")
+    monkeypatch.setattr(cfg, "AUTH_WEB_ENABLED", True)
+    # Offline/deterministic DNS so the scan gate's host pinning never does a real
+    # lookup (the storefront asset host need not exist on this machine).
+    import socket as _socket
+
+    def _fake_getaddrinfo(host, *a, **k):
+        return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(_socket, "getaddrinfo", _fake_getaddrinfo)
+    # reset the credential store singleton so it re-reads the env
+    import attestra.credentials.store as store
+
+    if hasattr(store, "_STORE"):
+        monkeypatch.setattr(store, "_STORE", None, raising=False)
+    yield
+
+
+class _Principal:
+    def __init__(self, role, actor="lead", tenant_id=1, user_id=1, username="lead"):
+        self.role = role
+        self.actor = actor
+        self.tenant_id = tenant_id
+        self.user_id = user_id
+        self.username = username
+
+
+def _lead(s, eid):
+    from attestra import services
+
+    e = services.get_engagement(s, eid)
+    return _Principal("lead", tenant_id=e.tenant_id)
+
+
+def test_auth_profile_manage_permission_is_lead_admin_only():
+    assert has_permission("admin", "auth_profile.manage")
+    assert has_permission("lead", "auth_profile.manage")
+    assert not has_permission("tester", "auth_profile.manage")
+    assert not has_permission("reviewer", "auth_profile.manage")
+    # testers may still read (to pick a profile) but not edit
+    assert has_permission("tester", "auth_profile.read")
+
+
+def test_create_profile_masks_secret(engagement, auth_env):
+    from attestra import db
+    from attestra.auth_web import profiles
+
+    with db.session() as s:
+        principal = _lead(s, engagement)
+        row = profiles.create_profile(
+            s, engagement, label="Admin token", role_name="admin", method="header",
+            config_json={"header_name": "Authorization"},
+            secret_value="super-secret-token-value", principal=principal, actor="lead",
+        )
+        s.commit()
+        d = profiles.profile_dict(row)
+    assert d["has_secret"] is True
+    assert "super-secret-token-value" not in str(d)
+    assert d["secret_ref"] and d["secret_ref"] != row.secret_ref  # truncated/masked
+
+
+def test_request_scan_carries_auth_profile(engagement, auth_env):
+    from attestra import db, services
+    from attestra.auth_web import profiles
+    from attestra.models import Asset
+
+    with db.session() as s:
+        principal = _lead(s, engagement)
+        prof = profiles.create_profile(
+            s, engagement, label="hdr", method="header",
+            config_json={"header_name": "Authorization"}, secret_value="tok", principal=principal,
+        )
+        s.flush()
+        asset = s.query(Asset).filter(Asset.engagement_id == engagement, Asset.kind == "web_app").first()
+        run = services.request_scan(
+            s, engagement, asset_id=asset.id, tool="zap", profile="baseline",
+            actor="lead", auth_profile_id=prof.id,
+        )
+        s.commit()
+        assert run.auth_profile_id == prof.id
+
+
+def test_request_scan_rejects_foreign_profile(engagement, auth_env):
+    from attestra import db, services
+    from attestra.models import Asset
+
+    with db.session() as s:
+        asset = s.query(Asset).filter(Asset.engagement_id == engagement, Asset.kind == "web_app").first()
+        with pytest.raises(services.ServiceError):
+            services.request_scan(
+                s, engagement, asset_id=asset.id, tool="zap", profile="baseline",
+                actor="lead", auth_profile_id=99999,
+            )
+
+
+def _make_run(s, eid, profile_id, tool="zap"):
+    from attestra.models import Asset, ScanRun
+
+    asset = s.query(Asset).filter(Asset.engagement_id == eid, Asset.kind == "web_app").first()
+    run = ScanRun(
+        engagement_id=eid, asset_id=asset.id, tool=tool, profile="baseline",
+        status="queued", requested_by="lead", auth_profile_id=profile_id,
+    )
+    s.add(run)
+    s.flush()
+    return run
+
+
+def test_prepare_for_run_header_profile_zap(engagement, auth_env, tmp_path):
+    from attestra import db
+    from attestra.auth_web import profiles, scan_auth
+
+    with db.session() as s:
+        principal = _lead(s, engagement)
+        prof = profiles.create_profile(
+            s, engagement, label="hdr", method="header",
+            config_json={"header_name": "Authorization", "verify_url": "https://shop.example.com/me",
+                         "logged_in_indicator": "Sign out"},
+            secret_value="tok", principal=principal,
+        )
+        run = _make_run(s, engagement, prof.id, tool="zap")
+        plan = scan_auth.prepare_for_run(
+            s, run, tmp_path, tool="zap", target_url="https://shop.example.com/",
+            login_probe=lambda u, h: (200, "Welcome Sign out"),
+        )
+    assert plan.authenticated is True
+    assert plan.status == "ready"
+    assert plan.zap_auth_opts.get("hook_path")
+    assert "Cookie" not in plan.injected_names  # header profile => only the header
+    assert "Authorization" in plan.injected_names
+
+
+def test_prepare_for_run_nuclei_secret_file(engagement, auth_env, tmp_path):
+    from attestra import db
+    from attestra.auth_web import profiles, scan_auth
+
+    with db.session() as s:
+        principal = _lead(s, engagement)
+        prof = profiles.create_profile(
+            s, engagement, label="ck", method="cookie",
+            config_json={"cookie_name": "sid", "verify_url": "https://shop.example.com/me"},
+            secret_value="SECRETSESSION", principal=principal,
+        )
+        run = _make_run(s, engagement, prof.id, tool="nuclei")
+        plan = scan_auth.prepare_for_run(
+            s, run, tmp_path, tool="nuclei", target_url="https://shop.example.com/",
+            login_probe=lambda u, h: (200, "ok"),
+        )
+    assert plan.authenticated is True
+    assert plan.nuclei_secret_file
+    body = open(plan.nuclei_secret_file).read()
+    # secret is in the mounted file (that's expected), and nowhere in the plan's public fields
+    assert "SECRETSESSION" in body
+    assert "SECRETSESSION" not in plan.note
+
+
+def test_prepare_for_run_failed_login_raises(engagement, auth_env, tmp_path):
+    from attestra import db
+    from attestra.auth_web import profiles, scan_auth
+
+    with db.session() as s:
+        principal = _lead(s, engagement)
+        prof = profiles.create_profile(
+            s, engagement, label="hdr", method="header",
+            config_json={"header_name": "Authorization", "verify_url": "https://shop.example.com/me",
+                         "logged_in_indicator": "Sign out"},
+            secret_value="tok", principal=principal,
+        )
+        run = _make_run(s, engagement, prof.id)
+        with pytest.raises(scan_auth.ScanAuthError):
+            scan_auth.prepare_for_run(
+                s, run, tmp_path, tool="zap", target_url="https://shop.example.com/",
+                login_probe=lambda u, h: (200, "Please log in"),  # indicator missing
+            )
+
+
+def test_prepare_for_run_no_profile_is_skipped(engagement, auth_env, tmp_path):
+    from attestra import db
+    from attestra.auth_web import scan_auth
+
+    with db.session() as s:
+        run = _make_run(s, engagement, None)
+        plan = scan_auth.prepare_for_run(
+            s, run, tmp_path, tool="zap", target_url="https://shop.example.com/",
+        )
+    assert plan.authenticated is False
+    assert plan.status == "skipped"

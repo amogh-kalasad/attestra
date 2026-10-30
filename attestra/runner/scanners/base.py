@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -173,6 +174,7 @@ def docker_run_argv(
     add_hosts: list[tuple[str, str]] = (),
     entrypoint: str | None = None,
     args: list[str] = (),
+    extra_flags: list[str] = (),
 ) -> list[str]:
     """``docker run`` for one scanner container: removed afterwards, named so it can be stopped.
 
@@ -185,6 +187,7 @@ def docker_run_argv(
             argv += ["--add-host", f"{host}:{ip}"]
     for src, dst, mode in mounts:
         argv += ["-v", f"{docker_host_path(src)}:{dst}:{mode}"]
+    argv += list(extra_flags)  # e.g. --shm-size for a headless browser
     if entrypoint:
         argv += ["--entrypoint", entrypoint]
     argv.append(require_digest_image(image))
@@ -202,8 +205,25 @@ def stop_container(name: str) -> None:
         pass
 
 
-def _tail(data: bytes, n: int = 1500) -> str:
-    return data.decode("utf-8", errors="replace").strip()[-n:]
+def _tail(data: bytes, n: int = 1500, redact_values=()) -> str:
+    return redact_text(data.decode("utf-8", errors="replace"), redact_values).strip()[-n:]
+
+
+_REDACT_PATTERNS = (
+    (re.compile(r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)(\s*[:=]\s*)[^\r\n]+"), r"\1\2[REDACTED]"),
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"), "Bearer [REDACTED]"),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"), "[REDACTED-JWT]"),
+)
+TOOL_LOG_MAX_BYTES = 2_000_000
+
+
+def redact_text(text: str, redact_values=()) -> str:
+    """Mask known secret values plus anything that looks like a session header/token."""
+    for v in sorted({str(x) for x in redact_values or () if x and len(str(x)) >= 4}, key=len, reverse=True):
+        text = text.replace(v, "[REDACTED]")
+    for rx, repl in _REDACT_PATTERNS:
+        text = rx.sub(repl, text)
+    return text
 
 
 class ScannerAdapter(ABC):
@@ -213,6 +233,10 @@ class ScannerAdapter(ABC):
     image_key: str = ""  # key in config.SCANNER_IMAGES when the tool can run in Docker
     default_timeout_s: int | None = None  # per-tool default; None uses ATTESTRA_SCANNER_TIMEOUT_S
     report_on_stdout: bool = False  # the tool prints its report instead of writing a file
+    # When set, the tool's (redacted) output is kept next to the report for troubleshooting,
+    # e.g. "nuclei-stderr.log". tool_log_streams picks stdout and/or stderr.
+    tool_log_name: str = ""
+    tool_log_streams: tuple[str, ...] = ("stderr",)
     empty_report_ok: bool = False  # an empty report with exit code 0 means "no findings"
 
     @abstractmethod
@@ -280,6 +304,10 @@ class ScannerAdapter(ABC):
         hint = "start Docker Desktop" if self.image_key else f"install {self.name}"
         return f"{self.name} cannot run on this machine: docker was not found and the {self.name} tool is not installed ({hint})"
 
+    def _write_tool_log(self, out_dir: Path, result: ProcessResult, redact=()) -> None:
+        """Keep the tool's redacted output as ``tool_log_name`` in out_dir (never raises)."""
+        _write_tool_log_impl(self, out_dir, result, redact)
+
     def validate_report(self, raw: bytes) -> str | None:
         """Return an error when the report cannot be read by the importer."""
         from attestra import importers
@@ -299,6 +327,8 @@ class ScannerAdapter(ABC):
         profile: str = "baseline",
         **opts,
     ) -> ScannerResult:
+        # Secret values to mask in any kept log / error text (never passed to the tool).
+        redact = tuple(opts.pop("redact_values", ()) or ())
         config.ensure_dirs()
         out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / (self.out_name or f"{self.name}-out.json")
@@ -317,6 +347,7 @@ class ScannerAdapter(ABC):
         version = self.version() if not container else f"{self.name} (docker)"
         timeout = self.timeout_s()
         result = run_process(argv, cancel=cancel, timeout=timeout)
+        self._write_tool_log(out_dir, result, redact)
         if result.cancelled or result.timed_out:
             stop_container(container)
             return ScannerResult(
@@ -324,7 +355,7 @@ class ScannerAdapter(ABC):
                 tool_version=version,
                 image_digest=digest,
                 error="" if result.cancelled else f"{self.name} timed out after {timeout}s",
-                extra={"cancelled": result.cancelled, "timed_out": result.timed_out, "stderr": _tail(result.stderr)},
+                extra={"cancelled": result.cancelled, "timed_out": result.timed_out, "stderr": _tail(result.stderr, redact_values=redact)},
             )
         out_file = self.resolve_output(out_file)
         if not out_file.exists():
@@ -332,22 +363,39 @@ class ScannerAdapter(ABC):
                 out_file.write_bytes(result.stdout)
             elif self.empty_report_ok and result.returncode == 0:
                 out_file.write_bytes(b"")
-        extra = {"returncode": result.returncode, "argv": argv, "stderr": _tail(result.stderr)}
+        extra = {"returncode": result.returncode, "argv": argv, "stderr": _tail(result.stderr, redact_values=redact)}
         sr = ScannerResult(
             tool=self.name, tool_version=version, image_digest=digest, import_tool=self.import_tool, extra=extra
         )
         if not out_file.exists():
-            detail = _tail(result.stderr) or _tail(result.stdout)
+            detail = _tail(result.stderr, redact_values=redact) or _tail(result.stdout, redact_values=redact)
             sr.error = f"{self.name} wrote no report (exit code {result.returncode}): {detail}"[:1500]
             return sr
         problem = self.validate_report(out_file.read_bytes())
         if problem:
-            detail = _tail(result.stderr) or _tail(result.stdout)
+            detail = _tail(result.stderr, redact_values=redact) or _tail(result.stdout, redact_values=redact)
             sr.error = f"{problem} (exit code {result.returncode}). {detail}"[:1500]
             return sr
         # A valid report is success even with a non-zero exit code (ZAP 1/2 on WARN/FAIL, semgrep 1 on findings).
         sr.raw_path = out_file
         return sr
+
+
+def _write_tool_log_impl(adapter, out_dir: Path, result: ProcessResult, redact) -> None:
+    if not adapter.tool_log_name:
+        return
+    try:
+        parts = []
+        for stream in adapter.tool_log_streams:
+            data = result.stdout if stream == "stdout" else result.stderr
+            if len(adapter.tool_log_streams) > 1:
+                parts.append(f"===== {stream} =====\n")
+            parts.append(data[-TOOL_LOG_MAX_BYTES:].decode("utf-8", errors="replace"))
+        status = "cancelled" if result.cancelled else ("timed out" if result.timed_out else "finished")
+        parts.append(f"\n===== exit code {result.returncode} ({status}) =====\n")
+        (out_dir / adapter.tool_log_name).write_text(redact_text("".join(parts), redact), encoding="utf-8")
+    except Exception:  # noqa: BLE001 - diagnostics only
+        pass
 
 
 def require_digest_image(image: str) -> str:

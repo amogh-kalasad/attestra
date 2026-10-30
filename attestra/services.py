@@ -2068,6 +2068,7 @@ def request_scan(
     actor: str,
     user_id: int | None = None,
     idempotency_key: str | None = None,
+    auth_profile_id: int | None = None,
 ) -> ScanRun:
     """Create a ScanRun + Job after the dispatch gate accepts the request.
 
@@ -2080,6 +2081,14 @@ def request_scan(
     from attestra.runner.gate import GateError, check
 
     eng = get_engagement(s, engagement_id)
+    if auth_profile_id is not None:
+        from attestra.models import AuthCredentialProfile
+
+        _ap = s.get(AuthCredentialProfile, auth_profile_id)
+        if _ap is None or _ap.engagement_id != engagement_id or _ap.tenant_id != eng.tenant_id:
+            raise ServiceError("auth profile not found for this engagement")
+        if (_ap.status or "") == "revoked":
+            raise ServiceError("auth profile is revoked; choose another or re-validate it")
     # Fail-fast when enforcement is on and the org has no credits (no debit yet).
     if config.subscription_enforcement_enabled():
         if balance_view(s, eng.tenant_id, actor=actor)["exhausted"]:
@@ -2098,6 +2107,7 @@ def request_scan(
             status="refused",
             requested_by=actor,
             refuse_reason=exc.reason,
+            auth_profile_id=auth_profile_id,
         )
         s.add(run)
         s.flush()
@@ -2119,6 +2129,7 @@ def request_scan(
         profile=profile,
         status="queued",
         requested_by=actor,
+        auth_profile_id=auth_profile_id,
     )
     s.add(run)
     s.flush()

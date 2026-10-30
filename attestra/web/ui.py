@@ -60,6 +60,16 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 # Tools the scan runner and the scheduler accept (one list for both forms).
 SCAN_TOOLS = ("zap", "nuclei", "testssl", "naabu", "webcheck", "trivy", "semgrep", "gitleaks", "checkov")
+# Auth-web credential profile methods shown in the target Authentication section.
+AUTH_PROFILE_METHODS = (
+    ("header", "Session Token / Header (OTP, SSO, 2FA)"),
+    ("cookie", "Session Cookie"),
+    ("form", "Username + Password Form Login"),
+    ("otp", "Email OTP (Test Inbox)"),
+    ("none", "None (Anonymous)"),
+)
+# Tools that honor an authenticated session when a profile is selected.
+AUTH_CAPABLE_TOOLS = ("zap", "nuclei")
 SCAN_TOOL_LABELS = {
     "zap": "zap: web app scan (DAST), web targets",
     "nuclei": "nuclei: known issues and misconfigurations, web targets",
@@ -158,6 +168,10 @@ templates.env.globals.update(
     tz_label=TZ_LABEL,
     detected_by=detected_by_label,
 )
+from attestra.runner import crawl as _crawl  # noqa: E402 - crawl settings helpers for templates
+
+templates.env.globals["crawl_defaults"] = _crawl.form_defaults
+templates.env.globals["crawl_summary"] = _crawl.summary_for_run
 
 
 def _actor(request: Request) -> str | None:
@@ -535,6 +549,19 @@ def _ct_apexes_for(s, eid: int) -> list[str]:
         return []
 
 
+def _auth_profiles_for(s, eid: int, principal) -> list[dict]:
+    """Masked, metadata-only auth credential profiles for the engagement (never secrets)."""
+    if not has_permission(principal.role, "auth_profile.read"):
+        return []
+    try:
+        from attestra.auth_web import profiles as auth_profiles
+
+        rows = auth_profiles.list_profiles(s, eid, principal)
+        return [auth_profiles.profile_dict(r) for r in rows]
+    except Exception:  # noqa: BLE001 - never break the page over the optional auth panel
+        return []
+
+
 def _engagement_ctx(
     request: Request,
     s,
@@ -585,6 +612,7 @@ def _engagement_ctx(
         "scan_tool_labels": SCAN_TOOL_LABELS,
         "tool_asset_kinds": _tool_asset_kinds(),
         "worker_concurrency": _worker_concurrency(),
+        "worker": _worker_panel(s, principal, scans),
         "import_labels": IMPORT_FORMAT_LABELS,
         "asset_findings": asset_findings,
         "asset_schedules": asset_schedules,
@@ -627,6 +655,10 @@ def _engagement_ctx(
         "ct_apexes": _ct_apexes_for(s, eid),
         "ct_suggestions": ct_suggestions or [],
         "ct_apex": ct_apex,
+        "auth_web_enabled": config.AUTH_WEB_ENABLED,
+        "can_manage_auth": has_permission(principal.role, "auth_profile.manage"),
+        "auth_profiles": _auth_profiles_for(s, eid, principal),
+        "auth_methods": AUTH_PROFILE_METHODS,
         "org_credits": _org_credits_for(principal, s, e.tenant_id),
     }
 
@@ -864,6 +896,10 @@ def target_page(request: Request, eid: int, aid: int):
                 "ownership_bypass_active": config.ownership_bypass_active(),
                 "signed_authorization_bypass_active": config.signed_authorization_bypass_active(),
                 "bypass_status": config.BYPASS_STATUS,
+                "auth_web_enabled": config.AUTH_WEB_ENABLED,
+                "can_manage_auth": has_permission(principal.role, "auth_profile.manage"),
+                "auth_profiles": _auth_profiles_for(s, eid, principal),
+                "auth_methods": AUTH_PROFILE_METHODS,
             },
         )
 
@@ -883,10 +919,14 @@ def add_target(
     in_cde: bool = Form(False),
     owner: str = Form(""),
     notes: str = Form(""),
+    crawl_seed_urls: str = Form(""),
+    crawl_spider_minutes: str = Form(""),
+    crawl_ajax_minutes: str = Form(""),
 ):
     return _do(
         request, f"/engagements/{eid}", "#scope", f"Target {identifier.strip()} added to scope.",
-        services.add_asset, eid, kind=kind, identifier=identifier, name=name, environment=environment,
+        _crawl.add_asset_with_crawl, eid, crawl_seed_urls=crawl_seed_urls,
+        crawl_spider_minutes=crawl_spider_minutes, crawl_ajax_minutes=crawl_ajax_minutes, kind=kind, identifier=identifier, name=name, environment=environment,
         test_types=test_types, intrusive_allowed=intrusive_allowed, criticality=criticality, exposure=exposure,
         in_cde=in_cde, owner=owner, notes=notes,
     )
@@ -1036,6 +1076,81 @@ def _worker_concurrency() -> int:
     return resolve_concurrency()
 
 
+# Start Worker / Stop Worker buttons (engagement page, Automated scans).
+WORKER_CONTROL_ROLES = frozenset({"admin", "lead"})
+
+
+def _worker_panel(s, principal, scans) -> dict:
+    """Worker status for the Automated scans card; never raises."""
+    from attestra.jobs import launcher
+
+    try:
+        allowed, why = launcher.ui_control_allowed()
+        st = launcher.worker_status(s)
+    except Exception:  # noqa: BLE001 - the engagement page must render
+        return {}
+    role_ok = bool(principal) and principal.role in WORKER_CONTROL_ROLES
+    queued = sum(1 for r in scans if r.status == "queued")
+    can_control = role_ok and allowed
+    return {
+        "status": st,
+        "allowed": allowed,
+        "why": why,
+        "role_ok": role_ok,
+        "can_control": can_control,
+        "queued": queued,
+        "show_start": can_control and queued > 0 and not st.running and not st.starting,
+        "show_stop": can_control and st.running and not st.stop_requested,
+    }
+
+
+def _worker_control(request: Request, eid: int, action: str) -> RedirectResponse:
+    from attestra.jobs import launcher
+
+    url = f"/engagements/{eid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if principal.role not in WORKER_CONTROL_ROLES:
+        return _back(url, error=f"Only an admin or lead can {action} the worker.", anchor="#scans")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            if action == "start":
+                pid = launcher.start_worker(actor=principal.username, s=s)
+                audit.record(s, principal.username, "worker.start", "worker", pid, engagement_id=eid)
+                msg = (
+                    f"Worker started in the background (PID {pid}). Queued scans start within a few "
+                    f"seconds. Output: {launcher.log_path()}"
+                )
+            else:
+                launcher.stop_worker(actor=principal.username, s=s)
+                audit.record(s, principal.username, "worker.stop", "worker", None, engagement_id=eid)
+                msg = (
+                    "Stop requested. The worker stops its running scans, puts them back in the queue "
+                    "and exits within a few seconds."
+                )
+    except launcher.WorkerControlError as e:
+        return _back(url, error=str(e), anchor="#scans")
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#scans")
+    except OSError as e:
+        return _back(url, error=f"Could not {action} the worker: {e}", anchor="#scans")
+    return _back(url, msg=msg, anchor="#scans")
+
+
+@router.post("/engagements/{eid}/worker/start")
+def ui_start_worker(request: Request, eid: int):
+    """Start Worker button: spawn `attestra worker` in the background (local/dev only)."""
+    return _worker_control(request, eid, "start")
+
+
+@router.post("/engagements/{eid}/worker/stop")
+def ui_stop_worker(request: Request, eid: int):
+    """Stop Worker button: graceful stop via the worker's stop file (local/dev only)."""
+    return _worker_control(request, eid, "stop")
+
+
 def _back_both(url: str, *, msg: str = "", error: str = "", anchor: str = "") -> RedirectResponse:
     """Redirect with a success and an error flash at the same time (multi-tool queue)."""
     parts = [f"msg={quote(msg)}"] if msg else []
@@ -1054,6 +1169,7 @@ def queue_scan(
     asset_id: str = Form(""),
     tool: list[str] = Form([]),
     profile: str = Form("baseline"),
+    auth_profile_id: str = Form(""),
 ):
     """Queue one scan per selected tool; each goes through the gate and credits on its own."""
     principal = _principal(request)
@@ -1068,6 +1184,8 @@ def queue_scan(
         return _back(url, error="Choose at least one tool.", anchor="#scans")
     if any(t not in SCAN_TOOLS for t in tools):
         return _back(url, error=f"Choose a tool from the list ({', '.join(SCAN_TOOLS)}).", anchor="#scans")
+    apid = auth_profile_id.strip()
+    auth_pid: int | None = int(apid) if apid.isdigit() else None
     queued: list[tuple[str, int]] = []
     refused: list[tuple[str, str]] = []
     for t in tools:
@@ -1082,6 +1200,7 @@ def queue_scan(
                     profile=profile,
                     actor=who,
                     user_id=principal.user_id if principal else None,
+                    auth_profile_id=auth_pid if t in ("zap", "nuclei") else None,
                 )
                 if run.status == "refused":
                     refused.append((t, run.refuse_reason or "scan refused"))
@@ -1101,6 +1220,227 @@ def queue_scan(
     if refused:
         error = "Not queued: " + "; ".join(f"{t}: {why}" for t, why in refused)
     return _back_both(url, msg=msg, error=error, anchor="#scans")
+
+
+def _auth_url(eid: int, aid: str | int = "") -> str:
+    base = f"/engagements/{eid}"
+    return f"{base}/targets/{aid}" if aid not in ("", None) else base
+
+
+@router.post("/engagements/{eid}/auth-profiles")
+def ui_create_auth_profile(
+    request: Request,
+    eid: int,
+    label: str = Form(...),
+    method: str = Form(...),
+    role_name: str = Form(""),
+    purpose: str = Form(""),
+    asset_id: str = Form(""),
+    login_url: str = Form(""),
+    username: str = Form(""),
+    username_field: str = Form(""),
+    password_field: str = Form(""),
+    success_url_contains: str = Form(""),
+    verify_url: str = Form(""),
+    logged_in_indicator: str = Form(""),
+    logged_out_indicator: str = Form(""),
+    header_name: str = Form(""),
+    cookie_name: str = Form(""),
+    otp_request_url: str = Form(""),
+    otp_field: str = Form(""),
+    otp_submit_url: str = Form(""),
+    imap_host: str = Form(""),
+    imap_port: str = Form(""),
+    imap_user: str = Form(""),
+    imap_mailbox: str = Form(""),
+    sender_filter: str = Form(""),
+    subject_filter: str = Form(""),
+    otp_regex: str = Form(""),
+    secret: str = Form(""),
+    imap_app_password: str = Form(""),
+    extra_headers: str = Form(""),
+    extra_cookies: str = Form(""),
+):
+    """Create an auth credential profile. Secrets go only to the credential store (masked in UI)."""
+    import json as _json
+
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    method = (method or "").strip().lower()
+    # Build non-secret config from the method-specific fields.
+    cfg: dict = {}
+    for key, val in (
+        ("username", username), ("username_field", username_field), ("password_field", password_field),
+        ("verify_url", verify_url), ("logged_in_indicator", logged_in_indicator),
+        ("logged_out_indicator", logged_out_indicator), ("header_name", header_name),
+        ("cookie_name", cookie_name), ("otp_request_url", otp_request_url), ("otp_field", otp_field),
+        ("otp_submit_url", otp_submit_url), ("imap_host", imap_host), ("imap_user", imap_user),
+        ("imap_mailbox", imap_mailbox), ("sender_filter", sender_filter),
+        ("subject_filter", subject_filter), ("otp_regex", otp_regex),
+    ):
+        if val and val.strip():
+            cfg[key] = val.strip()
+    if imap_port.strip().isdigit():
+        cfg["imap_port"] = int(imap_port.strip())
+    # Compose the stored secret value (never persisted in metadata / audit).
+    secret_value: str | None
+    if method == "none":
+        secret_value = None
+    elif method == "otp":
+        secret_value = _json.dumps({"password": secret or "", "imap_app_password": imap_app_password or ""})
+    else:
+        secret_value = secret
+        if not (secret_value or "").strip():
+            return _back(url, error="A secret (token, cookie, or password) is required for this method.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.create_profile(
+                s, eid, label=label, role_name=role_name, purpose=purpose, method=method,
+                login_url=login_url, success_url_contains=success_url_contains,
+                secret_value=secret_value, config_json=cfg, extra_headers=extra_headers,
+                extra_cookies=extra_cookies or None,
+                asset_id=int(aid) if aid.isdigit() else None,
+                actor=principal.actor, principal=principal,
+            )
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg=f"Authentication profile '{label.strip()}' saved. Validate it before scanning.", anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/rotate")
+def ui_rotate_auth_profile(
+    request: Request, eid: int, pid: int,
+    secret: str = Form(""), imap_app_password: str = Form(""), asset_id: str = Form(""),
+):
+    import json as _json
+
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            row = auth_profiles._get_profile(s, eid, pid, principal)
+            if (row.method or "").lower() == "otp":
+                value = _json.dumps({"password": secret or "", "imap_app_password": imap_app_password or ""})
+            else:
+                value = secret
+            if not (value or "").strip():
+                return _back(url, error="A new secret value is required to rotate.", anchor="#authentication")
+            auth_profiles.rotate_secret(s, eid, pid, secret_value=value, principal=principal, actor=principal.actor)
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg="Secret rotated. Re-validate the profile before scanning.", anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/extra-headers")
+def ui_update_auth_profile_extra_headers(
+    request: Request, eid: int, pid: int, extra_headers: str = Form(""), asset_id: str = Form(""),
+):
+    """Edit a profile's non-secret extra headers (empty clears them)."""
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.update_extra_headers(
+                s, eid, pid, extra_headers=extra_headers, principal=principal, actor=principal.actor
+            )
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg="Extra headers saved. They apply to the next authenticated scan.", anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/extra-cookies")
+def ui_update_auth_profile_extra_cookies(
+    request: Request, eid: int, pid: int,
+    extra_cookies: str = Form(""), clear: str = Form(""), asset_id: str = Form(""),
+):
+    """Replace (or clear) a profile's ENCRYPTED extra cookies. Values are never shown back."""
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    clearing = clear.strip() == "1"
+    if not clearing and not extra_cookies.strip():
+        return _back(url, error="Paste the cookies to save (name=value; name2=value2), or use Clear.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.update_extra_cookies(
+                s, eid, pid, extra_cookies="" if clearing else extra_cookies,
+                principal=principal, actor=principal.actor,
+            )
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    msg = "Extra cookies cleared." if clearing else "Extra cookies saved (encrypted). They apply to the next authenticated scan."
+    return _back(url, msg=msg, anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/revoke")
+def ui_revoke_auth_profile(request: Request, eid: int, pid: int, asset_id: str = Form("")):
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.revoke_profile(s, eid, pid, principal=principal, actor=principal.actor)
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg="Authentication profile revoked.", anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/delete")
+def ui_delete_auth_profile(request: Request, eid: int, pid: int, asset_id: str = Form("")):
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    try:
+        with db.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.delete_profile(s, eid, pid, principal=principal, actor=principal.actor)
+            s.commit()
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg="Authentication profile deleted (secret destroyed).", anchor="#authentication")
 
 
 @router.get("/engagements/{eid}/scans/{sid}", response_class=HTMLResponse)
@@ -1950,3 +2290,37 @@ def ui_credits_resolve(
     except (services.ServiceError, LookupError, ValueError) as e:
         return _back("/credits", error=str(e))
     return _back(f"/credits?tenant_id={tid}", msg=f"Renewal request #{rid} updated.")
+
+
+# ---------------------------------------------------------------- crawl settings (per target)
+
+
+@router.post("/engagements/{eid}/targets/{aid}/crawl-settings")
+def save_target_crawl_settings(
+    request: Request,
+    eid: int,
+    aid: int,
+    crawl_seed_urls: str = Form(""),
+    crawl_spider_minutes: str = Form(""),
+    crawl_ajax_minutes: str = Form(""),
+):
+    """Extra Start URLs and crawl minutes for ZAP / nuclei (same host only, checked against scope)."""
+    from attestra.runner import crawl as crawl_settings
+
+    url = f"/engagements/{eid}/targets/{aid}"
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "asset.write"):
+        return _back(url, error="Only a lead or tester with asset write can change crawl settings.", anchor="#crawl")
+    try:
+        with db.session() as s:
+            services.get_engagement(s, eid, principal)
+            services.get_asset(s, aid, principal)
+            crawl_settings.update_crawl_settings(
+                s, eid, aid, seed_text=crawl_seed_urls, spider=crawl_spider_minutes, ajax=crawl_ajax_minutes,
+                actor=principal.actor,
+            )
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#crawl")
+    return _back(url, msg="Crawl settings saved. They apply to the next ZAP and nuclei scans.", anchor="#crawl")

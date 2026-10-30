@@ -626,9 +626,31 @@ def cmd_worker(args) -> None:
         sys.exit(1)
     worker_id = new_worker_id()
     concurrency = resolve_concurrency(getattr(args, "concurrency", None))
+    # Stop Worker (web page) writes this file; clear a leftover one from an earlier run.
+    stop_file = config.DATA_DIR / ".worker-stop"
+    try:
+        stop_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    # Remove auth secret files that an earlier (crashed / force-stopped) worker left behind.
+    try:
+        from attestra.jobs.durable import sweep_auth_secrets
+
+        with db.session() as s:
+            removed = sweep_auth_secrets(s)
+        if removed:
+            print(f"removed {len(removed)} leftover authentication secret file(s)/folder(s): {', '.join(removed)}")
+    except Exception as exc:  # noqa: BLE001 - never block the worker on housekeeping
+        print(f"warning: could not sweep leftover authentication secrets ({type(exc).__name__})", file=sys.stderr)
     print(f"worker {worker_id} started (runs up to {concurrency} scan(s) at the same time)")
     try:
-        WorkerPool(worker_id=worker_id, concurrency=concurrency, poll=args.poll).run_forever()
+        WorkerPool(
+            worker_id=worker_id,
+            concurrency=concurrency,
+            poll=args.poll,
+            lock_file=lock.path,
+            stop_file=stop_file,
+        ).run_forever()
     except KeyboardInterrupt:
         print("worker stopping")
     finally:

@@ -1,0 +1,549 @@
+"""Wire per-target authentication profiles into the scanners (ZAP, Nuclei).
+
+This is the glue that turns an :class:`AuthCredentialProfile` + its stored secret
+into concrete session material (request headers / cookies) and the per-tool
+artifacts the adapters consume:
+
+* **ZAP** — a mounted *hook* file (``--hook``) that installs a Replacer rule on
+  ``zap_started`` so every request (baseline spider, passive and active scan)
+  carries the session header/cookie. For ``form`` profiles we additionally keep
+  the native ZAP form-auth context as a fallback.
+* **Nuclei** — a mounted *secret file* (``-sf``, authx ``static`` headers) so the
+  session header/cookie rides on every probe without ever hitting ``argv``.
+
+Secrets never touch ``argv``, ScanRun rows, audit details, or logs. They live
+only inside restrictive (0600) files on the per-scan work mount, exactly like the
+existing ZAP auth-context files.
+
+Supported methods (``AuthCredentialProfile.method``):
+
+* ``header``  — paste an ``Authorization`` (or named) header value. Works for
+  bearer tokens, SSO, 2FA — anything that yields a long-lived header.
+* ``cookie``  — paste a session cookie value (or a full ``Cookie:`` string).
+* ``form``    — username + password form login; we POST the form, capture the
+  session cookie, and inject it (falls back to ZAP's native form context).
+* ``otp``     — email one-time-passcode login via a test IMAP inbox
+  (see :mod:`attestra.auth_web.otp`).
+* ``none`` / ``sso_bootstrap`` — no injection (sso_bootstrap is reported blocked).
+"""
+# @lat: [[architecture#Authenticated website testing]]
+# @lat: [[runner#Authenticated scan wiring]]
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import urlsplit
+
+from attestra.auth_web import otp as otp_mod
+
+_FILE_MODE = 0o600
+_HOOK_NAME = "attestra-zap-hooks.py"
+_HOOK_DATA_NAME = "attestra-zap-hook-data.json"
+_NUCLEI_SECRET_NAME = "attestra-nuclei-auth.yaml"
+_USER_AGENT = "attestra-auth-web/0.1 (security testing)"
+_FETCH_TIMEOUT_S = 10.0
+
+
+class ScanAuthError(Exception):
+    """Authentication material could not be prepared."""
+
+
+@dataclass
+class ScanAuthPlan:
+    """Per-tool wiring + status for one authenticated scan.
+
+    ``status`` is one of ``ready`` (inject + authenticated), ``skipped`` (no
+    profile / method=none), ``blocked`` (sso_bootstrap), or ``error``.
+    Secret-bearing material stays in mounted files, never on these fields.
+    """
+
+    status: str = "skipped"
+    method: str = "none"
+    profile_id: int | None = None
+    profile_label: str = ""
+    role_name: str = ""
+    note: str = ""
+    authenticated: bool = False
+    # ZAP
+    zap_auth_context_path: str | None = None
+    zap_auth_opts: dict[str, Any] = field(default_factory=dict)
+    # Nuclei
+    nuclei_secret_file: str | None = None
+    # non-secret diagnostic: header/cookie names only, never values
+    injected_names: list[str] = field(default_factory=list)
+
+    def zap_kwargs(self) -> dict[str, Any]:
+        if not self.authenticated:
+            return {}
+        return {"auth_context_path": self.zap_auth_context_path, "auth_opts": dict(self.zap_auth_opts)}
+
+    def nuclei_kwargs(self) -> dict[str, Any]:
+        if not self.authenticated or not self.nuclei_secret_file:
+            return {}
+        return {"auth_secret_file": self.nuclei_secret_file}
+
+
+# --------------------------------------------------------------- session material
+
+
+def _mask_header_prefix(secret: str, cfg: dict[str, Any]) -> str:
+    name = str(cfg.get("header_name") or cfg.get("name") or "Authorization").strip() or "Authorization"
+    prefix = cfg.get("header_prefix")
+    if prefix is None:
+        prefix = "Bearer " if name.lower() == "authorization" and not secret.lower().startswith("bearer ") else ""
+    prefix = str(prefix)
+    value = f"{prefix}{secret}" if prefix and not secret.startswith(prefix) else secret
+    return value
+
+
+def session_material(
+    method: str,
+    cfg: dict[str, Any],
+    secret: str,
+    *,
+    http_post: "otp_mod.HttpPost | None" = None,
+    imap_search: "otp_mod.ImapSearch | None" = None,
+) -> tuple[dict[str, str], dict[str, str], str]:
+    """Return ``(headers, cookies, note)`` for the given auth method.
+
+    ``headers`` are plain ``name: value`` request headers; ``cookies`` is a
+    ``name: value`` map. For ``form``/``otp`` a live login is performed via the
+    injected ``http_post`` (and ``imap_search`` for otp).
+    """
+    method = (method or "").strip().lower()
+    secrets = otp_mod.parse_profile_secret(secret)
+
+    if method == "header":
+        name = str(cfg.get("header_name") or cfg.get("name") or "Authorization").strip() or "Authorization"
+        value = _mask_header_prefix(secret, cfg)
+        return {name: value}, {}, "header injected"
+
+    if method == "cookie":
+        raw = secret.strip()
+        if "=" in raw and (";" in raw or cfg.get("cookie_is_header")):
+            # A full "name=value; name2=value2" cookie string.
+            cookies = _parse_cookie_string(raw)
+            return {}, cookies, "cookie string injected"
+        name = str(cfg.get("cookie_name") or cfg.get("name") or "session").strip() or "session"
+        return {}, {name: raw}, "cookie injected"
+
+    if method == "form":
+        if http_post is None:
+            raise ScanAuthError("form login requires an http transport")
+        cookies = _form_login(cfg, secrets, http_post=http_post)
+        return {}, cookies, "form login ok"
+
+    if method == "otp":
+        if http_post is None:
+            raise ScanAuthError("otp login requires an http transport")
+        result = otp_mod.login_with_otp(cfg, secrets, http_post=http_post, imap_search=imap_search)
+        return {}, dict(result.cookies), result.note
+
+    if method in ("", "none"):
+        return {}, {}, "no authentication"
+    if method == "sso_bootstrap":
+        raise ScanAuthError("sso_bootstrap cannot be automated; use a cookie or header profile")
+    raise ScanAuthError(f"unsupported auth method: {method}")
+
+
+def _parse_cookie_string(raw: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        if k.strip():
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _form_login(cfg: dict[str, Any], secrets: dict[str, str], *, http_post: "otp_mod.HttpPost") -> dict[str, str]:
+    login_url = str(cfg.get("login_url") or "").strip()
+    if not login_url:
+        raise ScanAuthError("login_url is required for form login")
+    username = str(cfg.get("username") or "").strip()
+    password = secrets.get("password") or ""
+    if not username or not password:
+        raise ScanAuthError("username and password are required for form login")
+    user_field = str(cfg.get("username_field") or "username")
+    pass_field = str(cfg.get("password_field") or "password")
+    reply = http_post(login_url, {user_field: username, pass_field: password}, {})
+    if reply.status >= 400:
+        raise ScanAuthError(f"form login failed (HTTP {reply.status})")
+    cookies = dict(reply.cookies or {})
+    if not cookies:
+        raise ScanAuthError("form login completed but no session cookie was set")
+    return cookies
+
+
+def cookie_header(cookies: dict[str, str]) -> str:
+    return "; ".join(f"{k}={v}" for k, v in cookies.items())
+
+
+def all_request_headers(headers: dict[str, str], cookies: dict[str, str]) -> dict[str, str]:
+    out = dict(headers)
+    if cookies:
+        existing = out.get("Cookie")
+        ch = cookie_header(cookies)
+        out["Cookie"] = f"{existing}; {ch}" if existing else ch
+    return out
+
+
+# -------------------------------------------------------------------- ZAP hook
+
+
+def write_zap_hook(out_dir: Path | str, headers: dict[str, str], cookies: dict[str, str]) -> str:
+    """Write a ZAP ``--hook`` file that injects session headers via a Replacer rule.
+
+    Returns the hook file path. The secret values live in a sibling 0600 JSON
+    file that the hook reads at ``zap_started`` time; neither is on ``argv``.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    data = {"headers": all_request_headers(headers, cookies)}
+    data_path = out / _HOOK_DATA_NAME
+    data_path.write_text(json.dumps(data), encoding="utf-8")
+    _chmod(data_path)
+
+    hook_path = out / _HOOK_NAME
+    hook_path.write_text(_HOOK_SOURCE, encoding="utf-8")
+    _chmod(hook_path)
+    return str(hook_path)
+
+
+# The hook runs inside the ZAP container. It reads the sibling data file and adds
+# one Replacer rule per header so every outgoing request carries the session.
+_HOOK_SOURCE = '''# Attestra-generated ZAP hook: inject authenticated session headers.
+import json, os
+
+def _load():
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(here, "''' + _HOOK_DATA_NAME + '''"), "r") as fh:
+            return json.load(fh).get("headers", {})
+    except Exception:
+        return {}
+
+def zap_started(zap, target):
+    headers = _load()
+    for name, value in headers.items():
+        try:
+            zap.replacer.add_rule(
+                description="attestra-auth-" + name,
+                enabled=True,
+                matchtype="REQ_HEADER",
+                matchregex=False,
+                matchstring=name,
+                replacement=value,
+                initiators="",
+                url="",
+            )
+        except Exception:
+            pass
+    return zap, target
+'''
+
+
+# ------------------------------------------------------------------- Nuclei file
+
+
+def write_nuclei_secret_file(
+    out_dir: Path | str,
+    target_url: str,
+    headers: dict[str, str],
+    cookies: dict[str, str],
+) -> str:
+    """Write a Nuclei authx secret file (``-sf``) with the session headers.
+
+    Returns the file path. Secret values stay in this 0600 file, never on argv.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    all_headers = all_request_headers(headers, cookies)
+    host = urlsplit(target_url).hostname or ""
+    entry: dict[str, Any] = {"type": "header", "headers": dict(all_headers)}
+    if host:
+        entry["domains"] = [host]
+    doc = {"static": [entry]}
+    import yaml
+
+    path = out / _NUCLEI_SECRET_NAME
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    _chmod(path)
+    return str(path)
+
+
+def _chmod(path: Path) -> None:
+    try:
+        path.chmod(_FILE_MODE)
+    except OSError:
+        pass
+
+
+# ------------------------------------------------------------- pre-scan check
+
+# login_probe(url, headers) -> (status_code|None, body_text)
+LoginProbe = Callable[[str, dict[str, str]], tuple[int | None, str]]
+
+
+def verify_logged_in(
+    cfg: dict[str, Any],
+    headers: dict[str, str],
+    cookies: dict[str, str],
+    *,
+    login_probe: LoginProbe,
+) -> tuple[bool, str]:
+    """Confirm the session is authenticated by probing a protected URL.
+
+    Checks (in order): a ``logged_in_indicator`` regex must appear, a
+    ``logged_out_indicator`` regex must NOT appear, and the response must not be
+    an auth redirect/401/403. Returns ``(ok, note)`` with a redacted note.
+    """
+    url = str(cfg.get("verify_url") or cfg.get("success_url") or cfg.get("login_url") or "").strip()
+    if not url:
+        return True, "no verify_url configured; skipped pre-scan login check"
+    req_headers = all_request_headers(headers, cookies)
+    req_headers.setdefault("User-Agent", _USER_AGENT)
+    try:
+        status, body = login_probe(url, req_headers)
+    except Exception as exc:  # noqa: BLE001 - redact
+        return False, f"login check request failed: {type(exc).__name__}"
+
+    if status in (401, 403):
+        return False, f"login check got HTTP {status} (not authenticated)"
+
+    logged_out = str(cfg.get("logged_out_indicator") or "").strip()
+    if logged_out:
+        try:
+            if re.search(logged_out, body):
+                return False, "login check saw the logged-out indicator (session not active)"
+        except re.error:
+            return False, "invalid logged_out_indicator regex"
+
+    logged_in = str(cfg.get("logged_in_indicator") or "").strip()
+    if logged_in:
+        try:
+            if not re.search(logged_in, body):
+                return False, "login check did not find the logged-in indicator"
+        except re.error:
+            return False, "invalid logged_in_indicator regex"
+        return True, "login check passed (logged-in indicator present)"
+
+    success = str(cfg.get("success_url_contains") or "").strip()
+    if success and success not in body and status and status >= 400:
+        return False, f"login check got HTTP {status}"
+    return True, "login check passed (no explicit indicator; response ok)"
+
+
+# ------------------------------------------------------------ run orchestration
+
+
+def _profile_cfg(profile) -> dict[str, Any]:
+    """Build the effective config dict from the profile columns + config_json."""
+    cfg = dict(getattr(profile, "config_json", None) or {})
+    for col in (
+        "login_url",
+        "username_selector",
+        "password_selector",
+        "submit_selector",
+        "success_url_contains",
+        "role_name",
+    ):
+        val = getattr(profile, col, "")
+        if val and col not in cfg:
+            cfg[col] = val
+    return cfg
+
+
+def _allowed_hosts(profile, target_url: str) -> set[str]:
+    hosts: set[str] = set()
+    for u in (target_url, getattr(profile, "login_url", "") or "", (profile.config_json or {}).get("verify_url", "")):
+        try:
+            host = urlsplit(u).hostname
+        except Exception:
+            host = None
+        if host:
+            hosts.add(host.lower())
+    return hosts
+
+
+def _host_ok(url: str, allowed: set[str]) -> bool:
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    return bool(host) and host in allowed
+
+
+def live_http_post(allowed_hosts: set[str], *, timeout_s: float = _FETCH_TIMEOUT_S) -> "otp_mod.HttpPost":
+    """A urllib-based form POST restricted to the allowlisted hosts (for login)."""
+    import urllib.parse
+    import urllib.request
+    from http.cookiejar import CookieJar
+
+    def _post(url: str, data: dict[str, str], cookies: dict[str, str]) -> "otp_mod.HttpReply":
+        if not _host_ok(url, allowed_hosts):
+            raise ScanAuthError("login URL host is not in scope for this target")
+        jar = CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        body = urllib.parse.urlencode(data).encode("utf-8")
+        headers = {"User-Agent": _USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"}
+        if cookies:
+            headers["Cookie"] = cookie_header(cookies)
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        got: dict[str, str] = {}
+        status = 200
+        final = url
+        try:
+            with opener.open(req, timeout=timeout_s) as resp:  # noqa: S310 - host allowlisted
+                status = int(getattr(resp, "status", 200) or 200)
+                final = getattr(resp, "geturl", lambda: url)() or url
+                text = resp.read(200_000).decode("utf-8", "replace")
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", None)
+            status = int(code) if isinstance(code, int) else 599
+            text = ""
+        for ck in jar:
+            got[ck.name] = ck.value or ""
+        return otp_mod.HttpReply(status=status, body=text, cookies=got, final_url=final)
+
+    return _post
+
+
+def live_login_probe(allowed_hosts: set[str], *, timeout_s: float = _FETCH_TIMEOUT_S) -> LoginProbe:
+    """A urllib GET restricted to allowlisted hosts (for the pre-scan login check)."""
+    import urllib.request
+
+    def _probe(url: str, headers: dict[str, str]) -> tuple[int | None, str]:
+        if not _host_ok(url, allowed_hosts):
+            raise ScanAuthError("verify URL host is not in scope for this target")
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310 - host allowlisted
+                status = int(getattr(resp, "status", 200) or 200)
+                text = resp.read(500_000).decode("utf-8", "replace")
+                return status, text
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", None)
+            if isinstance(code, int):
+                body = ""
+                try:
+                    body = exc.read(200_000).decode("utf-8", "replace")  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                return code, body
+            raise
+
+    return _probe
+
+
+def load_profile_for_run(s, run) -> Any | None:
+    """Load the AuthCredentialProfile referenced by ``run.auth_profile_id`` (or None)."""
+    pid = getattr(run, "auth_profile_id", None)
+    if not pid:
+        return None
+    from attestra.models import AuthCredentialProfile
+
+    row = s.get(AuthCredentialProfile, pid)
+    if row is None:
+        raise ScanAuthError(f"auth profile {pid} not found")
+    if row.engagement_id != run.engagement_id:
+        raise ScanAuthError("auth profile does not belong to this engagement")
+    if (row.status or "") == "revoked":
+        raise ScanAuthError("auth profile is revoked")
+    return row
+
+
+def prepare_for_run(
+    s,
+    run,
+    out_dir: Path | str,
+    *,
+    tool: str,
+    target_url: str,
+    http_post: "otp_mod.HttpPost | None" = None,
+    imap_search: "otp_mod.ImapSearch | None" = None,
+    login_probe: LoginProbe | None = None,
+    verify: bool = True,
+) -> ScanAuthPlan:
+    """Prepare authenticated-scan artifacts for one ScanRun + tool.
+
+    Returns a :class:`ScanAuthPlan`. Raises :class:`ScanAuthError` when a profile
+    was requested but authentication could not be established (the caller fails
+    the scan with the returned message).
+    """
+    profile = load_profile_for_run(s, run)
+    if profile is None:
+        return ScanAuthPlan(status="skipped", note="unauthenticated scan")
+
+    method = (profile.method or "").strip().lower()
+    plan = ScanAuthPlan(
+        status="skipped",
+        method=method,
+        profile_id=profile.id,
+        profile_label=profile.label or "",
+        role_name=profile.role_name or "",
+    )
+    if method in ("", "none"):
+        plan.note = "profile method=none; unauthenticated scan"
+        return plan
+    if method == "sso_bootstrap":
+        plan.status = "blocked"
+        plan.note = "sso_bootstrap cannot be automated; use a cookie or header profile"
+        raise ScanAuthError(plan.note)
+
+    from attestra import credentials
+
+    ref = (profile.secret_ref or "").strip()
+    if not ref:
+        raise ScanAuthError("auth profile has no stored secret")
+    secret = credentials.get_secret(ref)
+
+    cfg = _profile_cfg(profile)
+    allowed = _allowed_hosts(profile, target_url)
+    if http_post is None:
+        http_post = live_http_post(allowed)
+    if login_probe is None:
+        login_probe = live_login_probe(allowed)
+
+    headers, cookies, note = session_material(
+        method, cfg, secret, http_post=http_post, imap_search=imap_search
+    )
+    if not headers and not cookies:
+        raise ScanAuthError("no session header or cookie could be prepared")
+
+    if verify:
+        ok, vnote = verify_logged_in(cfg, headers, cookies, login_probe=login_probe)
+        if not ok:
+            raise ScanAuthError(vnote)
+        note = f"{note}; {vnote}"
+
+    out = Path(out_dir)
+    if tool == "zap":
+        plan.zap_auth_opts = {"hook_path": write_zap_hook(out, headers, cookies)}
+        # Keep a native ZAP form context as a fallback for full (active) scans.
+        if method == "form":
+            try:
+                from attestra.auth_web.zap_auth import prepare_zap_auth
+
+                res = prepare_zap_auth(out, profile, secret)
+                if res.get("status") == "ready" and res.get("auth_context_path"):
+                    plan.zap_auth_context_path = res["auth_context_path"]
+                    plan.zap_auth_opts["context_path"] = res["auth_context_path"]
+                    if res.get("zap_user"):
+                        plan.zap_auth_opts["user"] = res["zap_user"]
+            except Exception:
+                pass
+    elif tool == "nuclei":
+        plan.nuclei_secret_file = write_nuclei_secret_file(out, target_url, headers, cookies)
+
+    plan.injected_names = sorted(list(headers.keys()) + (["Cookie"] if cookies else []))
+    plan.authenticated = True
+    plan.status = "ready"
+    plan.note = note[:480]
+    return plan
