@@ -2323,4 +2323,50 @@ Master Phase 12: final verification checklist and delivery report (`docs/MASTER_
 
 Focused unit/integration/auth/migration/report suites and ruff on master-impl modules passed; representative JSON/Markdown/PDF text inspected from a merged ZAP+Nuclei engagement. Full-tree pytest, live scanner E2E, and browser UI walkthrough were not re-run; see the Phase 12 report section K for limitations.
 
+## Elite Phase E2 mock apps
+
+Local-only secure and intentionally vulnerable FastAPI mocks for Elite automated security-testing fixtures (`tests/automated_vapt/`).
+
+Covered by `tests/automated_vapt/test_e2_mock_apps.py` plus restored Phase 6 smoke on `tests/fixtures/auth_web_mock_app.py`. Mocks expose `GET /__attestra_mock__` with `mode` `secure` or `vulnerable`.
+
+### Mock modes distinguishable
+
+Secure and vulnerable mocks report distinct `mode` values and `local_only=true` on `/__attestra_mock__`.
+
+### Secure blocks cross-owner project
+
+Account A can read `proj-a` without secrets; `proj-b` returns 404 on the secure mock.
+
+### Vulnerable exposes cross-owner project
+
+Account A reading `proj-b` on the vulnerable mock returns 200 with `secret_note` and `api_token` (intentional BOLA/exposure).
+
+### Secure enforces admin role
+
+Non-admin sessions receive 403 on `/admin`; admin sessions receive 200.
+
+### Vulnerable admin role failure
+
+Any authenticated member reaches `/admin` with 200 on the vulnerable mock.
+
+### Secure settings require auth
+
+Unauthenticated `/app/settings` redirects to login; authenticated sessions succeed.
+
+### Vulnerable settings auth failure
+
+Unauthenticated `/app/settings` returns 200 on the vulnerable mock.
+
+### Secure user directory limited
+
+Members are forbidden from `/api/users`; admin lists users without password fields.
+
+### Vulnerable excessive data exposure
+
+Authenticated members receive user passwords and project tokens from `/api/users`.
+
+### Account B can access own project
+
+Account B successfully reads `proj-b` on both secure and vulnerable mocks.
+
 

@@ -45,3 +45,16 @@ Run the smoke suite:
 ```bash
 pytest tests/test_phase6_auth_mock_smoke.py -q
 ```
+
+## Elite secure / vulnerable mocks
+
+For Elite automated security-testing fixtures (Account A/B, `proj-a`/`proj-b`, intentional BOLA and exposure cases), use:
+
+- `tests/automated_vapt/fixtures/mock_secure_app.py` — negative control
+- `tests/automated_vapt/fixtures/mock_vulnerable_app.py` — positive control (local-only)
+
+Both expose `GET /__attestra_mock__` with `mode` and `local_only`. See `docs/ELITE_VAPT_GAP_ANALYSIS.md`.
+
+```bash
+pytest tests/automated_vapt/test_e2_mock_apps.py -q
+```
