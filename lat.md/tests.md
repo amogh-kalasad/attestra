@@ -2369,4 +2369,36 @@ Authenticated members receive user passwords and project tokens from `/api/users
 
 Account B successfully reads `proj-b` on both secure and vulnerable mocks.
 
+## Elite Phase E3 orchestrator
+
+Orchestrator, scope validation, execution status, and API wiring for Elite automated security testing (`tests/automated_vapt/test_e3_orchestrator.py`).
+
+### Feature flag off refuses
+
+With `AUTOMATED_VAPT_ENABLED` false, create_execution raises ServiceError mentioning disabled.
+
+### Registry lists cases
+
+Catalogue includes authorization/scope categories and ids `T04` and `SCOPE_SMOKE`.
+
+### Scope rejects foreign host
+
+A target outside the approved localhost seed origin is rejected as out of scope.
+
+### Queue run complete scope smoke
+
+Queued `SCOPE_SMOKE` transitions QUEUED → RUNNING → COMPLETED with a PASSED case result.
+
+### Cancel queued execution
+
+A queued execution can be cancelled before run.
+
+### Deferred cases stay honest
+
+Unknown-handler catalogue ids such as `T04` complete as DEFERRED in E3 without fabricating PASS.
+
+### Out of scope asset fails run
+
+Creating an execution against a blocked metadata host raises ServiceError.
+
 
