@@ -164,4 +164,5 @@ Choose next step:
 | E2 Secure + vulnerable mocks | Done (2026-10-30) | Restored `tests/fixtures/auth_web_mock_app.py`; added `tests/automated_vapt/fixtures/` + `test_e2_mock_apps.py` |
 | E3 Orchestrator + scope | Done (2026-10-30) | `attestra/automated_vapt/core/*`, model + migration 0034, API routes, `SCOPE_SMOKE`; other cases DEFERRED |
 | E4 HTTP capture | Done (2026-10-30) | `capture/http_capture.py`, parsers, orchestrator `T01` |
-| E5+ | Not started | Next: Playwright browser capture |
+| E5 Browser capture | Done (2026-10-30) | `capture/browser_capture.py`, orchestrator `T02` (Playwright optional; injectable capture_fn) |
+| E6+ | Not started | Next: auth/authz test modules |

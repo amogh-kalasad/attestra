@@ -278,6 +278,8 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         }
     if case.id == "T01":
         return _run_t01_http_capture(ctx, case.category)
+    if case.id == "T02":
+        return _run_t02_browser_capture(ctx, case.category)
     # Later Elite phases register real handlers; record deferred honestly.
     known = {c.id for c in list_test_cases()}
     if test_id in known or case.id in known:
@@ -329,4 +331,51 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
         "capture": tx.to_dict(),
         "request_normalized": {k: v for k, v in req_n.items() if k != "original"},
         "response_normalized": resp_n,
+    }
+
+
+def _run_t02_browser_capture(ctx: TestContext, category: str) -> dict[str, Any]:
+    """T02: capture a browser screenshot of the approved target."""
+    from attestra.automated_vapt.capture.browser_capture import (
+        capture_screenshot,
+        stable_screenshot_name,
+    )
+
+    scope = scope_validator.build_scope_from_asset(
+        ctx.target_base_url,
+        allow_private=ctx.allow_private,
+    )
+    capture_fn = ctx.extra.get("browser_capture_fn")
+    try:
+        result = capture_screenshot(
+            ctx.target_base_url,
+            scope=scope,
+            allow_private=ctx.allow_private,
+            capture_fn=capture_fn,
+            check_dns=not ctx.allow_private,
+            username=ctx.extra.get("browser_username"),
+            password=ctx.extra.get("browser_password"),
+            login_url=ctx.extra.get("browser_login_url"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "test_id": "T02",
+            "status": "FAILED",
+            "detail": f"browser capture failed: {exc}",
+            "category": category,
+        }
+    name = stable_screenshot_name(
+        engagement_id=ctx.engagement_id,
+        execution_id=int(ctx.extra.get("execution_id") or 0),
+        test_case_id="T02",
+        label="fullpage" if result.full_page else "viewport",
+    )
+    # Keep PNG out of result_json; record metadata only.
+    ctx.extra.setdefault("_screenshots", {})[name] = result.screenshot_png
+    return {
+        "test_id": "T02",
+        "status": "PASSED",
+        "detail": "browser screenshot captured",
+        "category": category,
+        "screenshot": {**result.to_dict(), "filename": name},
     }
