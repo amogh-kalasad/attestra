@@ -2501,4 +2501,20 @@ Empty/deny responses are likely FP; exposure is never suppressed.
 
 Exposure without supporting evidence classifies as POTENTIAL.
 
+## Elite Phase E8 evidence visuals
+
+Two-panel HTTP renderer, annotation, and screenshot manager (`tests/automated_vapt/test_e8_evidence_visuals.py`).
+
+### Render http pair png
+
+`render_http_pair_png` returns a PNG larger than 1KB with PNG magic bytes.
+
+### Annotate screenshot
+
+Annotated derivative differs from the original PNG and keeps the original intact.
+
+### Screenshot manager filenames
+
+Stable filenames encode engagement, execution, test case, and label.
+
 
