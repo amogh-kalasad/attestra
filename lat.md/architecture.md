@@ -137,6 +137,28 @@ Controlled secure and intentionally vulnerable FastAPI apps for Elite automated 
 
 Phase-6-compatible secure smoke app: [[tests/fixtures/auth_web_mock_app.py#create_app]]. Elite pair: [[tests/automated_vapt/fixtures/mock_secure_app.py#create_secure_app]] and [[tests/automated_vapt/fixtures/mock_vulnerable_app.py#create_vulnerable_app]] with Account A/B and `proj-a`/`proj-b`. Both Elite apps expose `GET /__attestra_mock__` (`mode=secure|vulnerable`, `local_only=true`). Gap map: `docs/ELITE_VAPT_GAP_ANALYSIS.md`.
 
+## Elite automated security testing
+
+Engagement-scoped orchestrator for approved automated security-test executions (off by default).
+
+Flag: `ATTESTRA_AUTOMATED_VAPT_ENABLED` → [[attestra/config.py#AUTOMATED_VAPT_ENABLED]]. Rows: [[attestra/models.py#AutomatedTestExecution]] (migration `0034_automated_test_executions`). Statuses QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED via [[attestra/automated_vapt/core/execution_manager.py#transition]]. Create/run/cancel: [[attestra/automated_vapt/core/orchestrator.py#create_execution]], [[attestra/automated_vapt/core/orchestrator.py#run_execution]], [[attestra/automated_vapt/core/orchestrator.py#cancel_execution]]. Scope reuses [[attestra/auth_web/scope.py]] through [[attestra/automated_vapt/core/scope_validator.py#validate_target_url]]. Authorization guard: [[attestra/automated_vapt/core/authorization_guard.py#assert_engagement_ready]]. API under `/api/automated-vapt/...` ([[attestra/automated_vapt/routes.py]]). E3 implements `SCOPE_SMOKE`; other catalogue ids return DEFERRED until later Elite phases.
+
+### Scope validation
+
+Elite targets must pass auth_web crawl allowlist and SSRF checks before execution.
+
+### Authorization guard
+
+Feature flag, engagement.write, valid signed authorization, and testing window.
+
+### Execution status
+
+Finite status graph for automated test execution rows.
+
+### Orchestrator
+
+Queue and run approved test-case lists against an engagement asset.
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.

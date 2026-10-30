@@ -112,6 +112,13 @@ AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST",
 AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
 # Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).
 
+# Elite automated security-testing orchestrator. Off by default.
+AUTOMATED_VAPT_ENABLED = os.environ.get("ATTESTRA_AUTOMATED_VAPT_ENABLED", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # Feature flags. Changing these requires restarting the API and any workers
 # (no hot reload). Bypass flags default to false and only activate in an
 # allowlisted APP_ENV (local / test / development).

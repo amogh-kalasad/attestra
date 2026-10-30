@@ -1888,6 +1888,10 @@ from attestra.auth_web.routes import api_router as auth_web_api_router  # noqa: 
 
 app.include_router(auth_web_api_router)
 
+from attestra.automated_vapt.routes import api_router as automated_vapt_api_router  # noqa: E402
+
+app.include_router(automated_vapt_api_router)
+
 # Phase 8 P6-6: SEBI CSCRF security-testing timeline staff UI (parent include_router)
 from attestra.web.sebi_routes import ui_router as sebi_ui_router  # noqa: E402
 

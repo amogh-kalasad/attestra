@@ -1179,6 +1179,31 @@ class CreditTransaction(Base):
 # ---------------------------------------------------------------- Certification Authority (platform issuer branding)
 
 
+class AutomatedTestExecution(Base):
+    """Elite automated security-testing run against an engagement asset."""
+
+    __tablename__ = "automated_test_executions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    engagement_id: Mapped[int] = mapped_column(ForeignKey("engagements.id"))
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"))
+    target_base_url: Mapped[str] = mapped_column(String(500), default="")
+    profile: Mapped[str] = mapped_column(String(50), default="baseline")
+    test_case_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="QUEUED")
+    requested_by: Mapped[str] = mapped_column(String(200), default="")
+    allow_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    engagement: Mapped[Engagement] = relationship()
+    asset: Mapped[Asset | None] = relationship()
+
+
 class CertificationAuthority(Base):
     """Singleton platform Certification Authority (issuer) branding for reports.
 

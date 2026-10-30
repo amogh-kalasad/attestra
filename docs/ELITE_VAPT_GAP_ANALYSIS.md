@@ -162,4 +162,5 @@ Choose next step:
 | --- | --- | --- |
 | E1 Discovery map | Done | This document |
 | E2 Secure + vulnerable mocks | Done (2026-10-30) | Restored `tests/fixtures/auth_web_mock_app.py`; added `tests/automated_vapt/fixtures/` + `test_e2_mock_apps.py` |
-| E3+ | Not started | Stop for review before orchestrator |
+| E3 Orchestrator + scope | Done (2026-10-30) | `attestra/automated_vapt/core/*`, model + migration 0034, API routes, `SCOPE_SMOKE`; other cases DEFERRED |
+| E4+ | Not started | Next: HTTP capture |
