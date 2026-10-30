@@ -143,7 +143,7 @@ def test_deferred_cases_stay_honest(eng_with_asset):
             s,
             engagement_id=eng_with_asset["engagement_id"],
             asset_id=eng_with_asset["asset_id"],
-            test_case_ids=["SCOPE_SMOKE", "T04"],
+            test_case_ids=["SCOPE_SMOKE", "T15"],
             actor="tester",
             allow_private=True,
         )
@@ -153,7 +153,7 @@ def test_deferred_cases_stay_honest(eng_with_asset):
         assert done.status == "COMPLETED"
         cases = {c["test_id"]: c for c in orch.execution_public_dict(done)["result"]["cases"]}
         assert cases["SCOPE_SMOKE"]["status"] == "PASSED"
-        assert cases["T04"]["status"] == "DEFERRED"
+        assert cases["T15"]["status"] == "DEFERRED"
 
 
 # @lat: [[tests#Elite Phase E3 orchestrator#Out of scope asset fails run]]

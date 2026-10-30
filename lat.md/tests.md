@@ -2545,4 +2545,48 @@ Map validated Elite results into Attestra findings.
 
 CONFIRMED validation creates a finding; duplicates dedupe by fingerprint; NOT_VULNERABLE creates none.
 
+## Elite Phase E12 frontend
+
+Engagement helpers list Elite catalogue cases when the feature flag is on.
+
+### Elite helpers list cases
+
+`_elite_test_cases` includes `T04`.
+
+## Elite Phase E13 subscription
+
+One credit consumed per Elite execution under subscription enforcement.
+
+### One credit per elite run
+
+Creating an execution decreases the organization credit balance by one when enforcement is on.
+
+## Elite Phase E14 matrix
+
+Catalogue T01–T18 coverage against secure/vulnerable mocks (`tests/automated_vapt/test_e14_t01_t18_matrix.py`).
+
+### Catalogue contains t01 t18
+
+Registry includes `T01` through `T18`.
+
+### T01 t02 capture both apps
+
+HTTP and browser capture succeed on secure and vulnerable mocks.
+
+### T03 t07 secure vs vulnerable
+
+Authn/authz/BOLA/tenant/disclosure finding_candidate differs correctly across mocks.
+
+### T08 t09 validation
+
+Secure path NOT_VULNERABLE; vulnerable exposure CONFIRMED.
+
+### T10 t12 evidence
+
+Redaction, two-panel render, annotation, and manifest verify succeed.
+
+### T16 scope enforcement
+
+Foreign hosts are rejected by scope validation.
+
 

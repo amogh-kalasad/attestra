@@ -490,6 +490,59 @@
   </details>
 </div>
 
+{% if automated_vapt_enabled %}
+<!-- ============================================================ ELITE AUTOMATED TESTING -->
+<div class="card" id="automated-testing">
+  <h2>Automated security testing</h2>
+  <p class="meta">Queue approved Elite test cases against an in-scope target. One test-run credit is used per queued execution when subscription enforcement is on. Evidence Collection, execution history, and validation results appear below after runs complete.</p>
+  <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions">
+    <div class="fields">
+      <div><label for="elite_asset">Target *</label>
+        <select id="elite_asset" name="asset_id" required>
+          {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>
+          {% else %}<option value="">No targets in scope</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="elite_profile">Profile</label>
+        <select id="elite_profile" name="profile"><option value="baseline">Baseline</option><option value="active">Active</option></select>
+      </div>
+    </div>
+    <label>Test cases *</label>
+    <div class="checks">
+      {% for c in elite_test_cases %}
+      <label><input type="checkbox" name="test_case_id" value="{{ c.id }}" {% if c.id == 'SCOPE_SMOKE' %}checked{% endif %}> {{ c.id }} — {{ c.title }} <span class="meta">({{ c.category }})</span></label>
+      {% endfor %}
+    </div>
+    <div class="form-actions"><button type="submit">Queue automated test</button></div>
+  </form>
+  <h3>Test execution history</h3>
+  {% if elite_executions %}
+  <table class="table">
+    <thead><tr><th>ID</th><th>Status</th><th>Cases</th><th>Target</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for x in elite_executions %}
+      <tr>
+        <td class="mono">{{ x.id }}</td>
+        <td>{{ x.status }}</td>
+        <td class="mono">{{ x.test_case_ids|join(', ') }}</td>
+        <td class="mono">{{ x.target_base_url }}</td>
+        <td>
+          {% if x.status == 'QUEUED' %}
+          <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/run" style="display:inline"><button type="submit">Run</button></form>
+          <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/cancel" style="display:inline"><button type="submit">Cancel</button></form>
+          {% endif %}
+          <details><summary>Validation results</summary><pre class="http-pair">{{ x.result }}</pre></details>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">No Elite executions yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <!-- ============================================================ IMPORT -->
 <div class="card" id="import">
   <h2>Import results</h2>

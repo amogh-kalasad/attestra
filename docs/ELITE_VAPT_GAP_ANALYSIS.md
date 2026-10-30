@@ -171,4 +171,7 @@ Choose next step:
 | E9 Evidence integrity | Done (2026-10-30) | redactor façade + EvidenceManifest SHA-256 |
 | E10 Burp import | Done (2026-10-30) | façade over `importers.burp` / proof.capture |
 | E11 Finding integration | Done (2026-10-30) | `create_finding_from_validation` with dedup fingerprint |
-| E12+ | Not started | Next: frontend + credits + T01–T18 matrix |
+| E12 Frontend | Done (2026-10-30) | Engagement card + UI POST routes when flag on |
+| E13 Subscription | Done (2026-10-30) | One credit per Elite execution via subscription_adapter |
+| E14 T01–T18 matrix | Done (2026-10-30) | `test_e14_t01_t18_matrix.py` |
+| E15 Demo | Done (2026-10-30) | `scripts/elite_e15_demo.py` + `docs/ELITE_VAPT_DEPLOY.md` |

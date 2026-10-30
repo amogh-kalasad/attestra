@@ -66,6 +66,17 @@ def create_execution(
     )
     s.add(ex)
     s.flush()
+    # E13: one credit per authorized Elite test run (not per HTTP/screenshot).
+    from attestra.automated_vapt.integrations.subscription_adapter import ensure_credit_for_execution
+
+    ensure_credit_for_execution(
+        s,
+        tenant_id=eng.tenant_id,
+        engagement_id=eng.id,
+        execution_id=ex.id,
+        actor=actor,
+        user_id=getattr(principal, "user_id", None) if principal is not None else None,
+    )
     audit.record(
         s,
         actor,
@@ -133,7 +144,27 @@ def run_execution(
 
         results: list[dict[str, Any]] = []
         for tid in ctx.test_case_ids:
-            results.append(_run_case(tid, ctx))
+            case_result = _run_case(tid, ctx)
+            # E11: map CONFIRMED/POTENTIAL validation onto findings.
+            validation = case_result.get("validation") or {}
+            if (validation.get("status") or "").upper() in ("CONFIRMED", "POTENTIAL"):
+                from attestra.automated_vapt.integrations.attestra_findings import (
+                    create_finding_from_validation,
+                )
+
+                finding = create_finding_from_validation(
+                    s,
+                    engagement_id=eng.id,
+                    asset_id=asset.id,
+                    title=f"Elite {case_result.get('test_id')}: authorization issue",
+                    description=str(case_result.get("detail") or "Elite automated finding"),
+                    validation=validation,
+                    location=ex.target_base_url,
+                    actor=actor,
+                )
+                if finding is not None:
+                    case_result["finding_id"] = finding.id
+            results.append(case_result)
 
         ex.result_json = json.dumps({"cases": results}, sort_keys=True)
         exec_mgr.transition(ex, "COMPLETED")
