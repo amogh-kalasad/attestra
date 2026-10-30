@@ -131,3 +131,7 @@ def test_orchestrator_t04_secure_vs_vulnerable(fresh_db, elite_flag, clients):
     vuln_case = _run(vuln)
     assert secure_case["status"] == "PASSED"
     assert vuln_case["status"] == "FINDING"
+    assert vuln_case.get("finding_id")
+    evidence = vuln_case.get("evidence") or {}
+    assert evidence.get("http_pair_ids"), "documented finding must store http_pair evidence"
+    assert evidence.get("two_panel_ids"), "documented finding must store two-panel PNG for HTML/PDF"
