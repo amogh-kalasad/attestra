@@ -2517,4 +2517,32 @@ Annotated derivative differs from the original PNG and keeps the original intact
 
 Stable filenames encode engagement, execution, test case, and label.
 
+## Elite Phase E9 evidence integrity
+
+Manifest hashing and HTTP pair redaction (`tests/automated_vapt/test_e9_e11_integrations.py`).
+
+### Manifest hash verify
+
+Manifest entries store SHA-256 and verify round-trips; tampering fails verification.
+
+### Redact http pair
+
+Authorization headers are redacted in report pairs.
+
+## Elite Phase E10 burp import
+
+Burp Issues XML import façade.
+
+### Import sample burp
+
+Supported Burp fixture parses to at least one finding when present.
+
+## Elite Phase E11 finding integration
+
+Map validated Elite results into Attestra findings.
+
+### Create from confirmed
+
+CONFIRMED validation creates a finding; duplicates dedupe by fingerprint; NOT_VULNERABLE creates none.
+
 
