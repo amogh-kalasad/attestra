@@ -163,6 +163,10 @@ Queue and run approved test-case lists against an engagement asset.
 
 HTTPX capture into [[attestra/proof/pair.py#HttpPair]] with redacted report pairs via [[attestra/automated_vapt/capture/http_capture.py#capture_request]]; request/response normalizers in [[attestra/automated_vapt/capture/request_parser.py#parse_request]] and [[attestra/automated_vapt/capture/response_parser.py#parse_response]]. Catalogue case `T01` is wired in the orchestrator.
 
+### Browser capture
+
+Playwright (when installed) or injectable ``capture_fn`` via [[attestra/automated_vapt/capture/browser_capture.py#capture_screenshot]]; DOM prep from [[attestra/proof/screenshot_redact.py#prepare_page_for_capture]]; catalogue case `T02`.
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.

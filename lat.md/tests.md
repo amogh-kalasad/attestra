@@ -2429,4 +2429,24 @@ Responses containing `secret_note` / SENSITIVE markers populate `sensitive_indic
 
 Queued `T01` with an injected TestClient completes PASSED with a captured status 200.
 
+## Elite Phase E5 browser capture
+
+Browser screenshot capture with injectable capture_fn and orchestrator `T02` (`tests/automated_vapt/test_e5_browser_capture.py`).
+
+### Injected capture returns png
+
+`capture_screenshot` with a capture_fn returns PNG magic bytes without requiring Playwright.
+
+### Out of scope browser refused
+
+Browser capture against a foreign origin raises ServiceError.
+
+### Stable screenshot filename
+
+Filenames encode engagement id, execution id, test case id, and label.
+
+### Orchestrator T02 injected
+
+Queued `T02` with an injected capture_fn completes PASSED with screenshot metadata.
+
 
