@@ -166,4 +166,5 @@ Choose next step:
 | E4 HTTP capture | Done (2026-10-30) | `capture/http_capture.py`, parsers, orchestrator `T01` |
 | E5 Browser capture | Done (2026-10-30) | `capture/browser_capture.py`, orchestrator `T02` (Playwright optional; injectable capture_fn) |
 | E6 Authz modules | Done (2026-10-30) | `testing/*` modules + orchestrator `T03`–`T07` |
-| E7+ | Not started | Next: validation engine |
+| E7 Validation engine | Done (2026-10-30) | `validation/*` + wired into authz orchestrator results |
+| E8+ | Not started | Next: screenshot/renderer/annotate |

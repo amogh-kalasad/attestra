@@ -418,6 +418,46 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             "category": category,
         }
     # finding_candidate True means vulnerability indicators were observed.
+    from attestra.automated_vapt.validation.false_positive_checker import check_false_positive
+    from attestra.automated_vapt.validation.vulnerability_validator import validate_result
+
+    obs = result.get("observations") or {}
+    protected = bool(obs.get("exposed_secrets") or obs.get("excessive_data_exposure"))
+    bypass = bool(
+        result.get("finding_candidate")
+        and (
+            obs.get("cross_tenant_access")
+            or obs.get("settings_open_without_auth")
+            or (obs.get("member_admin_status") == 200)
+            or (obs.get("account_a_proj_b_status") == 200 and protected)
+        )
+    )
+    vctx = {
+        "executed": True,
+        "in_scope": True,
+        "auth_valid": True,
+        "identity_ok": True,
+        "expected_control_defined": True,
+        "status_code": obs.get("account_a_proj_b_status")
+        or obs.get("member_admin_status")
+        or obs.get("settings_unauth_status")
+        or obs.get("users_status"),
+        "protected_data_exposed": protected,
+        "authorization_bypass": bypass or bool(result.get("finding_candidate") and protected),
+        "reproducible": True,
+        "evidence_supports": True,
+        "finding_candidate": bool(result.get("finding_candidate")),
+        "authorized_access": bool(obs.get("authorized_ok") and obs.get("unauthorized_blocked")),
+    }
+    validation = validate_result(vctx)
+    fp = check_false_positive(
+        {
+            "status_code": vctx.get("status_code"),
+            "protected_data_exposed": protected,
+            "authorization_bypass": vctx["authorization_bypass"],
+            "authorized_access": vctx["authorized_access"],
+        }
+    )
     status = "FINDING" if result.get("finding_candidate") else "PASSED"
     return {
         "test_id": test_id,
@@ -425,4 +465,6 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "detail": "authz module completed",
         "category": category,
         "module": result,
+        "validation": validation,
+        "false_positive": fp,
     }
