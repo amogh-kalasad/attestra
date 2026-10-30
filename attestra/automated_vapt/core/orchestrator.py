@@ -280,6 +280,8 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t01_http_capture(ctx, case.category)
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
+    if case.id in {"T03", "T04", "T05", "T06", "T07"}:
+        return _run_authz_module(case.id, ctx, case.category)
     # Later Elite phases register real handlers; record deferred honestly.
     known = {c.id for c in list_test_cases()}
     if test_id in known or case.id in known:
@@ -378,4 +380,49 @@ def _run_t02_browser_capture(ctx: TestContext, category: str) -> dict[str, Any]:
         "detail": "browser screenshot captured",
         "category": category,
         "screenshot": {**result.to_dict(), "filename": name},
+    }
+
+
+def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str, Any]:
+    """Dispatch T03–T07 testing modules against an injected HTTP client."""
+    client = ctx.extra.get("httpx_client")
+    if client is None:
+        return {
+            "test_id": test_id,
+            "status": "FAILED",
+            "detail": "httpx_client required in execution extra for authz modules",
+            "category": category,
+        }
+    from attestra.automated_vapt.testing import (
+        api_security_tests,
+        authentication_tests,
+        authorization_tests,
+        idor_bola_tests,
+        tenant_isolation_tests,
+    )
+
+    runners = {
+        "T03": authentication_tests.run,
+        "T04": idor_bola_tests.run,
+        "T05": authorization_tests.run,
+        "T06": tenant_isolation_tests.run,
+        "T07": api_security_tests.run,
+    }
+    try:
+        result = runners[test_id](client, ctx.target_base_url)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "test_id": test_id,
+            "status": "FAILED",
+            "detail": f"module error: {exc}",
+            "category": category,
+        }
+    # finding_candidate True means vulnerability indicators were observed.
+    status = "FINDING" if result.get("finding_candidate") else "PASSED"
+    return {
+        "test_id": test_id,
+        "status": status,
+        "detail": "authz module completed",
+        "category": category,
+        "module": result,
     }
