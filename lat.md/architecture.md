@@ -191,6 +191,10 @@ Redaction façade [[attestra/automated_vapt/evidence/evidence_redactor.py#redact
 
 [[attestra/automated_vapt/integrations/attestra_findings.py#create_finding_from_validation]] creates findings only for CONFIRMED/POTENTIAL with fingerprint dedup.
 
+### Finding evidence documents
+
+When Elite documents a CONFIRMED/POTENTIAL finding, [[attestra/automated_vapt/integrations/attestra_findings.py#document_finding_evidence]] attaches `http_pair` evidence and PNG screenshots (browser captures plus two-panel HTTP visuals from [[attestra/automated_vapt/evidence/request_response_renderer.py#render_http_pair_png]]) via [[attestra/proof/store.py#attach_http_pair]] / [[attestra/proof/store.py#attach_screenshot]]. Technical HTML/PDF/DOCX reports embed those kinds automatically ([[reports#Generation]]).
+
 ### Subscription credits
 
 [[attestra/automated_vapt/integrations/subscription_adapter.py#ensure_credit_for_execution]] charges one organization credit per Elite execution when `SUBSCRIPTION_SERVICE=ON`.

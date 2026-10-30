@@ -122,3 +122,82 @@ def test_create_from_confirmed(fresh_db, elite_flag):
             validation={"status": "NOT_VULNERABLE", "confidence": "high", "reasons": []},
         )
         assert none is None
+
+
+# @lat: [[tests#Elite Phase E11 finding integration#Document evidence in report HTML]]
+def test_document_evidence_in_report_html(fresh_db, elite_flag):
+    """When documenting, HTTP pair + two-panel PNG attach and appear in technical HTML."""
+    from attestra.automated_vapt.integrations.attestra_findings import document_finding_evidence
+    from attestra.reports import generate_report
+
+    today = date.today()
+    tiny_png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05"
+        b"\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    pair = HttpPair(
+        method="GET",
+        url="http://localhost:8765/api/projects/proj-b",
+        request_headers={"Authorization": "Bearer secret-token"},
+        status=200,
+        response_body='{"id":"proj-b","secret_note":"SENSITIVE"}',
+        source="automated_vapt",
+    )
+    with db.session() as s:
+        e = services.create_engagement(
+            s,
+            tenant="Elite E11 Docs",
+            name="Elite E11 Docs",
+            type="vapt",
+            frameworks=["pci_dss_4"],
+            window_start=today,
+            window_end=today + timedelta(days=7),
+            actor="tester",
+        )
+        services.add_authorization(
+            s,
+            e.id,
+            filename="roe.txt",
+            data=b"authorized",
+            signer="Client",
+            signed_on=today,
+            expires_on=today + timedelta(days=7),
+            rules_of_engagement="local",
+            environments=["dev"],
+            actor="tester",
+        )
+        a = services.add_asset(
+            s,
+            e.id,
+            kind="web_app",
+            identifier="http://localhost:8765/",
+            name="Mock",
+            environment="dev",
+            actor="tester",
+        )
+        finding = create_finding_from_validation(
+            s,
+            engagement_id=e.id,
+            asset_id=a.id,
+            title="BOLA documented with images",
+            description="Cross-owner access exposed secrets",
+            validation={"status": "CONFIRMED", "confidence": "high", "reasons": ["exposure"]},
+            location="/api/projects/proj-b",
+        )
+        assert finding is not None
+        meta = document_finding_evidence(
+            s,
+            finding.id,
+            actor="tester",
+            http_pairs=[pair],
+            screenshots=[("elite_browser.png", tiny_png)],
+        )
+        assert meta["http_pair_ids"]
+        assert meta["two_panel_ids"]
+        assert meta["screenshot_ids"]
+        report = generate_report(s, e.id, kind="technical", actor="tester")
+        body = Path(report.path).read_text(encoding="utf-8")
+        assert "data:image/png;base64," in body
+        assert "http-pair" in body or "HTTP request" in body or "GET" in body
+        assert "Elite two-panel" in body or "Elite browser" in body or "Fig." in body

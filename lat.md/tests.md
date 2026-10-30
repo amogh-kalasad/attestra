@@ -2545,6 +2545,10 @@ Map validated Elite results into Attestra findings.
 
 CONFIRMED validation creates a finding; duplicates dedupe by fingerprint; NOT_VULNERABLE creates none.
 
+### Document evidence in report HTML
+
+[[attestra/automated_vapt/integrations/attestra_findings.py#document_finding_evidence]] attaches http_pair, browser screenshot, and two-panel PNG; technical report HTML includes data-URI figures and HTTP pair content.
+
 ## Elite Phase E12 frontend
 
 Engagement helpers list Elite catalogue cases when the feature flag is on.

@@ -150,6 +150,7 @@ def run_execution(
             if (validation.get("status") or "").upper() in ("CONFIRMED", "POTENTIAL"):
                 from attestra.automated_vapt.integrations.attestra_findings import (
                     create_finding_from_validation,
+                    document_finding_evidence,
                 )
 
                 finding = create_finding_from_validation(
@@ -164,6 +165,18 @@ def run_execution(
                 )
                 if finding is not None:
                     case_result["finding_id"] = finding.id
+                    # Document captures as finding evidence so HTML/PDF reports embed them.
+                    pairs = _evidence_pairs_for_case(case_result, ctx)
+                    shots = _evidence_screenshots_for_case(case_result, ctx)
+                    case_result["evidence"] = document_finding_evidence(
+                        s,
+                        finding.id,
+                        actor=actor,
+                        http_pairs=pairs,
+                        screenshots=shots,
+                    )
+            # HttpPair objects are not JSON-serializable; strip before persist.
+            case_result.pop("evidence_pairs", None)
             results.append(case_result)
 
         ex.result_json = json.dumps({"cases": results}, sort_keys=True)
@@ -325,6 +338,36 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
     return {"test_id": test_id, "status": "FAILED", "detail": "unknown test case"}
 
 
+def _evidence_pairs_for_case(case_result: dict[str, Any], ctx: TestContext) -> list[Any]:
+    """Collect HttpPair (or dict) documents for finding evidence."""
+    pairs: list[Any] = []
+    for item in case_result.get("evidence_pairs") or []:
+        pairs.append(item)
+    capture = case_result.get("capture")
+    if isinstance(capture, dict) and capture.get("url"):
+        pairs.append(capture)
+    for item in ctx.extra.get("_http_pairs") or []:
+        pairs.append(item)
+    return pairs
+
+
+def _evidence_screenshots_for_case(
+    case_result: dict[str, Any], ctx: TestContext
+) -> list[tuple[str, bytes]]:
+    """Collect PNG screenshots to embed in HTML/PDF via finding evidence."""
+    shots: list[tuple[str, bytes]] = []
+    pending: dict[str, bytes] = ctx.extra.get("_screenshots") or {}
+    meta = case_result.get("screenshot") or {}
+    name = meta.get("filename") if isinstance(meta, dict) else None
+    if name and name in pending:
+        shots.append((name, pending.pop(name)))
+    # Remaining browser captures from T02 in this run also document the finding.
+    for fname, png in list(pending.items()):
+        shots.append((fname, png))
+        pending.pop(fname, None)
+    return shots
+
+
 def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
     """T01: capture one GET against the approved target base URL."""
     from attestra.automated_vapt.capture.http_capture import capture_request
@@ -354,8 +397,10 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
             "detail": f"HTTP capture failed: {exc}",
             "category": category,
         }
-    req_n = parse_request(tx.report_pair or tx.pair.redacted())
-    resp_n = parse_response(tx.report_pair or tx.pair.redacted())
+    report = tx.report_pair or tx.pair.redacted()
+    ctx.extra.setdefault("_http_pairs", []).append(report)
+    req_n = parse_request(report)
+    resp_n = parse_response(report)
     return {
         "test_id": "T01",
         "status": "PASSED",
@@ -490,12 +535,19 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         }
     )
     status = "FINDING" if result.get("finding_candidate") else "PASSED"
-    return {
+    out: dict[str, Any] = {
         "test_id": test_id,
         "status": status,
         "detail": "authz module completed",
         "category": category,
-        "module": result,
+        "module": {
+            k: v
+            for k, v in result.items()
+            if k != "evidence_pairs"
+        },
         "validation": validation,
         "false_positive": fp,
     }
+    if result.get("evidence_pairs"):
+        out["evidence_pairs"] = list(result["evidence_pairs"])
+    return out
