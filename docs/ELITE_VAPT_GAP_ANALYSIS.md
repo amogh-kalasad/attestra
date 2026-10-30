@@ -168,4 +168,7 @@ Choose next step:
 | E6 Authz modules | Done (2026-10-30) | `testing/*` modules + orchestrator `T03`–`T07` |
 | E7 Validation engine | Done (2026-10-30) | `validation/*` + wired into authz orchestrator results |
 | E8 Evidence visuals | Done (2026-10-30) | two-panel renderer, annotate wrapper, screenshot manager |
-| E9+ | Not started | Next: redaction/hash/manifest |
+| E9 Evidence integrity | Done (2026-10-30) | redactor façade + EvidenceManifest SHA-256 |
+| E10 Burp import | Done (2026-10-30) | façade over `importers.burp` / proof.capture |
+| E11 Finding integration | Done (2026-10-30) | `create_finding_from_validation` with dedup fingerprint |
+| E12+ | Not started | Next: frontend + credits + T01–T18 matrix |

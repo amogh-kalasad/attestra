@@ -179,6 +179,18 @@ Elite modules under [[attestra/automated_vapt/testing/]] for authentication, BOL
 
 Two-panel HTTP PNG via [[attestra/automated_vapt/evidence/request_response_renderer.py#render_http_pair_png]]; annotation wraps [[attestra/evidence/annotate.py#annotate_png]]; screenshot association via [[attestra/automated_vapt/evidence/screenshot_manager.py#ScreenshotManager]].
 
+### Evidence integrity
+
+Redaction façade [[attestra/automated_vapt/evidence/evidence_redactor.py#redact_http_pair]]; SHA-256 manifest [[attestra/automated_vapt/evidence/evidence_hasher.py#EvidenceManifest]].
+
+### Burp import
+
+[[attestra/automated_vapt/integrations/burp_importer.py#import_burp_bytes]] reuses [[attestra/importers/burp.py]] and proof pair extraction.
+
+### Finding integration
+
+[[attestra/automated_vapt/integrations/attestra_findings.py#create_finding_from_validation]] creates findings only for CONFIRMED/POTENTIAL with fingerprint dedup.
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.
