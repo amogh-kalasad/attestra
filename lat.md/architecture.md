@@ -175,6 +175,10 @@ Elite modules under [[attestra/automated_vapt/testing/]] for authentication, BOL
 
 [[attestra/automated_vapt/validation/vulnerability_validator.py#validate_result]] classifies CONFIRMED/POTENTIAL/NOT_VULNERABLE/INCONCLUSIVE/NEEDS_MANUAL_REVIEW without treating HTTP 200 alone as proof. FP heuristics: [[attestra/automated_vapt/validation/false_positive_checker.py#check_false_positive]].
 
+### Evidence visuals
+
+Two-panel HTTP PNG via [[attestra/automated_vapt/evidence/request_response_renderer.py#render_http_pair_png]]; annotation wraps [[attestra/evidence/annotate.py#annotate_png]]; screenshot association via [[attestra/automated_vapt/evidence/screenshot_manager.py#ScreenshotManager]].
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.
