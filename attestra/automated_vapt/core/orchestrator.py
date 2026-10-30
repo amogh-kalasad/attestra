@@ -80,8 +80,15 @@ def create_execution(
     return ex
 
 
-def run_execution(s: Session, execution_id: int, *, actor: str, principal=None) -> AutomatedTestExecution:
-    """Run a queued execution: scope re-check, then registered case handlers (E3: SCOPE_SMOKE)."""
+def run_execution(
+    s: Session,
+    execution_id: int,
+    *,
+    actor: str,
+    principal=None,
+    extra: dict[str, Any] | None = None,
+) -> AutomatedTestExecution:
+    """Run a queued execution: scope re-check, then registered case handlers."""
     guard.require_feature_enabled()
     guard.require_write(principal)
     ex = get_execution(s, execution_id, principal=principal)
@@ -108,6 +115,7 @@ def run_execution(s: Session, execution_id: int, *, actor: str, principal=None) 
         profile=ex.profile,
         actor=actor,
         allow_private=bool(ex.allow_private),
+        extra=dict(extra or {}),
     )
 
     try:
@@ -256,11 +264,11 @@ def _normalize_test_ids(test_case_ids: list[str]) -> list[str]:
 
 
 def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
-    """Dispatch a single case. E3 implements SCOPE_SMOKE; others report deferred."""
+    """Dispatch a single case. Implemented: SCOPE_SMOKE, T01; others deferred."""
     case = get_test_case(test_id)
     if case is None:
         return {"test_id": test_id, "status": "FAILED", "detail": "unknown test case"}
-    if test_id == "SCOPE_SMOKE" or case.id == "SCOPE_SMOKE":
+    if case.id == "SCOPE_SMOKE":
         return {
             "test_id": "SCOPE_SMOKE",
             "status": "PASSED",
@@ -268,13 +276,57 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
             "target": ctx.target_base_url,
             "category": case.category,
         }
-    # Later Elite phases register real handlers; E3 records deferred honestly.
+    if case.id == "T01":
+        return _run_t01_http_capture(ctx, case.category)
+    # Later Elite phases register real handlers; record deferred honestly.
     known = {c.id for c in list_test_cases()}
-    if test_id in known:
+    if test_id in known or case.id in known:
         return {
-            "test_id": test_id,
+            "test_id": case.id,
             "status": "DEFERRED",
-            "detail": "handler not implemented in Elite E3 (orchestrator/scope only)",
+            "detail": "handler not implemented in this Elite phase yet",
             "category": case.category,
         }
     return {"test_id": test_id, "status": "FAILED", "detail": "unknown test case"}
+
+
+def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
+    """T01: capture one GET against the approved target base URL."""
+    from attestra.automated_vapt.capture.http_capture import capture_request
+    from attestra.automated_vapt.capture.request_parser import parse_request
+    from attestra.automated_vapt.capture.response_parser import parse_response
+
+    seeds = []
+    scope = scope_validator.build_scope_from_asset(
+        ctx.target_base_url,
+        extra_seeds=seeds,
+        allow_private=ctx.allow_private,
+    )
+    client = ctx.extra.get("httpx_client")
+    try:
+        tx = capture_request(
+            "GET",
+            ctx.target_base_url,
+            scope=scope,
+            profile=ctx.profile,
+            client=client,
+            check_dns=not ctx.allow_private,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface capture failures in case result
+        return {
+            "test_id": "T01",
+            "status": "FAILED",
+            "detail": f"HTTP capture failed: {exc}",
+            "category": category,
+        }
+    req_n = parse_request(tx.report_pair or tx.pair.redacted())
+    resp_n = parse_response(tx.report_pair or tx.pair.redacted())
+    return {
+        "test_id": "T01",
+        "status": "PASSED",
+        "detail": "HTTP transaction captured",
+        "category": category,
+        "capture": tx.to_dict(),
+        "request_normalized": {k: v for k, v in req_n.items() if k != "original"},
+        "response_normalized": resp_n,
+    }

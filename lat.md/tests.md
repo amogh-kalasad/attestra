@@ -2401,4 +2401,32 @@ Unknown-handler catalogue ids such as `T04` complete as DEFERRED in E3 without f
 
 Creating an execution against a blocked metadata host raises ServiceError.
 
+## Elite Phase E4 HTTP capture
+
+HTTPX capture, redaction, parsers, and orchestrator `T01` (`tests/automated_vapt/test_e4_http_capture.py`).
+
+### Capture public home
+
+In-scope GET against the secure mock home returns status 200 and page body.
+
+### Redacts authorization header
+
+Captured report pairs replace Authorization header values with `[REDACTED]`.
+
+### Out of scope refused
+
+Capture against a foreign origin raises ServiceError before the request is sent.
+
+### Request parser extracts path ids
+
+Path identifiers such as `proj-b` are extracted; sensitive query values are redacted in normalized fields.
+
+### Response parser flags secrets
+
+Responses containing `secret_note` / SENSITIVE markers populate `sensitive_indicators`.
+
+### Orchestrator T01 with ASGI client
+
+Queued `T01` with an injected TestClient completes PASSED with a captured status 200.
+
 
