@@ -169,7 +169,7 @@ Playwright (when installed) or injectable ``capture_fn`` via [[attestra/automate
 
 ### Authz test modules
 
-Elite modules under [[attestra/automated_vapt/testing/]] for authentication, BOLA/IDOR, roles, tenant isolation, and API disclosure (`T03`–`T07`). Results use ``finding_candidate``; orchestrator maps True→FINDING / False→PASSED.
+Elite modules under [[attestra/automated_vapt/testing/idor_bola_tests.py]] (and sibling authn/authz modules) for authentication, BOLA/IDOR, roles, tenant isolation, and API disclosure (`T03`–`T07`). Results use ``finding_candidate``; orchestrator maps True→FINDING / False→PASSED.
 
 ### Validation engine
 
