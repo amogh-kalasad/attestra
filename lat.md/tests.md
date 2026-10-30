@@ -2449,4 +2449,32 @@ Filenames encode engagement id, execution id, test case id, and label.
 
 Queued `T02` with an injected capture_fn completes PASSED with screenshot metadata.
 
+## Elite Phase E6 authz modules
+
+Authentication and authorization modules against secure/vulnerable mocks (`tests/automated_vapt/test_e6_authz_modules.py`).
+
+### Secure BOLA no finding
+
+Account A cannot read Project B secrets on the secure mock (`finding_candidate` false).
+
+### Vulnerable BOLA finding
+
+Account A reading Project B on the vulnerable mock sets `finding_candidate` with exposed secrets.
+
+### Secure auth and role
+
+Secure mock rejects unauthenticated settings access and member `/admin`.
+
+### Vulnerable auth and role
+
+Vulnerable mock yields authentication and role `finding_candidate` true.
+
+### Tenant and disclosure
+
+Secure mock blocks cross-tenant and password listing; vulnerable mock does not.
+
+### Orchestrator T04 secure vs vulnerable
+
+Orchestrator `T04` returns PASSED on secure and FINDING on vulnerable.
+
 

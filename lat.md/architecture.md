@@ -167,6 +167,10 @@ HTTPX capture into [[attestra/proof/pair.py#HttpPair]] with redacted report pair
 
 Playwright (when installed) or injectable ``capture_fn`` via [[attestra/automated_vapt/capture/browser_capture.py#capture_screenshot]]; DOM prep from [[attestra/proof/screenshot_redact.py#prepare_page_for_capture]]; catalogue case `T02`.
 
+### Authz test modules
+
+Elite modules under [[attestra/automated_vapt/testing/]] for authentication, BOLA/IDOR, roles, tenant isolation, and API disclosure (`T03`–`T07`). Results use ``finding_candidate``; orchestrator maps True→FINDING / False→PASSED.
+
 ## Phase 7 gated IDOR / request tampering
 
 Intrusive-only object-access probes that plan by default and execute only under the scan scope gate.
