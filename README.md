@@ -14,7 +14,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURIT
 | --- | --- |
 | Engagements | Tenants, engagements (VA, PT, VA + PT, retest, continuous), test window and target frameworks |
 | Permission gate | A signed permission letter is stored hashed and write-once. Scans and imports are blocked without a valid one |
-| Domain ownership | The owner proves control with a DNS TXT record (`attestra-verify=<token>`) or the file `/.well-known/attestra-verify.txt`. Proof stays valid for a Super Admin–configured per-tenant period (default 30 days), then must be re-checked (keep the published value) |
+| Domain ownership | The owner proves control with a DNS TXT record (`attestra-verify=<token>`) or the file `/attestra-verify.txt` at the website root. Proof stays valid for a Super Admin–configured per-tenant period (default 30 days), then must be re-checked (keep the published value) |
 | Targets | Assets with criticality 1 to 5, internet or internal exposure, and a PCI CDE flag |
 | In-app scans | Passive and baseline scans run by a background worker: ZAP, webcheck (headers, cookies, DNS and email security, redirects, mixed content), testssl, Nuclei, Trivy, Semgrep, Gitleaks, Checkov, naabu and others. Scans can be cancelled. Queue the same path from the CLI with `attestra scan` |
 | Auth website testing | Optional authenticated crawl and checklist (off by default). See [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md) |

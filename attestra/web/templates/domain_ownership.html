@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1>Domain ownership</h1>
-    <p class="lede">Prove control of each hostname once for this organization. Publish one DNS TXT value <b>or</b> download <code>{{ file_name }}</code> and upload it to <code>/.well-known/{{ file_name }}</code>. This is not session-based: the same key stays until it expires ({{ validity_days }} days), then Attestra renews a new value.</p>
+    <p class="lede">Prove control of each hostname once for this organization. Publish one DNS TXT value <b>or</b> download <code>{{ file_name }}</code> and upload it to your <b>website root</b> (same place as the homepage — no special folders). This is not session-based: the same key stays until it expires ({{ validity_days }} days), then Attestra renews a new value.</p>
   </div>
 </div>
 
@@ -63,7 +63,7 @@
   <p class="meta">Create a TXT record on <span class="mono">{{ h.hostname }}</span> with this exact value.</p>
 
   <p style="margin:14px 0 4px"><b>Or upload the verification file</b></p>
-  <p class="meta">Download <code>{{ h.file_name }}</code>, then upload it so it is served at <span class="mono">{{ h.file_url }}</span> (path <span class="mono">{{ h.file_path_hint }}</span>).</p>
+  <p class="meta">Download <code>{{ h.file_name }}</code>, then upload that file to your website root (next to the homepage). It must open at <span class="mono">{{ h.file_url }}</span> — no <code>.well-known</code> folder required.</p>
   <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">
     <a class="btn" href="/settings/domain-ownership/hosts/{{ h.id }}/attestra-verify.txt">Download {{ h.file_name }}</a>
     <form method="post" action="/settings/domain-ownership/hosts/{{ h.id }}/verify" style="display:inline">

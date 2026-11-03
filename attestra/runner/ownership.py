@@ -23,7 +23,9 @@ from attestra.runner.authorization import (
 )
 
 WELL_KNOWN_FILENAME = "attestra-verify.txt"
-WELL_KNOWN_PATH = f"/.well-known/{WELL_KNOWN_FILENAME}"
+# Site root only — owners upload the downloaded file next to the homepage (no .well-known folder).
+VERIFY_FILE_PATH = f"/{WELL_KNOWN_FILENAME}"
+WELL_KNOWN_PATH = VERIFY_FILE_PATH  # alias kept for older call sites
 TXT_PREFIX = "attestra-verify="
 CHECK_TIMEOUT = 5  # seconds, for both the DNS lookup and the file fetch
 MAX_FILE_BYTES = 4096

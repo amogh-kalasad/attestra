@@ -40,7 +40,7 @@
     <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span>
     <button type="button" class="secondary" data-copy="{{ oi.txt_value }}">Copy</button>
   </div>
-  <p class="meta">Well-known upload path: <span class="mono">{{ oi.file_url }}</span> — file name <code>attestra-verify.txt</code></p>
+  <p class="meta">Upload file to site root: <span class="mono">{{ oi.file_url }}</span> (file name <code>attestra-verify.txt</code>, no special folders).</p>
   {% if can(prole, "asset.verify_ownership") %}
   <p class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
     <a class="btn" href="/settings/domain-ownership?tenant_id={{ e.tenant_id }}">Open Domain ownership</a>

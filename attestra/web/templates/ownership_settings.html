@@ -4,7 +4,7 @@
 <div class="page-head">
   <div>
     <h1>Ownership verification</h1>
-    <p class="lede">Set how many days a successful ownership proof (DNS TXT, well-known file, or owner confirm) stays valid before the client must re-check. Super Admin only. Default is {{ default_days }} days.</p>
+    <p class="lede">Set how many days a successful ownership proof (DNS TXT, site-root <code>attestra-verify.txt</code>, or owner confirm) stays valid before the client must re-check. Super Admin only. Default is {{ default_days }} days.</p>
   </div>
 </div>
 
@@ -24,7 +24,7 @@
         <input type="number" id="ownership_validity_days" name="ownership_validity_days"
                min="{{ min_days }}" max="{{ max_days }}" step="1" required
                value="{{ ownership_validity_days }}">
-        <div class="hint">Allowed range {{ min_days }}–{{ max_days }}. Keep the published DNS TXT or well-known file in place; after this many days Attestra requires Check now / Verify now again.</div>
+        <div class="hint">Allowed range {{ min_days }}–{{ max_days }}. Keep the published DNS TXT or site-root <code>attestra-verify.txt</code> in place; after this many days Attestra requires Check now / Verify now again.</div>
       </div>
     </div>
     <div class="row" style="margin-top:12px">
