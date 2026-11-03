@@ -101,7 +101,7 @@ Within one organization, the same hostname reuses one ownership token and a stil
 
 The Check now button does one DNS TXT lookup and at most one plain GET of the well-known file. It never scans and never follows redirects.
 
-[[attestra/web/ui.py#verify_target_ownership]] calls [[attestra/services.py#verify_asset_ownership]], which runs [[attestra/runner/ownership.py#check]]. The DNS step looks for `attestra-verify=<token>` on the host, asking the resolvers from [[attestra/runner/ownership.py#dns_resolvers]] in order (public resolvers first, then the system one). The file step fetches [[attestra/runner/ownership.py#well_known_url]] only when the target is inside a valid signed authorization and in scope. Every result is explained in plain words. Success is audited as `asset.ownership_verified`, failure as `asset.ownership_check_failed`.
+[[attestra/web/ui.py#verify_target_ownership]] calls [[attestra/services.py#verify_asset_ownership]], which runs [[attestra/runner/ownership.py#check]]. The DNS step looks for the bare ownership token via [[attestra/runner/ownership.py#dns_txt_matches]] (legacy `attestra-verify=` still accepted), asking the resolvers from [[attestra/runner/ownership.py#dns_resolvers]] in order (public resolvers first, then the system one). The file step fetches [[attestra/runner/ownership.py#well_known_url]] only when the target is inside a valid signed authorization and in scope. Every result is explained in plain words. Success is audited as `asset.ownership_verified`, failure as `asset.ownership_check_failed`.
 
 ### Owner confirm for private IPs
 

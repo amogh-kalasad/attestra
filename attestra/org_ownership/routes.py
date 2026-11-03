@@ -12,7 +12,6 @@ from attestra import db, services
 from attestra.auth.roles import has_permission
 from attestra.models import Tenant
 from attestra.org_ownership import service as org_own
-from attestra.runner import ownership
 
 ui_router = APIRouter(include_in_schema=False)
 
@@ -79,7 +78,6 @@ def ui_domain_ownership(request: Request, tenant_id: int | None = None):
             "hosts": cards,
             "validity_days": validity_days,
             "file_name": org_own.WELL_KNOWN_DOWNLOAD_NAME,
-            "txt_prefix": ownership.TXT_PREFIX,
         },
     )
 

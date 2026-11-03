@@ -60,7 +60,7 @@
     <code class="mono">{{ h.txt_value }}</code>
     <button type="button" class="secondary" data-copy="{{ h.txt_value }}">Copy</button>
   </div>
-  <p class="meta">Create a TXT record on <span class="mono">{{ h.hostname }}</span> with this exact value.</p>
+  <p class="meta">Create a TXT record on <span class="mono">{{ h.hostname }}</span> with this exact value (the token only — no <code>attestra-verify=</code> prefix).</p>
 
   <p style="margin:14px 0 4px"><b>Or upload the verification file</b></p>
   <p class="meta">Download <code>{{ h.file_name }}</code>, then upload that file to your website root (next to the homepage). It must open at <span class="mono">{{ h.file_url }}</span> — no <code>.well-known</code> folder required.</p>

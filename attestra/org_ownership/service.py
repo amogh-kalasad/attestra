@@ -227,7 +227,7 @@ def host_card(s: Session, row: TenantOwnershipHost) -> dict:
         "id": row.id,
         "hostname": row.hostname,
         "token": row.ownership_token,
-        "txt_value": f"{ownership.TXT_PREFIX}{row.ownership_token}",
+        "txt_value": row.ownership_token or "",
         "file_name": WELL_KNOWN_DOWNLOAD_NAME,
         "file_url": f"https://{row.hostname}{ownership.WELL_KNOWN_PATH}",
         "file_path_hint": ownership.WELL_KNOWN_PATH,

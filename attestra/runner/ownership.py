@@ -26,6 +26,7 @@ WELL_KNOWN_FILENAME = "attestra-verify.txt"
 # Site root only — owners upload the downloaded file next to the homepage (no .well-known folder).
 VERIFY_FILE_PATH = f"/{WELL_KNOWN_FILENAME}"
 WELL_KNOWN_PATH = VERIFY_FILE_PATH  # alias kept for older call sites
+# Legacy DNS prefix; new publishes use the bare token only. Matching still accepts the old form.
 TXT_PREFIX = "attestra-verify="
 CHECK_TIMEOUT = 5  # seconds, for both the DNS lookup and the file fetch
 MAX_FILE_BYTES = 4096
@@ -138,6 +139,19 @@ def is_verified(asset: Asset, *, validity_days: int | None = None) -> bool:
     return False
 
 
+def dns_txt_matches(token: str, records: list[str]) -> bool:
+    """True when any TXT record is the bare token (legacy attestra-verify= form also accepted)."""
+    token = (token or "").strip()
+    if not token:
+        return False
+    legacy = f"{TXT_PREFIX}{token}"
+    for raw in records:
+        value = (raw or "").strip().strip('"')
+        if value == token or value == legacy or token in value:
+            return True
+    return False
+
+
 def verify(
     asset: Asset,
     *,
@@ -149,16 +163,15 @@ def verify(
     token = asset.ownership_token
     if not token:
         token = issue_token(asset)
-    expected = f"{TXT_PREFIX}{token}"
     host = _host_for(asset)
     if not host:
         return False
 
-    # DNS TXT
+    # DNS TXT — bare token (legacy attestra-verify= still accepted)
     lookup = dns_lookup or _default_dns_txt
     try:
         txts = lookup(host)
-        if any(expected in t or token in t for t in txts):
+        if dns_txt_matches(token, list(txts)):
             asset.ownership_verified_at = utcnow()
             return True
     except Exception:
@@ -197,7 +210,7 @@ def instructions(asset: Asset, *, validity_days: int | None = None) -> dict:
         "txt_name": host,
         "txt_short_name": short_name,
         "txt_zone": zone,
-        "txt_value": f"{TXT_PREFIX}{token}",
+        "txt_value": token,
         "file_url": well_known_url(asset),
         "file_content": token,
         "validity_days": days,
@@ -257,7 +270,6 @@ def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "")
     """
     result = OwnershipCheck()
     token = ensure_token(asset)
-    expected = f"{TXT_PREFIX}{token}"
     host = _host_for(asset)
     if not host or not _HOSTNAME.match(host):
         # Literal private IPs use owner confirm; hostnames must match the DNS name pattern.
@@ -269,28 +281,24 @@ def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "")
             result.notes.append("This target has no host name Attestra can check.")
         return result
 
-    # 1. DNS TXT on the host itself
-    records, error = _dns_txt_records(host, expected=expected)
+    # 1. DNS TXT on the host itself — value is the bare token (legacy attestra-verify= still accepted).
+    records, error = _dns_txt_records(host, expected=token)
     if error:
         result.dns_note = f"DNS: could not look up TXT records for {host} ({error})."
-    elif any(expected in r for r in records):
+    elif dns_txt_matches(token, records):
         result.ok, result.method = True, "dns"
         asset.ownership_verified_at = utcnow()
-        result.dns_note = f"DNS: found the TXT record {expected} on {host}."
+        result.dns_note = f"DNS: found the TXT token for {host}."
         return result
     elif not records:
-        result.dns_note = f"DNS: no TXT record found on {host}. Add a TXT record named {host} with value {expected}."
+        result.dns_note = (
+            f"DNS: no TXT record found on {host}. Add a TXT record named {host} with value {token}."
+        )
     else:
-        others = [r for r in records if r.startswith(TXT_PREFIX)]
-        if others:
-            result.dns_note = (
-                f"DNS: found an attestra-verify TXT record on {host}, but its value does not match this target's "
-                f"token. Change it to {expected}."
-            )
-        else:
-            result.dns_note = (
-                f"DNS: found {len(records)} TXT record(s) on {host}, but none is {expected}."
-            )
+        result.dns_note = (
+            f"DNS: found {len(records)} TXT record(s) on {host}, but none matches this target's token. "
+            f"Set the TXT value to {token}."
+        )
 
     # 2. Well-known file, one plain GET, only for targets inside a valid signed authorization
     url = well_known_url(asset)

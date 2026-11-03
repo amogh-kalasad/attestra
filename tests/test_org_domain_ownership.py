@@ -86,7 +86,8 @@ def test_org_domain_ownership_page_download_and_reuse(org_lead, monkeypatch):
     assert page.status_code == 200
     assert "Domain ownership" in page.text
     assert "shop.example.com" in page.text
-    assert f"attestra-verify={token}" in page.text
+    assert token in page.text
+    assert f"attestra-verify={token}" not in page.text
     assert "Download attestra-verify.txt" in page.text
     assert "one-time" in page.text.lower() or "not session" in page.text.lower() or "until it expires" in page.text
 

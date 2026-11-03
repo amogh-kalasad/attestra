@@ -132,7 +132,7 @@ def test_ownership_fields_on_asset_page(fresh_db, engagement):
     r = c.get(f"/engagements/{engagement}/targets/{aid}")
     assert r.status_code == 200
     assert 'id="ownership"' in r.text
-    assert f"attestra-verify={token}" in r.text
+    assert token in r.text
     assert 'data-copy="' in r.text
     assert "Ownership verification" in r.text
 
