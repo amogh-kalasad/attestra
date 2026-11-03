@@ -709,6 +709,37 @@ def inherit_or_issue_ownership(
             return "issued"
         return "kept"
 
+    # Prefer organization Domain ownership row (durable token; rotate only after expiry).
+    from attestra.org_ownership import service as org_own
+
+    org_row = org_own.ensure_org_ownership_host(
+        s, tenant_id, host, actor=actor, renew_if_expired=True
+    )
+    if org_row.ownership_token:
+        probe = ownership.synthetic_asset_for_host(org_row.hostname, org_row.ownership_token)
+        probe.ownership_verified_at = org_row.ownership_verified_at
+        org_verified = ownership.is_verified(probe, validity_days=days)
+        changed = (asset.ownership_token != org_row.ownership_token) or (
+            asset.ownership_verified_at != org_row.ownership_verified_at
+        )
+        asset.ownership_token = org_row.ownership_token
+        asset.ownership_verified_at = org_row.ownership_verified_at
+        if changed and actor:
+            audit.record(
+                s,
+                actor,
+                "asset.ownership_inherited",
+                "asset",
+                asset.id,
+                engagement_id=asset.engagement_id,
+                identifier=asset.identifier,
+                host=host,
+                source_ownership_host_id=org_row.id,
+                token_suffix=ownership.token_fingerprint(org_row.ownership_token),
+                verified=org_verified,
+            )
+        return "inherited_verified" if org_verified else "inherited_token"
+
     siblings = _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id)
     verified = [
         a
@@ -769,7 +800,7 @@ def inherit_or_issue_ownership(
 
 
 def asset_ownership_verified(s: Session, asset: Asset, *, tenant_id: int, validity_days: int | None = None) -> bool:
-    """True when this target, or another same-host target in the org, still has a valid proof."""
+    """True when this target, or the org Domain ownership host, still has a valid proof."""
     from attestra.runner import ownership
     from attestra.runner.policy import OWNERSHIP_KINDS
 
@@ -785,6 +816,22 @@ def asset_ownership_verified(s: Session, asset: Asset, *, tenant_id: int, validi
     host = ownership.host_for(asset)
     if not host:
         return False
+    from attestra.models import TenantOwnershipHost
+    from attestra.org_ownership import service as org_own
+
+    row = s.scalar(
+        select(TenantOwnershipHost).where(
+            TenantOwnershipHost.tenant_id == tenant_id, TenantOwnershipHost.hostname == host
+        )
+    )
+    if row is not None:
+        org_own.renew_org_ownership_host_if_expired(s, row)
+        probe = ownership.synthetic_asset_for_host(row.hostname, row.ownership_token)
+        probe.ownership_verified_at = row.ownership_verified_at
+        if ownership.is_verified(probe, validity_days=days):
+            asset.ownership_token = row.ownership_token
+            asset.ownership_verified_at = row.ownership_verified_at
+            return True
     for sib in _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id):
         if ownership.is_verified(sib, validity_days=days) and sib.ownership_token:
             asset.ownership_token = sib.ownership_token
@@ -794,7 +841,9 @@ def asset_ownership_verified(s: Session, asset: Asset, *, tenant_id: int, validi
 
 
 def propagate_ownership_verification(s: Session, asset: Asset, *, tenant_id: int, actor: str = "") -> int:
-    """Copy a fresh verification onto other same-host targets in the organization that share the token."""
+    """Copy a fresh verification onto the org host row and other same-host targets."""
+    from attestra.models import TenantOwnershipHost
+    from attestra.org_ownership import service as org_own
     from attestra.runner import ownership
 
     host = ownership.host_for(asset)
@@ -802,6 +851,17 @@ def propagate_ownership_verification(s: Session, asset: Asset, *, tenant_id: int
     if not host or not token or asset.ownership_verified_at is None:
         return 0
     n = 0
+    row = s.scalar(
+        select(TenantOwnershipHost).where(
+            TenantOwnershipHost.tenant_id == tenant_id, TenantOwnershipHost.hostname == host
+        )
+    )
+    if row is None:
+        row = org_own.ensure_org_ownership_host(s, tenant_id, host, actor=actor, renew_if_expired=False)
+    row.ownership_token = token
+    row.ownership_verified_at = asset.ownership_verified_at
+    row.updated_at = utcnow()
+    n += org_own.sync_assets_from_org_host(s, row)
     for sib in _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id):
         if sib.ownership_token and sib.ownership_token != token:
             continue

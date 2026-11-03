@@ -118,6 +118,11 @@ EMAIL_ALERT_POLICIES: dict[str, str] = {
     "email_alert_sent": _tenant("tenant_id"),
 }
 POLICIES.update(EMAIL_ALERT_POLICIES)
+# Organization domain ownership hosts (migration 0036_tenant_ownership_hosts).
+TENANT_OWNERSHIP_HOST_POLICIES: dict[str, str] = {
+    "tenant_ownership_hosts": _tenant("tenant_id"),
+}
+POLICIES.update(TENANT_OWNERSHIP_HOST_POLICIES)
 # Authenticated website testing (migration 0022_auth_web).
 AUTH_WEB_POLICIES: dict[str, str] = {
     "auth_credential_profiles": _tenant("tenant_id"),

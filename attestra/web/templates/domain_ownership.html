@@ -1,0 +1,106 @@
+{% extends "_layout.html" %}
+{% block title %}Domain ownership · Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <h1>Domain ownership</h1>
+    <p class="lede">Prove control of each hostname once for this organization. Publish one DNS TXT value <b>or</b> download <code>{{ file_name }}</code> and upload it to <code>/.well-known/{{ file_name }}</code>. This is not session-based: the same key stays until it expires ({{ validity_days }} days), then Attestra renews a new value.</p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" action="/settings/domain-ownership" class="fields" style="margin-bottom:0">
+    <div>
+      <label for="tenant_id">Organization</label>
+      <select id="tenant_id" name="tenant_id" onchange="this.form.submit()">
+        {% for t in tenants %}
+        <option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Add hostname</h2>
+  <form method="post" action="/settings/domain-ownership/hosts" class="fields">
+    <input type="hidden" name="tenant_id" value="{{ tenant_id }}">
+    <div>
+      <label for="hostname">Hostname</label>
+      <input id="hostname" name="hostname" required placeholder="shop.example.com" autocomplete="off">
+      <div class="hint">One key per hostname. Engagements that use this host reuse the proof while it is valid.</div>
+    </div>
+    <div class="row" style="align-items:end">
+      <button type="submit">Add hostname</button>
+    </div>
+  </form>
+</div>
+
+{% if not hosts %}
+<div class="card"><p class="meta">No hostnames yet. Add the domains this organization owns.</p></div>
+{% endif %}
+
+{% for h in hosts %}
+<div class="card" id="host-{{ h.id }}">
+  <h2 class="mono">{{ h.hostname }}</h2>
+  {% if h.verified %}
+  <p><span class="st-met">Verified{% if h.last_method == "dns" %} (DNS){% elif h.last_method == "file" %} (file){% elif h.last_method == "owner_confirmed" %} (owner confirmed){% endif %}</span>
+    <span class="meta"> · checked {{ h.verified_at|dt }} · valid until {{ h.verified_until|dt }}</span></p>
+  <p class="meta">Keep the DNS TXT or <code>{{ h.file_name }}</code> published. All engagements for this hostname in this organization stay verified until expiry.</p>
+  {% elif h.expired %}
+  <p><span class="st-not_met">Expired</span>
+    <span class="meta"> · last checked {{ h.verified_at|dt }} · token renewed — update DNS or re-upload the file</span></p>
+  {% else %}
+  <p class="st-not_met">Not verified</p>
+  <p class="meta">Do <b>one</b> of the steps below, then click Check now.</p>
+  {% endif %}
+
+  <p style="margin:12px 0 4px"><b>DNS TXT value</b></p>
+  <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+    <code class="mono">{{ h.txt_value }}</code>
+    <button type="button" class="secondary" data-copy="{{ h.txt_value }}">Copy</button>
+  </div>
+  <p class="meta">Create a TXT record on <span class="mono">{{ h.hostname }}</span> with this exact value.</p>
+
+  <p style="margin:14px 0 4px"><b>Or upload the verification file</b></p>
+  <p class="meta">Download <code>{{ h.file_name }}</code>, then upload it so it is served at <span class="mono">{{ h.file_url }}</span> (path <span class="mono">{{ h.file_path_hint }}</span>).</p>
+  <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px">
+    <a class="btn" href="/settings/domain-ownership/hosts/{{ h.id }}/attestra-verify.txt">Download {{ h.file_name }}</a>
+    <form method="post" action="/settings/domain-ownership/hosts/{{ h.id }}/verify" style="display:inline">
+      <button type="submit">Check now</button>
+    </form>
+  </div>
+
+  {% if h.private_confirm and not h.verified %}
+  <details style="margin-top:14px">
+    <summary>Private address: owner confirm</summary>
+    <form method="post" action="/settings/domain-ownership/hosts/{{ h.id }}/confirm" class="fields" style="margin-top:8px">
+      <label style="display:flex;gap:8px;align-items:flex-start">
+        <input type="checkbox" name="confirm" value="1" required>
+        <span>I confirm this organization owns or controls <span class="mono">{{ h.hostname }}</span>.</span>
+      </label>
+      <div>
+        <label for="confirmed_by-{{ h.id }}">Confirmed by (name and role)</label>
+        <input id="confirmed_by-{{ h.id }}" name="confirmed_by" required maxlength="200" placeholder="Alex Kim, Security lead">
+      </div>
+      <button type="submit">Confirm ownership</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+
+<p class="meta">Validity window for this organization: <b>{{ validity_days }}</b> days.
+  {% if can(role, "ownership.configure") %}
+  <a href="/settings/ownership?tenant_id={{ tenant_id }}">Change validity days</a>
+  {% endif %}
+</p>
+<script>
+document.addEventListener('click', function (ev) {
+  const btn = ev.target.closest('[data-copy]');
+  if (!btn) return;
+  const text = btn.getAttribute('data-copy') || '';
+  if (navigator.clipboard && text) navigator.clipboard.writeText(text);
+});
+</script>
+{% endblock %}

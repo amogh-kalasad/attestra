@@ -192,6 +192,24 @@ class Tenant(Base):
     ownership_validity_days: Mapped[int] = mapped_column(Integer, default=30)
 
 
+class TenantOwnershipHost(Base):
+    """Organization-level ownership proof for one hostname (DNS TXT / well-known file)."""
+
+    __tablename__ = "tenant_ownership_hosts"
+    __table_args__ = (UniqueConstraint("tenant_id", "hostname"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"))
+    hostname: Mapped[str] = mapped_column(String(253))
+    ownership_token: Mapped[str] = mapped_column(String(64), default="")
+    ownership_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_method: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    tenant: Mapped[Tenant] = relationship()
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)

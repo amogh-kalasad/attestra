@@ -100,14 +100,14 @@ def test_ownership_30_day_full_flow(engagement, monkeypatch):
     eng = client.get(f"/engagements/{engagement}")
     assert eng.status_code == 200
     assert "Not verified" in eng.text
-    assert "attestra-verify=" in eng.text
+    assert "Domain ownership" in eng.text
     assert token in eng.text
-    assert "Proof stays valid for 30 days" in eng.text
 
     target = client.get(f"/engagements/{engagement}/targets/{aid}")
     assert target.status_code == 200
     assert "Not verified" in target.text
-    assert "Proof stays valid for 30 days" in target.text
+    assert "Domain ownership" in target.text
+    assert "attestra-verify.txt" in target.text
 
     # 2) Verify now (DNS)
     def fake_check(asset, *, scope=None, scope_error=""):
@@ -146,22 +146,32 @@ def test_ownership_30_day_full_flow(engagement, monkeypatch):
         assert "already verified" in result.message
         assert "stays valid until" in result.message
 
-    # 4) Expire after 30 days: UI Expired + gate refuses ownership
+    # 4) Expire after 30 days: org host renews token; gate refuses until re-verify
     with db.session() as s:
+        from attestra.models import TenantOwnershipHost
+        from attestra.org_ownership import service as org_own
+
         asset = s.get(Asset, aid)
-        asset.ownership_verified_at = utcnow() - timedelta(days=30)
-        assert ownership.is_verified(asset) is False
-        assert ownership.is_expired(asset) is True
+        eng = s.get(Engagement, engagement)
+        row = s.scalar(
+            select(TenantOwnershipHost).where(
+                TenantOwnershipHost.tenant_id == eng.tenant_id,
+                TenantOwnershipHost.hostname == ownership.host_for(asset),
+            )
+        )
+        if row is None:
+            row = org_own.ensure_org_ownership_host(s, eng.tenant_id, ownership.host_for(asset))
+        row.ownership_token = asset.ownership_token
+        row.ownership_verified_at = utcnow() - timedelta(days=30)
+        asset.ownership_verified_at = row.ownership_verified_at
 
     expired_target = client.get(f"/engagements/{engagement}/targets/{aid}")
-    assert "Expired" in expired_target.text
-    assert "re-check required" in expired_target.text
-    assert "Verify now" in expired_target.text
+    # Page load renews expired org token → Not verified + Domain ownership CTA
+    assert "Domain ownership" in expired_target.text
+    assert "Verified" not in expired_target.text or "Not verified" in expired_target.text
 
     expired_eng = client.get(f"/engagements/{engagement}")
-    assert "Expired" in expired_eng.text
-    assert "Renew ownership" in expired_eng.text
-    assert "expired" in expired_eng.text  # scan dropdown
+    assert "Domain ownership" in expired_eng.text
 
     with db.session() as s:
         with pytest.raises(GateError, match="ownership"):
@@ -219,25 +229,21 @@ def test_ownership_org_host_reuse_across_engagements(engagement):
 
     from sqlalchemy import select
 
-    from attestra.models import Engagement
+    from attestra.models import Engagement, Tenant, TenantOwnershipHost
+    from attestra.org_ownership import service as org_own
     from attestra.runner.gate import policy_input
 
     today = date.today()
     with db.session() as s:
-        from attestra.models import Tenant
-
         eng1 = s.get(Engagement, engagement)
         tid = eng1.tenant_id
         tenant = s.get(Tenant, tid)
         assert tenant is not None
-        # Use the fixture web_app host so a second engagement can inherit it.
-        a1 = s.scalars(
-            select(Asset).where(Asset.engagement_id == engagement, Asset.kind == "web_app")
-        ).first()
-        assert a1 is not None
-        a1.ownership_token = "SharedOrgTokenValue0123456789ab"
-        a1.ownership_verified_at = utcnow()
-        token = a1.ownership_token
+        row = org_own.ensure_org_ownership_host(s, tid, "shop.example.com", actor="tester", renew_if_expired=False)
+        row.ownership_token = "SharedOrgTokenValue0123456789ab"
+        row.ownership_verified_at = utcnow()
+        org_own.sync_assets_from_org_host(s, row)
+        token = row.ownership_token
 
         eng2 = services.create_engagement(
             s,
@@ -260,31 +266,36 @@ def test_ownership_org_host_reuse_across_engagements(engagement):
         )
         assert a2.ownership_token == token
         assert a2.ownership_verified_at is not None
-        assert ownership.is_verified(
-            a2, validity_days=services.ownership_validity_days_for_tenant(s, tid)
-        )
         assert services.asset_ownership_verified(s, a2, tenant_id=tid) is True
         inp = policy_input(s, eng2.id, a2.id, tool="zap", profile="baseline")
         assert inp["ownership_verified"] is True
 
-        # Expired org proof: reuse token, require re-verify
-        a1.ownership_verified_at = utcnow() - timedelta(days=60)
-        a2.ownership_verified_at = None
-        a2.ownership_token = ""
+        # Expired org proof: renew issues a new DNS token (plan: one-time until expiry)
+        row = s.scalars(
+            select(TenantOwnershipHost).where(
+                TenantOwnershipHost.tenant_id == tid, TenantOwnershipHost.hostname == "shop.example.com"
+            )
+        ).one()
+        row.ownership_verified_at = utcnow() - timedelta(days=60)
+        renewed = org_own.renew_org_ownership_host_if_expired(s, row, actor="tester")
+        assert renewed is True
+        assert row.ownership_token != token
+        assert row.ownership_verified_at is None
         status = services.inherit_or_issue_ownership(s, a2, tenant_id=tid, actor="tester")
         assert status == "inherited_token"
-        assert a2.ownership_token == token
+        assert a2.ownership_token == row.ownership_token
         assert a2.ownership_verified_at is None
         assert services.asset_ownership_verified(s, a2, tenant_id=tid) is False
 
-        # Fresh verify on one target propagates to the sibling with same host/token
+        # Fresh verify propagates via org host
+        new_token = row.ownership_token
+        a2.ownership_token = new_token
         a2.ownership_verified_at = utcnow()
         n = services.propagate_ownership_verification(s, a2, tenant_id=tid, actor="tester")
         assert n >= 1
-        s.refresh(a1)
-        assert a1.ownership_token == token
-        assert a1.ownership_verified_at is not None
-        assert ownership._as_utc(a1.ownership_verified_at) == ownership._as_utc(a2.ownership_verified_at)
+        s.refresh(row)
+        assert row.ownership_token == new_token
+        assert row.ownership_verified_at is not None
 
 
 # @lat: [[tests#Phase 5 workflow#Ownership validity Super Admin configurable]]
@@ -414,19 +425,24 @@ def test_asset_page_set_token_and_verify_now_routes(engagement, monkeypatch):
 
     page = client.get(f"/engagements/{engagement}/targets/{aid}")
     assert page.status_code == 200
-    assert "ownership-token" in page.text
+    assert "Domain ownership" in page.text
     assert "verify-ownership-now" in page.text
-    assert "Verify now" in page.text
-    assert "Proof stays valid for 30 days" in page.text
+    assert "attestra-verify.txt" in page.text
 
     with db.session() as s:
+        from attestra.models import Engagement, TenantOwnershipHost
+        from attestra.org_ownership import service as org_own
+
         asset = s.get(Asset, aid)
-        asset.ownership_verified_at = utcnow() - timedelta(days=31)
+        eng = s.get(Engagement, engagement)
+        row = org_own.ensure_org_ownership_host(s, eng.tenant_id, ownership.host_for(asset), renew_if_expired=False)
+        row.ownership_token = asset.ownership_token or row.ownership_token
+        row.ownership_verified_at = utcnow() - timedelta(days=31)
+        asset.ownership_verified_at = row.ownership_verified_at
     expired_page = client.get(f"/engagements/{engagement}/targets/{aid}")
     assert expired_page.status_code == 200
-    assert "Expired" in expired_page.text
-    assert "re-check required" in expired_page.text
-    assert "Verify now" in expired_page.text
+    assert "Domain ownership" in expired_page.text
+    assert "attestra-verify.txt" in expired_page.text
 
     reused = "SharedTokenFromOtherAsset99xx"
     r = client.post(

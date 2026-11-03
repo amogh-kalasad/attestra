@@ -251,36 +251,30 @@
         {% if ownership_is_expired(a) %}<span class="st-not_met">Expired{% if om == "dns" %} (DNS){% elif om == "file" %} (file){% elif om == "owner_confirmed" %} (owner confirmed){% endif %}</span><div class="meta">Last checked {{ a.ownership_verified_at|dt }} · re-check required</div>
         {% elif ownership_bypass %}<span class="st-partial"><b>Bypassed (local testing)</b></span><div class="meta mono">{{ local_bypass_status }}</div>
         {% else %}<span class="st-not_met">Not verified</span>{% endif %}
-        <details id="ov-{{ a.id }}" class="ownership" {{ "open" if ov_open == a.id }} style="max-width:440px">
-          <summary>{% if ownership_is_expired(a) %}Renew ownership{% else %}Verify ownership{% endif %}</summary>
+        <div class="meta" style="margin-top:4px">
+          {% if can(principal.role, "asset.verify_ownership") %}
+          <a href="/settings/domain-ownership?tenant_id={{ e.tenant_id }}">Manage on organization Domain ownership</a>
+          <span class="meta"> — download <span class="mono">attestra-verify.txt</span>, publish DNS, Check now once for this hostname.</span>
+          {% else %}
+          Ask a lead or admin to complete Domain ownership for this organization.
+          {% endif %}
+        </div>
+        <details id="ov-{{ a.id }}" class="ownership" {{ "open" if ov_open == a.id }} style="max-width:440px;margin-top:6px">
+          <summary>Advanced: check from this engagement</summary>
           {% if ov_open == a.id and ov_message %}<div class="flash err" role="alert" style="margin:6px 0">{{ ov_message }}</div>{% endif %}
-          <p class="meta">{% if ownership_is_expired(a) %}Proof older than {{ ownership_validity_days }} days. Keep the published value and click Check now.{% else %}Ask the client to do <b>one</b> of these, then click Check now. This proves they control the site before any scan. Proof stays valid for {{ ownership_validity_days }} days.{% endif %}</p>
-          <p style="margin:6px 0 2px"><b>Option A: DNS TXT record</b></p>
-          <div class="meta">Type: <span class="mono">TXT</span></div>
-          <div class="meta">Name: <span class="mono">{{ oi.txt_name }}</span>{% if oi.txt_short_name != "@" %} (in GoDaddy and most DNS panels for <span class="mono">{{ oi.txt_zone }}</span>, type just <span class="mono">{{ oi.txt_short_name }}</span>){% else %} (in most DNS panels, type <span class="mono">@</span>){% endif %}</div>
-          <div class="meta">Value: <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span></div>
-          <div class="meta">DNS changes can take a few minutes to an hour to show up.</div>
-          <p style="margin:8px 0 2px"><b>Option B: file on the website</b></p>
-          <div class="meta">Put a plain text file at: <span class="mono" style="word-break:break-all">{{ oi.file_url }}</span></div>
-          <div class="meta">The file must contain only: <span class="mono" style="word-break:break-all">{{ oi.file_content }}</span></div>
-          <div class="meta">It must open directly (HTTP 200, no redirect).</div>
+          <p class="meta">Prefer the organization page. Value: <span class="mono" style="word-break:break-all">{{ oi.txt_value }}</span></p>
           {% if can(principal.role, "asset.verify_ownership") %}
           <form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/verify-ownership" style="margin-top:8px">
             <button type="submit">Check now</button>
           </form>
-          <div class="meta">Check now only looks up the DNS record and opens that one file. It does not scan the site.</div>
-          {% else %}<div class="meta" style="margin-top:8px">Only a lead or admin can run the check.</div>{% endif %}
-          {% if oi.private_confirm %}
-          <p style="margin:10px 0 2px"><b>Option C: owner confirms (private address only)</b></p>
-          <div class="meta">This is a private network address. It has no DNS name for Option A, and Attestra blocks the file check on private addresses for safety. If you own or control it, confirm it here. Your confirmation is saved in the audit log.</div>
-          {% if can(principal.role, "asset.verify_ownership") %}
+          {% endif %}
+          {% if oi.private_confirm and can(principal.role, "asset.verify_ownership") %}
           <form method="post" action="/engagements/{{ e.id }}/targets/{{ a.id }}/confirm-ownership" style="margin-top:6px">
             <label><input type="checkbox" name="confirm" value="yes" required> I confirm I own or control this private address</label>
             <label for="cb-{{ a.id }}">Confirmed by (name, role) *</label>
             <input type="text" id="cb-{{ a.id }}" name="confirmed_by" required maxlength="200" placeholder="Your name, role">
             <button type="submit" style="margin-top:6px">Confirm ownership</button>
           </form>
-          {% else %}<div class="meta" style="margin-top:6px">Only a lead or admin can confirm ownership.</div>{% endif %}
           {% endif %}
         </details>
         {% endif %}

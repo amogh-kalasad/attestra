@@ -966,7 +966,15 @@ End-to-end: unverified UI → DNS verify → Verified until → early no-op → 
 
 ### Ownership org host reuse across engagements
 
-Same hostname in the same tenant inherits a still-valid token and verification on a new engagement target; expired proof reuses the token but requires re-verify; a successful verify propagates to sibling targets.
+Same-tenant hostname inherits org ownership token and verification across engagements until expiry.
+
+Clean no-bypass E2E: `tests/test_e2e_ownership_clean.py`. Expired proofs renew a new token; re-verify propagates via the org host row.
+
+### Organization domain ownership page
+
+Lead/admin Domain ownership UI: add host, download `attestra-verify.txt`, durable token until expiry.
+
+Covered by `tests/test_org_domain_ownership.py` (download filename, no session rotate, inherit, renew).
 
 ### Ownership target page routes
 

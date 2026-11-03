@@ -22,7 +22,8 @@ from attestra.runner.authorization import (
     owner_confirm_host,
 )
 
-WELL_KNOWN_PATH = "/.well-known/attestra-verify.txt"
+WELL_KNOWN_FILENAME = "attestra-verify.txt"
+WELL_KNOWN_PATH = f"/.well-known/{WELL_KNOWN_FILENAME}"
 TXT_PREFIX = "attestra-verify="
 CHECK_TIMEOUT = 5  # seconds, for both the DNS lookup and the file fetch
 MAX_FILE_BYTES = 4096
@@ -236,6 +237,16 @@ class OwnershipCheck:
         return " ".join(parts)
 
 
+def synthetic_asset_for_host(hostname: str, token: str, *, scheme: str = "https") -> Asset:
+    """Build an unsaved Asset so org-host DNS/file checks reuse [[check]]."""
+    host = (hostname or "").strip().lower()
+    return Asset(
+        kind="web_app",
+        identifier=f"{scheme}://{host}",
+        ownership_token=token,
+    )
+
+
 def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "") -> OwnershipCheck:
     """Look for the token: one DNS TXT lookup, then (if needed) one HTTPS GET of the well-known file.
 
@@ -247,7 +258,13 @@ def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "")
     expected = f"{TXT_PREFIX}{token}"
     host = _host_for(asset)
     if not host or not _HOSTNAME.match(host):
-        result.notes.append("This target has no host name Attestra can check.")
+        # Literal private IPs use owner confirm; hostnames must match the DNS name pattern.
+        if host and owner_confirm_host(asset.kind, asset.identifier):
+            result.notes.append(
+                "This is a private address: use owner confirmation on the organization Domain ownership page."
+            )
+        else:
+            result.notes.append("This target has no host name Attestra can check.")
         return result
 
     # 1. DNS TXT on the host itself
