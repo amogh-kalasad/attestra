@@ -172,6 +172,24 @@ from attestra.runner import crawl as _crawl  # noqa: E402 - crawl settings helpe
 
 templates.env.globals["crawl_defaults"] = _crawl.form_defaults
 templates.env.globals["crawl_summary"] = _crawl.summary_for_run
+from attestra.runner import ownership as _ownership  # noqa: E402 - ownership status helpers for templates
+
+# Defaults; engagement/target pages override these in context with the tenant's days.
+templates.env.globals["ownership_is_verified"] = _ownership.is_verified
+templates.env.globals["ownership_is_expired"] = _ownership.is_expired
+templates.env.globals["ownership_verified_until"] = _ownership.verified_until
+templates.env.globals["ownership_validity_days"] = _ownership.DEFAULT_OWNERSHIP_VALIDITY_DAYS
+
+
+def _ownership_template_helpers(validity_days: int) -> dict:
+    """Per-request ownership helpers bound to the tenant validity window."""
+    days = _ownership.normalize_validity_days(validity_days)
+    return {
+        "ownership_validity_days": days,
+        "ownership_is_verified": lambda a: _ownership.is_verified(a, validity_days=days),
+        "ownership_is_expired": lambda a: _ownership.is_expired(a, validity_days=days),
+        "ownership_verified_until": lambda a: _ownership.verified_until(a, validity_days=days),
+    }
 
 
 def _actor(request: Request) -> str | None:
@@ -617,16 +635,22 @@ def _engagement_ctx(
     from attestra.runner import ownership
     from attestra.runner.policy import OWNERSHIP_KINDS
 
-    services.ensure_ownership_tokens(e)
+    services.ensure_ownership_tokens(s, e)
     ov = request.query_params.get("ov", "")
+    ownership_days = services.ownership_validity_days_for_tenant(s, e.tenant_id)
     return {
         "ownership_kinds": OWNERSHIP_KINDS,
-        "ownership_info": {a.id: ownership.instructions(a) for a in e.assets if a.kind in OWNERSHIP_KINDS},
+        "ownership_info": {
+            a.id: ownership.instructions(a, validity_days=ownership_days)
+            for a in e.assets
+            if a.kind in OWNERSHIP_KINDS
+        },
         "ownership_methods": services.ownership_methods(s, [a.id for a in e.assets]),
         "ownership_verification_required": config.ownership_verification_required(),
         "ownership_bypass_active": config.ownership_bypass_active(),
         "signed_authorization_bypass_active": config.signed_authorization_bypass_active(),
         "bypass_status": config.BYPASS_STATUS,
+        **_ownership_template_helpers(ownership_days),
         "ov_open": int(ov) if ov.isdigit() else None,
         "ov_message": request.query_params.get("ovmsg", ""),
         "scan_tools": SCAN_TOOLS,
@@ -901,9 +925,10 @@ def target_page(request: Request, eid: int, aid: int):
         from attestra.runner import ownership
         from attestra.runner.policy import OWNERSHIP_KINDS
 
-        services.ensure_ownership_tokens(e)
+        services.ensure_ownership_tokens(s, e)
         cert_status = asset_cert_status(s, aid)
         needs_ownership = asset.kind in OWNERSHIP_KINDS
+        ownership_days = services.ownership_validity_days_for_tenant(s, e.tenant_id)
         return _render(
             request,
             "asset.html",
@@ -914,12 +939,15 @@ def target_page(request: Request, eid: int, aid: int):
                 "site_grade": site_grade,
                 "cert_status": cert_status,
                 "ownership_kinds": OWNERSHIP_KINDS,
-                "ownership_info": ownership.instructions(asset) if needs_ownership else None,
+                "ownership_info": (
+                    ownership.instructions(asset, validity_days=ownership_days) if needs_ownership else None
+                ),
                 "ownership_method": services.ownership_methods(s, [asset.id]).get(asset.id, ""),
                 "ownership_verification_required": config.ownership_verification_required(),
                 "ownership_bypass_active": config.ownership_bypass_active(),
                 "signed_authorization_bypass_active": config.signed_authorization_bypass_active(),
                 "bypass_status": config.BYPASS_STATUS,
+                **_ownership_template_helpers(ownership_days),
                 "auth_web_enabled": config.AUTH_WEB_ENABLED,
                 "can_manage_auth": has_permission(principal.role, "auth_profile.manage"),
                 "auth_profiles": _auth_profiles_for(s, eid, principal),
@@ -972,11 +1000,12 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
         return _back(url, error="Only a lead or admin can check target ownership.", anchor="#targets")
     try:
         with db.session() as s:
-            services.get_engagement(s, eid, principal)
+            eng = services.get_engagement(s, eid, principal)
             result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
             from attestra.models import Asset
 
             ident = s.get(Asset, aid).identifier
+            days = services.ownership_validity_days_for_tenant(s, eng.tenant_id)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#targets")
     except Exception:  # noqa: BLE001 - the check must never end in a 500 page
@@ -985,8 +1014,14 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
     if result.ok:
         how = {"dns": "the DNS TXT record", "file": "the verification file",
                "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
-        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
-                     anchor="#targets")
+        return _back(
+            url,
+            msg=(
+                f"Ownership of {ident} verified using {how}. "
+                f"Valid for {days} days while the published proof stays in place. Scans can now be queued for it."
+            ),
+            anchor="#targets",
+        )
     msg = "Not verified yet. " + result.message
     return RedirectResponse(f"{url}?ov={aid}&ovmsg={quote(msg)}#ov-{aid}", status_code=303)
 
@@ -1025,11 +1060,12 @@ def verify_target_ownership_now(request: Request, eid: int, aid: int):
         return _back(url, error="Only a lead or admin can check target ownership.", anchor="#ownership")
     try:
         with db.session() as s:
-            services.get_engagement(s, eid, principal)
+            eng = services.get_engagement(s, eid, principal)
             result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
             from attestra.models import Asset
 
             ident = s.get(Asset, aid).identifier
+            days = services.ownership_validity_days_for_tenant(s, eng.tenant_id)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#ownership")
     except Exception:  # noqa: BLE001 - the check must never end in a 500 page
@@ -1038,8 +1074,14 @@ def verify_target_ownership_now(request: Request, eid: int, aid: int):
     if result.ok:
         how = {"dns": "the DNS TXT record", "file": "the verification file",
                "owner_confirmed": "the owner's confirmation"}.get(result.method, "an earlier check")
-        return _back(url, msg=f"Ownership of {ident} verified using {how}. Scans can now be queued for it.",
-                     anchor="#ownership")
+        return _back(
+            url,
+            msg=(
+                f"Ownership of {ident} verified using {how}. "
+                f"Valid for {days} days while the published proof stays in place. Scans can now be queued for it."
+            ),
+            anchor="#ownership",
+        )
     return _back(url, error="Not verified yet. " + result.message, anchor="#ownership")
 
 

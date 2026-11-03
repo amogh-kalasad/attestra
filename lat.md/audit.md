@@ -35,6 +35,8 @@ SQLite triggers `audit_events_no_update` / `audit_events_no_delete` are installe
 Audit actions written by target ownership, scan requests and user accounts.
 
 - `asset.ownership_verified` and `asset.ownership_check_failed`: result of a DNS TXT or well-known file check.
+- `tenant.ownership_validity_updated`: Super Admin changed the tenant ownership proof validity days (`previous_days`, `days`).
+- `asset.ownership_inherited`: same-organization hostname reused another target's token and optional verification (`host`, `source_asset_id`, `token_suffix`, `verified`).
 - `asset.ownership_confirmed`: a lead or admin recorded the owner's confirmation for a private IP.
 - `asset.ownership_token_set`: token set or reused; details include `token_suffix` (last four chars) only.
 - `report.grc_pushed`: signed report metadata pushed to an optional GRC webhook ([[architecture#GRC evidence push]]).

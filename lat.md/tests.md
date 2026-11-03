@@ -948,6 +948,26 @@ Empty, short, or non-urlsafe tokens raise [[attestra/services.py#ServiceError]].
 
 Saving the same token again leaves `ownership_verified_at` unchanged.
 
+### Ownership 30-day full flow
+
+End-to-end: unverified UI → DNS verify → Verified until → early no-op → expire → Expired UI + gate ownership refuse → re-verify restores ownership.
+
+### Ownership proof expires after 30 days
+
+[[attestra/runner/ownership.py#is_verified]] is false once [[attestra/runner/ownership.py#verified_until]] has passed (default [[attestra/runner/ownership.py#DEFAULT_OWNERSHIP_VALIDITY_DAYS]]); [[attestra/runner/ownership.py#is_expired]] is true for a stale proof.
+
+### Ownership expired allows re-verify
+
+[[attestra/services.py#verify_asset_ownership]] runs a new DNS/file check when the prior proof is past the validity window and refreshes `ownership_verified_at` on success.
+
+### Ownership validity Super Admin configurable
+
+[[attestra/services.py#set_ownership_validity_days]] is Super Admin only; a shorter tenant window expires proofs earlier; `/settings/ownership` and the API enforce `ownership.configure`.
+
+### Ownership org host reuse across engagements
+
+Same hostname in the same tenant inherits a still-valid token and verification on a new engagement target; expired proof reuses the token but requires re-verify; a successful verify propagates to sibling targets.
+
 ### Ownership target page routes
 
 Target page shows set-token and Verify now forms; POSTs redirect back to the target with flash messages.

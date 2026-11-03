@@ -188,6 +188,8 @@ class Tenant(Base):
     contact_email: Mapped[str] = mapped_column(String(200), default="")
     data_region: Mapped[str] = mapped_column(String(50), default="default")
     plan: Mapped[str] = mapped_column(String(50), default="standard")
+    # How long a successful ownership proof (DNS / file / confirm) stays valid before re-check.
+    ownership_validity_days: Mapped[int] = mapped_column(Integer, default=30)
 
 
 class User(Base):

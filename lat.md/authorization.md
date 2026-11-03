@@ -79,6 +79,18 @@ Before the first scan, a lead or admin must prove the client controls each targe
 
 Only users with the `asset.verify_ownership` permission (lead and admin, see [[attestra/auth/roles.py#ROLES]]) can check or confirm ownership. Each target gets a token from [[attestra/runner/ownership.py#ensure_token]]. The page shows what to publish using [[attestra/runner/ownership.py#instructions]]. When [[attestra/config.py#ownership_bypass_active]] ([[interfaces#Configuration#Ownership verification flag]]), the dispatch gate skips ownership via `ownership_required=false`; UI verify/confirm and audit remain. Engagement and asset pages show **Bypassed (local testing)** with [[attestra/config.py#BYPASS_STATUS]] when bypass is active and `ownership_verified_at` is unset — never as Verified — and keep Verify ownership details available. Bypass never invents `ownership_verified_at`. [[attestra/web/ui.py]] passes `ownership_bypass_active`, `signed_authorization_bypass_active`, and `bypass_status` into those templates; scan intro copy still branches on `*_required` helpers.
 
+### Validity window
+
+A successful proof (DNS, well-known file, or owner confirm) stays valid for a per-tenant number of days from `ownership_verified_at` (default [[attestra/runner/ownership.py#DEFAULT_OWNERSHIP_VALIDITY_DAYS]] = 30).
+
+[[attestra/models.py#Tenant]] stores `ownership_validity_days` (migration `0035_tenant_ownership_validity`). Super Admin (`ownership.configure`) sets it at `/settings/ownership` and `GET`/`PUT /api/settings/ownership` via [[attestra/services.py#set_ownership_validity_days]] ([[attestra/runner/ownership.py#normalize_validity_days]], 1–3650). [[attestra/services.py#ownership_validity_days_for_tenant]] feeds [[attestra/runner/ownership.py#is_verified]] / [[attestra/runner/ownership.py#verified_until]] / [[attestra/runner/ownership.py#is_expired]]. After expiry the gate treats the target as unverified and the UI shows **Expired** with Renew / Verify now. Keep the published DNS TXT or well-known file; re-check refreshes `ownership_verified_at`.
+
+### Organization host reuse
+
+Within one organization, the same hostname reuses one ownership token and a still-valid verification across engagements.
+
+[[attestra/services.py#inherit_or_issue_ownership]] (from [[attestra/services.py#add_asset]] and [[attestra/services.py#ensure_ownership_tokens]]) looks up other targets for [[attestra/runner/ownership.py#host_for]] in the tenant. If one is still verified, the new target inherits that token and `ownership_verified_at` (audited `asset.ownership_inherited`) and the UI does not ask to verify again. If only an expired or unverified token exists, the token is reused so DNS stays the same and Check now is required. If none exists, a new token is issued. [[attestra/services.py#asset_ownership_verified]] and [[attestra/services.py#propagate_ownership_verification]] keep the gate and sibling targets in sync after a successful check.
+
 ### DNS or file check
 
 The Check now button does one DNS TXT lookup and at most one plain GET of the well-known file. It never scans and never follows redirects.

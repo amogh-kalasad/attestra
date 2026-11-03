@@ -683,6 +683,9 @@
           {% if can(role, "certification.manage") %}
           <a href="/settings/certification-authority" {{ 'aria-current=page' if path.startswith('/settings/certification-authority') }}>Certification Authority</a>
           {% endif %}
+          {% if can(role, "ownership.configure") %}
+          <a href="/settings/ownership" {{ 'aria-current=page' if path.startswith('/settings/ownership') }}>Ownership validity</a>
+          {% endif %}
           {% if can(role, "credits.read") %}
           <a href="/credits" {{ 'aria-current=page' if path.startswith('/credits') }}>Organization credits</a>
           {% endif %}

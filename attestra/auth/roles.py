@@ -48,6 +48,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "credits.allocate": frozenset({"admin"}),
     # Platform Certification Authority issuer branding (Super Admin only).
     "certification.manage": frozenset({"admin"}),
+    # Per-tenant ownership proof validity window (Super Admin only).
+    "ownership.configure": frozenset({"admin"}),
 }
 
 
