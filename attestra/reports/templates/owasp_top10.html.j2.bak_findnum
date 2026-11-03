@@ -1,0 +1,66 @@
+{% extends "_base.html.j2" %}
+{% block title %}OWASP Top 10{% endblock %}
+{% block body %}
+<h1>OWASP Top 10</h1>
+<div class="meta">{{ eng.name }} · {{ type_label }} · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+
+<p class="note">Findings from this security testing engagement grouped by
+<a href="https://owasp.org/Top10/">OWASP Top 10 2021</a> categories (via CWE mapping).
+Category labels are evidence aids for remediation prioritisation; they are not a certification
+against the full Top 10. Unmapped findings appear in a separate section.</p>
+
+<div class="kpis">
+  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+</div>
+
+{% for g in top10_groups %}
+<h2>{{ g.heading }}</h2>
+{% if g.findings %}
+<table>
+  <tr><th>Finding</th><th>Severity</th><th>Status</th><th>CWE</th><th>ASVS</th><th>Location</th></tr>
+  {% for f in g.findings %}
+  <tr>
+    <td>F-{{ f.id }} {{ f.title }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.status }}</td>
+    <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>
+    <td class="mono">{{ f.asvs_ref or "—" }}</td>
+    <td class="mono">{{ (f.location or "")[:90] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No findings mapped to this category in the current engagement.</p>
+{% endif %}
+{% endfor %}
+
+{% if show_llm_top10 %}
+<h2>OWASP Top 10 for LLM Applications 2025</h2>
+<p class="note">Optional view for AI / ISO/IEC 42001 engagements. Categories follow
+<a href="https://genai.owasp.org/llm-top-10/">OWASP Top 10 for LLM Applications 2025</a>.
+Findings are linked by CWE where the ISO 42001 pack defines a map; empty categories mean no
+matching evidence in this engagement.</p>
+{% for g in llm_top10_groups %}
+<h3>{{ g.heading }}</h3>
+{% if g.findings %}
+<table>
+  <tr><th>Finding</th><th>Severity</th><th>Status</th><th>CWE</th><th>Location</th></tr>
+  {% for f in g.findings %}
+  <tr>
+    <td>F-{{ f.id }} {{ f.title }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.status }}</td>
+    <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>
+    <td class="mono">{{ (f.location or "")[:90] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No findings mapped to this LLM category.</p>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+<h2>Disclaimer</h2>
+<p class="note">{{ disclaimer }}</p>
+{% endblock %}

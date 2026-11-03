@@ -6,6 +6,8 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+import re
+
 import pytest
 
 # Minimal 1x1 PNG
@@ -94,7 +96,11 @@ def test_list_of_figures_section(loaded):
     assert 'id="list-of-figures"' in body
     assert 'href="#list-of-figures"' in body
     assert "Login bypass" in body
-    assert f"Fig. F-{f.id}-1" in body
+    # Internal anchor keeps the DB id; the displayed label uses report numbering (F-1, F-2 ...).
+    assert f'href="#fig-F-{f.id}-1"' in body
+    m = re.search(rf'<h3><a name="finding-{f.id}"></a>(F-\d+) ', body)
+    assert m, "finding heading with report number"
+    assert f"Fig. {m.group(1)}-1" in body
 
 
 # @lat: [[tests#Phase 3 reports#Risk legend in Word]]

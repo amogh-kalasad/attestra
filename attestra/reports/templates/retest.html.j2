@@ -43,7 +43,7 @@
   {% for f in findings %}
   {% set rt = latest_retest(f.id) %}
   <tr>
-    <td class="mono">F-{{ f.id }}</td>
+    <td class="mono">{{ flabel(f) }}</td>
     <td>{{ f.title }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status|replace("_", " ") }}</td>
@@ -59,7 +59,7 @@
 {% for rt in all_retests %}
 {% set f = findings_by_id.get(rt.finding_id) %}
 <div class="finding">
-  <h3>Retest #{{ rt.id }} · Finding F-{{ rt.finding_id }}{% if f %} · {{ f.title }}{% endif %}</h3>
+  <h3>Retest #{{ rt.id }} · Finding {{ flabel(rt.finding_id) }}{% if f %} · {{ f.title }}{% endif %}</h3>
   <table>
     <tr><th style="width:160px">Result</th><td><b>{{ rt.result or "requested" }}</b></td></tr>
     <tr><th>Requested by</th><td>{{ rt.requested_by }}</td></tr>
@@ -96,7 +96,7 @@
   <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th></tr>
   {% for f in unresolved %}
   <tr>
-    <td class="mono">F-{{ f.id }}</td>
+    <td class="mono">{{ flabel(f) }}</td>
     <td>{{ f.title }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status|replace("_", " ") }}</td>

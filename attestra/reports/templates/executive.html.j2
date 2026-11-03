@@ -35,7 +35,7 @@
 <table>
   <tr><th>Finding</th><th>Severity</th><th>Asset / location</th><th>Fix by</th></tr>
   {% for f in top %}
-  <tr><td>F-{{ f.id }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td><td class="mono">{{ f.location[:90] }}</td><td>{{ f.sla_due or "" }}</td></tr>
+  <tr><td>{{ flabel(f) }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td><td class="mono">{{ f.location[:90] }}</td><td>{{ f.sla_due or "" }}</td></tr>
   {% else %}<tr><td colspan="4">No open findings.</td></tr>{% endfor %}
 </table>
 

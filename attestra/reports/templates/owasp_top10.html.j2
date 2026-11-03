@@ -20,7 +20,7 @@ against the full Top 10. Unmapped findings appear in a separate section.</p>
   <tr><th>Finding</th><th>Severity</th><th>Status</th><th>CWE</th><th>ASVS</th><th>Location</th></tr>
   {% for f in g.findings %}
   <tr>
-    <td>F-{{ f.id }} {{ f.title }}</td>
+    <td>{{ flabel(f) }} {{ f.title }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status }}</td>
     <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>
@@ -47,7 +47,7 @@ matching evidence in this engagement.</p>
   <tr><th>Finding</th><th>Severity</th><th>Status</th><th>CWE</th><th>Location</th></tr>
   {% for f in g.findings %}
   <tr>
-    <td>F-{{ f.id }} {{ f.title }}</td>
+    <td>{{ flabel(f) }} {{ f.title }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status }}</td>
     <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>

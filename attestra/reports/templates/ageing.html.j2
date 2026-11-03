@@ -11,7 +11,7 @@
   <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>SLA due</th><th>First seen</th></tr>
   {% for f in sla_breaches %}
   <tr>
-    <td>F-{{ f.id }}</td>
+    <td>{{ flabel(f) }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.title }}</td>
     <td>{{ f.status }}</td>

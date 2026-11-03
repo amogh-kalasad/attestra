@@ -359,6 +359,10 @@ def run_execution(
             engagement_id=eng.id,
             cases=len(results),
         )
+        # Automatic WSTG/ASVS checklist status from this run (savepoint; never fails the run).
+        from attestra.auth_web import checklist_auto
+
+        checklist_auto.apply_automated_run_safely(s, ex)
     except ServiceError as exc:
         exec_mgr.transition(ex, "FAILED", error=str(exc))
         audit.record(

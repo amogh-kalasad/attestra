@@ -328,6 +328,15 @@ def cmd_cert_expiry_check(args) -> None:
         _print(run_daily_cert_alerts(s, today=today, actor=actor))
 
 
+def cmd_checklist_sync(args) -> None:
+    """Backfill automatic checklist statuses from completed imports / automated runs."""
+    from attestra.auth_web import checklist_auto
+
+    db.init(use_migrations=True)
+    with db.session() as s:
+        _print(checklist_auto.sync_engagement(s, int(args.engagement), dry_run=bool(args.dry_run)))
+
+
 def cmd_sla_alert_check(args) -> None:
     """Daily job: email once per open finding past its SLA due date."""
     from datetime import date
@@ -732,6 +741,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     sp.add_argument("--today", default=None, help="YYYY-MM-DD freeze clock for tests")
     sp.set_defaults(fn=cmd_cert_expiry_check)
+
+    sp = sub.add_parser(
+        "checklist-sync",
+        help="apply automatic WSTG/ASVS checklist statuses from completed scans/imports and automated runs",
+    )
+    sp.add_argument("--engagement", type=int, required=True)
+    sp.add_argument("--dry-run", action="store_true", help="show changes without saving")
+    sp.set_defaults(fn=cmd_checklist_sync)
 
     sp = sub.add_parser(
         "sla-alert-check",

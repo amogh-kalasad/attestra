@@ -406,14 +406,20 @@ def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
 _HTTP_BODY_CAP = 4096
 
 
-def _figures_list(evidence_embeds: dict[int, list[dict]]) -> list[dict]:
-    """List-of-figures rows from screenshot embeds (caption + finding id)."""
+def _figures_list(evidence_embeds: dict[int, list[dict]], flabel=None, fnum=None) -> list[dict]:
+    """List-of-figures rows from screenshot embeds (caption + finding id).
+
+    ``id`` is the internal anchor (DB id); ``label`` is the displayed report number.
+    """
     figures: list[dict] = []
-    for fid, embeds in evidence_embeds.items():
+    order = sorted(evidence_embeds, key=lambda k: ((fnum or {}).get(k, 10**9), k))
+    for fid in order:
+        embeds = evidence_embeds[fid]
         for i, e in enumerate(embeds, 1):
             figures.append(
                 {
                     "id": f"F-{fid}-{i}",
+                    "label": f"{flabel(fid) if flabel else f'F-{fid}'}-{i}",
                     "caption": e.get("caption") or e.get("note") or e.get("filename") or "screenshot",
                     "finding_id": fid,
                     "role": e.get("role") or "original",
@@ -612,6 +618,21 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
 
     reportable = consolidate(s, [f for f in findings if f.status != "false_positive"])
     open_f = [f for f in reportable if f.status in OPEN_STATUSES]
+    # Report-only labels: F-1, F-2 ... in the order findings appear in the report. DB ids stay
+    # internal (anchors); every merged/member row maps to its report entry's number.
+    fnum: dict[int, int] = {}
+    for n, rf in enumerate(reportable, 1):
+        for mid in member_ids(rf):
+            fnum.setdefault(int(mid), n)
+
+    def flabel(ref) -> str:
+        rid = ref if isinstance(ref, int) else getattr(ref, "id", ref)
+        try:
+            n = fnum.get(int(rid))
+        except (TypeError, ValueError):
+            n = None
+        return f"F-{n}" if n else f"#{rid}"
+
     by_sev = Counter(f.severity for f in open_f)
     prev_by_sev = _previous_open_by_sev(s, eng)
     imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == engagement_id).order_by(ImportRun.id)))
@@ -694,7 +715,9 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "retests_by_finding": retests_by_finding,
         "latest_retest": lambda fid: _latest_retest(retests_by_finding, fid),
         "evidence_embeds": embeds,
-        "figures": _figures_list(embeds),
+        "figures": _figures_list(embeds, flabel, fnum),
+        "flabel": flabel,
+        "finding_numbers": fnum,
         "http_pairs": _http_pair_embeds(reportable),
         "automated_runs": _automated_runs(s, engagement_id),
         "cover_title": branding["cover_title"],

@@ -1527,6 +1527,10 @@ def import_results(
     from attestra import crossmerge
 
     crossmerge.recompute_safely(s, engagement_id, actor=actor)
+    # Automatic WSTG/ASVS checklist status from this import (savepoint; never blocks the import).
+    from attestra.auth_web import checklist_auto
+
+    checklist_auto.apply_import_run_safely(s, run)
     audit.record(
         s, actor, "import.create", "import_run", run.id,
         engagement_id=engagement_id, tool=tool, sha256=sha, parsed=len(parsed), new=new, updated=updated,

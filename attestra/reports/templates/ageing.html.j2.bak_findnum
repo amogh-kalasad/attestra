@@ -1,0 +1,26 @@
+{% extends "_base.html.j2" %}
+{% block title %}Finding ageing and SLA breaches{% endblock %}
+{% block body %}
+<h1>Ageing and SLA breaches</h1>
+<div class="meta">{{ eng.name }} · {{ tenant }} · generated {{ generated_at }} by {{ generated_by }}</div>
+
+<p class="note">Open findings past their severity SLA due date (critical 30d, high 60d, medium 90d, low 180d).</p>
+
+{% if sla_breaches %}
+<table>
+  <tr><th>ID</th><th>Severity</th><th>Title</th><th>Status</th><th>SLA due</th><th>First seen</th></tr>
+  {% for f in sla_breaches %}
+  <tr>
+    <td>F-{{ f.id }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td>{{ f.title }}</td>
+    <td>{{ f.status }}</td>
+    <td>{{ f.sla_due }}</td>
+    <td>{{ f.first_seen.strftime('%Y-%m-%d') if f.first_seen else "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No open findings are past their SLA due date.</p>
+{% endif %}
+{% endblock %}

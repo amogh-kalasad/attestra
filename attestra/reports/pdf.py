@@ -570,8 +570,18 @@ def _xhtml2pdf(html: str) -> bytes | None:
         from xhtml2pdf import pisa
     except Exception:
         return None
-    buf = BytesIO()
-    result = pisa.CreatePDF(html, dest=buf, encoding="utf-8")
+    try:
+        buf = BytesIO()
+        result = pisa.CreatePDF(html, dest=buf, encoding="utf-8")
+    except Exception:  # reportlab LayoutError ("Splitting error") on an oversized boxed block
+        # Retry with plain flowing blocks: no keep-with-next and no bordered finding box, so long
+        # content breaks across pages instead of failing the whole export.
+        relaxed = html.replace("-pdf-keep-with-next: true", "-pdf-keep-with-next: false").replace(
+            ".finding { border: 0.5pt solid #e3e5ea; padding: 6pt 8pt; margin: 8pt 0; }",
+            ".finding { margin: 8pt 0; }",
+        )
+        buf = BytesIO()
+        result = pisa.CreatePDF(relaxed, dest=buf, encoding="utf-8")
     if result.err:
         return None
     return buf.getvalue() or None

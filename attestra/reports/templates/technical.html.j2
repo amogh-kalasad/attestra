@@ -79,9 +79,9 @@
   <tr><th>Figure</th><th>Caption</th><th>Finding</th></tr>
   {% for fig in figures %}
   <tr>
-    <td class="mono"><a href="#fig-{{ fig.id }}">Fig. {{ fig.id }}</a></td>
+    <td class="mono"><a href="#fig-{{ fig.id }}">Fig. {{ fig.label }}</a></td>
     <td>{{ fig.caption }}</td>
-    <td class="mono"><a href="#finding-{{ fig.finding_id }}">F-{{ fig.finding_id }}</a></td>
+    <td class="mono"><a href="#finding-{{ fig.finding_id }}">{{ flabel(fig.finding_id) }}</a></td>
   </tr>
   {% endfor %}
 </table>
@@ -194,7 +194,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% for f in findings %}
   {% set rt = latest_retest(f.id) %}
   <tr>
-    <td class="mono">F-{{ f.id }}</td>
+    <td class="mono">{{ flabel(f) }}</td>
     <td>{{ f.title }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status|replace("_", " ") }}</td>
@@ -279,7 +279,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 {% set sec.n = sec.n + 1 %}<h2 id="findings">{{ sec.n }}. Detailed findings</h2>
 {% for f in findings %}
 <div class="finding" id="finding-{{ f.id }}">
-  <h3><a name="finding-{{ f.id }}"></a>F-{{ f.id }} · {{ f.title }}</h3>
+  <h3><a name="finding-{{ f.id }}"></a>{{ flabel(f) }} · {{ f.title }}</h3>
   <div><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
     {% if f.asset and f.asset.exposure == "internet" %}&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}
     &nbsp;Status: <b>{{ f.status|replace("_", " ") }}</b>
@@ -341,7 +341,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% endif %}
   {% if f.cross_sources is defined and f.cross_sources|length > 1 %}
   <p><b>Sources.</b> ({{ f.cross_sources|length }})</p>
-  <ul>{% for src in f.cross_sources %}<li>{{ src.tool_label }}: {{ src.severity_label }} &middot; {{ src.finding_refs if src.finding_refs is defined and src.finding_refs else "F-" ~ src.finding_id }} {{ src.title }} &middot; {{ src.status_label }}{% if src.location %} &middot; <span class="mono">{{ src.location }}</span>{% endif %}{% if src.evidence %} &middot; <span class="mono">{{ src.evidence|join(" | ")|truncate(300) }}</span>{% endif %}</li>{% endfor %}</ul>
+  <ul>{% for src in f.cross_sources %}<li>{{ src.tool_label }}: {{ src.severity_label }} &middot; {{ src.title }} &middot; {{ src.status_label }}{% if src.location %} &middot; <span class="mono">{{ src.location }}</span>{% endif %}{% if src.evidence %} &middot; <span class="mono">{{ src.evidence|join(" | ")|truncate(300) }}</span>{% endif %}</li>{% endfor %}</ul>
   {% endif %}
   {% set embeds = evidence_embeds.get(f.id, []) %}
   {% if embeds %}
@@ -349,16 +349,19 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% for e in embeds %}
   <figure id="fig-F-{{ f.id }}-{{ loop.index }}"><a name="fig-F-{{ f.id }}-{{ loop.index }}"></a>
     {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
-    <figcaption class="fig-caption">Fig. F-{{ f.id }}-{{ loop.index }}: {{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
+    <figcaption class="fig-caption">Fig. {{ flabel(f) }}-{{ loop.index }}: {{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
   </figure>
   {% endfor %}
   {% endif %}
   {% set pairs = http_pairs.get(f.id, []) if http_pairs is defined else [] %}
   {% if pairs %}
   <p><b>Evidence (HTTP request/response).</b></p>
-  {% for p in pairs %}
+  {# Consolidated findings carry one pair per merged scanner row; show two representative
+     pairs and point to the hashed register instead of repeating near-identical dumps. #}
+  {% for p in pairs[:2] %}
   <pre class="http-pair mono">{{ p.display }}</pre>
   {% endfor %}
+  {% if pairs|length > 2 %}<p class="meta">{{ pairs|length - 2 }} more HTTP request/response pair{{ "s" if pairs|length - 2 != 1 }} for this issue are listed (with SHA-256) in the evidence register below.</p>{% endif %}
   {% endif %}
   {% set limits = evidence_limitations.get(f.id, []) if evidence_limitations is defined else [] %}
   {% if limits %}
@@ -388,7 +391,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 <table>
   <tr><th>Test</th><th>Status</th><th>Detail</th></tr>
   {% for c in run.cases %}
-  <tr><td class="mono">{{ c.test_id }}{% if c.title %} &middot; {{ c.title }}{% endif %}</td><td>{{ c.status }}{% if c.validation_status %} ({{ c.validation_status }}){% endif %}{% if c.finding_id %} &middot; F-{{ c.finding_id }}{% endif %}</td><td>{{ c.detail }}</td></tr>
+  <tr><td class="mono">{{ c.test_id }}{% if c.title %} &middot; {{ c.title }}{% endif %}</td><td>{{ c.status }}{% if c.validation_status %} ({{ c.validation_status }}){% endif %}{% if c.finding_id %} &middot; {{ flabel(c.finding_id) }}{% endif %}</td><td>{{ c.detail }}</td></tr>
   {% endfor %}
 </table>
 {% endif %}
