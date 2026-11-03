@@ -19,7 +19,6 @@ from attestra.models import Asset, ScanRun, utcnow
 from attestra.runner import policy
 from attestra.runner.authorization import AuthorizationError, authorize_target, scope_for_engagement
 from attestra.runner.dns_pin import PinnedTarget, pin_url
-from attestra.runner.ownership import is_verified
 
 URL_TOOLS = ("zap", "nuclei", "testssl", "naabu", "webcheck")
 PATH_TOOLS = ("semgrep", "gitleaks", "checkov")
@@ -93,7 +92,16 @@ def policy_input(
         recent_scan_count=count,
         rate_limit=config.SCAN_RATE_PER_ASSET,
         asset_kind=asset.kind if found else "",
-        ownership_verified=is_verified(asset) if found else False,
+        ownership_verified=(
+            services.asset_ownership_verified(
+                s,
+                asset,
+                tenant_id=eng.tenant_id,
+                validity_days=services.ownership_validity_days_for_tenant(s, eng.tenant_id),
+            )
+            if found
+            else False
+        ),
         ownership_required=config.ownership_verification_required(),
         authorization_required=config.signed_authorization_required(),
     )

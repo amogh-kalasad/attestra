@@ -225,6 +225,59 @@ def assert_engagement_access(s: Session, engagement_id: int, principal) -> Engag
     return eng
 
 
+def ownership_validity_days_for_tenant(s: Session, tenant_id: int) -> int:
+    """Return the tenant's ownership proof validity window in days (default 30)."""
+    from attestra.runner import ownership
+
+    t = s.get(Tenant, tenant_id)
+    if t is None:
+        return ownership.DEFAULT_OWNERSHIP_VALIDITY_DAYS
+    try:
+        return ownership.normalize_validity_days(t.ownership_validity_days)
+    except ownership.OwnershipError:
+        return ownership.DEFAULT_OWNERSHIP_VALIDITY_DAYS
+
+
+def ownership_validity_days_for_engagement(s: Session, engagement_id: int) -> int:
+    eng = s.get(Engagement, engagement_id)
+    if eng is None:
+        from attestra.runner import ownership
+
+        return ownership.DEFAULT_OWNERSHIP_VALIDITY_DAYS
+    return ownership_validity_days_for_tenant(s, eng.tenant_id)
+
+
+def set_ownership_validity_days(s: Session, principal, tenant_id: int, days: int) -> Tenant:
+    """Super Admin sets how many days an ownership proof stays valid for a tenant."""
+    from attestra.auth.roles import has_permission
+    from attestra.runner import ownership
+
+    if principal is None or not has_permission(getattr(principal, "role", ""), "ownership.configure"):
+        raise PermissionError("only a Super Admin can set ownership validity days")
+    allowed = tenant_ids_for(s, principal)
+    if allowed is not None and tenant_id not in allowed:
+        raise LookupError(f"tenant {tenant_id} not found")
+    t = s.get(Tenant, tenant_id)
+    if t is None:
+        raise LookupError(f"tenant {tenant_id} not found")
+    try:
+        cleaned = ownership.normalize_validity_days(days)
+    except ownership.OwnershipError as exc:
+        raise ServiceError(str(exc)) from exc
+    previous = ownership_validity_days_for_tenant(s, tenant_id)
+    t.ownership_validity_days = cleaned
+    audit.record(
+        s,
+        principal.actor,
+        "tenant.ownership_validity_updated",
+        "tenant",
+        t.id,
+        previous_days=previous,
+        days=cleaned,
+    )
+    return t
+
+
 # ---------------------------------------------------------------- engagements
 
 
@@ -602,17 +655,249 @@ def add_asset(
         s, actor, "asset.add", "asset", a.id, engagement_id=engagement_id, identifier=identifier,
         environment=environment, test_types=tests, intrusive_allowed=intrusive_allowed, in_cde=in_cde,
     )
+    inherit_or_issue_ownership(s, a, tenant_id=eng.tenant_id, actor=actor)
     return a
 
 
-def ensure_ownership_tokens(eng: Engagement) -> None:
-    """Give every target that needs ownership proof a token, so the UI can show it."""
+def _tenant_assets_for_ownership_host(
+    s: Session, tenant_id: int, host: str, *, exclude_asset_id: int | None = None
+) -> list[Asset]:
+    """Targets in this organization whose ownership host matches ``host`` (case-insensitive)."""
     from attestra.runner import ownership
     from attestra.runner.policy import OWNERSHIP_KINDS
 
+    host_key = (host or "").strip().lower()
+    if not host_key:
+        return []
+    rows = list(
+        s.scalars(
+            select(Asset)
+            .join(Engagement, Asset.engagement_id == Engagement.id)
+            .where(Engagement.tenant_id == tenant_id, Asset.kind.in_(tuple(OWNERSHIP_KINDS)))
+        )
+    )
+    out: list[Asset] = []
+    for a in rows:
+        if exclude_asset_id is not None and a.id == exclude_asset_id:
+            continue
+        if ownership.host_for(a) == host_key:
+            out.append(a)
+    return out
+
+
+def inherit_or_issue_ownership(
+    s: Session, asset: Asset, *, tenant_id: int, actor: str = "", validity_days: int | None = None
+) -> str:
+    """Reuse this org's token/verification for the same hostname, or issue a new token.
+
+    Returns ``inherited_verified``, ``inherited_token``, ``issued``, ``kept``, or ``skipped``.
+    """
+    from attestra.runner import ownership
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    if asset.kind not in OWNERSHIP_KINDS:
+        return "skipped"
+    days = (
+        ownership.normalize_validity_days(validity_days)
+        if validity_days is not None
+        else ownership_validity_days_for_tenant(s, tenant_id)
+    )
+    host = ownership.host_for(asset)
+    if not host:
+        if not asset.ownership_token:
+            ownership.ensure_token(asset)
+            return "issued"
+        return "kept"
+
+    # Prefer organization Domain ownership row (durable token; rotate only after expiry).
+    from attestra.org_ownership import service as org_own
+
+    org_row = org_own.ensure_org_ownership_host(
+        s, tenant_id, host, actor=actor, renew_if_expired=True
+    )
+    if org_row.ownership_token:
+        probe = ownership.synthetic_asset_for_host(org_row.hostname, org_row.ownership_token)
+        probe.ownership_verified_at = org_row.ownership_verified_at
+        org_verified = ownership.is_verified(probe, validity_days=days)
+        changed = (asset.ownership_token != org_row.ownership_token) or (
+            asset.ownership_verified_at != org_row.ownership_verified_at
+        )
+        asset.ownership_token = org_row.ownership_token
+        asset.ownership_verified_at = org_row.ownership_verified_at
+        if changed and actor:
+            audit.record(
+                s,
+                actor,
+                "asset.ownership_inherited",
+                "asset",
+                asset.id,
+                engagement_id=asset.engagement_id,
+                identifier=asset.identifier,
+                host=host,
+                source_ownership_host_id=org_row.id,
+                token_suffix=ownership.token_fingerprint(org_row.ownership_token),
+                verified=org_verified,
+            )
+        return "inherited_verified" if org_verified else "inherited_token"
+
+    siblings = _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id)
+    verified = [
+        a
+        for a in siblings
+        if a.ownership_token and ownership.is_verified(a, validity_days=days)
+    ]
+    if verified:
+        src = max(verified, key=lambda a: ownership._as_utc(a.ownership_verified_at))
+        changed = (asset.ownership_token != src.ownership_token) or (
+            asset.ownership_verified_at != src.ownership_verified_at
+        )
+        asset.ownership_token = src.ownership_token
+        asset.ownership_verified_at = src.ownership_verified_at
+        if changed and actor:
+            audit.record(
+                s,
+                actor,
+                "asset.ownership_inherited",
+                "asset",
+                asset.id,
+                engagement_id=asset.engagement_id,
+                identifier=asset.identifier,
+                host=host,
+                source_asset_id=src.id,
+                token_suffix=ownership.token_fingerprint(src.ownership_token),
+                verified=True,
+            )
+        return "inherited_verified"
+
+    with_token = [a for a in siblings if a.ownership_token]
+    if with_token:
+        src = with_token[0]
+        if asset.ownership_token != src.ownership_token:
+            asset.ownership_token = src.ownership_token
+            # Expired or never verified org proof: keep DNS token, require Check now again.
+            asset.ownership_verified_at = None
+            if actor:
+                audit.record(
+                    s,
+                    actor,
+                    "asset.ownership_inherited",
+                    "asset",
+                    asset.id,
+                    engagement_id=asset.engagement_id,
+                    identifier=asset.identifier,
+                    host=host,
+                    source_asset_id=src.id,
+                    token_suffix=ownership.token_fingerprint(src.ownership_token),
+                    verified=False,
+                )
+            return "inherited_token"
+        return "kept"
+
+    if not asset.ownership_token:
+        ownership.ensure_token(asset)
+        return "issued"
+    return "kept"
+
+
+def asset_ownership_verified(s: Session, asset: Asset, *, tenant_id: int, validity_days: int | None = None) -> bool:
+    """True when this target, or the org Domain ownership host, still has a valid proof."""
+    from attestra.runner import ownership
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    if asset.kind not in OWNERSHIP_KINDS:
+        return True
+    days = (
+        ownership.normalize_validity_days(validity_days)
+        if validity_days is not None
+        else ownership_validity_days_for_tenant(s, tenant_id)
+    )
+    if ownership.is_verified(asset, validity_days=days):
+        return True
+    host = ownership.host_for(asset)
+    if not host:
+        return False
+    from attestra.models import TenantOwnershipHost
+    from attestra.org_ownership import service as org_own
+
+    row = s.scalar(
+        select(TenantOwnershipHost).where(
+            TenantOwnershipHost.tenant_id == tenant_id, TenantOwnershipHost.hostname == host
+        )
+    )
+    if row is not None:
+        org_own.renew_org_ownership_host_if_expired(s, row)
+        probe = ownership.synthetic_asset_for_host(row.hostname, row.ownership_token)
+        probe.ownership_verified_at = row.ownership_verified_at
+        if ownership.is_verified(probe, validity_days=days):
+            asset.ownership_token = row.ownership_token
+            asset.ownership_verified_at = row.ownership_verified_at
+            return True
+    for sib in _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id):
+        if ownership.is_verified(sib, validity_days=days) and sib.ownership_token:
+            asset.ownership_token = sib.ownership_token
+            asset.ownership_verified_at = sib.ownership_verified_at
+            return True
+    return False
+
+
+def propagate_ownership_verification(s: Session, asset: Asset, *, tenant_id: int, actor: str = "") -> int:
+    """Copy a fresh verification onto the org host row and other same-host targets."""
+    from attestra.models import TenantOwnershipHost
+    from attestra.org_ownership import service as org_own
+    from attestra.runner import ownership
+
+    host = ownership.host_for(asset)
+    token = asset.ownership_token or ""
+    if not host or not token or asset.ownership_verified_at is None:
+        return 0
+    n = 0
+    row = s.scalar(
+        select(TenantOwnershipHost).where(
+            TenantOwnershipHost.tenant_id == tenant_id, TenantOwnershipHost.hostname == host
+        )
+    )
+    if row is None:
+        row = org_own.ensure_org_ownership_host(s, tenant_id, host, actor=actor, renew_if_expired=False)
+    row.ownership_token = token
+    row.ownership_verified_at = asset.ownership_verified_at
+    row.updated_at = utcnow()
+    n += org_own.sync_assets_from_org_host(s, row)
+    for sib in _tenant_assets_for_ownership_host(s, tenant_id, host, exclude_asset_id=asset.id):
+        if sib.ownership_token and sib.ownership_token != token:
+            continue
+        if (
+            sib.ownership_token == token
+            and sib.ownership_verified_at == asset.ownership_verified_at
+        ):
+            continue
+        sib.ownership_token = token
+        sib.ownership_verified_at = asset.ownership_verified_at
+        n += 1
+        if actor:
+            audit.record(
+                s,
+                actor,
+                "asset.ownership_inherited",
+                "asset",
+                sib.id,
+                engagement_id=sib.engagement_id,
+                identifier=sib.identifier,
+                host=host,
+                source_asset_id=asset.id,
+                token_suffix=ownership.token_fingerprint(token),
+                verified=True,
+            )
+    return n
+
+
+def ensure_ownership_tokens(s: Session, eng: Engagement) -> None:
+    """Reuse org ownership for the same hostname when still valid; otherwise issue a token."""
+    from attestra.runner.policy import OWNERSHIP_KINDS
+
+    days = ownership_validity_days_for_tenant(s, eng.tenant_id)
     for a in eng.assets:
-        if a.kind in OWNERSHIP_KINDS and not a.ownership_token:
-            ownership.ensure_token(a)
+        if a.kind in OWNERSHIP_KINDS:
+            inherit_or_issue_ownership(s, a, tenant_id=eng.tenant_id, validity_days=days)
 
 
 def set_ownership_token(
@@ -683,15 +968,19 @@ def verify_asset_ownership(s: Session, engagement_id: int, asset_id: int, *, act
     from attestra.runner.authorization import AuthorizationError, authorize_target, scope_for_engagement
     from attestra.runner.policy import OWNERSHIP_KINDS
 
-    get_engagement(s, engagement_id)
+    eng = get_engagement(s, engagement_id)
     a = s.get(Asset, asset_id)
     if not a or a.engagement_id != engagement_id:
         raise LookupError(f"target {asset_id} is not in this engagement")
     if a.kind not in OWNERSHIP_KINDS:
         raise ServiceError(f"{ASSET_KINDS.get(a.kind, a.kind)} targets do not need ownership proof")
-    if a.ownership_verified_at is not None:
+    days = ownership_validity_days_for_tenant(s, eng.tenant_id)
+    inherit_or_issue_ownership(s, a, tenant_id=eng.tenant_id, actor=actor, validity_days=days)
+    if asset_ownership_verified(s, a, tenant_id=eng.tenant_id, validity_days=days):
         result = ownership.OwnershipCheck(ok=True, method=ownership_methods(s, [a.id]).get(a.id, ""))
-        result.notes.append("This target is already verified.")
+        until = ownership.verified_until(a, validity_days=days)
+        until_note = f" It stays valid until {until.isoformat()}." if until else ""
+        result.notes.append(f"This target is already verified.{until_note}")
         return result
 
     scope, scope_error = None, ""
@@ -712,6 +1001,7 @@ def verify_asset_ownership(s: Session, engagement_id: int, asset_id: int, *, act
             s, actor, "asset.ownership_verified", "asset", a.id, engagement_id=engagement_id,
             identifier=a.identifier, method=result.method, verified_at=a.ownership_verified_at.isoformat(),
         )
+        propagate_ownership_verification(s, a, tenant_id=eng.tenant_id, actor=actor)
     else:
         audit.record(
             s, actor, "asset.ownership_check_failed", "asset", a.id, engagement_id=engagement_id,
@@ -730,7 +1020,7 @@ def confirm_private_ownership(
     ``localhost`` qualify (never public IPs, domain names or blocked ranges), and the target's
     environment must be in a valid signed authorization. Audited as ``asset.ownership_confirmed``.
     """
-    from attestra.runner import authorization
+    from attestra.runner import authorization, ownership
     from attestra.runner.policy import OWNERSHIP_KINDS
 
     eng = get_engagement(s, engagement_id)
@@ -739,7 +1029,9 @@ def confirm_private_ownership(
         raise LookupError(f"target {asset_id} is not in this engagement")
     if a.kind not in OWNERSHIP_KINDS:
         raise ServiceError(f"{ASSET_KINDS.get(a.kind, a.kind)} targets do not need ownership proof")
-    if a.ownership_verified_at is not None:
+    days = ownership_validity_days_for_tenant(s, eng.tenant_id)
+    inherit_or_issue_ownership(s, a, tenant_id=eng.tenant_id, actor=actor, validity_days=days)
+    if asset_ownership_verified(s, a, tenant_id=eng.tenant_id, validity_days=days):
         raise ServiceError("This target is already verified.")
     host = authorization.owner_confirm_host(a.kind, a.identifier)
     if not host:
@@ -762,12 +1054,15 @@ def confirm_private_ownership(
         raise ServiceError("Type who is confirming, as name and role.")
     if len(who) > 200:
         raise ServiceError("Confirmed by is too long (200 characters at most).")
+    if not a.ownership_token:
+        ownership.ensure_token(a)
     a.ownership_verified_at = utcnow()
     audit.record(
         s, actor, "asset.ownership_confirmed", "asset", a.id, engagement_id=engagement_id,
         identifier=a.identifier, host=host, method=authorization.OWNER_CONFIRMED, confirmed_by=who,
         verified_at=a.ownership_verified_at.isoformat(),
     )
+    propagate_ownership_verification(s, a, tenant_id=eng.tenant_id, actor=actor)
     return a
 
 

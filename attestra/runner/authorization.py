@@ -93,10 +93,13 @@ def scope_for_engagement(s: Session, engagement_id: int, on: date | None = None)
         aid for aid, method in services.ownership_methods(s, [a.id for a in assets]).items()
         if method == OWNER_CONFIRMED
     }
+    validity_days = services.ownership_validity_days_for_tenant(s, eng.tenant_id)
     for a in assets:
         _classify_asset(a, hosts, urls, paths, images, private_ok)
         # A private address the owner confirmed may be reached (BLOCKED_CIDRS stay refused at pin time).
-        if a.id in confirmed and a.ownership_verified_at is not None:
+        if a.id in confirmed and services.asset_ownership_verified(
+            s, a, tenant_id=eng.tenant_id, validity_days=validity_days
+        ):
             host = owner_confirm_host(a.kind, a.identifier)
             if host:
                 private_ok.add(host)

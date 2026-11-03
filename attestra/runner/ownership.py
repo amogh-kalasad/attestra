@@ -10,6 +10,7 @@ import socket
 import ssl
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from http.client import HTTPConnection, HTTPSConnection
 from urllib.parse import urlsplit
 
@@ -21,10 +22,18 @@ from attestra.runner.authorization import (
     owner_confirm_host,
 )
 
-WELL_KNOWN_PATH = "/.well-known/attestra-verify.txt"
+WELL_KNOWN_FILENAME = "attestra-verify.txt"
+# Site root only — owners upload the downloaded file next to the homepage (no .well-known folder).
+VERIFY_FILE_PATH = f"/{WELL_KNOWN_FILENAME}"
+WELL_KNOWN_PATH = VERIFY_FILE_PATH  # alias kept for older call sites
 TXT_PREFIX = "attestra-verify="
 CHECK_TIMEOUT = 5  # seconds, for both the DNS lookup and the file fetch
 MAX_FILE_BYTES = 4096
+# Default when a tenant has no override; Super Admin sets per-tenant days in settings.
+DEFAULT_OWNERSHIP_VALIDITY_DAYS = 30
+OWNERSHIP_VALIDITY_DAYS = DEFAULT_OWNERSHIP_VALIDITY_DAYS  # alias kept for older call sites
+OWNERSHIP_VALIDITY_DAYS_MIN = 1
+OWNERSHIP_VALIDITY_DAYS_MAX = 3650
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
 # urlsafe tokens from issue_token; allow reuse of another asset's token of the same shape
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
@@ -32,6 +41,22 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 
 class OwnershipError(ValueError):
     """Invalid ownership token or proof input."""
+
+
+def normalize_validity_days(days: int | None) -> int:
+    """Accept a tenant ownership validity window in days (1–3650), default 30."""
+    if days is None:
+        return DEFAULT_OWNERSHIP_VALIDITY_DAYS
+    try:
+        value = int(days)
+    except (TypeError, ValueError) as exc:
+        raise OwnershipError("Ownership validity days must be a whole number.") from exc
+    if value < OWNERSHIP_VALIDITY_DAYS_MIN or value > OWNERSHIP_VALIDITY_DAYS_MAX:
+        raise OwnershipError(
+            f"Ownership validity days must be between {OWNERSHIP_VALIDITY_DAYS_MIN} and "
+            f"{OWNERSHIP_VALIDITY_DAYS_MAX}."
+        )
+    return value
 
 
 def issue_token(asset: Asset) -> str:
@@ -77,8 +102,33 @@ def token_fingerprint(token: str) -> str:
     return cleaned[-4:] if cleaned else ""
 
 
-def is_verified(asset: Asset) -> bool:
-    if asset.ownership_verified_at is not None:
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def verified_until(asset: Asset, *, validity_days: int | None = None) -> datetime | None:
+    """When the current ownership proof stops counting as verified, or None if never verified."""
+    at = asset.ownership_verified_at
+    if at is None:
+        return None
+    days = normalize_validity_days(validity_days)
+    return _as_utc(at) + timedelta(days=days)
+
+
+def is_expired(asset: Asset, *, validity_days: int | None = None) -> bool:
+    """True when a past proof exists but is older than the tenant validity window."""
+    until = verified_until(asset, validity_days=validity_days)
+    if until is None:
+        return False
+    return utcnow() >= until
+
+
+def is_verified(asset: Asset, *, validity_days: int | None = None) -> bool:
+    """True when ownership proof is present and still inside the tenant validity window."""
+    until = verified_until(asset, validity_days=validity_days)
+    if until is not None and utcnow() < until:
         return True
     # Loopback / explicitly private fixtures skip ownership in development.
     ident = (asset.identifier or "").lower()
@@ -131,7 +181,7 @@ def verify(
 # ---------------------------------------------------------------- UI check (show token, check now)
 
 
-def instructions(asset: Asset) -> dict:
+def instructions(asset: Asset, *, validity_days: int | None = None) -> dict:
     """What the client must publish to prove control of this target (both methods)."""
     host = _host_for(asset)
     token = asset.ownership_token or ""
@@ -140,6 +190,7 @@ def instructions(asset: Asset) -> dict:
         short_name, zone = ".".join(labels[:-2]), ".".join(labels[-2:])
     else:
         short_name, zone = "@", host
+    days = normalize_validity_days(validity_days)
     return {
         "host": host,
         "token": token,
@@ -149,6 +200,7 @@ def instructions(asset: Asset) -> dict:
         "txt_value": f"{TXT_PREFIX}{token}",
         "file_url": well_known_url(asset),
         "file_content": token,
+        "validity_days": days,
         # Private network address: Option C (owner confirms) is offered instead of DNS / file.
         "private_confirm": bool(owner_confirm_host(asset.kind, asset.identifier)),
     }
@@ -187,6 +239,16 @@ class OwnershipCheck:
         return " ".join(parts)
 
 
+def synthetic_asset_for_host(hostname: str, token: str, *, scheme: str = "https") -> Asset:
+    """Build an unsaved Asset so org-host DNS/file checks reuse [[check]]."""
+    host = (hostname or "").strip().lower()
+    return Asset(
+        kind="web_app",
+        identifier=f"{scheme}://{host}",
+        ownership_token=token,
+    )
+
+
 def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "") -> OwnershipCheck:
     """Look for the token: one DNS TXT lookup, then (if needed) one HTTPS GET of the well-known file.
 
@@ -198,7 +260,13 @@ def check(asset: Asset, *, scope: AuthorizedScope | None, scope_error: str = "")
     expected = f"{TXT_PREFIX}{token}"
     host = _host_for(asset)
     if not host or not _HOSTNAME.match(host):
-        result.notes.append("This target has no host name Attestra can check.")
+        # Literal private IPs use owner confirm; hostnames must match the DNS name pattern.
+        if host and owner_confirm_host(asset.kind, asset.identifier):
+            result.notes.append(
+                "This is a private address: use owner confirmation on the organization Domain ownership page."
+            )
+        else:
+            result.notes.append("This target has no host name Attestra can check.")
         return result
 
     # 1. DNS TXT on the host itself
@@ -438,6 +506,11 @@ def _host_for(asset: Asset) -> str:
     if asset.kind == "host":
         return asset.identifier.split("/")[0].lower()
     return ""
+
+
+def host_for(asset: Asset) -> str:
+    """Hostname used to match ownership proofs across engagements in one organization."""
+    return _host_for(asset)
 
 
 def _default_dns_txt(host: str) -> list[str]:

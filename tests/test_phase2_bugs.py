@@ -124,7 +124,7 @@ def test_ownership_fields_on_asset_page(fresh_db, engagement):
         e = services.get_engagement(s, engagement)
         tid = e.tenant_id
         asset = next(a for a in e.assets if a.kind == "web_app")
-        services.ensure_ownership_tokens(e)
+        services.ensure_ownership_tokens(s, e)
         aid, token = asset.id, asset.ownership_token
         assert token
 

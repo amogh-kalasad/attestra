@@ -1,0 +1,35 @@
+{% extends "_layout.html" %}
+{% block title %}Ownership settings · Attestra{% endblock %}
+{% block main %}
+<div class="page-head">
+  <div>
+    <h1>Ownership verification</h1>
+    <p class="lede">Set how many days a successful ownership proof (DNS TXT, site-root <code>attestra-verify.txt</code>, or owner confirm) stays valid before the client must re-check. Super Admin only. Default is {{ default_days }} days.</p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="post" action="/settings/ownership">
+    <div class="fields">
+      <div>
+        <label for="tenant_id">Tenant</label>
+        <select id="tenant_id" name="tenant_id" onchange="location.href='/settings/ownership?tenant_id='+this.value">
+          {% for t in tenants %}
+          <option value="{{ t.id }}" {% if t.id == tenant_id %}selected{% endif %}>{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="ownership_validity_days">Validity period (days)</label>
+        <input type="number" id="ownership_validity_days" name="ownership_validity_days"
+               min="{{ min_days }}" max="{{ max_days }}" step="1" required
+               value="{{ ownership_validity_days }}">
+        <div class="hint">Allowed range {{ min_days }}–{{ max_days }}. Keep the published DNS TXT or site-root <code>attestra-verify.txt</code> in place; after this many days Attestra requires Check now / Verify now again.</div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

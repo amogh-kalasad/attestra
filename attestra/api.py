@@ -1796,6 +1796,16 @@ from attestra.certification.routes import ui_router as ca_ui_router  # noqa: E40
 app.include_router(ca_api_router)
 app.include_router(ca_ui_router)
 
+from attestra.ownership_settings.routes import api_router as ownership_settings_api_router  # noqa: E402
+from attestra.ownership_settings.routes import ui_router as ownership_settings_ui_router  # noqa: E402
+
+app.include_router(ownership_settings_api_router)
+app.include_router(ownership_settings_ui_router)
+
+from attestra.org_ownership.routes import ui_router as org_ownership_ui_router  # noqa: E402
+
+app.include_router(org_ownership_ui_router)
+
 
 # ---------------------------------------------------------------- C9 / C10: PCI calendar, ASV import, ISO records
 
