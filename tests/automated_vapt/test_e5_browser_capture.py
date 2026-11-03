@@ -127,3 +127,19 @@ def test_orchestrator_t02_injected(fresh_db, elite_flag):
         assert t02["status"] == "PASSED"
         assert t02["screenshot"]["png_magic_ok"] is True
         assert "T02" in t02["screenshot"]["filename"]
+
+
+def test_browser_result_reports_write_bodies_count(elite_flag):
+    from attestra.automated_vapt.capture.browser_capture import BrowserCaptureResult
+
+    r = BrowserCaptureResult(
+        url="https://example.test/",
+        screenshot_png=b"\x89PNG\r\n\x1a\n" + b"\x00" * 8,
+        full_page=True,
+        captured_at="2026-01-01T00:00:00Z",
+        write_bodies=[{"method": "POST", "url": "https://example.test/api", "body": "{}"}],
+    )
+    d = r.to_dict()
+    assert d["write_bodies_count"] == 1
+    assert "write_bodies" not in d
+

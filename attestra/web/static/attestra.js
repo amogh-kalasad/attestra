@@ -534,6 +534,158 @@
     if (editWs && editWe) {
       editWs.addEventListener("change", function () { editWe.min = editWs.value; });
     }
+
+    initEngagementLivePoll();
+  }
+
+  /* Poll scan + automated status while anything is queued/running (no full reload). */
+  function initEngagementLivePoll() {
+    var cfg = readJsonScript("engagement-live-poll", null);
+    if (!cfg || !cfg.engagement_id) return;
+    var eid = cfg.engagement_id;
+    var pollMs = cfg.poll_ms || 4000;
+    var timer = null;
+    var terminalScan = { completed: 1, failed: 1, cancelled: 1, refused: 1, done: 1 };
+    var terminalAuto = { COMPLETED: 1, FAILED: 1, CANCELLED: 1 };
+    var sawActive = false;
+    var reloadOnce = false;
+
+    function labelStatus(s) {
+      if (!s) return "";
+      return String(s).replace(/_/g, " ");
+    }
+
+    function statusClass(s) {
+      return "st st-" + String(s || "").toLowerCase();
+    }
+
+    function autoBadgeClass(s) {
+      var u = String(s || "").toUpperCase();
+      if (u === "COMPLETED") return "av-badge av-ok";
+      if (u === "FAILED" || u === "CANCELLED") return "av-badge av-bad";
+      if (u === "RUNNING") return "av-badge av-warn";
+      return "av-badge av-muted";
+    }
+
+    function applyScans(scans) {
+      if (!scans || !scans.length) return;
+      scans.forEach(function (row) {
+        var tr = document.querySelector('tr[data-scan-id="' + row.id + '"]');
+        if (!tr) return;
+        var prev = tr.getAttribute("data-scan-status") || "";
+        tr.setAttribute("data-scan-status", row.status || "");
+        var st = tr.querySelector('[data-role="scan-status"]');
+        if (st) {
+          st.className = statusClass(row.status);
+          st.textContent = labelStatus(row.status);
+        }
+        var ref = tr.querySelector('[data-role="scan-refuse"]');
+        if (ref) {
+          if (row.refuse_reason) {
+            ref.hidden = false;
+            ref.textContent = row.refuse_reason;
+          } else {
+            ref.hidden = true;
+            ref.textContent = "";
+          }
+        }
+        var auth = tr.querySelector('[data-role="scan-auth"]');
+        if (auth) {
+          if (row.auth_note) {
+            auth.hidden = false;
+            auth.textContent = row.auth_note;
+          } else {
+            auth.hidden = true;
+          }
+        }
+        var sha = tr.querySelector('[data-role="scan-sha"]');
+        if (sha) {
+          sha.textContent = row.raw_sha256 ? (row.raw_sha256 + "…") : "-";
+        }
+        var actions = tr.querySelector('[data-role="scan-actions"]');
+        if (actions) {
+          var active = row.status === "queued" || row.status === "running";
+          if (!active) actions.innerHTML = "";
+        }
+        if (prev && prev !== row.status && terminalScan[row.status]) {
+          /* status moved to terminal — keep row updated; no reload needed for scans */
+        }
+      });
+    }
+
+    function applyAutomated(rows) {
+      if (!rows || !rows.length) return;
+      rows.forEach(function (row) {
+        var box = document.querySelector('[data-auto-id="' + row.id + '"]');
+        if (!box) return;
+        var prev = box.getAttribute("data-auto-status") || "";
+        box.setAttribute("data-auto-status", row.status || "");
+        var badge = box.querySelector('[data-role="auto-status"]');
+        if (badge) {
+          badge.className = autoBadgeClass(row.status);
+          badge.textContent = row.status || "";
+        }
+        var wait = box.querySelector('[data-role="auto-wait"]');
+        if (wait) {
+          if (row.status === "RUNNING") wait.textContent = "Running on worker…";
+          else if (row.status === "QUEUED") wait.textContent = "Waiting for the worker to pick this up (status updates automatically).";
+          else wait.hidden = true;
+        }
+        var cancel = box.querySelector('[data-role="auto-cancel"]');
+        if (cancel && row.status !== "QUEUED") cancel.remove();
+        if (prev && prev !== row.status && terminalAuto[row.status] && !reloadOnce) {
+          reloadOnce = true;
+          /* One soft reload so case tables/evidence appear after completion. */
+          window.setTimeout(function () {
+            var hash = "#automated-testing";
+            if (window.location.hash !== hash) window.location.hash = hash;
+            window.location.reload();
+          }, 400);
+        }
+      });
+    }
+
+    function applyWorker(w) {
+      if (!w) return;
+      var el = document.getElementById("worker_state");
+      if (!el) return;
+      if (w.running) {
+        el.innerHTML = 'Worker: <b class="st st-running">Worker Running</b>' +
+          (w.pid ? (" (PID " + w.pid + ")") : "") +
+          (w.stop_requested ? " · stopping" : "");
+      } else if (w.starting) {
+        el.innerHTML = "Worker: <b>Worker Starting</b>" + (w.pid ? (" (PID " + w.pid + ")") : "");
+      }
+    }
+
+    function tick() {
+      fetch("/api/engagements/" + eid + "/live-status", {
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" }
+      }).then(function (r) {
+        if (!r.ok) throw new Error("live-status " + r.status);
+        return r.json();
+      }).then(function (data) {
+        applyScans(data.scans || []);
+        applyAutomated(data.automated || []);
+        applyWorker(data.worker || {});
+        var active = data.active && data.active.any;
+        if (active) sawActive = true;
+        if (!active && sawActive) {
+          /* Drain complete — one last paint already applied; stop timer. */
+          if (timer) { window.clearInterval(timer); timer = null; }
+        } else if (!active && !sawActive) {
+          /* Nothing active on first poll — stop soon unless user queues later via navigation. */
+          if (timer) { window.clearInterval(timer); timer = null; }
+        }
+      }).catch(function () {
+        /* keep trying while page open; network blip */
+      });
+    }
+
+    /* Always poll a few times after load; continue while active. */
+    tick();
+    timer = window.setInterval(tick, pollMs);
   }
 
   function init() {

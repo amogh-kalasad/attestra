@@ -119,6 +119,14 @@ AUTOMATED_VAPT_ENABLED = os.environ.get("ATTESTRA_AUTOMATED_VAPT_ENABLED", "").l
     "yes",
 )
 
+# Body-level write mutation (T22 POST/PUT/PATCH object-id swaps). Off by default.
+# Sends only occur when this is on AND APP_ENV is local/test/development.
+AUTOMATED_VAPT_MUTATION = os.environ.get("ATTESTRA_AUTOMATED_VAPT_MUTATION", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # Feature flags. Changing these requires restarting the API and any workers
 # (no hot reload). Bypass flags default to false and only activate in an
 # allowlisted APP_ENV (local / test / development).

@@ -1427,8 +1427,10 @@ def _scan_dict(r) -> dict:
         "image_digest": r.image_digest,
         "raw_sha256": r.raw_sha256,
         "refuse_reason": r.refuse_reason,
-        "started_at": r.started_at,
-        "ended_at": r.ended_at,
+        "authenticated": bool(getattr(r, "authenticated", False)),
+        "auth_note": (getattr(r, "auth_note", None) or "")[:500],
+        "started_at": r.started_at.isoformat() if getattr(r, "started_at", None) else None,
+        "ended_at": r.ended_at.isoformat() if getattr(r, "ended_at", None) else None,
     }
 
 
@@ -1583,6 +1585,72 @@ def resolve_renewal_api(
         raise HTTPException(404, str(e)) from e
     except services.ServiceError as e:
         raise HTTPException(400, str(e)) from e
+
+
+
+@app.get("/api/engagements/{eid}/live-status")
+def engagement_live_status(eid: int, principal: Principal = Depends(require("engagement.read"))):
+    """Lightweight status for engagement page polling (no secrets)."""
+
+    def fn(s):
+        services.get_engagement(s, eid, principal)
+        scans = services.list_scans(s, eid)
+        scan_rows = [
+            {
+                "id": r.id,
+                "tool": r.tool,
+                "status": r.status,
+                "profile": r.profile,
+                "refuse_reason": r.refuse_reason or "",
+                "raw_sha256": (r.raw_sha256 or "")[:16],
+                "authenticated": bool(getattr(r, "authenticated", False)),
+                "auth_note": (getattr(r, "auth_note", None) or "")[:200],
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            }
+            for r in scans
+        ]
+        automated = []
+        from attestra import config as _cfg
+
+        if getattr(_cfg, "AUTOMATED_VAPT_ENABLED", False):
+            from attestra.automated_vapt.core import orchestrator as orch
+
+            for ex in orch.list_executions(s, eid, principal=principal):
+                automated.append(
+                    {
+                        "id": ex.id,
+                        "status": ex.status,
+                        "profile": ex.profile,
+                        "error": (ex.error or "")[:300],
+                        "started_at": ex.started_at.isoformat() if ex.started_at else None,
+                        "ended_at": ex.ended_at.isoformat() if ex.ended_at else None,
+                        "created_at": ex.created_at.isoformat() if ex.created_at else None,
+                    }
+                )
+        from attestra.jobs import launcher as _launcher
+
+        wk = _launcher.worker_status(s)
+        queued_scans = sum(1 for r in scans if (r.status or "").lower() in ("queued", "running"))
+        queued_auto = sum(1 for a in automated if a["status"] in ("QUEUED", "RUNNING"))
+        return {
+            "engagement_id": eid,
+            "scans": scan_rows,
+            "automated": automated,
+            "worker": {
+                "running": bool(wk.running),
+                "starting": bool(getattr(wk, "starting", False)),
+                "pid": getattr(wk, "pid", None),
+                "stop_requested": bool(getattr(wk, "stop_requested", False)),
+            },
+            "active": {
+                "scans": queued_scans,
+                "automated": queued_auto,
+                "any": (queued_scans + queued_auto) > 0,
+            },
+        }
+
+    return _run(fn)
 
 
 @app.get("/api/engagements/{eid}/scans")

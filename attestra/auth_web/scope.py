@@ -17,7 +17,7 @@ from attestra.runner.authorization import (
     unwrap_ip,
     validate_resolved_ips,
 )
-from attestra.runner.dns_pin import resolve_host
+from attestra.runner.dns_pin import drop_nat64_duplicates, resolve_host
 
 SAFE_SCHEMES = frozenset({"http", "https"})
 
@@ -184,7 +184,7 @@ def assert_url_in_scope(
         raise ScopeError(str(exc)) from exc
 
     try:
-        ips = resolver(host)
+        ips = drop_nat64_duplicates(resolver(host))
         validate_resolved_ips(ips, allow_private=allow_private)
     except AuthorizationError as exc:
         raise ScopeError(str(exc)) from exc

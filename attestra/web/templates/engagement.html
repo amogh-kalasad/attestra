@@ -417,15 +417,20 @@
     {% endif %}
   </div>
   {% endif %}
-  <table>
+  <table id="scan-runs-table" data-engagement-id="{{ e.id }}">
     <tr><th>ID</th><th>Tool</th><th>Target</th><th>Profile</th><th>Status</th><th>SHA-256</th><th></th></tr>
     {% for r in scans %}
-    <tr>
+    <tr data-scan-id="{{ r.id }}" data-scan-status="{{ r.status }}">
       <td><a href="/engagements/{{ e.id }}/scans/{{ r.id }}">#{{ r.id }}</a></td>
       <td>{{ r.tool }}</td><td class="mono">{{ r.asset.identifier if r.asset else r.asset_id }}</td>
-      <td>{{ r.profile|capitalize }}</td><td><span class="st st-{{ r.status }}">{{ r.status|label }}</span>{% if r.refuse_reason %}<div class="meta st-not_met">{{ r.refuse_reason }}</div>{% endif %}</td>
-      <td class="mono">{% if r.raw_sha256 %}{{ r.raw_sha256[:16] }}&hellip;{% else %}-{% endif %}</td>
-      <td>
+      <td>{{ r.profile|capitalize }}</td>
+      <td class="scan-status-cell">
+        <span class="st st-{{ r.status }}" data-role="scan-status">{{ r.status|label }}</span>
+        <div class="meta st-not_met" data-role="scan-refuse"{% if not r.refuse_reason %} hidden{% endif %}>{{ r.refuse_reason }}</div>
+        <div class="meta" data-role="scan-auth"{% if not r.auth_note %} hidden{% endif %}>{{ r.auth_note }}</div>
+      </td>
+      <td class="mono" data-role="scan-sha">{% if r.raw_sha256 %}{{ r.raw_sha256[:16] }}&hellip;{% else %}-{% endif %}</td>
+      <td data-role="scan-actions">
         {% if r.status in ("queued", "running") and can(prole, "scan.start") %}
         <form method="post" action="/engagements/{{ e.id }}/scans/{{ r.id }}/cancel"
               onsubmit="return confirm('Cancel scan #{{ r.id }}?')">
@@ -489,7 +494,7 @@
 <!-- ============================================================ ELITE AUTOMATED TESTING -->
 <div class="card" id="automated-testing">
   <h2>Automated security testing</h2>
-  <p class="meta">Queue approved Elite test cases against an in-scope target. One test-run credit is used per queued execution when subscription enforcement is on. Evidence Collection, execution history, and validation results appear below after runs complete.</p>
+  <p class="meta">Queue approved test cases against an in-scope target. The worker picks up QUEUED runs (same process as ZAP/Nuclei); this page refreshes status automatically. One test-run credit is used per queued execution when subscription enforcement is on. Evidence and validation results appear below when a run finishes.</p>
   <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions">
     <div class="fields">
       <div><label for="elite_asset">Target *</label>
@@ -512,28 +517,59 @@
   </form>
   <h3>Test execution history</h3>
   {% if elite_executions %}
-  <table class="table">
-    <thead><tr><th>ID</th><th>Status</th><th>Cases</th><th>Target</th><th>Actions</th></tr></thead>
-    <tbody>
-    {% for x in elite_executions %}
-      <tr>
-        <td class="mono">{{ x.id }}</td>
-        <td>{{ x.status }}</td>
-        <td class="mono">{{ x.test_case_ids|join(', ') }}</td>
-        <td class="mono">{{ x.target_base_url }}</td>
-        <td>
-          {% if x.status == 'QUEUED' %}
-          <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/run" style="display:inline"><button type="submit">Run</button></form>
-          <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/cancel" style="display:inline"><button type="submit">Cancel</button></form>
-          {% endif %}
-          <details><summary>Validation results</summary><pre class="http-pair">{{ x.result }}</pre></details>
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <style>
+    #automated-testing .av-run { border-top: 1px solid #d0d7de; padding: 10px 0; }
+    #automated-testing .av-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #automated-testing .av-target { word-break: break-all; overflow-wrap: anywhere; margin: 4px 0; }
+    #automated-testing .av-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap; }
+    #automated-testing .av-ok { background: #1a7f37; }
+    #automated-testing .av-bad { background: #cf222e; }
+    #automated-testing .av-muted { background: #6e7781; }
+    #automated-testing .av-warn { background: #bf8700; }
+    #automated-testing .av-cases { width: 100%; table-layout: auto; }
+    #automated-testing .av-cases td { vertical-align: top; }
+    #automated-testing .av-detail { word-break: break-word; overflow-wrap: anywhere; min-width: 12em; }
+    #automated-testing .av-thumb { max-width: 160px; max-height: 110px; border: 1px solid #d0d7de; margin: 2px; vertical-align: top; }
+    #automated-testing pre.av-raw { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; overflow-x: hidden; max-height: 420px; overflow-y: auto; max-width: 100%; }
+    #av-failed-only:checked ~ .av-runs .av-case-pass { display: none; }
+  </style>
+  <input type="checkbox" id="av-failed-only"> <label for="av-failed-only" style="display:inline">Show failed only</label>
+  <div class="av-runs">
+  {% for x in elite_executions %}
+    <div class="av-run" id="automated-run-{{ x.id }}" data-auto-id="{{ x.id }}" data-auto-status="{{ x.status }}">
+      <div class="av-head">
+        <b>Run #{{ x.id }}</b>
+        <span class="av-badge av-{{ x.status_class }}" data-role="auto-status">{{ x.status }}</span>
+        <span class="meta" data-role="auto-meta">Profile {{ x.profile }}{% if x.requested_by %} &middot; by {{ x.requested_by }}{% endif %}{% if x.ended_at %} &middot; finished {{ x.ended_at }}{% elif x.created_at %} &middot; queued {{ x.created_at }}{% endif %}</span>
+        {% if x.status == 'QUEUED' %}
+        <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/cancel" style="display:inline" data-role="auto-cancel"><button type="submit">Cancel</button></form>
+        {% endif %}
+      </div>
+      <div class="av-target mono">Target: {{ x.target_base_url }}</div>
+      {% if x.error %}<div class="warn">{{ x.error }}</div>{% endif %}
+      {% if x.cases_view %}
+      <table class="table av-cases">
+        <thead><tr><th>Test</th><th>Status</th><th>Detail</th><th>Evidence</th></tr></thead>
+        <tbody>
+        {% for c in x.cases_view %}
+          <tr class="{{ 'av-case-pass' if c.status_class in ('ok', 'muted') else 'av-case-fail' }}">
+            <td><span class="mono">{{ c.test_id }}</span>{% if c.title %}<br><span class="meta">{{ c.title }}</span>{% endif %}</td>
+            <td><span class="av-badge av-{{ c.status_class }}">{{ c.status }}</span>{% if c.validation_status %}<br><span class="meta">{{ c.validation_status }}</span>{% endif %}{% if c.finding_id %}<br><a href="/engagements/{{ e.id }}/findings/{{ c.finding_id }}">Finding F-{{ c.finding_id }}</a>{% endif %}</td>
+            <td class="av-detail">{{ c.detail }}</td>
+            <td>{% for ev in c.evidence %}<a href="{{ ev.url }}" target="_blank" rel="noopener" title="{{ ev.label }}"><img class="av-thumb" src="{{ ev.url }}" alt="{{ ev.label }}" loading="lazy"></a>{% else %}<span class="meta">None saved</span>{% endfor %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% elif x.status in ('QUEUED', 'RUNNING') %}
+      <p class="meta" data-role="auto-wait">Waiting for the worker to pick this up (status updates automatically).</p>
+      {% endif %}
+      <details><summary>Raw results</summary><pre class="av-raw mono">{{ x.result_pretty }}</pre></details>
+    </div>
+  {% endfor %}
+  </div>
   {% else %}
-  <p class="meta">No Elite executions yet.</p>
+  <p class="meta">No automated test runs yet.</p>
   {% endif %}
 </div>
 {% endif %}
@@ -755,5 +791,6 @@
 {# Engagement page handlers live in /static/attestra.js (CSP blocks inline classic scripts). #}
 <script type="application/json" id="engagement-default-tests">{{ default_tests|tojson }}</script>
 <script type="application/json" id="engagement-authorized-envs">{{ authorized_envs|list|tojson }}</script>
+<script type="application/json" id="engagement-live-poll">{"engagement_id": {{ e.id }}, "poll_ms": 4000}</script>
 </div>
 {% endblock %}

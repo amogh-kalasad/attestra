@@ -70,9 +70,21 @@ def allowed_methods_for_profile(profile: str) -> frozenset[str]:
     return frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def validate_method(method: str, profile: str) -> None:
+def mutation_write_methods() -> frozenset[str]:
+    """Methods T22 may use when ATTESTRA_AUTOMATED_VAPT_MUTATION is enabled. Never DELETE."""
+    return frozenset({"POST", "PUT", "PATCH"})
+
+
+def validate_method(method: str, profile: str, *, allow_mutation_methods: bool = False) -> None:
     m = (method or "GET").upper()
-    allowed = allowed_methods_for_profile(profile)
+    allowed = set(allowed_methods_for_profile(profile))
+    if allow_mutation_methods:
+        from attestra.automated_vapt.core.body_mutation import mutation_sends_allowed
+
+        if mutation_sends_allowed():
+            allowed |= mutation_write_methods()
+        # DELETE is never permitted
+        allowed.discard("DELETE")
     if m not in allowed:
         raise ServiceError(f"HTTP method {m} not allowed for profile {profile!r}")
 

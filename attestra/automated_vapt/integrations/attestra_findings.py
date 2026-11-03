@@ -129,7 +129,7 @@ def document_finding_evidence(
                 filename=f"elite_http_pair_{ev.id}_two_panel.png",
                 data=png,
                 actor=actor,
-                note="Elite two-panel HTTP visual (Attestra-generated)",
+                note="Two-panel HTTP visual (Attestra-generated)",
                 source_tool=source_tool,
             )
             attached["two_panel_ids"].append(shot.id)
@@ -147,7 +147,7 @@ def document_finding_evidence(
                 filename=filename or "elite_screenshot.png",
                 data=data,
                 actor=actor,
-                note="Elite browser screenshot",
+                note="Browser screenshot",
                 source_tool=source_tool,
             )
             attached["screenshot_ids"].append(shot.id)

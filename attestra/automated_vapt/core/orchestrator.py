@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from attestra import audit
@@ -17,8 +18,106 @@ from attestra.automated_vapt.core.test_registry import get_test_case, list_test_
 from attestra.models import AutomatedTestExecution, utcnow
 from attestra.services import ServiceError
 
+log = logging.getLogger(__name__)
+
 # @lat: [[architecture#Elite automated security testing]]
 # @lat: [[architecture#Elite automated security testing#Orchestrator]]
+
+
+
+def claim_queued_execution(s: Session, worker_id: str = "") -> AutomatedTestExecution | None:
+    """Atomically claim the next QUEUED automated execution (worker path).
+
+    Conditional UPDATE on status=QUEUED is the lock (same pattern as claim_job).
+    Returns the RUNNING row, or None when the queue is empty.
+    """
+    from attestra.models import AutomatedTestExecution
+
+    q = (
+        select(AutomatedTestExecution)
+        .where(AutomatedTestExecution.status == "QUEUED")
+        .order_by(AutomatedTestExecution.id)
+        .limit(5)
+    )
+    for ex in s.scalars(q).all():
+        result = s.execute(
+            update(AutomatedTestExecution)
+            .where(
+                AutomatedTestExecution.id == ex.id,
+                AutomatedTestExecution.status == "QUEUED",
+            )
+            .values(status="RUNNING", started_at=utcnow(), error="")
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            s.refresh(ex)
+            audit.record(
+                s,
+                worker_id or "worker",
+                "automated_vapt.claimed",
+                "automated_test_execution",
+                ex.id,
+                tenant_id=ex.tenant_id,
+                engagement_id=ex.engagement_id,
+                worker_id=worker_id or "",
+            )
+            return ex
+    return None
+
+
+def recover_stale_executions(s: Session, *, stale_s: int | None = None) -> int:
+    """Re-queue RUNNING automated executions whose started_at is older than stale_s.
+
+    Automated runs have no Job heartbeat; a dead worker would leave them RUNNING forever.
+    """
+    from datetime import timedelta
+
+    from attestra import config
+    from attestra.models import AutomatedTestExecution
+
+    seconds = int(
+        stale_s
+        if stale_s is not None
+        else getattr(config, "AUTOMATED_VAPT_STALE_S", 1800)  # 30m; T01?T22 often exceed Job heartbeat (120s)
+    )
+    cutoff = utcnow() - timedelta(seconds=max(30, seconds))
+    rows = list(
+        s.scalars(
+            select(AutomatedTestExecution).where(
+                AutomatedTestExecution.status == "RUNNING",
+                AutomatedTestExecution.started_at.is_not(None),
+                AutomatedTestExecution.started_at < cutoff,
+            )
+        ).all()
+    )
+    n = 0
+    for ex in rows:
+        result = s.execute(
+            update(AutomatedTestExecution)
+            .where(
+                AutomatedTestExecution.id == ex.id,
+                AutomatedTestExecution.status == "RUNNING",
+            )
+            .values(
+                status="QUEUED",
+                started_at=None,
+                ended_at=None,
+                error="re-queued after stale worker heartbeat",
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            n += 1
+            audit.record(
+                s,
+                "system",
+                "automated_vapt.requeued_stale",
+                "automated_test_execution",
+                ex.id,
+                tenant_id=ex.tenant_id,
+                engagement_id=ex.engagement_id,
+            )
+    return n
 
 
 def create_execution(
@@ -98,14 +197,22 @@ def run_execution(
     actor: str,
     principal=None,
     extra: dict[str, Any] | None = None,
+    already_running: bool = False,
 ) -> AutomatedTestExecution:
-    """Run a queued execution: scope re-check, then registered case handlers."""
+    """Run a queued execution: scope re-check, then registered case handlers.
+
+    When ``already_running`` is True the row was atomically claimed by the worker
+    (status already RUNNING); do not transition again.
+    """
     guard.require_feature_enabled()
     guard.require_write(principal)
     ex = get_execution(s, execution_id, principal=principal)
     if ex.status == "CANCELLED":
         raise ServiceError("execution was cancelled")
-    if ex.status not in ("QUEUED",):
+    if already_running:
+        if ex.status != "RUNNING":
+            raise ServiceError(f"execution status {ex.status} is not RUNNING for claimed run")
+    elif ex.status not in ("QUEUED",):
         raise ServiceError(f"execution status {ex.status} cannot be started")
 
     eng = guard.load_engagement(s, ex.engagement_id, principal)
@@ -114,8 +221,9 @@ def run_execution(
     if asset is None:
         raise ServiceError("execution asset missing")
 
-    exec_mgr.transition(ex, "RUNNING")
-    s.flush()
+    if not already_running:
+        exec_mgr.transition(ex, "RUNNING")
+        s.flush()
 
     ctx = TestContext(
         engagement_id=eng.id,
@@ -142,9 +250,57 @@ def run_execution(
             check_dns=not ctx.allow_private,
         )
 
+        # Real run id so screenshot names and the evidence folder match this row.
+        ctx.extra.setdefault("execution_id", ex.id)
+        # Same page list Nuclei uses: base URL + Extra Start URLs + latest ZAP pages.
+        from attestra.automated_vapt.core.capture_urls import build_capture_urls
+
+        capture_info: dict[str, Any] = {}
+        capture_urls, capture_source = build_capture_urls(
+            session=s,
+            asset=asset,
+            target_base_url=ex.target_base_url,
+            scope=scope,
+            info=capture_info,
+            check_dns=not ctx.allow_private,
+        )
+        ctx.extra["_capture_urls"] = capture_urls or [ex.target_base_url]
+        ctx.extra["_capture_url_source"] = capture_source
+        ctx.extra["_capture_api_urls"] = list(capture_info.get("api_urls") or [])
+        ctx.extra["_js_api"] = capture_info.get("js_api")
+        # T01 sends the login profile's session (header + extra headers + extra cookies):
+        # explicit extra["auth_profile_id"], else the profile of the reused ZAP scan.
+        if any(t in ctx.test_case_ids for t in ("T01", "T02", "T19", "T20", "T21", "T22")) and "_session_auth" not in ctx.extra:
+            from attestra.automated_vapt.core.session_auth import load_session_auth
+
+            pid = ctx.extra.get("auth_profile_id")
+            if not pid and capture_info.get("zap_scan_id"):
+                from attestra.models import ScanRun
+
+                zr = s.get(ScanRun, capture_info["zap_scan_id"])
+                pid = getattr(zr, "auth_profile_id", None) if zr is not None else None
+            ctx.extra["_session_auth"] = load_session_auth(
+                s,
+                profile_id=pid,
+                engagement_id=eng.id,
+                target_url=ex.target_base_url,
+            )
+            # Optional second (non-admin) profile for confident IDOR / body-mutation probes.
+            sec_pid = ctx.extra.get("secondary_auth_profile_id") or ctx.extra.get("auth_profile_id_secondary")
+            if sec_pid and "_secondary_session_auth" not in ctx.extra:
+                ctx.extra["_secondary_session_auth"] = load_session_auth(
+                    s,
+                    profile_id=int(sec_pid),
+                    engagement_id=eng.id,
+                    target_url=ex.target_base_url,
+                )
         results: list[dict[str, Any]] = []
         for tid in ctx.test_case_ids:
+            pairs_before = len(ctx.extra.get("_http_pairs") or [])
+            shots_before = set((ctx.extra.get("_screenshots") or {}).keys())
             case_result = _run_case(tid, ctx)
+            # Always keep proof of testing on disk, even when no finding is created.
+            _persist_run_evidence(ex.id, case_result, ctx, pairs_before, shots_before)
             # E11: map CONFIRMED/POTENTIAL validation onto findings.
             validation = case_result.get("validation") or {}
             if (validation.get("status") or "").upper() in ("CONFIRMED", "POTENTIAL"):
@@ -153,15 +309,25 @@ def run_execution(
                     document_finding_evidence,
                 )
 
+                ftitle = case_result.get("finding_title") or (
+                    f"Automated test {case_result.get('test_id')}: "
+                    f"{(validation.get('title_suffix') or 'authorization issue')}"
+                )
                 finding = create_finding_from_validation(
                     s,
                     engagement_id=eng.id,
                     asset_id=asset.id,
-                    title=f"Elite {case_result.get('test_id')}: authorization issue",
-                    description=str(case_result.get("detail") or "Elite automated finding"),
+                    title=str(ftitle)[:500],
+                    description=str(case_result.get("detail") or "Automated test finding"),
                     validation=validation,
-                    location=ex.target_base_url,
+                    cwe=case_result.get("finding_cwe") or validation.get("cwe") or 639,
+                    location=str(case_result.get("finding_location") or ex.target_base_url)[:1000],
                     actor=actor,
+                    recommendation=str(
+                        case_result.get("finding_recommendation")
+                        or validation.get("recommendation")
+                        or "Enforce object-level authorization and retest."
+                    ),
                 )
                 if finding is not None:
                     case_result["finding_id"] = finding.id
@@ -177,8 +343,10 @@ def run_execution(
                     )
             # HttpPair objects are not JSON-serializable; strip before persist.
             case_result.pop("evidence_pairs", None)
+            case_result.pop("finding_evidence_pairs", None)
             results.append(case_result)
 
+        ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
         ex.result_json = json.dumps({"cases": results}, sort_keys=True)
         exec_mgr.transition(ex, "COMPLETED")
         audit.record(
@@ -326,28 +494,91 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t02_browser_capture(ctx, case.category)
     if case.id in {"T03", "T04", "T05", "T06", "T07"}:
         return _run_authz_module(case.id, ctx, case.category)
+    if case.id in {"T19", "T20", "T21", "T22"}:
+        return _run_replay_check(case.id, ctx, case.category)
     # Later Elite phases register real handlers; record deferred honestly.
     known = {c.id for c in list_test_cases()}
     if test_id in known or case.id in known:
         return {
             "test_id": case.id,
             "status": "DEFERRED",
-            "detail": "handler not implemented in this Elite phase yet",
+            "detail": "handler not implemented yet",
             "category": case.category,
         }
     return {"test_id": test_id, "status": "FAILED", "detail": "unknown test case"}
 
 
+def _persist_run_evidence(
+    execution_id: int,
+    case_result: dict[str, Any],
+    ctx: TestContext,
+    pairs_before: int,
+    shots_before: set[str],
+) -> None:
+    """Save this case's screenshots and HTTP visuals under DATA_DIR/raw/automated-<id>/.
+
+    All captures stay on disk for the engagement gallery. ``report_evidence_files`` lists
+    only the failing-endpoint subset (empty when the case passed) so the technical report
+    does not embed every screenshot.
+    """
+    try:
+        from attestra.automated_vapt.evidence.run_evidence import persist_case_evidence
+
+        # Prefer the case's own evidence_pairs. Fall back to the slice of _http_pairs added
+        # during this case when the handler did not populate evidence_pairs (T01/T02).
+        own = list(case_result.get("evidence_pairs") or [])
+        if own:
+            pairs = own
+        else:
+            pairs = list((ctx.extra.get("_http_pairs") or [])[pairs_before:])
+        pending: dict[str, bytes] = ctx.extra.get("_screenshots") or {}
+        shots = [(name, png) for name, png in pending.items() if name not in shots_before]
+        files = persist_case_evidence(
+            execution_id,
+            str(case_result.get("test_id") or "case"),
+            http_pairs=pairs,
+            screenshots=shots,
+        )
+        if files:
+            case_result["evidence_files"] = files
+
+        # Report subset: finding pairs only (same object identity when possible).
+        find_pairs = list(case_result.get("finding_evidence_pairs") or [])
+        status_u = (case_result.get("status") or "").upper()
+        if not find_pairs and status_u in {"FINDING", "FAILED", "CONFIRMED", "VULNERABLE"}:
+            # Whole-case failure with no per-endpoint split (e.g. T01 FAILED).
+            find_pairs = pairs
+        if find_pairs:
+            # Persist under a distinct stem so filenames are stable and easy to filter;
+            # originals in evidence_files remain for the UI gallery.
+            report_files = persist_case_evidence(
+                execution_id,
+                f"{case_result.get('test_id') or 'case'}_fail",
+                http_pairs=find_pairs,
+                screenshots=[],
+            )
+            case_result["report_evidence_files"] = report_files
+        else:
+            case_result["report_evidence_files"] = []
+    except Exception:  # noqa: BLE001 - evidence must never fail the run
+        log.exception("saving run evidence failed for execution %s", execution_id)
+
+
 def _evidence_pairs_for_case(case_result: dict[str, Any], ctx: TestContext) -> list[Any]:
-    """Collect HttpPair (or dict) documents for finding evidence."""
+    """Collect HttpPair (or dict) documents for finding evidence.
+
+    Only the pairs that prove the finding (``finding_evidence_pairs``, else the case's
+    own ``evidence_pairs``). Never dumps the whole run's ``_http_pairs`` — that used to
+    attach every T01/T19/T20 capture onto a single T21 finding.
+    """
     pairs: list[Any] = []
-    for item in case_result.get("evidence_pairs") or []:
+    for item in case_result.get("finding_evidence_pairs") or case_result.get("evidence_pairs") or []:
         pairs.append(item)
     capture = case_result.get("capture")
     if isinstance(capture, dict) and capture.get("url"):
-        pairs.append(capture)
-    for item in ctx.extra.get("_http_pairs") or []:
-        pairs.append(item)
+        # T01-style whole-case capture only when this case itself is the finding source.
+        if (case_result.get("status") or "").upper() in {"FINDING", "FAILED", "CONFIRMED", "VULNERABLE"}:
+            pairs.append(capture)
     return pairs
 
 
@@ -369,94 +600,235 @@ def _evidence_screenshots_for_case(
 
 
 def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
-    """T01: capture one GET against the approved target base URL."""
+    """T01: capture GET against each approved page (base + Extra Start + ZAP URLs)."""
     from attestra.automated_vapt.capture.http_capture import capture_request
     from attestra.automated_vapt.capture.request_parser import parse_request
     from attestra.automated_vapt.capture.response_parser import parse_response
 
-    seeds = []
+    urls = list(ctx.extra.get("_capture_urls") or [ctx.target_base_url])
+    source = str(ctx.extra.get("_capture_url_source") or "root-only")
+    seeds = [u for u in urls[1:] if u]
     scope = scope_validator.build_scope_from_asset(
         ctx.target_base_url,
         extra_seeds=seeds,
         allow_private=ctx.allow_private,
     )
     client = ctx.extra.get("httpx_client")
-    try:
-        tx = capture_request(
-            "GET",
-            ctx.target_base_url,
-            scope=scope,
-            profile=ctx.profile,
-            client=client,
-            check_dns=not ctx.allow_private,
+    api_set = {u.rstrip("/") for u in ctx.extra.get("_capture_api_urls") or []}
+    auth = ctx.extra.get("_session_auth")
+    auth_info = auth.public() if auth is not None else {"profile_id": None, "status": "none", "note": "", "injected": []}
+    pages: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    last_tx = None
+    last_req: dict[str, Any] = {}
+    last_resp: dict[str, Any] = {}
+    for url in urls:
+        # GET only; session headers only for the target origin.
+        headers = auth.headers_for(url, ctx.target_base_url) if auth is not None else {}
+        try:
+            tx = capture_request(
+                "GET",
+                url,
+                scope=scope,
+                profile=ctx.profile,
+                headers=headers or None,
+                client=client,
+                check_dns=not ctx.allow_private,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface capture failures in case result
+            detail = str(exc)
+            if auth is not None:
+                detail = auth.scrub(detail)
+            pages.append({"url": url, "status": "FAILED", "detail": detail})
+            continue
+        report = tx.report_pair or tx.pair.redacted()
+        if auth is not None and auth.redact_values:
+            report.response_body = auth.scrub(report.response_body)
+            report.request_body = auth.scrub(report.request_body)
+            report.request_headers = {k: auth.scrub(v) for k, v in report.request_headers.items()}
+            report.response_headers = {k: auth.scrub(v) for k, v in report.response_headers.items()}
+            tx.report_pair = report
+        ctx.extra.setdefault("_http_pairs", []).append(report)
+        req_n = parse_request(report)
+        resp_n = parse_response(report)
+        last_tx, last_req, last_resp = tx, req_n, resp_n
+        code = report.status
+        status_counts[str(code)] = status_counts.get(str(code), 0) + 1
+        pages.append(
+            {
+                "url": url,
+                "status": "PASSED",
+                "detail": "HTTP transaction captured",
+                "http_status": code,
+                "kind": "api" if url.rstrip("/") in api_set else "page",
+                "authenticated": bool(headers),
+            }
         )
-    except Exception as exc:  # noqa: BLE001 — surface capture failures in case result
+    ok = [p for p in pages if p["status"] == "PASSED"]
+    if not ok:
+        first = pages[0]["detail"] if pages else "no URLs"
         return {
             "test_id": "T01",
             "status": "FAILED",
-            "detail": f"HTTP capture failed: {exc}",
+            "detail": f"HTTP capture failed on {len(pages)} page(s) ({source}): {first}",
             "category": category,
+            "pages": pages,
+            "url_source": source,
+            "auth": auth_info,
         }
-    report = tx.report_pair or tx.pair.redacted()
-    ctx.extra.setdefault("_http_pairs", []).append(report)
-    req_n = parse_request(report)
-    resp_n = parse_response(report)
-    return {
+    out: dict[str, Any] = {
         "test_id": "T01",
         "status": "PASSED",
-        "detail": "HTTP transaction captured",
+        "detail": (
+            f"HTTP captured for {len(ok)}/{len(pages)} page(s) ({source}); "
+            f"HTTP {', '.join(f'{k}x{v}' for k, v in sorted(status_counts.items()))}; "
+            f"auth: {auth_info['status']}"
+            + (f" (profile #{auth_info['profile_id']})" if auth_info.get("profile_id") else "")
+        ),
         "category": category,
-        "capture": tx.to_dict(),
-        "request_normalized": {k: v for k, v in req_n.items() if k != "original"},
-        "response_normalized": resp_n,
+        "pages": pages,
+        "url_source": source,
+        "status_counts": status_counts,
+        "auth": auth_info,
+        "js_api": ctx.extra.get("_js_api"),
     }
+    if last_tx is not None:
+        out["capture"] = last_tx.to_dict()
+        out["request_normalized"] = {k: v for k, v in last_req.items() if k != "original"}
+        out["response_normalized"] = last_resp
+    return out
+
 
 
 def _run_t02_browser_capture(ctx: TestContext, category: str) -> dict[str, Any]:
-    """T02: capture a browser screenshot of the approved target."""
+    """T02: browser screenshot of each approved page (base + Extra Start + ZAP URLs)."""
     from attestra.automated_vapt.capture.browser_capture import (
         capture_screenshot,
         stable_screenshot_name,
     )
+    from attestra.automated_vapt.core.capture_urls import page_label
 
+    urls = list(ctx.extra.get("_capture_urls") or [ctx.target_base_url])
+    api_set = {u.rstrip("/") for u in ctx.extra.get("_capture_api_urls") or []}
+    urls = [u for u in urls if u.rstrip("/") not in api_set] or [ctx.target_base_url]
+    source = str(ctx.extra.get("_capture_url_source") or "root-only")
+    seeds = [u for u in urls[1:] if u]
     scope = scope_validator.build_scope_from_asset(
         ctx.target_base_url,
+        extra_seeds=seeds,
         allow_private=ctx.allow_private,
     )
     capture_fn = ctx.extra.get("browser_capture_fn")
-    try:
-        result = capture_screenshot(
-            ctx.target_base_url,
-            scope=scope,
-            allow_private=ctx.allow_private,
-            capture_fn=capture_fn,
-            check_dns=not ctx.allow_private,
-            username=ctx.extra.get("browser_username"),
-            password=ctx.extra.get("browser_password"),
-            login_url=ctx.extra.get("browser_login_url"),
+    pages: list[dict[str, Any]] = []
+    last_shot: dict[str, Any] | None = None
+    # Inject login-profile session headers so SPA XHR/fetch runs authenticated and
+    # POST/PUT/PATCH JSON bodies can be observed for T22.
+    extra_headers: dict[str, str] = {}
+    auth = ctx.extra.get("_session_auth")
+    if auth is not None and getattr(auth, "status", "") == "ready":
+        try:
+            extra_headers = auth.headers_for(ctx.target_base_url, ctx.target_base_url) or {}
+        except Exception:  # noqa: BLE001
+            extra_headers = {}
+    write_bodies_all: list[dict[str, Any]] = list(ctx.extra.get("_write_captures") or [])
+    for i, url in enumerate(urls, 1):
+        try:
+            result = capture_screenshot(
+                url,
+                scope=scope,
+                allow_private=ctx.allow_private,
+                capture_fn=capture_fn,
+                check_dns=not ctx.allow_private,
+                username=ctx.extra.get("browser_username"),
+                password=ctx.extra.get("browser_password"),
+                login_url=ctx.extra.get("browser_login_url"),
+                extra_headers=extra_headers or None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            pages.append({"url": url, "status": "FAILED", "detail": str(exc)})
+            continue
+        name = stable_screenshot_name(
+            engagement_id=ctx.engagement_id,
+            execution_id=int(ctx.extra.get("execution_id") or 0),
+            test_case_id="T02",
+            label=page_label(i, url),
         )
-    except Exception as exc:  # noqa: BLE001
+        ctx.extra.setdefault("_screenshots", {})[name] = result.screenshot_png
+        meta = {**result.to_dict(), "filename": name, "url": url}
+        pages.append({"url": url, "status": "PASSED", "detail": "browser screenshot captured", "screenshot": meta})
+        last_shot = meta
+        for wb in getattr(result, "write_bodies", None) or []:
+            write_bodies_all.append(wb)
+    # Persist redacted write bodies for T22 (same run folder as screenshots).
+    if write_bodies_all:
+        try:
+            from attestra.automated_vapt.capture import write_body_capture as wbc
+
+            merged = wbc.merge_write_captures([], write_bodies_all)
+            ctx.extra["_write_captures"] = merged
+            xid = int(ctx.extra.get("execution_id") or 0)
+            if xid:
+                wbc.save_write_bodies(xid, merged)
+        except Exception:  # noqa: BLE001
+            log.exception("saving captured write bodies failed")
+    ok = [p for p in pages if p["status"] == "PASSED"]
+    if not ok:
+        first = pages[0]["detail"] if pages else "no URLs"
         return {
             "test_id": "T02",
             "status": "FAILED",
-            "detail": f"browser capture failed: {exc}",
+            "detail": f"browser capture failed on {len(pages)} page(s) ({source}): {first}",
             "category": category,
+            "pages": pages,
+            "url_source": source,
         }
-    name = stable_screenshot_name(
-        engagement_id=ctx.engagement_id,
-        execution_id=int(ctx.extra.get("execution_id") or 0),
-        test_case_id="T02",
-        label="fullpage" if result.full_page else "viewport",
-    )
-    # Keep PNG out of result_json; record metadata only.
-    ctx.extra.setdefault("_screenshots", {})[name] = result.screenshot_png
-    return {
+    captured = list(ctx.extra.get("_write_captures") or [])
+    from attestra.automated_vapt.capture import write_body_capture as _wbc
+
+    summary = _wbc.public_summary(captured)
+    out: dict[str, Any] = {
         "test_id": "T02",
         "status": "PASSED",
-        "detail": "browser screenshot captured",
+        "detail": (
+            f"browser screenshots for {len(ok)}/{len(pages)} page(s) ({source}); "
+            f"write bodies captured: {len(captured)}"
+        ),
         "category": category,
-        "screenshot": {**result.to_dict(), "filename": name},
+        "pages": pages,
+        "url_source": source,
+        "write_bodies_captured": len(captured),
+        "write_bodies_summary": summary[:40],
     }
+    if last_shot is not None:
+        out["screenshot"] = last_shot
+    return out
+
+
+
+def _run_replay_check(test_id: str, ctx: TestContext, category: str) -> dict[str, Any]:
+    """T19 auth bypass / T20 IDOR / T21 input validation / T22 body mutation."""
+    from attestra.automated_vapt.core import body_mutation, replay_checks
+
+    runners = {
+        "T19": replay_checks.run_auth_bypass,
+        "T20": replay_checks.run_idor,
+        "T21": replay_checks.run_input_validation,
+        "T22": body_mutation.run_object_mutation,
+    }
+    try:
+        result = runners[test_id](ctx)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "test_id": test_id,
+            "status": "FAILED",
+            "detail": f"module error: {type(exc).__name__}",
+            "category": category,
+        }
+    result.setdefault("category", category)
+    # Push redacted pairs onto the shared list so _persist_run_evidence picks them up too.
+    for pair in result.get("evidence_pairs") or []:
+        ctx.extra.setdefault("_http_pairs", []).append(pair)
+    return result
 
 
 def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str, Any]:

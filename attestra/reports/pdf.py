@@ -304,9 +304,11 @@ def _watermark(pdf: bytes) -> bytes:
     from reportlab.pdfgen import canvas
 
     reader = PdfReader(BytesIO(pdf))
-    writer = PdfWriter()
+    # Clone so pages keep their identity: internal links (Contents, List of figures,
+    # finding anchors) and outlines still point at pages that exist in the output.
+    writer = PdfWriter(clone_from=reader)
     stamps: dict[tuple[float, float], bytes] = {}
-    for page in reader.pages:
+    for page in writer.pages:
         w, h = float(page.mediabox.width), float(page.mediabox.height)
         if (w, h) not in stamps:
             buf = BytesIO()
@@ -319,11 +321,10 @@ def _watermark(pdf: bytes) -> bytes:
             c.drawCentredString(0, -size * 0.35, "DRAFT")
             c.save()
             stamps[(w, h)] = buf.getvalue()
-        # Draw the report on top of a fresh stamp page: the stamp sits underneath the text, and the
-        # report's own graphics state (clips, transforms) cannot hide or skew it.
-        base = PdfReader(BytesIO(stamps[(w, h)])).pages[0]
-        base.merge_page(page)
-        writer.add_page(base)
+        # Put the stamp underneath the report content (over=False): pypdf isolates each content
+        # stream, so the report's own graphics state (clips, transforms) cannot hide or skew it.
+        stamp = PdfReader(BytesIO(stamps[(w, h)])).pages[0]
+        page.merge_page(stamp, over=False)
     out = BytesIO()
     writer.write(out)
     return out.getvalue()

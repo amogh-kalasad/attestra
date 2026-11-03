@@ -34,6 +34,33 @@ _CASES: tuple[TestCase, ...] = (
     TestCase("T17", "scope", "Tenant evidence isolation", "Reject unauthorized evidence retrieval."),
     TestCase("T18", "subscription", "Subscription enforcement", "Respect SUBSCRIPTION_SERVICE credit rules."),
     TestCase(
+        "T19",
+        "authentication",
+        "API auth bypass",
+        "Replay authenticated API GETs without a session and with a bad bearer; flag if data still returns.",
+    ),
+    TestCase(
+        "T20",
+        "authorization",
+        "API IDOR / BOLA",
+        "Swap harvested object ids into dynamic GET endpoints; flag foreign-id data access (confirm manually).",
+    ),
+    TestCase(
+        "T21",
+        "validation",
+        "API input validation",
+        "Replay authenticated GET params with quotes, long strings, wrong types, XSS and path traversal.",
+    ),
+    TestCase(
+        "T22",
+        "authorization",
+        "API object mutation (BOLA write)",
+        "Body-level object-id swap on captured POST/PUT/PATCH (never DELETE). "
+        "Off by default (ATTESTRA_AUTOMATED_VAPT_MUTATION=0); when disabled the case is SKIPPED "
+        "with a dry-run plan. Requires APP_ENV=local|test|development to send. "
+        "Prefer a secondary (non-admin) login profile for confident IDOR.",
+    ),
+    TestCase(
         "SCOPE_SMOKE",
         "scope",
         "Scope smoke",

@@ -40,7 +40,9 @@ def assert_engagement_ready(eng: Engagement) -> None:
         # Treat missing/empty as active for older rows; refuse closed/archived.
         if (eng.status or "").lower() in ("closed", "archived", "cancelled"):
             raise ServiceError(f"engagement status {eng.status!r} does not allow testing")
-    if not any(a.is_valid(date.today()) for a in eng.authorizations):
+    if config.signed_authorization_required() and not any(
+        a.is_valid(date.today()) for a in eng.authorizations
+    ):
         raise ServiceError("record a currently valid signed authorization before running tests")
     if eng.window_start and date.today() < eng.window_start:
         raise ServiceError("testing window has not started")

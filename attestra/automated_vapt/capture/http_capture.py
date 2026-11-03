@@ -61,13 +61,16 @@ def capture_request(
     follow_redirects: bool = False,
     timeout_s: float = _DEFAULT_TIMEOUT_S,
     check_dns: bool = True,
+    allow_mutation_methods: bool = False,
 ) -> CapturedTransaction:
     """Perform one in-scope HTTP request and return a captured transaction.
 
     Never logs bearer tokens or cookies. The ``report_pair`` is always redacted.
     """
     method_u = (method or "GET").upper()
-    scope_validator.validate_method(method_u, profile)
+    scope_validator.validate_method(
+        method_u, profile, allow_mutation_methods=allow_mutation_methods
+    )
     absolute = url.strip()
     if scope is not None:
         scope_validator.validate_target_url(absolute, scope, check_dns=check_dns)

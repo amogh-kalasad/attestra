@@ -48,6 +48,8 @@ class _Active:
     job_id: int
     tool: str
     thread: threading.Thread
+    kind: str = "scan"  # scan | automated
+    execution_id: int | None = None
 
 
 @dataclass
@@ -91,16 +93,28 @@ class WorkerPool:
             self._safe("housekeeping", self._housekeeping)
         self._heartbeat()
         started = 0
-        while len(self.active_job_ids()) < self.concurrency and not self.stop_event.is_set():
+        while self.active_count() < self.concurrency and not self.stop_event.is_set():
             claimed = self._safe("claim", self._claim_one)
-            if not claimed:
+            if claimed:
+                started += 1
+                continue
+            claimed_auto = self._safe("claim_auto", self._claim_automated)
+            if not claimed_auto:
                 break
             started += 1
         return started
 
     def active_job_ids(self) -> list[int]:
         with self._lock:
-            return [a.job_id for a in self._active.values() if a.thread.is_alive()]
+            return [
+                a.job_id
+                for a in self._active.values()
+                if a.thread.is_alive() and a.kind == "scan"
+            ]
+
+    def active_count(self) -> int:
+        with self._lock:
+            return sum(1 for a in self._active.values() if a.thread.is_alive())
 
     def wait_idle(self, timeout: float = 30.0) -> bool:
         deadline = time.monotonic() + timeout
@@ -115,10 +129,15 @@ class WorkerPool:
     # ------------------------------------------------------------------ steps
     def _housekeeping(self) -> None:
         from attestra import services
+        from attestra.automated_vapt.core import orchestrator as orch
 
         with db.session() as s:
             durable.recover_interrupted_jobs(s, exclude_worker_id=self.worker_id)
             durable.resume_queued_jobs(s)
+            try:
+                orch.recover_stale_executions(s)
+            except Exception:  # noqa: BLE001
+                pass
             services.enqueue_due_schedules(s, actor=f"worker:{self.worker_id}")
 
     def _heartbeat(self, force: bool = False) -> None:
@@ -156,7 +175,7 @@ class WorkerPool:
 
     def _claim_one(self) -> bool:
         with self._lock:
-            busy = {a.tool for a in self._active.values() if a.thread.is_alive()}
+            busy = {a.tool for a in self._active.values() if a.thread.is_alive() and a.kind == "scan"}
         exclude = sorted(busy & SERIAL_TOOLS)
         with db.session() as s:
             job = durable.claim_job(s, self.worker_id, exclude_tools=exclude)
@@ -166,12 +185,74 @@ class WorkerPool:
             run = s.get(ScanRun, job.scan_run_id)
             tool = run.tool if run else ""
         # Claim committed (session closed) before the scan thread opens its own session.
-        t = threading.Thread(target=self._run, args=(job_id,), name=f"attestra-job-{job_id}", daemon=True)
+        thr = threading.Thread(target=self._run, args=(job_id,), name=f"attestra-job-{job_id}", daemon=True)
         with self._lock:
-            self._active[job_id] = _Active(job_id=job_id, tool=tool, thread=t)
-        self.log(f"job {job_id} started ({tool or 'unknown tool'}); running {len(self.active_job_ids()) + 1}/{self.concurrency}")
-        t.start()
+            self._active[job_id] = _Active(job_id=job_id, tool=tool, thread=thr, kind="scan")
+        self.log(
+            f"job {job_id} started ({tool or 'unknown tool'}); "
+            f"running {self.active_count() + 1}/{self.concurrency}"
+        )
+        thr.start()
         return True
+
+    def _claim_automated(self) -> bool:
+        """Claim one QUEUED Elite automated execution and run it off the HTTP request."""
+        from attestra import config
+        from attestra.automated_vapt.core import orchestrator as orch
+
+        if not getattr(config, "AUTOMATED_VAPT_ENABLED", False):
+            return False
+        with self._lock:
+            if any(a.kind == "automated" and a.thread.is_alive() for a in self._active.values()):
+                return False
+        with db.session() as s:
+            ex = orch.claim_queued_execution(s, worker_id=self.worker_id)
+            if ex is None:
+                return False
+            xid = ex.id
+            actor = ex.requested_by or f"worker:{self.worker_id}"
+        key = -xid
+        thr = threading.Thread(
+            target=self._run_automated,
+            args=(xid, actor),
+            name=f"attestra-auto-{xid}",
+            daemon=True,
+        )
+        with self._lock:
+            self._active[key] = _Active(
+                job_id=key, tool="automated_vapt", thread=thr, kind="automated", execution_id=xid
+            )
+        self.log(
+            f"automated execution {xid} claimed; running {self.active_count() + 1}/{self.concurrency}"
+        )
+        thr.start()
+        return True
+
+    def _run_automated(self, execution_id: int, actor: str) -> None:
+        from attestra.automated_vapt.core import orchestrator as orch
+
+        try:
+            with db.session() as s:
+                orch.run_execution(
+                    s,
+                    execution_id,
+                    actor=actor,
+                    principal=None,
+                    already_running=True,
+                )
+        except Exception as exc:  # noqa: BLE001
+            tb = traceback.format_exc()
+            self.log(f"automated execution {execution_id} crashed: {exc}\n{tb}")
+            self._safe("fail_auto", self._fail_automated, execution_id, str(exc))
+
+    def _fail_automated(self, execution_id: int, error: str) -> None:
+        from attestra.automated_vapt.core import execution_manager as exec_mgr
+        from attestra.models import AutomatedTestExecution
+
+        with db.session() as s:
+            ex = s.get(AutomatedTestExecution, execution_id)
+            if ex is not None and ex.status == "RUNNING":
+                exec_mgr.transition(ex, "FAILED", error=f"worker error: {error}"[:500])
 
     def _run(self, job_id: int) -> None:
         runner = self.run_job or durable.run_one_job
@@ -199,18 +280,35 @@ class WorkerPool:
 
     def _reap(self) -> None:
         with self._lock:
-            done = [jid for jid, a in self._active.items() if not a.thread.is_alive()]
-            for jid in done:
+            done_items = [(jid, a) for jid, a in self._active.items() if not a.thread.is_alive()]
+            for jid, _a in done_items:
                 self._active.pop(jid, None)
-        for jid in done:
+        for jid, a in done_items:
             if jid in self._shutdown_ids:
-                self._safe("requeue", self._requeue_after_shutdown, jid)
+                self._safe("requeue", self._requeue_after_shutdown, jid, a)
             else:
-                self.log(f"job {jid} finished")
+                label = (
+                    f"automated execution {a.execution_id}"
+                    if a.kind == "automated"
+                    else f"job {jid}"
+                )
+                self.log(f"{label} finished")
 
-    def _requeue_after_shutdown(self, job_id: int) -> None:
-        """A scan stopped by Ctrl+C (not by a user cancel) goes back to the queue."""
+    def _requeue_after_shutdown(self, job_id: int, active: _Active | None = None) -> None:
+        """A scan/automated run stopped by Ctrl+C goes back to the queue."""
         self._shutdown_ids.discard(job_id)
+        if active is not None and active.kind == "automated" and active.execution_id:
+            from attestra.models import AutomatedTestExecution
+
+            with db.session() as s:
+                ex = s.get(AutomatedTestExecution, active.execution_id)
+                if ex is not None and ex.status == "RUNNING":
+                    ex.status = "QUEUED"
+                    ex.started_at = None
+                    ex.ended_at = None
+                    ex.error = "re-queued after worker stop"
+                    self.log(f"automated execution {active.execution_id} put back in the queue")
+            return
         with db.session() as s:
             job = s.get(Job, job_id)
             if job is None or job.cancel_requested:
@@ -226,21 +324,25 @@ class WorkerPool:
 
     def shutdown(self) -> None:
         self.stop_event.set()
-        ids = self.active_job_ids()
-        for jid in ids:
-            self._shutdown_ids.add(jid)
-            durable.signal_job_cancel(jid)
+        with self._lock:
+            actives = list(self._active.values())
+        for a in actives:
+            if not a.thread.is_alive():
+                continue
+            self._shutdown_ids.add(a.job_id)
+            if a.kind == "scan":
+                durable.signal_job_cancel(a.job_id)
         try:
             deadline = time.monotonic() + SHUTDOWN_JOIN_S
-            while self.active_job_ids() and time.monotonic() < deadline:
+            while self.active_count() and time.monotonic() < deadline:
                 time.sleep(0.2)
         except KeyboardInterrupt:
             self.log("forced stop: running jobs will be recovered on the next start")
             return
         self._reap()
-        left = self.active_job_ids()
+        left = self.active_count()
         if left:
-            self.log(f"{len(left)} job(s) still stopping; they will be recovered on the next start")
+            self.log(f"{left} job(s) still stopping; they will be recovered on the next start")
 
     def _safe(self, what: str, fn, *args):
         try:

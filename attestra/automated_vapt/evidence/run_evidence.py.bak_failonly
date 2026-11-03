@@ -1,0 +1,234 @@
+"""Per-run evidence files for automated security testing.
+
+Every run saves its browser screenshots and an Attestra-rendered two-panel
+request/response PNG (from the redacted HTTP pair) under
+``DATA_DIR/raw/automated-<execution id>/``, whether or not a finding was created.
+The engagement page shows them as thumbnails and the technical report embeds them.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import logging
+import re
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+from attestra import config
+
+log = logging.getLogger(__name__)
+
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,150}\.png$")
+MAX_EMBED_BYTES = 5 * 1024 * 1024
+MAX_REPORT_RUNS = 20
+
+_PASS = {"PASSED", "NOT_VULNERABLE"}
+_FAIL = {"FAILED", "CONFIRMED", "FINDING", "VULNERABLE"}
+_MUTED = {"DEFERRED", "SKIPPED", "NOT_RUN", "CANCELLED", "QUEUED"}
+
+
+def run_dir(execution_id: int) -> Path:
+    """Folder holding one run's evidence images (same raw dir as other scans)."""
+    return Path(config.DATA_DIR) / "raw" / f"automated-{int(execution_id)}"
+
+
+def status_class(status: str | None) -> str:
+    """CSS-ish bucket for a status badge: ok, bad, muted or warn."""
+    st = (status or "").strip().upper()
+    if st in _PASS or st == "COMPLETED":
+        return "ok"
+    if st in _FAIL:
+        return "bad"
+    if st in _MUTED:
+        return "muted"
+    return "warn"
+
+
+def _safe_stem(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", str(text or "")).strip("_")[:60] or "case"
+
+
+def _write(folder: Path, name: str, data: bytes) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(data)
+
+
+def persist_case_evidence(
+    execution_id: int,
+    test_id: str,
+    *,
+    http_pairs: list[Any] | None = None,
+    screenshots: list[tuple[str, bytes]] | None = None,
+) -> list[str]:
+    """Save one case's screenshots and two-panel HTTP visuals; return file names."""
+    from attestra.automated_vapt.integrations.attestra_findings import _coerce_pair
+
+    folder = run_dir(execution_id)
+    stem = _safe_stem(test_id)
+    saved: list[str] = []
+    for idx, (_name, data) in enumerate(screenshots or [], 1):
+        if not data or not bytes(data[:8]).startswith(b"\x89PNG"):
+            continue
+        fname = f"{stem}_screenshot_{idx}.png"
+        try:
+            _write(folder, fname, bytes(data))
+            saved.append(fname)
+        except OSError:
+            log.exception("could not save screenshot for run %s case %s", execution_id, test_id)
+    idx = 0
+    for raw in http_pairs or []:
+        pair = _coerce_pair(raw)
+        if pair is None:
+            continue
+        idx += 1
+        try:
+            from attestra.automated_vapt.evidence.request_response_renderer import render_http_pair_png
+
+            png = render_http_pair_png(pair.redacted())
+            fname = f"{stem}_http_{idx}.png"
+            _write(folder, fname, png)
+            saved.append(fname)
+        except Exception:  # noqa: BLE001 - evidence must never fail the run
+            log.exception("could not render HTTP visual for run %s case %s", execution_id, test_id)
+    return saved
+
+
+def safe_evidence_path(execution_id: int, filename: str) -> Path | None:
+    """Resolve ``filename`` inside the run folder, or None (traversal-safe)."""
+    name = str(filename or "")
+    if not _SAFE_NAME.match(name) or ".." in name:
+        return None
+    base = run_dir(execution_id).resolve()
+    path = (base / name).resolve()
+    if path.parent != base or not path.is_file():
+        return None
+    return path
+
+
+def evidence_url(engagement_id: int, execution_id: int, filename: str) -> str:
+    return (
+        f"/engagements/{int(engagement_id)}/automated-vapt/executions/"
+        f"{int(execution_id)}/evidence/{quote(filename)}"
+    )
+
+
+def _label(fname: str) -> str:
+    if "_screenshot_" in fname:
+        return "Browser screenshot"
+    if "_http_" in fname:
+        return "Two-panel HTTP visual"
+    return "Evidence image"
+
+
+def _title_for(test_id: str) -> str:
+    try:
+        from attestra.automated_vapt.core.test_registry import get_test_case
+
+        case = get_test_case(test_id)
+        return case.title if case is not None else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _short(text: Any, cap: int = 300) -> str:
+    s = " ".join(str(text or "").split())
+    return s if len(s) <= cap else s[: cap - 3] + "..."
+
+
+def case_rows(
+    result: dict[str, Any] | None,
+    engagement_id: int,
+    execution_id: int,
+    *,
+    embed: bool = False,
+) -> list[dict[str, Any]]:
+    """Display rows for a run's cases (UI links, or report data URIs when embed=True)."""
+    rows: list[dict[str, Any]] = []
+    for case in (result or {}).get("cases") or []:
+        if not isinstance(case, dict):
+            continue
+        tid = str(case.get("test_id") or "")
+        status = str(case.get("status") or "")
+        validation = case.get("validation") if isinstance(case.get("validation"), dict) else {}
+        vstatus = str(validation.get("status") or "")
+        evidence: list[dict[str, Any]] = []
+        for fname in case.get("evidence_files") or []:
+            item: dict[str, Any] = {"name": fname, "label": _label(str(fname))}
+            if embed:
+                path = safe_evidence_path(execution_id, str(fname))
+                if path is None:
+                    continue
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    continue
+                if len(data) > MAX_EMBED_BYTES:
+                    continue
+                item["sha256"] = hashlib.sha256(data).hexdigest()
+                item["data_uri"] = "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+            else:
+                item["url"] = evidence_url(engagement_id, execution_id, str(fname))
+            evidence.append(item)
+        rows.append(
+            {
+                "test_id": tid,
+                "title": _title_for(tid),
+                "status": status,
+                "status_class": status_class(status),
+                "validation_status": vstatus,
+                "detail": _short(case.get("detail")),
+                "finding_id": case.get("finding_id"),
+                "evidence": evidence,
+            }
+        )
+    return rows
+
+
+def pretty_result(result: Any) -> str:
+    try:
+        return json.dumps(result, indent=2, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(result)
+
+
+def report_runs(s, engagement_id: int) -> list[dict[str, Any]]:
+    """Finished automated runs for the technical report, images embedded as data URIs."""
+    from sqlalchemy import select
+
+    from attestra.models import AutomatedTestExecution
+
+    q = (
+        select(AutomatedTestExecution)
+        .where(
+            AutomatedTestExecution.engagement_id == engagement_id,
+            AutomatedTestExecution.status.in_(("COMPLETED", "FAILED")),
+        )
+        .order_by(AutomatedTestExecution.id.desc())
+        .limit(MAX_REPORT_RUNS)
+    )
+    out: list[dict[str, Any]] = []
+    for ex in reversed(list(s.scalars(q))):
+        try:
+            result = json.loads(ex.result_json or "{}")
+        except json.JSONDecodeError:
+            result = {}
+        cases = case_rows(result, ex.engagement_id, ex.id, embed=True)
+        if not cases and not ex.error:
+            continue
+        ended = ex.ended_at.strftime("%Y-%m-%d %H:%M UTC") if ex.ended_at else ""
+        out.append(
+            {
+                "id": ex.id,
+                "target": ex.target_base_url,
+                "profile": ex.profile,
+                "status": ex.status,
+                "error": ex.error or "",
+                "ended_at": ended,
+                "cases": cases,
+                "image_count": sum(len(c["evidence"]) for c in cases),
+            }
+        )
+    return out

@@ -19,6 +19,7 @@ from attestra import __version__, audit, config, services
 from attestra.compliance import load_library, objectives_for
 from attestra.dedup import detected_by_label
 from attestra.models import (
+    ASSET_KINDS,
     DISPLAY_LABELS,
     OPEN_STATUSES,
     SEVERITIES,
@@ -152,6 +153,22 @@ def _distribution_list(eng: Engagement) -> list[dict]:
     return rows
 
 
+def _test_type_label(key: str) -> str:
+    """Full display name for a test-type key (e.g. web_dast -> Web application scan)."""
+    meta = TEST_TYPES.get(key or "")
+    if meta:
+        return meta["label"]
+    return DISPLAY_LABELS.get(key or "") or (key or "").replace("_", " ").strip().capitalize()
+
+
+def _asset_kind_label(kind: str) -> str:
+    """Human asset type (e.g. web_app -> Web application), without the input hint."""
+    label = ASSET_KINDS.get(kind or "")
+    if label:
+        return label.split(" (", 1)[0].strip()
+    return (kind or "").replace("_", " ").strip().capitalize()
+
+
 def _test_types_and_standards(eng: Engagement) -> tuple[list[dict], list[str]]:
     """Unique authorized test types and standards across engagement assets."""
     seen: dict[str, dict] = {}
@@ -169,7 +186,13 @@ def _test_types_and_standards(eng: Engagement) -> tuple[list[dict], list[str]]:
 
 
 def _retests_for_engagement(s: Session, engagement_id: int, findings: list) -> dict[int, list[Retest]]:
-    ids = [f.id for f in findings]
+    from attestra.reports.consolidate import member_ids
+
+    owner: dict[int, int] = {}
+    for f in findings:
+        for mid in member_ids(f):
+            owner.setdefault(mid, f.id)
+    ids = list(owner)
     if not ids:
         return {}
     rows = list(
@@ -177,7 +200,7 @@ def _retests_for_engagement(s: Session, engagement_id: int, findings: list) -> d
     )
     out: dict[int, list[Retest]] = {}
     for row in rows:
-        out.setdefault(row.finding_id, []).append(row)
+        out.setdefault(owner.get(row.finding_id, row.finding_id), []).append(row)
     return out
 
 
@@ -209,6 +232,71 @@ def _screenshot_caption(e) -> str:
     return " · ".join(parts)
 
 
+def _is_automated_vapt_evidence(e) -> bool:
+    """True for elite automated captures (source_tool set, or legacy elite markers)."""
+    if (getattr(e, "source_tool", "") or "") == "automated_vapt":
+        return True
+    note = getattr(e, "note", None) or ""
+    fn = getattr(e, "filename", None) or ""
+    if "elite automated" in note.lower():
+        return True
+    if "elite_http_pair_" in fn:
+        return True
+    if e.kind == "http_pair" and note.startswith("proof:") and "elite" in note.lower():
+        return True
+    return False
+
+
+def _filter_automated_vapt_evidence(finding, items: list) -> list:
+    """When a finding has many automated_vapt attachments, keep only those for its location.
+
+    Early T19-T21 runs attached every capture in the execution onto the finding. The
+    technical report should show the failing endpoint's proof, not dozens of passed ones.
+    Non-automated evidence is always kept. Small attachment sets (<=4) are left alone.
+    """
+    loc = (getattr(finding, "location", None) or "").strip()
+    if not loc or not items:
+        return items
+    try:
+        from urllib.parse import urlsplit, unquote
+
+        needle = unquote(urlsplit(loc).path or loc).rstrip("/")
+    except Exception:  # noqa: BLE001
+        needle = loc
+    if len(needle) < 8:
+        return items
+
+    auto: list = []
+    other: list = []
+    for e in items:
+        if _is_automated_vapt_evidence(e):
+            auto.append(e)
+        else:
+            other.append(e)
+    if len(auto) <= 4:
+        return items
+
+    matching_pair_ids: set[int] = set()
+    for e in auto:
+        if e.kind == "http_pair" and needle in (e.note or ""):
+            matching_pair_ids.add(e.id)
+    if not matching_pair_ids:
+        # Fall back: keep nothing from the automated flood rather than all of it.
+        return other
+
+    kept: list = []
+    for e in auto:
+        if e.kind == "http_pair" and e.id in matching_pair_ids:
+            kept.append(e)
+        elif e.kind == "screenshot":
+            fn = e.filename or ""
+            if any(f"elite_http_pair_{pid}_" in fn for pid in matching_pair_ids):
+                kept.append(e)
+            elif needle in (e.note or ""):
+                kept.append(e)
+    return other + kept
+
+
 def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
     """Embed screenshot evidence as data URIs when the file is present and hash-matches.
 
@@ -219,7 +307,7 @@ def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
     for f in findings:
         screenshots = [
             e
-            for e in (f.evidence or [])
+            for e in _filter_automated_vapt_evidence(f, list(f.evidence or []))
             if e.kind == "screenshot" and (getattr(e, "capture_status", None) or "success") == "success"
         ]
         parents_with_annotated = {
@@ -287,7 +375,13 @@ def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
     """Scanner observations for report attribution (canonical findings only once)."""
     from attestra.models import FindingObservation
 
-    ids = [f.id for f in findings]
+    from attestra.reports.consolidate import member_ids
+
+    owner: dict[int, int] = {}
+    for f in findings:
+        for mid in member_ids(f):
+            owner.setdefault(mid, f.id)
+    ids = list(owner)
     if not ids:
         return {}
     rows = list(
@@ -298,8 +392,14 @@ def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
         )
     )
     out: dict[int, list] = {}
+    seen: set[tuple] = set()
     for o in rows:
-        out.setdefault(o.finding_id, []).append(o)
+        key_id = owner.get(o.finding_id, o.finding_id)
+        sig = (key_id, (o.tool or "").lower(), o.original_id or "", o.location or "")
+        if sig in seen:
+            continue  # same scanner rule on the same URL: list it once
+        seen.add(sig)
+        out.setdefault(key_id, []).append(o)
     return out
 
 
@@ -368,7 +468,7 @@ def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
     out: dict[int, list[dict]] = {}
     for f in findings:
         pairs: list[dict] = []
-        for e in f.evidence or []:
+        for e in _filter_automated_vapt_evidence(f, list(f.evidence or [])):
             if e.kind != "http_pair":
                 continue
             path = Path(e.path)
@@ -506,7 +606,11 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     all_findings = services.list_findings(s, engagement_id)
     # Cross-tool merge: one entry per issue; related rows are listed under Sources.
     findings = crossmerge.collapse(s, all_findings)
-    reportable = [f for f in findings if f.status != "false_positive"]
+    # Report-only consolidation (DB untouched): one entry per issue, so per-URL scanner
+    # rows and the same issue seen by several tools are not repeated in the report.
+    from attestra.reports.consolidate import consolidate, member_ids
+
+    reportable = consolidate(s, [f for f in findings if f.status != "false_positive"])
     open_f = [f for f in reportable if f.status in OPEN_STATUSES]
     by_sev = Counter(f.severity for f in open_f)
     prev_by_sev = _previous_open_by_sev(s, eng)
@@ -528,7 +632,10 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     if include_comments:
         from attestra.comments import comments_for_findings
 
-        comments_by_finding = comments_for_findings(s, [f.id for f in reportable])
+        owner = {mid: f.id for f in reportable for mid in member_ids(f)}
+        raw_comments = comments_for_findings(s, list(owner))
+        for mid, rows in raw_comments.items():
+            comments_by_finding.setdefault(owner.get(mid, mid), []).extend(rows)
 
     from attestra.library import service as library_service
 
@@ -539,6 +646,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     tmpl_cfg = load_template_config()
     embeds = _evidence_embeds(reportable)
     open_critical_high = sum(1 for f in open_f if f.severity in ("critical", "high"))
+    tls_all = services.tls_summaries(s, engagement_id)
+    tls_scanned = [t for t in tls_all if t.get("scanned")]
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -548,7 +657,10 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "evidence_limitations": _evidence_limitations(reportable),
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
-        "tls_summaries": services.tls_summaries(s, engagement_id),
+        # Only targets testssl actually scanned; the TLS section is omitted when empty.
+        "tls_summaries": tls_scanned,
+        "test_type_label": _test_type_label,
+        "asset_kind_label": _asset_kind_label,
         "site_grades": site_grades,
         "open_findings": open_f,
         "by_sev": by_sev,
@@ -584,6 +696,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "evidence_embeds": embeds,
         "figures": _figures_list(embeds),
         "http_pairs": _http_pair_embeds(reportable),
+        "automated_runs": _automated_runs(s, engagement_id),
         "cover_title": branding["cover_title"],
         "logo": branding["logo"],
         "cvss_legend": cvss_legend(),
@@ -601,6 +714,16 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }
+
+
+def _automated_runs(s: Session, engagement_id: int) -> list[dict]:
+    """Automated testing runs with their saved evidence images (empty when none)."""
+    try:
+        from attestra.automated_vapt.evidence.run_evidence import report_runs
+
+        return report_runs(s, engagement_id)
+    except Exception:  # noqa: BLE001 - never break a report over optional evidence
+        return []
 
 
 def _ca_report_context(s: Session) -> dict:
@@ -677,7 +800,9 @@ def generate_report(
         ctx["unresolved"] = [
             f for f in ctx["findings"] if f.status in OPEN_STATUSES or f.status in ("validated", "fixed")
         ]
-        ctx["findings_by_id"] = {f.id: f for f in ctx["findings"]}
+        from attestra.reports.consolidate import member_ids as _mids
+
+        ctx["findings_by_id"] = {mid: f for f in ctx["findings"] for mid in _mids(f)}
     if kind == "owasp_top10":
         from attestra.compliance.owasp import (
             get_llm_top10,

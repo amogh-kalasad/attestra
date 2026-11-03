@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from attestra import db, services
@@ -119,17 +119,25 @@ def get_one_execution(xid: int, principal=Depends(_principal)):
 
 @api_router.post("/executions/{xid}/run")
 def run_one_execution(xid: int, principal=Depends(_principal)):
+    """Mark/keep execution QUEUED for the worker (does not run in the HTTP request)."""
     if not has_permission(principal.role, "engagement.write"):
         raise HTTPException(403, "permission denied: engagement.write")
     try:
         with db.session() as s:
-            ex = orch.run_execution(
-                s,
-                xid,
-                actor=getattr(principal, "actor", None) or getattr(principal, "username", "") or "api",
-                principal=principal,
+            ex = orch.get_execution(s, xid, principal=principal)
+            if ex.status == "CANCELLED":
+                raise services.ServiceError("execution was cancelled")
+            if ex.status not in ("QUEUED", "RUNNING"):
+                raise services.ServiceError(f"execution status {ex.status} cannot be started")
+            # Already QUEUED or RUNNING — worker claims QUEUED; no sync orch.run_execution.
+            out = orch.execution_public_dict(ex)
+            out["queued_for_worker"] = ex.status == "QUEUED"
+            out["note"] = (
+                "queued for worker"
+                if ex.status == "QUEUED"
+                else "already running on worker"
             )
-            return orch.execution_public_dict(ex)
+            return out
     except services.ServiceError as e:
         raise _err(e) from e
 
@@ -192,16 +200,56 @@ async def ui_create_execution(
         )
 
 
+@ui_router.get("/engagements/{eid}/automated-vapt/executions/{xid}/evidence/{filename}")
+def ui_execution_evidence(request: Request, eid: int, xid: int, filename: str):
+    """Session-auth view of one saved run evidence image (only files in that run's folder)."""
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    if not has_permission(principal.role, "engagement.read"):
+        raise HTTPException(403, "not allowed")
+    if not services.client_may_download_evidence(principal.role, "screenshot"):
+        raise HTTPException(403, "not allowed")
+    from attestra.automated_vapt.evidence.run_evidence import safe_evidence_path
+
+    try:
+        with db.session() as s:
+            ex = orch.get_execution(s, xid, principal=principal)
+            if ex.engagement_id != eid:
+                raise HTTPException(404, "evidence not found")
+    except (services.ServiceError, LookupError):
+        raise HTTPException(404, "evidence not found") from None
+    path = safe_evidence_path(xid, filename)
+    if path is None:
+        raise HTTPException(404, "evidence not found")
+    return FileResponse(
+        str(path),
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @ui_router.post("/engagements/{eid}/automated-vapt/executions/{xid}/run")
 def ui_run_execution(request: Request, eid: int, xid: int):
+    """Keep execution QUEUED; the background worker claims and runs it (non-blocking)."""
     principal, redirect = _ui_principal(request)
     if redirect is not None:
         return redirect
     assert principal is not None
     try:
         with db.session() as s:
-            orch.run_execution(s, xid, actor=principal.username, principal=principal)
-        return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
+            ex = orch.get_execution(s, xid, principal=principal)
+            if ex.engagement_id != eid:
+                raise services.ServiceError("execution not found")
+            if ex.status == "CANCELLED":
+                raise services.ServiceError("execution was cancelled")
+            if ex.status not in ("QUEUED", "RUNNING"):
+                raise services.ServiceError(f"execution status {ex.status} cannot be started")
+        return RedirectResponse(
+            f"/engagements/{eid}?msg=Automated+test+queued+for+worker#automated-testing",
+            status_code=303,
+        )
     except services.ServiceError as e:
         return RedirectResponse(
             f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",

@@ -596,7 +596,16 @@ def _elite_executions(s, eid: int, principal) -> list[dict]:
     try:
         from attestra.automated_vapt.core import orchestrator as orch
 
-        return [orch.execution_public_dict(r) for r in orch.list_executions(s, eid, principal=principal)]
+        from attestra.automated_vapt.evidence import run_evidence
+
+        rows = []
+        for r in orch.list_executions(s, eid, principal=principal):
+            d = orch.execution_public_dict(r)
+            d["status_class"] = run_evidence.status_class(d.get("status"))
+            d["cases_view"] = run_evidence.case_rows(d.get("result"), eid, r.id)
+            d["result_pretty"] = run_evidence.pretty_result(d.get("result"))
+            rows.append(d)
+        return rows
     except Exception:  # noqa: BLE001
         return []
 

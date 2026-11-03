@@ -195,6 +195,24 @@ def badge_of(node) -> tuple[str, str] | None:
 
 # --------------------------------------------------------------------------- docx helpers
 
+def bookmark_name(name: str) -> str:
+    """Word-safe bookmark name for an HTML anchor (letters, digits, underscore; <=40)."""
+    n = re.sub(r"[^A-Za-z0-9_]", "_", name or "")
+    if not n or not n[0].isalpha():
+        n = "b_" + n
+    return n[:40]
+
+
+def _named_anchors(node) -> list[str]:
+    out: list[str] = []
+    for c in getattr(node, "children", []):
+        if isinstance(c, Node):
+            if c.tag == "a" and c.attrs.get("name"):
+                out.append(c.attrs["name"])
+            out.extend(_named_anchors(c))
+    return out
+
+
 def _qn(tag):
     from docx.oxml.ns import qn
     return qn(tag)
@@ -456,6 +474,22 @@ class Builder:
             fmt["bold"] = True
         if node.tag == "a" and node.attrs.get("href", "").startswith("http"):
             fmt["colour"] = "1D4ED8"
+        if node.tag == "a" and node.attrs.get("name"):
+            self.bookmark(par, node.attrs["name"])
+        href = node.attrs.get("href", "") if node.tag == "a" else ""
+        if href.startswith("#") and len(href) > 1:
+            # Internal link: wrap the runs in a w:hyperlink pointing at the bookmark.
+            fmt["colour"] = "1D4ED8"
+            before = len(par._p)
+            for c in node.children:
+                self.runs(par, c, fmt, label)
+            new = [el for el in list(par._p)[before:] if el.tag == _qn("w:r")]
+            if new:
+                link = _el("w:hyperlink", **{"w__anchor": bookmark_name(href[1:]), "w__history": 1})
+                new[0].addprevious(link)
+                for el in new:
+                    link.append(el)
+            return
         for c in node.children:
             self.runs(par, c, fmt, label)
 
@@ -519,7 +553,20 @@ class Builder:
         level = max(1, min(3, level))
         h = self.doc.add_heading(txt, level=level)
         self.headings.append((level, txt))
+        for name in _named_anchors(node):
+            self.bookmark(h, name)
         return h
+
+    def bookmark(self, par, name: str) -> None:
+        """Bookmark target so internal '#name' links (List of figures) jump in Word."""
+        seen = self.__dict__.setdefault("_bm_seen", set())
+        nm = bookmark_name(name)
+        if nm in seen:
+            return
+        seen.add(nm)
+        bid = str(len(seen))
+        par._p.append(_el("w:bookmarkStart", **{"w__id": bid, "w__name": nm}))
+        par._p.append(_el("w:bookmarkEnd", **{"w__id": bid}))
 
     def blocks(self, node, ctx=None):
         """Render children of node as block content."""

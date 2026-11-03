@@ -1,0 +1,207 @@
+"""Automated testing: per-run evidence files, evidence route, UI and report section."""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from attestra import config, db, services
+from attestra.automated_vapt.core import orchestrator as orch
+from attestra.automated_vapt.evidence import run_evidence
+from tests.automated_vapt.fixtures import create_secure_app
+
+_TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+    b"\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.fixture
+def av_flag(monkeypatch):
+    monkeypatch.setattr(config, "AUTOMATED_VAPT_ENABLED", True)
+
+
+def _eng(s, tenant: str = "Run Evidence Client"):
+    today = date.today()
+    e = services.create_engagement(
+        s,
+        tenant=tenant,
+        name="Run evidence",
+        type="vapt",
+        frameworks=["pci_dss_4"],
+        window_start=today - timedelta(days=1),
+        window_end=today + timedelta(days=30),
+        actor="tester",
+    )
+    services.add_authorization(
+        s,
+        e.id,
+        filename="roe.txt",
+        data=b"authorized for local testing",
+        signer="Client",
+        signed_on=today - timedelta(days=1),
+        expires_on=today + timedelta(days=30),
+        rules_of_engagement="Local mocks only.",
+        environments=["dev"],
+        actor="tester",
+    )
+    a = services.add_asset(
+        s,
+        e.id,
+        kind="web_app",
+        identifier="http://localhost:8765/",
+        name="Local mock",
+        environment="dev",
+        actor="tester",
+    )
+    return e, a
+
+
+@pytest.fixture
+def passing_run(fresh_db, av_flag):
+    """A completed T01+T02+SCOPE_SMOKE run against the secure mock (no findings)."""
+    with db.session() as s:
+        e, a = _eng(s)
+        ex = orch.create_execution(
+            s,
+            engagement_id=e.id,
+            asset_id=a.id,
+            test_case_ids=["SCOPE_SMOKE", "T01", "T02"],
+            actor="tester",
+            allow_private=True,
+        )
+        ids = {"eid": e.id, "xid": ex.id, "tenant_id": e.tenant_id}
+    secure = TestClient(create_secure_app(), base_url="http://localhost:8765")
+    with db.session() as s:
+        done = orch.run_execution(
+            s,
+            ids["xid"],
+            actor="tester",
+            extra={"httpx_client": secure, "browser_capture_fn": lambda _u: _TINY_PNG},
+        )
+        assert done.status == "COMPLETED"
+        ids["result"] = orch.execution_public_dict(done)["result"]
+    return ids
+
+
+def _login(tenant_id: int, username: str = "ev-lead", role: str = "lead") -> TestClient:
+    from attestra.api import app
+    from attestra.auth.keys import create_user
+
+    with db.session() as s:
+        u = create_user(s, username=username, role=role, password="pw-1234567890", display_name=username)
+        u.tenant_id = tenant_id
+    c = TestClient(app)
+    c.post("/login", data={"username": username, "password": "pw-1234567890"}, follow_redirects=False)
+    return c
+
+
+def test_passing_run_saves_evidence_files(passing_run):
+    cases = {c["test_id"]: c for c in passing_run["result"]["cases"]}
+    assert cases["T01"]["status"] == "PASSED"
+    assert cases["T02"]["status"] == "PASSED"
+    assert "finding_id" not in cases["T01"] and "finding_id" not in cases["T02"]
+    folder = Path(config.DATA_DIR) / "raw" / f"automated-{passing_run['xid']}"
+    assert folder == run_evidence.run_dir(passing_run["xid"])
+    t01 = cases["T01"]["evidence_files"]
+    t02 = cases["T02"]["evidence_files"]
+    assert t01 == ["T01_http_1.png"]
+    assert t02 == ["T02_screenshot_1.png"]
+    for name in t01 + t02:
+        data = (folder / name).read_bytes()
+        assert data.startswith(b"\x89PNG")
+    assert (folder / "T02_screenshot_1.png").read_bytes() == _TINY_PNG
+    # Screenshot name now carries the real execution id.
+    assert f"_x{passing_run['xid']}_" in cases["T02"]["screenshot"]["filename"]
+    assert "evidence_files" not in cases["SCOPE_SMOKE"]
+
+
+def test_safe_evidence_path_rejects_traversal(passing_run):
+    xid = passing_run["xid"]
+    assert run_evidence.safe_evidence_path(xid, "T01_http_1.png") is not None
+    for bad in ("../T01_http_1.png", "..\\x.png", "/etc/passwd", "x.txt", "", "..png", "a/../b.png", "missing.png"):
+        assert run_evidence.safe_evidence_path(xid, bad) is None
+    # Another run's folder is never reachable through this run id.
+    assert run_evidence.safe_evidence_path(xid + 1, "T01_http_1.png") is None
+
+
+def test_evidence_route_auth_and_traversal(passing_run):
+    eid, xid = passing_run["eid"], passing_run["xid"]
+    url = f"/engagements/{eid}/automated-vapt/executions/{xid}/evidence"
+
+    from attestra.api import app
+
+    anon = TestClient(app)
+    r = anon.get(f"{url}/T02_screenshot_1.png", follow_redirects=False)
+    assert r.status_code in (302, 303, 401, 403)
+
+    c = _login(passing_run["tenant_id"])
+    r = c.get(f"{url}/T02_screenshot_1.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content == _TINY_PNG
+    assert c.get(f"{url}/T01_http_1.png").status_code == 200
+
+    for bad in ("..%2F..%2Fattestra.db", "..%5C..%5Cx.png", "nope.png", "x.txt"):
+        assert c.get(f"{url}/{bad}").status_code == 404, bad
+    # Wrong engagement id for this run.
+    assert c.get(f"/engagements/{eid + 99}/automated-vapt/executions/{xid}/evidence/T01_http_1.png").status_code == 404
+
+
+def test_evidence_route_other_tenant_denied(passing_run):
+    with db.session() as s:
+        other, _a = _eng(s, tenant="Other Tenant Ltd")
+        other_tid = other.tenant_id
+    c = _login(other_tid, username="other-lead")
+    eid, xid = passing_run["eid"], passing_run["xid"]
+    r = c.get(f"/engagements/{eid}/automated-vapt/executions/{xid}/evidence/T01_http_1.png")
+    assert r.status_code == 404
+
+
+def test_engagement_page_shows_case_table(passing_run):
+    c = _login(passing_run["tenant_id"])
+    r = c.get(f"/engagements/{passing_run['eid']}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Show failed only" in body
+    assert "Raw results" in body
+    assert "av-badge av-ok" in body
+    assert f"/automated-vapt/executions/{passing_run['xid']}/evidence/T02_screenshot_1.png" in body
+    assert "Validation results" not in body
+
+
+def test_report_includes_run_evidence(passing_run):
+    from attestra.reports import generate_report
+
+    with db.session() as s:
+        report = generate_report(s, passing_run["eid"], kind="technical", actor="tester")
+        body = Path(report.path).read_text(encoding="utf-8")
+    assert 'id="automated-testing-evidence"' in body
+    assert "Automated testing evidence" in body
+    assert body.count("data:image/png;base64,") >= 2
+    assert "Fig. AT-" in body
+    assert "T02" in body and "Browser screenshot" in body
+    assert "Two-panel HTTP visual" in body
+
+
+def test_report_without_runs_has_no_section(fresh_db, av_flag):
+    from attestra.reports import generate_report
+
+    with db.session() as s:
+        e, _a = _eng(s)
+        report = generate_report(s, e.id, kind="technical", actor="tester")
+        body = Path(report.path).read_text(encoding="utf-8")
+    assert "automated-testing-evidence" not in body
+
+
+def test_status_class_buckets():
+    assert run_evidence.status_class("PASSED") == "ok"
+    assert run_evidence.status_class("FAILED") == "bad"
+    assert run_evidence.status_class("CONFIRMED") == "bad"
+    assert run_evidence.status_class("FINDING") == "bad"
+    assert run_evidence.status_class("DEFERRED") == "muted"
+    assert run_evidence.status_class("SKIPPED") == "muted"
+    assert run_evidence.status_class("POTENTIAL") == "warn"

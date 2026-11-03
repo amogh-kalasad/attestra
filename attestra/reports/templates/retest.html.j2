@@ -31,9 +31,9 @@
 
 <h2 id="scope">2. Scope</h2>
 <table>
-  <tr><th>Asset</th><th>Kind</th><th>Environment</th><th>Exposure</th></tr>
+  <tr><th>Environment URL</th><th>Type</th><th>Environment</th><th>Exposure</th></tr>
   {% for a in eng.assets %}
-  <tr><td class="mono">{{ a.identifier }}</td><td>{{ a.kind }}</td><td>{{ a.environment }}</td><td>{{ a.exposure }}</td></tr>
+  <tr><td class="mono">{{ a.identifier }}</td><td>{{ asset_kind_label(a.kind) if asset_kind_label is defined else a.kind }}</td><td>{{ a.environment }}</td><td>{{ a.exposure }}</td></tr>
   {% else %}<tr><td colspan="4">No assets recorded.</td></tr>{% endfor %}
 </table>
 
