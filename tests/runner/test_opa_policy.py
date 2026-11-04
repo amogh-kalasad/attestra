@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from attestra.audit import find_events
 from attestra.runner import policy
 
 POLICY_DIR = Path(__file__).resolve().parents[2] / "policy"
@@ -180,10 +181,8 @@ def _web_asset_id(engagement):
 
 
 def test_gate_uses_policy_decision_and_audits(engagement, monkeypatch):
-    from sqlalchemy import select
 
     from attestra import db
-    from attestra.models import AuditEvent
     from attestra.runner import gate
 
     asset_id = _web_asset_id(engagement)
@@ -197,7 +196,7 @@ def test_gate_uses_policy_decision_and_audits(engagement, monkeypatch):
     with db.session() as s:
         with pytest.raises(gate.GateError, match="refused by test policy"):
             gate.check(s, engagement, asset_id, tool="zap", profile="baseline", actor="opa-test")
-        events = list(s.scalars(select(AuditEvent).where(AuditEvent.action == "scan.refused")))
+        events = find_events(s, action="scan.refused")
         assert any(e.actor == "opa-test" for e in events)
     assert set(seen[0]) == set(policy.REQUIRED_FIELDS)
     assert seen[0]["asset_found"] is True

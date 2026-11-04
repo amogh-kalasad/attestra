@@ -9,7 +9,8 @@ import pytest
 from sqlalchemy import select
 
 from attestra import db, services
-from attestra.models import Asset, AuditEvent, utcnow
+from attestra.audit import find_events
+from attestra.models import Asset, utcnow
 from attestra.runner import ownership
 
 
@@ -39,10 +40,8 @@ def test_set_ownership_token_clears_verification_and_audits_suffix(engagement):
         assert out.ownership_verified_at is None
         assert original != reused
 
-        rows = list(
-            s.scalars(
-                select(AuditEvent).where(AuditEvent.action == "asset.ownership_token_set").order_by(AuditEvent.id)
-            )
+        rows = find_events(
+            s, action="asset.ownership_token_set"
         )
         assert len(rows) == 1
         details = rows[0].details or {}
@@ -430,7 +429,7 @@ def test_asset_page_set_token_and_verify_now_routes(engagement, monkeypatch):
     assert "attestra-verify.txt" in page.text
 
     with db.session() as s:
-        from attestra.models import Engagement, TenantOwnershipHost
+        from attestra.models import Engagement
         from attestra.org_ownership import service as org_own
 
         asset = s.get(Asset, aid)

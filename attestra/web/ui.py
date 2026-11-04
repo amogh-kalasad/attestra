@@ -15,9 +15,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
 
-from attestra import __version__, ai_narratives, audit, config, db, services
+from attestra import __version__, ai_narratives, audit, config, services
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
@@ -31,13 +30,12 @@ from attestra.models import (
     OPEN_STATUSES,
     TEST_TYPES,
     Engagement,
-    ImportRun,
-    Report,
     allowed_test_types_for,
     default_tests_for,
     engagement_type_label,
     new_engagement_type_labels,
 )
+from attestra.web import data_access
 
 READ_ONLY_ROLES = frozenset({"client_viewer", "auditor"})
 
@@ -199,24 +197,13 @@ def _actor(request: Request) -> str | None:
 
 
 def _principal(request: Request):
-    from attestra.auth.keys import Principal
     from attestra.auth.session import read_session
-    from attestra.models import User
 
     data = read_session(request.cookies.get(COOKIE))
     if not data or not data.get("uid"):
         return None
-    with db.session() as s:
-        user = s.get(User, int(data["uid"]))
-        if not user or not user.active:
-            return None
-        return Principal(
-            user_id=user.id,
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            tenant_id=user.tenant_id,
-        )
+    with data_access.identity_session() as s:
+        return data_access.principal_for_uid(s, int(data["uid"]))
 
 
 def _org_credits_for(principal, s, tenant_id: int | None = None) -> dict | None:
@@ -245,7 +232,7 @@ def _render(request: Request, template: str, ctx: dict, status_code: int = 200) 
         "org_credits": ctx.get("org_credits"),
     }
     if base["org_credits"] is None and principal is not None:
-        with db.session() as s:
+        with data_access.session() as s:
             base["org_credits"] = _org_credits_for(principal, s)
     return templates.TemplateResponse(request, template, {**base, **ctx}, status_code=status_code)
 
@@ -285,7 +272,7 @@ def _do(request: Request, url: str, anchor: str, ok_msg: str, fn, *args, **kwarg
     if not who:
         return _login_redirect(url)
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             fn(s, *args, **kwargs, actor=who)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor=anchor)
@@ -310,12 +297,11 @@ def login_form(request: Request, next: str = "/"):
 
 @router.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...), next: str = Form("/")):
-    from attestra.auth.keys import authenticate_password
     from attestra.auth.session import issue_session
 
     target = _safe_next(next)
-    with db.session() as s:
-        principal = authenticate_password(s, username, password)
+    with data_access.identity_session() as s:
+        principal = data_access.authenticate_password(s, username, password)
     if not principal:
         return _login_redirect(target, "Invalid username or password.")
     resp = RedirectResponse(target, status_code=303)
@@ -370,9 +356,9 @@ def home(request: Request):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse("/portal", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         rows = []
-        for e in s.scalars(services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())):
+        for e in data_access.list_engagements(s, principal):
             open_f = [f for f in e.findings if f.status in OPEN_STATUSES]
             rows.append({
                 "e": e,
@@ -395,7 +381,7 @@ def sites_dashboard(request: Request):
         return RedirectResponse("/portal", status_code=303)
     sort = (request.query_params.get("sort") or "grade").strip().lower()
     q = (request.query_params.get("q") or "").strip()
-    with db.session() as s:
+    with data_access.session() as s:
         rows = services.list_tenant_sites(s, principal, sort=sort, q=q)
         return _render(request, "sites.html", {"rows": rows, "sort": sort, "q": q})
 
@@ -410,7 +396,7 @@ def false_positive_rates(request: Request):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse("/portal", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         rows = tuning.fp_rate_by_tool(s, services.tenant_ids_for(s, principal))
         return _render(request, "tuning_fp.html", {"rows": rows, "small_sample": SMALL_SAMPLE})
 
@@ -425,7 +411,7 @@ def false_positive_tool_findings(request: Request, tool: str):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse("/portal", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         tenant_ids = services.tenant_ids_for(s, principal)
         findings = tuning.findings_for_tool(s, tool, tenant_ids)
         fp_n = sum(1 for f in findings if f.status == "false_positive")
@@ -489,7 +475,7 @@ def create_engagement(
     if ws and we and we < ws:
         return _back("/engagements/new", error="The test window end must be on or after the start date.")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             e = services.create_engagement(
                 s,
                 tenant=tenant,
@@ -595,7 +581,6 @@ def _elite_test_cases() -> list[dict]:
 def _elite_executions(s, eid: int, principal) -> list[dict]:
     try:
         from attestra.automated_vapt.core import orchestrator as orch
-
         from attestra.automated_vapt.evidence import run_evidence
 
         rows = []
@@ -629,8 +614,8 @@ def _engagement_ctx(
 
     # Cross-tool merge: one row per issue; related rows are listed under Sources.
     findings = crossmerge.collapse(s, services.list_findings(s, eid))
-    imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
-    reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
+    imports = data_access.import_runs_for_engagement(s, eid)
+    reports = data_access.reports_for_engagement(s, eid)
     scans = services.list_scans(s, eid)
     authorized = services.authorized_environments(e)
     asv_scans = list(e.asv_scans)
@@ -727,7 +712,7 @@ def engagement_page(request: Request, eid: int, framework: str | None = None):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             ctx = _engagement_ctx(request, s, principal, eid, framework)
         except LookupError:
@@ -746,7 +731,7 @@ def export_findings_ui(request: Request, eid: int, asset_id: int | None = None):
     if not has_permission(principal.role, "finding.read"):
         raise HTTPException(403, "permission denied: finding.read")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             if asset_id is not None:
                 asset = services.get_asset(s, asset_id, principal)
@@ -793,7 +778,7 @@ def export_engagement_ui(request: Request, eid: int, fmt: str, framework: str = 
     if not has_permission(principal.role, perms[fmt]):
         raise HTTPException(403, f"permission denied: {perms[fmt]}")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             eng = services.get_engagement(s, eid, principal)
             if fmt == "xlsx":
                 data = export_engagement_xlsx(s, eid, actor=principal.actor)
@@ -852,7 +837,7 @@ def fetch_ct_suggestions_ui(request: Request, eid: int, apex: str = Form(...)):
         return _back(f"/engagements/{eid}", error="Only a lead or tester with asset write can fetch suggestions.",
                      anchor="#targets")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             result = suggestions_for_engagement(s, eid, apex, actor=principal.actor)
             ctx = _engagement_ctx(
@@ -876,7 +861,7 @@ def ui_download_authorization_document(request: Request, eid: int, aid: int):
     if not has_permission(principal.role, "authorization.document"):
         return _back(f"/engagements/{eid}", error="Only a Super Admin can download signed authorization documents.", anchor="#scope")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             a, path = services.open_authorization_document(s, aid, principal=principal)
             if a.engagement_id != eid:
                 raise LookupError("authorization not found")
@@ -920,7 +905,7 @@ def target_page(request: Request, eid: int, aid: int):
     principal, redirect = _require_login(request)
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
             asset = services.get_asset(s, aid, principal)
@@ -1008,12 +993,10 @@ def verify_target_ownership(request: Request, eid: int, aid: int):
     if not has_permission(principal.role, "asset.verify_ownership"):
         return _back(url, error="Only a lead or admin can check target ownership.", anchor="#targets")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             eng = services.get_engagement(s, eid, principal)
             result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
-            from attestra.models import Asset
-
-            ident = s.get(Asset, aid).identifier
+            ident = data_access.get_asset(s, aid).identifier
             days = services.ownership_validity_days_for_tenant(s, eng.tenant_id)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#targets")
@@ -1045,7 +1028,7 @@ def set_target_ownership_token(request: Request, eid: int, aid: int, token: str 
     if not has_permission(principal.role, "asset.verify_ownership"):
         return _back(url, error="Only a lead or admin can set the ownership token.", anchor="#ownership")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             a = services.set_ownership_token(s, eid, aid, token, actor=principal.actor)
             ident = a.identifier
@@ -1068,12 +1051,10 @@ def verify_target_ownership_now(request: Request, eid: int, aid: int):
     if not has_permission(principal.role, "asset.verify_ownership"):
         return _back(url, error="Only a lead or admin can check target ownership.", anchor="#ownership")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             eng = services.get_engagement(s, eid, principal)
             result = services.verify_asset_ownership(s, eid, aid, actor=principal.actor)
-            from attestra.models import Asset
-
-            ident = s.get(Asset, aid).identifier
+            ident = data_access.get_asset(s, aid).identifier
             days = services.ownership_validity_days_for_tenant(s, eng.tenant_id)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#ownership")
@@ -1106,7 +1087,7 @@ def confirm_target_ownership(
     if not has_permission(principal.role, "asset.verify_ownership"):
         return _back(url, error="Only a lead or admin can confirm target ownership.", anchor="#targets")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             a = services.confirm_private_ownership(
                 s, eid, aid, actor=principal.actor, confirmed=confirm == "yes", confirmed_by=confirmed_by,
@@ -1129,7 +1110,7 @@ async def import_results(request: Request, eid: int, tool: str = Form(...), file
     if not who:
         return _login_redirect(url)
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             run = services.import_results(s, eid, tool=tool, filename=file.filename or f"{tool}.json", data=data, actor=who)
             msg = f"Imported {file.filename}: {run.new_findings} new, {run.updated_findings} merged"
             if run.unmatched_findings:
@@ -1189,7 +1170,7 @@ def _worker_control(request: Request, eid: int, action: str) -> RedirectResponse
     if principal.role not in WORKER_CONTROL_ROLES:
         return _back(url, error=f"Only an admin or lead can {action} the worker.", anchor="#scans")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             if action == "start":
                 pid = launcher.start_worker(actor=principal.username, s=s)
@@ -1266,7 +1247,7 @@ def queue_scan(
     for t in tools:
         # One session per tool: a refusal or error for one tool never undoes another.
         try:
-            with db.session() as s:
+            with data_access.session() as s:
                 run = services.request_scan(
                     s,
                     eid,
@@ -1373,7 +1354,7 @@ def ui_create_auth_profile(
         if not (secret_value or "").strip():
             return _back(url, error="A secret (token, cookie, or password) is required for this method.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             auth_profiles.create_profile(
@@ -1384,7 +1365,7 @@ def ui_create_auth_profile(
                 asset_id=int(aid) if aid.isdigit() else None,
                 actor=principal.actor, principal=principal,
             )
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg=f"Authentication profile '{label.strip()}' saved. Validate it before scanning.", anchor="#authentication")
@@ -1405,7 +1386,7 @@ def ui_rotate_auth_profile(
     if not has_permission(principal.role, "auth_profile.manage"):
         return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             row = auth_profiles._get_profile(s, eid, pid, principal)
@@ -1416,7 +1397,7 @@ def ui_rotate_auth_profile(
             if not (value or "").strip():
                 return _back(url, error="A new secret value is required to rotate.", anchor="#authentication")
             auth_profiles.rotate_secret(s, eid, pid, secret_value=value, principal=principal, actor=principal.actor)
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg="Secret rotated. Re-validate the profile before scanning.", anchor="#authentication")
@@ -1435,13 +1416,13 @@ def ui_update_auth_profile_extra_headers(
     if not has_permission(principal.role, "auth_profile.manage"):
         return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             auth_profiles.update_extra_headers(
                 s, eid, pid, extra_headers=extra_headers, principal=principal, actor=principal.actor
             )
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg="Extra headers saved. They apply to the next authenticated scan.", anchor="#authentication")
@@ -1464,14 +1445,14 @@ def ui_update_auth_profile_extra_cookies(
     if not clearing and not extra_cookies.strip():
         return _back(url, error="Paste the cookies to save (name=value; name2=value2), or use Clear.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             auth_profiles.update_extra_cookies(
                 s, eid, pid, extra_cookies="" if clearing else extra_cookies,
                 principal=principal, actor=principal.actor,
             )
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     msg = "Extra cookies cleared." if clearing else "Extra cookies saved (encrypted). They apply to the next authenticated scan."
@@ -1488,11 +1469,11 @@ def ui_revoke_auth_profile(request: Request, eid: int, pid: int, asset_id: str =
     if not has_permission(principal.role, "auth_profile.manage"):
         return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             auth_profiles.revoke_profile(s, eid, pid, principal=principal, actor=principal.actor)
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg="Authentication profile revoked.", anchor="#authentication")
@@ -1508,11 +1489,11 @@ def ui_delete_auth_profile(request: Request, eid: int, pid: int, asset_id: str =
     if not has_permission(principal.role, "auth_profile.manage"):
         return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             from attestra.auth_web import profiles as auth_profiles
 
             auth_profiles.delete_profile(s, eid, pid, principal=principal, actor=principal.actor)
-            s.commit()
+            data_access.commit(s)
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg="Authentication profile deleted (secret destroyed).", anchor="#authentication")
@@ -1525,7 +1506,7 @@ def scan_page(request: Request, eid: int, sid: int):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
             run = services.get_scan(s, sid)
@@ -1549,7 +1530,7 @@ def ui_cancel_scan(request: Request, eid: int, sid: int):
     if not has_permission(principal.role, "scan.start"):
         return _back(f"/engagements/{eid}", error="Your role can't cancel scans.", anchor="#scans")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             run = services.get_scan(s, sid)
             if run.engagement_id != eid:
@@ -1574,7 +1555,7 @@ async def ui_add_asv(
     if not who:
         return _login_redirect(f"/engagements/{eid}")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.add_asv_scan(
                 s, eid, vendor=vendor, scan_date=scan_date, passing=bool(passing),
                 filename=file.filename or "asv.pdf", data=data, actor=who,
@@ -1658,7 +1639,7 @@ def ui_run_due(request: Request, eid: int):
     if not who:
         return _login_redirect(f"/engagements/{eid}")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             runs = services.enqueue_due_schedules(s, engagement_id=eid, actor=who)
     except (services.ServiceError, LookupError) as e:
         return _back(f"/engagements/{eid}", error=str(e), anchor="#schedules")
@@ -1682,7 +1663,7 @@ def ui_pci_calendar(request: Request):
     principal, redirect = _staff_page(request)
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         return _render(request, "pci_calendar.html", {"rows": services.pci_calendar_overview(s, principal)})
 
 
@@ -1691,7 +1672,7 @@ def ui_pci_page(request: Request, eid: int):
     principal, redirect = _staff_page(request)
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
         except LookupError:
@@ -1740,7 +1721,7 @@ def ui_iso_page(request: Request, eid: int):
     principal, redirect = _staff_page(request)
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
         except LookupError:
@@ -1860,7 +1841,7 @@ def edit_engagement(
     except ValueError:
         return _back(url, error="The test window dates aren't valid. Pick them with the date picker.", anchor="#edit")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             services.update_engagement(
                 s, eid, name=name, window_start=ws, window_end=we, frameworks=frameworks,
@@ -1885,8 +1866,8 @@ def _evidence_text_previews(evidence_rows: list) -> dict[int, str]:
         if not path.is_file():
             continue
         try:
-            raw = path.read_bytes()
-        except OSError:
+            raw = data_access.stored_bytes(path)  # follows mongo:// GridFS sidecars
+        except (OSError, LookupError):
             continue
         if len(raw) > 200_000:
             out[ev.id] = "(preview omitted — file too large; use Download)"
@@ -1906,7 +1887,7 @@ def finding_page(request: Request, eid: int, fid: int):
         return redirect
     if principal.role in READ_ONLY_ROLES:
         return RedirectResponse(f"/portal/engagements/{eid}", status_code=303)
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
         except LookupError:
@@ -1914,9 +1895,9 @@ def finding_page(request: Request, eid: int, fid: int):
         from attestra.comments import can_add_comment, can_delete_comment, list_comments
         from attestra.evidence.gallery import build_gallery
         from attestra.library import service as lib
-        from attestra.models import Finding, ProofReplay
+        from attestra.models import ProofReplay
 
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f or f.engagement_id != eid:
             raise HTTPException(404, "finding not found")
         # Touch relationships while the session is open.
@@ -1925,9 +1906,7 @@ def finding_page(request: Request, eid: int, fid: int):
         observations = sorted(list(f.observations or []), key=lambda o: o.id)
         gallery = build_gallery(evidence_rows)
         text_previews = _evidence_text_previews(evidence_rows)
-        replays = list(
-            s.scalars(select(ProofReplay).where(ProofReplay.finding_id == fid).order_by(ProofReplay.id.desc()))
-        )
+        replays = data_access.proof_replays_for_finding(s, fid)
         latest_replay: dict[int, ProofReplay] = {}
         for r in replays:
             latest_replay.setdefault(r.evidence_id, r)
@@ -1963,27 +1942,26 @@ def ui_download_evidence(request: Request, eid: int, evid: int):
         return redirect
     if not has_permission(principal.role, "finding.read"):
         raise HTTPException(403, "not allowed")
-    from attestra.models import Evidence, Finding
 
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             eng = services.get_engagement(s, eid, principal)
         except LookupError:
             raise HTTPException(404, "evidence not found") from None
-        ev = s.get(Evidence, evid)
+        ev = data_access.get_evidence(s, evid)
         if not ev:
             raise HTTPException(404, "evidence not found")
-        f = s.get(Finding, ev.finding_id)
+        f = data_access.get_finding(s, ev.finding_id)
         if not f or f.engagement_id != eid:
             raise HTTPException(404, "evidence not found")
         if not services.client_may_download_evidence(principal.role, ev.kind):
             raise HTTPException(403, "client viewers may download only client_upload evidence")
         try:
-            path = services.assert_evidence_path_readable(Path(ev.path), eng.tenant_id)
-        except LookupError:
+            data = data_access.evidence_bytes(ev.path, eng.tenant_id)
+        except (LookupError, OSError):
             raise HTTPException(404, "evidence not found") from None
         audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
-        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
+        return data_access.download_response(data, ev.filename)
 
 
 @router.post("/engagements/{eid}/findings/{fid}/comments")
@@ -1997,11 +1975,10 @@ async def ui_add_finding_comment(request: Request, eid: int, fid: int, body: str
     if not can_add_comment(principal.role):
         return _back(detail, error="Your role can't add comments.", anchor="#comments")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
-            from attestra.models import Finding
 
-            f = s.get(Finding, fid)
+            f = data_access.get_finding(s, fid)
             if not f or f.engagement_id != eid:
                 raise LookupError(f"finding F-{fid} is not in this engagement")
             add_comment(s, fid, body=body, principal=principal)
@@ -2019,11 +1996,10 @@ def ui_delete_finding_comment(request: Request, eid: int, fid: int, cid: int):
     from attestra.comments import delete_comment
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
-            from attestra.models import Finding
 
-            f = s.get(Finding, fid)
+            f = data_access.get_finding(s, fid)
             if not f or f.engagement_id != eid:
                 raise LookupError(f"finding F-{fid} is not in this engagement")
             delete_comment(s, fid, cid, principal)
@@ -2044,7 +2020,7 @@ def recompute_cross_merge(request: Request, eid: int):
     from attestra import crossmerge
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             res = crossmerge.recompute(s, eid, actor=principal.actor)
     except (services.ServiceError, LookupError) as e:
@@ -2076,11 +2052,10 @@ def change_finding_status(request: Request, eid: int, fid: int, to: str = Form(.
             f"/engagements/{eid}/findings/{fid}?accept_risk=1", status_code=303
         )
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
-            from attestra.models import Finding
 
-            f = s.get(Finding, fid)
+            f = data_access.get_finding(s, fid)
             if not f or f.engagement_id != eid:
                 raise LookupError(f"finding F-{fid} is not in this engagement")
             services.transition(s, fid, to=to, note=note, actor=principal.actor)
@@ -2109,11 +2084,10 @@ def ui_accept_risk(
         return _back(url, error="Your role can't accept risk.", anchor="#status")
     try:
         exp = date_cls.fromisoformat(expires_on.strip())
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
-            from attestra.models import Finding
 
-            f = s.get(Finding, fid)
+            f = data_access.get_finding(s, fid)
             if not f or f.engagement_id != eid:
                 raise LookupError(f"finding F-{fid} is not in this engagement")
             services.accept_risk(
@@ -2140,7 +2114,7 @@ def ui_generate_report(request: Request, eid: int, kind: str = Form(...), framew
     if not has_permission(principal.role, "report.generate"):
         return _back(url, error="Your role can't generate reports.", anchor="#reports")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             r = generate_report(s, eid, kind=kind, framework=framework, actor=principal.actor, user_id=principal.user_id)
             rid = r.id
@@ -2181,9 +2155,9 @@ def _report_step(request: Request, eid: int, rid: int, permission: str, denied: 
     if not has_permission(principal.role, permission):
         return _back(url, error=denied, anchor="#reports")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
-            r = s.get(Report, rid)
+            r = data_access.get_report(s, rid)
             if not r or r.engagement_id != eid:
                 raise LookupError(f"report #{rid} is not in this engagement")
             fn(s, principal)
@@ -2246,15 +2220,9 @@ def ui_credits_page(request: Request):
     if not has_permission(principal.role, "credits.read"):
         return _back("/", error="Your role cannot view organization credits.")
     from attestra.credits import list_renewal_requests
-    from attestra.models import Tenant
 
-    with db.session() as s:
-        tenants = []
-        if principal.role == "admin":
-            tenants = list(s.scalars(select(Tenant).order_by(Tenant.name)))
-        elif principal.tenant_id:
-            t = s.get(Tenant, principal.tenant_id)
-            tenants = [t] if t else []
+    with data_access.session() as s:
+        tenants = data_access.tenants_for_principal(s, principal)
         tid = principal.tenant_id or (tenants[0].id if tenants else None)
         qtid = request.query_params.get("tenant_id")
         if qtid and qtid.isdigit() and principal.role == "admin":
@@ -2292,7 +2260,7 @@ def ui_credits_renewal_request(
     from attestra.credits import request_renewal
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             request_renewal(
                 s,
                 tenant_id,
@@ -2321,7 +2289,7 @@ def ui_credits_allocate(
     from attestra.credits import allocate_credits
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             allocate_credits(
                 s,
                 tenant_id,
@@ -2352,7 +2320,7 @@ def ui_credits_resolve(
 
     amount = int(allocate_amount) if allocate_amount.strip().isdigit() else None
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             row = resolve_renewal(
                 s,
                 rid,
@@ -2389,7 +2357,7 @@ def save_target_crawl_settings(
     if not has_permission(principal.role, "asset.write"):
         return _back(url, error="Only a lead or tester with asset write can change crawl settings.", anchor="#crawl")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             services.get_asset(s, aid, principal)
             crawl_settings.update_crawl_settings(

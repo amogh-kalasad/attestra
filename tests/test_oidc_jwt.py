@@ -161,10 +161,12 @@ def test_principal_provisioning_role_and_tenant(oidc_on, fresh_db, jwks, rsa_key
         s.add(t)
         s.flush()
         tid = t.id
+        s.commit()
         p = authenticate_bearer_jwt(s, _sign(rsa_key, _claims()), jwks=jwks)
         assert p and p.username == "kc.lead" and p.role == "lead" and p.tenant_id is None
-        user = s.get(User, p.user_id)
-        assert user.password_hash == "oidc"
+        from attestra.persistence.mongo.adapters import _db
+
+        assert _db()["users"].find_one({"_id": p.user_id})["password_hash"] == "oidc"
         client_tok = _sign(rsa_key, _claims(preferred_username="cv", realm_access={"roles": []},
                                             attestra_tenant_id=str(tid)))
         cv = authenticate_bearer_jwt(s, client_tok, jwks=jwks)

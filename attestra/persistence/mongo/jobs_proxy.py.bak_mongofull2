@@ -1,0 +1,49 @@
+﻿"""Write-through Job stand-in used when ATTESTRA_PERSISTENCE=mongo.
+
+Worker / service code mutates ``job.status`` etc. directly (SQLAlchemy habit). In
+Mongo mode the job lives in the ``jobs`` collection, so every assignment to a
+persisted field is written straight to MongoDB.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+_PERSIST = ("status", "worker_id", "error", "cancel_requested", "heartbeat_at", "attempts")
+
+
+class MongoJob:
+    def __init__(self, doc: dict[str, Any]):
+        d = object.__setattr__
+        d(self, "_live", False)
+        d(self, "id", int(doc["id"]))
+        d(self, "scan_run_id", int(doc["scan_run_id"]))
+        d(self, "tool", doc.get("tool") or "")
+        d(self, "status", doc.get("status") or "queued")
+        d(self, "attempts", int(doc.get("attempts") or 0))
+        d(self, "worker_id", doc.get("worker_id") or "")
+        d(self, "heartbeat_at", doc.get("heartbeat_at"))
+        d(self, "cancel_requested", bool(doc.get("cancel_requested")))
+        d(self, "error", doc.get("error") or "")
+        d(self, "_live", True)
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        if key == "error" and isinstance(value, str):
+            value = value[:2000]
+        object.__setattr__(self, key, value)
+        if self._live and key in _PERSIST:
+            from attestra.persistence.mongo.adapters import mongo_set_job_fields
+
+            mongo_set_job_fields(self.id, {key: value})
+
+    def refresh(self) -> None:
+        from attestra.persistence.mongo.adapters import mongo_get_job
+
+        doc = mongo_get_job(self.id)
+        if doc:
+            fresh = MongoJob(doc)
+            for k in ("status", "attempts", "worker_id", "heartbeat_at", "cancel_requested", "error", "tool"):
+                object.__setattr__(self, k, getattr(fresh, k))
+
+    def __repr__(self) -> str:
+        return f"<MongoJob id={self.id} scan_run_id={self.scan_run_id} status={self.status}>"

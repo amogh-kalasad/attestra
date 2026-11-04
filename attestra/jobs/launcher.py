@@ -104,13 +104,11 @@ def _read_marker() -> dict:
 
 
 def _fresh_heartbeats(s) -> int:
-    from sqlalchemy import func, select
-
-    from attestra.models import Job, utcnow
+    from attestra.jobs.durable import count_fresh_running
+    from attestra.models import utcnow
 
     cutoff = utcnow() - timedelta(seconds=config.JOB_STALE_HEARTBEAT_S)
-    q = select(func.count()).select_from(Job).where(Job.status == "running", Job.heartbeat_at >= cutoff)
-    return int(s.scalar(q) or 0)
+    return count_fresh_running(s, cutoff)
 
 
 def worker_status(s=None) -> WorkerStatus:

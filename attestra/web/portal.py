@@ -15,12 +15,12 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import or_, select
 
-from attestra import audit, comments, db, retest, services
+from attestra import audit, comments, retest, services
 from attestra.auth.roles import has_permission
 from attestra.compliance import load_library
-from attestra.models import OPEN_STATUSES, AuditEvent, Engagement, Finding, Report
+from attestra.models import OPEN_STATUSES, Finding, Report
+from attestra.web import data_access
 
 router = APIRouter(include_in_schema=False)
 
@@ -90,7 +90,7 @@ def _portal_can_write(role: str) -> bool:
 
 def _visible_portal_finding(s, eid: int, fid: int, principal) -> Finding:
     services.get_engagement(s, eid, principal)
-    f = s.get(Finding, fid)
+    f = data_access.get_finding(s, fid)
     if not f or f.engagement_id != eid:
         raise LookupError(f"finding {fid} not found")
     if principal.role == "client_viewer" and f.status in CLIENT_HIDDEN_STATUSES:
@@ -105,10 +105,10 @@ def portal_home(request: Request):
     principal, redirect = _login(request, "engagement.read")
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         rows = []
         branding = {"cover_title": "", "logo": "", "has_logo": False}
-        for e in s.scalars(services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())):
+        for e in data_access.list_engagements(s, principal):
             shown = visible_findings(e.findings, principal.role)
             rows.append({
                 "e": e,
@@ -132,7 +132,7 @@ def portal_engagement(request: Request, eid: int, framework: str | None = None):
     principal, redirect = _login(request, "engagement.read")
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
         except LookupError:
@@ -142,7 +142,7 @@ def portal_engagement(request: Request, eid: int, framework: str | None = None):
         results = services.compliance(s, eid, fw)
         findings = visible_findings(services.list_findings(s, eid), principal.role)
         reports = visible_reports(
-            list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc()))),
+            data_access.reports_for_engagement(s, eid),
             principal.role,
         )
         return _render(request, "portal_engagement.html", {
@@ -167,7 +167,7 @@ def portal_finding(request: Request, eid: int, fid: int):
     principal, redirect = _login(request, "finding.read")
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
             f = _visible_portal_finding(s, eid, fid, principal)
@@ -205,7 +205,7 @@ async def portal_add_comment(request: Request, eid: int, fid: int, body: str = F
     if not _portal_can_write(principal.role) or not comments.can_add_comment(principal.role):
         raise HTTPException(403, "permission denied: cannot add comments")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             _visible_portal_finding(s, eid, fid, principal)
             comments.add_comment(s, fid, body=body, principal=principal)
     except LookupError:
@@ -240,7 +240,7 @@ async def portal_add_evidence(
         )
     filename = (file.filename or "client_fix.bin").strip() or "client_fix.bin"
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             _visible_portal_finding(s, eid, fid, principal)
             # Always store as client_fix — never screenshot (scanner proof).
             services.add_evidence(
@@ -271,7 +271,7 @@ async def portal_request_retest(request: Request, eid: int, fid: int, note: str 
     if not text:
         return _back(detail, error="A note is required when requesting a retest.", anchor="#retest")
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             f = _visible_portal_finding(s, eid, fid, principal)
             row = retest.request_retest(
                 s,
@@ -304,21 +304,16 @@ def auditor_engagement(request: Request, eid: int):
     principal, redirect = _login(request, "audit.read")
     if redirect:
         return redirect
-    with db.session() as s:
+    with data_access.session() as s:
         try:
             e = services.get_engagement(s, eid, principal)
         except LookupError:
             raise HTTPException(404, "engagement not found") from None
         finding_ids = [f.id for f in e.findings]
-        report_ids = [r.id for r in s.scalars(select(Report).where(Report.engagement_id == eid))]
-        clauses = [(AuditEvent.entity == "engagement") & (AuditEvent.entity_id == eid)]
-        if finding_ids:
-            clauses.append((AuditEvent.entity == "finding") & AuditEvent.entity_id.in_(finding_ids))
-        if report_ids:
-            clauses.append((AuditEvent.entity == "report") & AuditEvent.entity_id.in_(report_ids))
-        events = list(s.scalars(select(AuditEvent).where(or_(*clauses)).order_by(AuditEvent.id.desc()).limit(500)))
+        reports = data_access.reports_for_engagement(s, eid)
+        report_ids = [r.id for r in reports]
+        events = data_access.audit_events_for_engagement(s, eid, finding_ids, report_ids, limit=500)
         ok, bad = audit.verify(s)
-        reports = list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
         return _render(request, "auditor_engagement.html", {
             "e": e,
             "events": events,

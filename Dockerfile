@@ -15,7 +15,11 @@ RUN pip wheel --wheel-dir /wheels ".[postgres]"
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    ATTESTRA_DATA_DIR=/data
+    ATTESTRA_DATA_DIR=/data \
+    ATTESTRA_PERSISTENCE=mongo \
+    ATTESTRA_STORAGE=mongo \
+    ATTESTRA_MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0 \
+    ATTESTRA_MONGODB_DB=attestra
 RUN groupadd --system --gid 10001 attestra \
  && useradd --system --uid 10001 --gid attestra --home-dir /app --shell /usr/sbin/nologin attestra
 WORKDIR /app

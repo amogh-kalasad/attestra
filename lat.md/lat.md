@@ -19,6 +19,8 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - [[runner]] — scoped scanner dispatch, SSRF/DNS pin, gate, durable jobs
 - [[tests]] — pytest suite: fixtures, test modules, and what each verifies
 
+MongoDB is the runtime store (see [[architecture#MongoDB persistence]]); cutover design notes live in `docs/mongodb_migration/`.
+
 ## Quick orientation
 
 Entry points for common questions about what Attestra does today.

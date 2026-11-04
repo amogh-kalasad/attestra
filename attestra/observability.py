@@ -156,10 +156,10 @@ def metrics_response(request: Request) -> Response:
 
 
 def setup_otel(app, engine=None) -> bool:
-    """Instrument FastAPI (and SQLAlchemy when an engine is given). Returns True if active.
+    """Instrument FastAPI. Returns True if active.
 
     Exports OTLP when ``OTEL_EXPORTER_OTLP_ENDPOINT`` is set (standard OTel env var),
-    otherwise spans are created but not exported.
+    otherwise spans are created but not exported. ``engine`` is ignored (no SQL engine).
     """
     if not OTEL_ENABLED:
         return False
@@ -183,19 +183,6 @@ def setup_otel(app, engine=None) -> bool:
                 log.warning("OTLP exporter not installed; spans will not be exported")
         trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app, excluded_urls="metrics,api/health")
-    if engine is not None:
-        instrument_engine(engine)
-    return True
-
-
-def instrument_engine(engine) -> bool:
-    if not OTEL_ENABLED:
-        return False
-    try:
-        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
-    except ImportError:
-        return False
-    SQLAlchemyInstrumentor().instrument(engine=engine)
     return True
 
 

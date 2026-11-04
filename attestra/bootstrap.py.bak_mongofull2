@@ -1,0 +1,34 @@
+"""Application persistence bootstrap.
+
+Normal operations always initialize MongoDB. SQLAlchemy/SQLite/PostgreSQL remain
+only as the legacy ``mongo-migrate`` source reader.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from attestra import config
+
+log = logging.getLogger("attestra.bootstrap")
+
+
+def init_persistence(*, use_migrations: bool = True) -> str:
+    """Initialize MongoDB persistence. Returns ``mongo``."""
+    from attestra.persistence.mongo.client import init_mongo
+
+    config.ensure_dirs()
+    init_mongo(apply_migrations=use_migrations)
+    log.info("persistence_backend=mongo")
+    return "mongo"
+
+
+def classify_sql_dependency(module: str) -> str:
+    """Return a Phase 11 classification label for remaining SQL references."""
+    if module.startswith("attestra.migration"):
+        return "legacy-import-only"
+    if module.startswith("tests.") or module.startswith("migrations."):
+        return "test-fixture-or-archive"
+    if module in {"attestra.db", "attestra.models", "attestra.rls"}:
+        return "legacy-runtime-when-ATTESTRA_PERSISTENCE=sql"
+    return "unresolved-or-shared"

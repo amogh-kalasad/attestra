@@ -1,0 +1,65 @@
+"""Mongo-only audit chain: tamper detection and append-only enforcement."""
+from __future__ import annotations
+
+import pytest
+
+pytestmark = [pytest.mark.mongo]
+
+
+def _db():
+    from attestra.persistence.mongo.adapters import _db as get
+
+    d = get()
+    assert d.name.startswith("attestra_test_")
+    return d
+
+
+def test_mongo_audit_tamper_breaks_chain(engagement):
+    from attestra import audit, db
+
+    with db.session() as s:
+        assert audit.verify(s)[0] is True
+    d = _db()
+    first = d["audit_events"].find_one(sort=[("_id", 1)])
+    assert first is not None, "need at least one audit event"
+    d["audit_events"].update_one({"_id": first["_id"]}, {"$set": {"hash": "deadbeef" * 8}})
+    with db.session() as s:
+        ok, bad = audit.verify(s)
+    assert ok is False and bad is not None
+
+
+def test_mongo_audit_detail_tamper_breaks_chain(engagement):
+    from attestra import audit, db
+
+    d = _db()
+    first = d["audit_events"].find_one(sort=[("_id", 1)])
+    d["audit_events"].update_one({"_id": first["_id"]}, {"$set": {"actor": "evil"}})
+    with db.session() as s:
+        assert audit.verify(s)[0] is False
+
+
+def test_mongo_audit_events_append_only(fresh_db):
+    from sqlalchemy import delete, update
+
+    from attestra import audit, db
+    from attestra.models import AuditEvent
+    from attestra.persistence.mongo.orm_session import AppendOnlyViolation
+
+    with db.session() as s:
+        audit.record(s, "t", "test.action", "x", 1)
+    ev_id = _db()["audit_events"].find_one(sort=[("_id", -1)])["_id"]
+    with pytest.raises(AppendOnlyViolation):
+        with db.session() as s:
+            s.get(AuditEvent, ev_id).actor = "evil"
+    with pytest.raises(AppendOnlyViolation):
+        with db.session() as s:
+            s.execute(update(AuditEvent).where(AuditEvent.id == ev_id).values(actor="evil"))
+    with pytest.raises(AppendOnlyViolation):
+        with db.session() as s:
+            s.delete(s.get(AuditEvent, ev_id))
+    with pytest.raises(AppendOnlyViolation):
+        with db.session() as s:
+            s.execute(delete(AuditEvent).where(AuditEvent.id == ev_id))
+    assert _db()["audit_events"].find_one({"_id": ev_id})["actor"] == "t"
+    with db.session() as s:
+        assert audit.verify(s)[0] is True

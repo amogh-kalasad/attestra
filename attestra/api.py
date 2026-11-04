@@ -16,9 +16,9 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request,
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from attestra import __version__, audit, config, db, observability, services
+from attestra import __version__, audit, config, observability, services
 from attestra.api_security import RateLimitMiddleware, SecurityHeadersMiddleware
-from attestra.auth.keys import Principal, authenticate_api_key
+from attestra.auth.keys import Principal
 from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME, read_session
 from attestra.compliance import load_library
@@ -28,9 +28,7 @@ from attestra.models import (
     FRAMEWORKS,
     NEW_ENGAGEMENT_TYPES,
     TEST_TYPES,
-    Engagement,
     Report,
-    User,
     new_engagement_type_labels,
 )
 from attestra.reports import (
@@ -42,14 +40,16 @@ from attestra.reports import (
     submit_report,
     verify_report,
 )
+from attestra.web import data_access
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # @lat: [[interfaces#Configuration#Subscription service flag]]
+    from attestra.bootstrap import init_persistence
+
     config.validate_runtime_config()
-    db.init(use_migrations=True)
-    observability.instrument_engine(db._engine)
+    init_persistence(use_migrations=True)
     yield
 
 
@@ -65,9 +65,10 @@ observability.setup_otel(app)
 def get_principal(request: Request) -> Principal:
     """Resolve the caller from Bearer API key, OIDC access token (if enabled) or session cookie."""
     auth = request.headers.get("authorization") or ""
-    with db.session() as s:
+    # Identity is Mongo-owned: no unit of work is opened (s is None).
+    with data_access.identity_session() as s:
         if auth.lower().startswith("bearer "):
-            principal = authenticate_api_key(s, auth[7:].strip())
+            principal = data_access.authenticate_bearer(s, auth[7:].strip())
             if principal is None and config.OIDC_ENABLED:
                 from attestra.auth.oidc import authenticate_bearer_jwt  # Step 6.4
 
@@ -76,15 +77,9 @@ def get_principal(request: Request) -> Principal:
                 return principal
         data = read_session(request.cookies.get(COOKIE_NAME))
         if data and data.get("uid"):
-            user = s.get(User, int(data["uid"]))
-            if user and user.active:
-                return Principal(
-                    user_id=user.id,
-                    username=user.username,
-                    display_name=user.display_name,
-                    role=user.role,
-                    tenant_id=user.tenant_id,
-                )
+            principal = data_access.principal_for_uid(s, int(data["uid"]))
+            if principal:
+                return principal
     raise HTTPException(401, "authentication required")
 
 
@@ -99,7 +94,7 @@ def require(permission: str):
 
 def _run(fn, *args, **kwargs):
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             return fn(s, *args, **kwargs)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
@@ -309,13 +304,22 @@ def health():
     from attestra.reports.pdf import pdf_engine_status
 
     pdf = pdf_engine_status()
-    return {
+    body = {
         "status": "ok",
         "version": __version__,
         "pdf": pdf,
         "pdf_engine": pdf["engine"],
         "pdf_message": pdf["message"],
+        "persistence": "mongo",
     }
+    try:
+        from attestra.persistence.mongo.health import ping as mongo_ping
+
+        body["mongo"] = mongo_ping()
+    except Exception as exc:  # noqa: BLE001 — health must not raise
+        body["mongo"] = {"ok": False, "error": type(exc).__name__}
+        body["status"] = "degraded"
+    return body
 
 
 @app.get("/api/catalog")
@@ -383,9 +387,8 @@ def create_engagement(body: EngagementIn, principal: Principal = Depends(require
 
 @app.get("/api/engagements")
 def list_engagements(principal: Principal = Depends(require("engagement.read"))):
-    with db.session() as s:
-        q = services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())
-        return [_eng_dict(e) for e in s.scalars(q)]
+    with data_access.session() as s:
+        return [_eng_dict(e) for e in data_access.list_engagements(s, principal)]
 
 
 @app.get("/api/engagements/{eid}")
@@ -446,7 +449,7 @@ def download_authorization_document(aid: int, principal: Principal = Depends(req
     from fastapi.responses import FileResponse
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             a, path = services.open_authorization_document(s, aid, principal=principal)
             filename = a.document_name or "authorization"
             # Read path while session is open; FileResponse needs a stable path string.
@@ -569,7 +572,7 @@ def _library_suggestion_count(eid: int) -> int:
     """Findings in the engagement that have a matching library writeup (by rule id or CWE)."""
     from attestra.library.service import suggestions_for_engagement
 
-    with db.session() as s:
+    with data_access.session() as s:
         return len(suggestions_for_engagement(s, eid))
 
 
@@ -675,22 +678,13 @@ def scope_suggestions_fetch(
 @app.get("/api/findings/{fid}/observations")
 def list_finding_observations(fid: int, principal: Principal = Depends(require("finding.read"))):
     """Scanner observations retained under a canonical finding (Phase 6)."""
-    from sqlalchemy import select
-
-    from attestra.models import Finding, FindingObservation
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
-        rows = list(
-            s.scalars(
-                select(FindingObservation)
-                .where(FindingObservation.finding_id == fid)
-                .order_by(FindingObservation.id)
-            )
-        )
+        rows = data_access.observations_for_finding(s, fid)
         return {
             "finding_id": fid,
             "detected_by": _detected_by(f),
@@ -704,14 +698,11 @@ def list_finding_observations(fid: int, principal: Principal = Depends(require("
 @app.get("/api/engagements/{eid}/dedup-suggestions")
 def engagement_dedup_suggestions(eid: int, principal: Principal = Depends(require("finding.read"))):
     """Non-destructive historical duplicate suggestions within one engagement."""
-    from sqlalchemy import select
-
     from attestra.dedup import suggest_historical_duplicates
-    from attestra.models import Finding
 
     def fn(s):
         services.get_engagement(s, eid, principal)
-        rows = list(s.scalars(select(Finding).where(Finding.engagement_id == eid)))
+        rows = data_access.findings_for_engagement(s, eid)
         return {"engagement_id": eid, "suggestions": suggest_historical_duplicates(rows)}
 
     return _run(fn)
@@ -721,9 +712,8 @@ def engagement_dedup_suggestions(eid: int, principal: Principal = Depends(requir
 def transition(fid: int, body: TransitionIn, principal: Principal = Depends(require("finding.write"))):
     def fn(s):
         from attestra.library import service as lib
-        from attestra.models import Finding
 
-        row = s.get(Finding, fid)
+        row = data_access.get_finding(s, fid)
         if not row:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, row.engagement_id, principal)
@@ -737,10 +727,9 @@ def transition(fid: int, body: TransitionIn, principal: Principal = Depends(requ
 def assign_finding_api(fid: int, body: AssignIn, principal: Principal = Depends(require("finding.write"))):
     """Assign a finding to a tenant username (audited)."""
     from attestra.assignments import assign_finding, current_assignee
-    from attestra.models import Finding
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
@@ -756,10 +745,9 @@ def assign_finding_api(fid: int, body: AssignIn, principal: Principal = Depends(
 def unassign_finding_api(fid: int, principal: Principal = Depends(require("finding.write"))):
     """Clear the current finding assignee (audited)."""
     from attestra.assignments import current_assignee, unassign_finding
-    from attestra.models import Finding
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
@@ -772,10 +760,9 @@ def unassign_finding_api(fid: int, principal: Principal = Depends(require("findi
 @app.get("/api/findings/{fid}/assignee")
 def get_finding_assignee(fid: int, principal: Principal = Depends(require("finding.read"))):
     from attestra.assignments import current_assignee
-    from attestra.models import Finding
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
@@ -815,7 +802,6 @@ async def add_evidence(
     file: UploadFile = File(...),
     principal: Principal = Depends(require("finding.write")),
 ):
-    from attestra.models import Finding
 
     data = await file.read()
     max_bytes = config.EVIDENCE_MAX_BYTES
@@ -823,7 +809,7 @@ async def add_evidence(
         raise HTTPException(413, f"evidence exceeds {max_bytes} byte limit")
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
@@ -850,17 +836,14 @@ class AnnotateEvidenceIn(BaseModel):
 @app.get("/api/findings/{fid}/evidence/gallery")
 def finding_evidence_gallery(fid: int, principal: Principal = Depends(require("finding.read"))):
     """Grouped evidence cards for a finding (no storage paths)."""
-    from sqlalchemy import select
-
     from attestra.evidence.gallery import build_gallery
-    from attestra.models import Evidence, Finding
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
-        rows = list(s.scalars(select(Evidence).where(Evidence.finding_id == fid).order_by(Evidence.id)))
+        rows = data_access.evidence_for_finding(s, fid)
         gallery = build_gallery(rows)
         gallery["finding_id"] = fid
         return gallery
@@ -876,14 +859,13 @@ def annotate_finding_evidence(
     principal: Principal = Depends(require("finding.write")),
 ):
     """Create an annotated screenshot derivative without altering the original."""
-    from attestra.models import Evidence, Finding
 
     def fn(s):
-        f = s.get(Finding, fid)
+        f = data_access.get_finding(s, fid)
         if not f:
             raise LookupError(f"finding {fid} not found")
         services.assert_engagement_access(s, f.engagement_id, principal)
-        original = s.get(Evidence, eid)
+        original = data_access.get_evidence(s, eid)
         if not original or original.finding_id != fid:
             raise LookupError(f"evidence {eid} not found on finding {fid}")
         ev = services.attach_annotated_screenshot(
@@ -949,7 +931,7 @@ def confirm(eid: int, body: ConfirmIn, principal: Principal = Depends(get_princi
     refused: str | None = None
     result: dict | None = None
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             try:
                 a = services.confirm_control(
@@ -1212,7 +1194,7 @@ def framework_pack(eid: int, framework: str, principal: Principal = Depends(requ
 
     from attestra.reports.packs import build_framework_pack
 
-    with db.session() as s:
+    with data_access.session() as s:
         services.get_engagement(s, eid, principal)
         path = build_framework_pack(s, eid, framework)
     return FileResponse(path, filename=path.name, media_type="application/zip")
@@ -1222,7 +1204,7 @@ def _report_file(s, rid: int, principal: Principal) -> tuple[Report, Path]:
     """The report row and its sealed file path, after the tenant scope and data-folder checks."""
     from attestra import config as cfg
 
-    r = s.scalar(services.scoped(s, Report, principal).where(Report.id == rid))
+    r = data_access.scoped_report(s, rid, principal)
     if not r:
         raise HTTPException(404, "report not found")
     eng = services.get_engagement(s, r.engagement_id, principal)
@@ -1260,7 +1242,7 @@ def download_report(rid: int, principal: Principal = Depends(require("report.rea
 
     from attestra.reports.signoff import banner_html, inject
 
-    with db.session() as s:
+    with data_access.session() as s:
         r, path = _report_file(s, rid, principal)
         sealed = path.read_bytes()
         banner = banner_html(
@@ -1283,7 +1265,7 @@ def download_report_export(rid: int, fmt: str, principal: Principal = Depends(re
         raise HTTPException(404, "unknown export format")
     media, key = _REPORT_EXPORT_TYPES[fmt]
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             r, html_path = _report_file(s, rid, principal)
             out = export_report_formats(r, html_path)
             audit.record(s, principal.actor, "report.exported", "report", r.id, format=fmt)
@@ -1301,7 +1283,7 @@ def download_report_export(rid: int, fmt: str, principal: Principal = Depends(re
 @app.get("/reports/{rid}/sealed")
 def download_sealed_report(rid: int, principal: Principal = Depends(require("report.read"))):
     """The sealed report file, byte for byte, exactly as it was hashed and signed."""
-    with db.session() as s:
+    with data_access.session() as s:
         r, path = _report_file(s, rid, principal)
         audit.record(s, principal.actor, "report.download", "report", r.id, sealed=True)
     return FileResponse(path, media_type="text/html", filename=path.name)
@@ -1309,29 +1291,28 @@ def download_sealed_report(rid: int, principal: Principal = Depends(require("rep
 
 @app.get("/api/evidence/{eid}/download")
 def download_evidence(eid: int, principal: Principal = Depends(require("finding.read"))):
-    from attestra.models import Evidence, Finding
 
-    with db.session() as s:
-        ev = s.get(Evidence, eid)
+    with data_access.session() as s:
+        ev = data_access.get_evidence(s, eid, principal)  # tenant-scoped; None -> 404
         if not ev:
             raise HTTPException(404, "evidence not found")
-        f = s.get(Finding, ev.finding_id)
+        f = data_access.get_finding(s, ev.finding_id)
         if not f:
             raise HTTPException(404, "evidence not found")
         eng = services.get_engagement(s, f.engagement_id, principal)
         if not services.client_may_download_evidence(principal.role, ev.kind):
             raise HTTPException(403, "client viewers may download only client_upload evidence")
         try:
-            path = services.assert_evidence_path_readable(Path(ev.path), eng.tenant_id)
-        except LookupError:
+            data = data_access.evidence_bytes(ev.path, eng.tenant_id)
+        except (LookupError, OSError):
             raise HTTPException(404, "evidence not found") from None
         audit.record(s, principal.actor, "evidence.download", "evidence", ev.id, finding_id=f.id)
-        return FileResponse(str(path), filename=ev.filename, media_type="application/octet-stream")
+        return data_access.download_response(data, ev.filename)
 
 
 @app.get("/api/audit/verify")
 def audit_verify(principal: Principal = Depends(require("audit.read"))):
-    with db.session() as s:
+    with data_access.session() as s:
         ok, bad = audit.verify(s)
     return {"ok": ok, "first_bad_event": bad}
 
@@ -1346,12 +1327,8 @@ def audit_export(
     import io
 
     from fastapi.responses import PlainTextResponse, Response
-    from sqlalchemy import select
-
-    from attestra.models import AuditEvent
-
-    with db.session() as s:
-        events = list(s.scalars(select(AuditEvent).order_by(AuditEvent.id)))
+    with data_access.session() as s:
+        events = data_access.audit_events(s)
         ok, bad = audit.verify(s)
         rows = [
             {
@@ -1437,7 +1414,7 @@ def _scan_dict(r) -> dict:
 @app.post("/api/engagements/{eid}/scans", status_code=201)
 def start_scan(eid: int, body: ScanIn, principal: Principal = Depends(require("scan.start"))):
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             services.get_engagement(s, eid, principal)
             data = body.model_dump()
             idem = data.pop("idempotency_key", None)
@@ -1486,7 +1463,7 @@ def allocate_credits_api(body: CreditAllocateIn, principal: Principal = Depends(
     from attestra.credits import allocate_credits, balance_view
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             tx = allocate_credits(
                 s,
                 body.tenant_id,
@@ -1509,7 +1486,7 @@ def create_renewal_request(body: CreditRenewalIn, principal: Principal = Depends
     from attestra.credits import request_renewal
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             row = request_renewal(
                 s,
                 body.tenant_id,
@@ -1571,7 +1548,7 @@ def resolve_renewal_api(
     from attestra.credits import resolve_renewal
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             row = resolve_renewal(
                 s,
                 rid,

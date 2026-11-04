@@ -117,6 +117,9 @@ pnpm-debug.log*
 package-lock.json
 yarn.lock
 
+# --- MongoDB migration local backups (may contain DB + signing keys) ---
+.migration_backups/
+
 # --- Logs & temp ---
 logs/
 *.log
@@ -126,6 +129,9 @@ temp/
 *.temp
 *.bak
 *.orig
+_baseline_probe.py
+_audit_verify.py
+_route_count*.py
 
 # --- Misc ---
 *.pid

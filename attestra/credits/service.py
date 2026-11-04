@@ -8,7 +8,7 @@ successfully admitted in [[attestra/services.py#request_scan]].
 
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit, config
@@ -30,39 +30,10 @@ REASON_RENEWAL_APPROVE = "renewal_approve"
 
 def ensure_account(s: Session, tenant_id: int, *, actor: str = "system") -> TenantCreditAccount:
     """Return the tenant credit account, creating it with the configured initial grant if missing."""
-    acct = s.get(TenantCreditAccount, tenant_id)
-    if acct is not None:
-        return acct
-    initial = int(config.INITIAL_TEST_RUN_CREDITS)
-    acct = TenantCreditAccount(
-        tenant_id=tenant_id,
-        balance=initial,
-        grant_total=initial,
-        updated_at=utcnow(),
-    )
-    s.add(acct)
-    s.flush()
-    if initial:
-        _ledger(
-            s,
-            tenant_id=tenant_id,
-            amount=initial,
-            balance_after=initial,
-            reason=REASON_INITIAL,
-            actor=actor,
-            note=f"Initial allocation of {initial} test-run credit(s)",
-            idempotency_key=f"initial_grant:tenant:{tenant_id}",
-        )
-        audit.record(
-            s,
-            actor,
-            "credits.initial_grant",
-            "tenant",
-            tenant_id,
-            amount=initial,
-            balance=initial,
-        )
-    return acct
+    from attestra.persistence.mongo.adapters import mongo_credit_account
+
+    doc = mongo_credit_account(tenant_id)
+    return TenantCreditAccount(tenant_id=tenant_id, balance=int(doc["balance"]), grant_total=int(doc.get("grant_total") or 0))
 
 
 def get_balance(s: Session, tenant_id: int, *, actor: str = "system") -> TenantCreditAccount:
@@ -89,46 +60,6 @@ def balance_view(s: Session, tenant_id: int, *, actor: str = "system") -> dict:
     }
 
 
-def _find_by_idempotency(s: Session, key: str | None) -> CreditTransaction | None:
-    if not key:
-        return None
-    return s.scalar(select(CreditTransaction).where(CreditTransaction.idempotency_key == key))
-
-
-def _ledger(
-    s: Session,
-    *,
-    tenant_id: int,
-    amount: int,
-    balance_after: int,
-    reason: str,
-    actor: str,
-    note: str = "",
-    user_id: int | None = None,
-    engagement_id: int | None = None,
-    scan_run_id: int | None = None,
-    renewal_request_id: int | None = None,
-    idempotency_key: str | None = None,
-) -> CreditTransaction:
-    tx = CreditTransaction(
-        tenant_id=tenant_id,
-        amount=amount,
-        balance_after=balance_after,
-        reason=reason,
-        actor=actor,
-        user_id=user_id,
-        engagement_id=engagement_id,
-        scan_run_id=scan_run_id,
-        renewal_request_id=renewal_request_id,
-        idempotency_key=idempotency_key,
-        note=note or "",
-        created_at=utcnow(),
-    )
-    s.add(tx)
-    s.flush()
-    return tx
-
-
 def consume_for_scan_admit(
     s: Session,
     tenant_id: int,
@@ -145,51 +76,28 @@ def consume_for_scan_admit(
     is exhausted. Repeated calls with the same idempotency key return the prior
     ledger row without a second debit.
     """
-    if not config.subscription_enforcement_enabled():
-        return None
-    existing = _find_by_idempotency(s, idempotency_key)
-    if existing is not None:
-        return existing
-    ensure_account(s, tenant_id, actor=actor)
-    result = s.execute(
-        update(TenantCreditAccount)
-        .where(TenantCreditAccount.tenant_id == tenant_id, TenantCreditAccount.balance >= 1)
-        .values(
-            balance=TenantCreditAccount.balance - 1,
-            updated_at=utcnow(),
-        )
+    from attestra.persistence.mongo.adapters import mongo_consume_credit
+
+    doc = mongo_consume_credit(
+        tenant_id,
+        actor=actor,
+        engagement_id=engagement_id,
+        user_id=user_id,
+        idempotency_key=idempotency_key,
     )
-    if result.rowcount != 1:
-        raise _service_error(
-            "The organization has exhausted its available test-run credits. "
-            "Request additional credits or ask a Super Admin to allocate more."
-        )
-    acct = s.get(TenantCreditAccount, tenant_id)
-    assert acct is not None
-    s.refresh(acct)
-    tx = _ledger(
-        s,
+    if doc is None:
+        return None
+    tx = CreditTransaction(
         tenant_id=tenant_id,
-        amount=-1,
-        balance_after=acct.balance,
-        reason=REASON_SCAN_ADMIT,
+        amount=doc["amount"],
+        balance_after=doc["balance_after"],
+        reason=doc["reason"],
         actor=actor,
         user_id=user_id,
         engagement_id=engagement_id,
         idempotency_key=idempotency_key,
-        note="Test-run credit consumed at scan admission",
     )
-    audit.record(
-        s,
-        actor,
-        "credits.consume",
-        "credit_transaction",
-        tx.id,
-        tenant_id=tenant_id,
-        engagement_id=engagement_id,
-        balance=acct.balance,
-        reason=REASON_SCAN_ADMIT,
-    )
+    tx.id = doc["id"]
     return tx
 
 
@@ -197,8 +105,10 @@ def attach_scan_run(s: Session, tx: CreditTransaction | None, scan_run_id: int) 
     """Link a debit ledger row to the admitted scan run id."""
     if tx is None:
         return
+    from attestra.persistence.mongo.adapters import mongo_attach_credit_scan_run
+
+    mongo_attach_credit_scan_run(tx.id, scan_run_id)
     tx.scan_run_id = scan_run_id
-    s.flush()
 
 
 def refund_for_scan(
@@ -222,46 +132,20 @@ def refund_for_scan(
     if (not post_start) and not config.CREDIT_REFUND_ON_PRE_START_FAILURE:
         return None
     reason = REASON_REFUND_POST_START if post_start else REASON_REFUND_PRE_START
-    key = f"refund:{reason}:tx:{debit_tx.id}"
-    existing = _find_by_idempotency(s, key)
-    if existing is not None:
-        return existing
-    ensure_account(s, tenant_id, actor=actor)
-    s.execute(
-        update(TenantCreditAccount)
-        .where(TenantCreditAccount.tenant_id == tenant_id)
-        .values(
-            balance=TenantCreditAccount.balance + 1,
-            updated_at=utcnow(),
-        )
+    from attestra.persistence.mongo.adapters import mongo_refund_credit
+
+    doc = mongo_refund_credit(
+        tenant_id, actor=actor, debit_tx_id=debit_tx.id, reason=reason,
+        scan_run_id=scan_run_id, engagement_id=engagement_id, note=note,
     )
-    acct = s.get(TenantCreditAccount, tenant_id)
-    assert acct is not None
-    s.refresh(acct)
-    tx = _ledger(
-        s,
-        tenant_id=tenant_id,
-        amount=1,
-        balance_after=acct.balance,
-        reason=reason,
-        actor=actor,
-        engagement_id=engagement_id,
-        scan_run_id=scan_run_id,
-        idempotency_key=key,
-        note=note or "Credit refund",
+    if doc is None:
+        return None
+    rtx = CreditTransaction(
+        tenant_id=tenant_id, amount=doc["amount"], balance_after=doc["balance_after"], reason=reason,
+        actor=actor, engagement_id=engagement_id, idempotency_key=doc.get("idempotency_key"),
     )
-    audit.record(
-        s,
-        actor,
-        "credits.refund",
-        "credit_transaction",
-        tx.id,
-        tenant_id=tenant_id,
-        scan_run_id=scan_run_id,
-        balance=acct.balance,
-        reason=reason,
-    )
-    return tx
+    rtx.id = doc["id"]
+    return rtx
 
 
 def allocate_credits(
@@ -279,46 +163,18 @@ def allocate_credits(
     """Admin grant of credits to an organization (audited)."""
     if amount < 1:
         raise _service_error("allocation amount must be at least 1")
-    existing = _find_by_idempotency(s, idempotency_key)
-    if existing is not None:
-        return existing
-    ensure_account(s, tenant_id, actor=actor)
-    s.execute(
-        update(TenantCreditAccount)
-        .where(TenantCreditAccount.tenant_id == tenant_id)
-        .values(
-            balance=TenantCreditAccount.balance + amount,
-            grant_total=TenantCreditAccount.grant_total + amount,
-            updated_at=utcnow(),
-        )
+    from attestra.persistence.mongo.adapters import mongo_allocate_credits
+
+    doc = mongo_allocate_credits(
+        tenant_id, amount, actor=actor, note=note, user_id=user_id,
+        renewal_request_id=renewal_request_id, reason=reason, idempotency_key=idempotency_key,
     )
-    acct = s.get(TenantCreditAccount, tenant_id)
-    assert acct is not None
-    s.refresh(acct)
-    tx = _ledger(
-        s,
-        tenant_id=tenant_id,
-        amount=amount,
-        balance_after=acct.balance,
-        reason=reason,
-        actor=actor,
-        user_id=user_id,
-        renewal_request_id=renewal_request_id,
-        idempotency_key=idempotency_key,
-        note=note or f"Allocated {amount} credit(s)",
+    atx = CreditTransaction(
+        tenant_id=tenant_id, amount=doc["amount"], balance_after=doc["balance_after"], reason=reason,
+        actor=actor, user_id=user_id, idempotency_key=idempotency_key,
     )
-    audit.record(
-        s,
-        actor,
-        "credits.allocate",
-        "credit_transaction",
-        tx.id,
-        tenant_id=tenant_id,
-        amount=amount,
-        balance=acct.balance,
-        reason=reason,
-    )
-    return tx
+    atx.id = doc["id"]
+    return atx
 
 
 def request_renewal(

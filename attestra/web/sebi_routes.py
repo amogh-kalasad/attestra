@@ -8,8 +8,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from attestra import db, services
+from attestra import services
 from attestra.compliance import sebi_timeline as sebi
+from attestra.web import data_access
 
 ui_router = APIRouter(include_in_schema=False)
 
@@ -28,7 +29,7 @@ def ui_sebi_timeline(request: Request, eid: int):
         return _back("/portal", error="That page is for the test team. Here is your read-only portal instead.")
 
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             eng = services.get_engagement(s, eid, principal)
             timeline = sebi.build_timeline(s, eng)
             return _render(

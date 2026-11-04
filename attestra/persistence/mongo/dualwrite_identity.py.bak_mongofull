@@ -1,0 +1,190 @@
+﻿"""Dual-write mirror for identity, settings and webhook tables (companion to ``dualwrite``).
+
+Same contract as ``persistence.mongo.dualwrite``: while ``ATTESTRA_PERSISTENCE=mongo`` and SQL
+is still the read/auth path, committed inserts/updates/deletes on ``IDENTITY_TABLES`` are
+replayed into the Mongo collection of the same name with the same integer ``_id``.
+
+Differences: webhook endpoint secrets are encrypted (``secret_enc``) via
+``migration.transform.row_to_document`` -> ``secrets_codec.protect_webhook_endpoint`` and
+plaintext never reaches Mongo; the id sequence of each mirrored collection is seeded past the
+mirrored ids so later Mongo-native inserts cannot collide.
+
+Install with ``install(db._SessionLocal)`` (idempotent), e.g. next to
+``dualwrite.install`` in ``db.init``.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from sqlalchemy import event, inspect
+
+log = logging.getLogger("attestra.persistence.dualwrite_identity")
+
+IDENTITY_TABLES: frozenset[str] = frozenset(
+    {
+        "tenants",
+        "users",
+        "api_keys",
+        "tenant_memberships",
+        "user_invites",
+        "email_alert_settings",
+        "email_alert_sent",
+        "certification_authority",
+        "webhook_endpoints",
+        "webhook_deliveries",
+        "workflow_rules",
+        "finding_assignments",
+    }
+)
+
+_KEY = "_attestra_mongo_identity_mirror"
+_stats = {"writes": 0, "failures": 0}
+
+
+def stats() -> dict[str, int]:
+    return dict(_stats)
+
+
+def _table_of(obj: Any) -> str | None:
+    name = getattr(getattr(obj, "__table__", None), "name", None)
+    return name if name in IDENTITY_TABLES else None
+
+
+def _row(obj: Any) -> dict[str, Any]:
+    mapper = inspect(obj).mapper
+    return {prop.columns[0].name: getattr(obj, prop.key) for prop in mapper.column_attrs}
+
+
+def to_document(table: str, row: dict[str, Any]) -> dict[str, Any]:
+    from attestra.migration.transform import row_to_document
+    from attestra.persistence.mongo.secrets_codec import protect_webhook_endpoint
+
+    doc = row_to_document(table, row)
+    if table == "webhook_endpoints":  # defence in depth if transform is ever bypassed
+        protect_webhook_endpoint(doc)
+    return doc
+
+
+def _after_flush(session, _ctx) -> None:
+    from attestra.persistence import using_mongo
+
+    if not using_mongo():
+        return
+    pending: dict = session.info.setdefault(_KEY, {})
+    for obj in list(session.new) + list(session.dirty):
+        tbl = _table_of(obj)
+        ident = getattr(obj, "id", None)
+        if tbl and ident is not None:
+            pending[(tbl, int(ident))] = obj
+    for obj in session.deleted:
+        tbl = _table_of(obj)
+        ident = getattr(obj, "id", None)
+        if tbl and ident is not None:
+            pending[(tbl, int(ident))] = None
+
+
+def _after_commit(session) -> None:
+    pending: dict = session.info.pop(_KEY, None) or {}
+    if not pending:
+        return
+    from pymongo import DeleteOne, ReplaceOne
+
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.persistence.mongo.sequences import seed_sequence
+
+    by_table: dict[str, list] = {}
+    max_ids: dict[str, int] = {}
+    for (tbl, ident), obj in pending.items():
+        try:
+            if obj is None:
+                by_table.setdefault(tbl, []).append(DeleteOne({"_id": ident}))
+            else:
+                doc = to_document(tbl, _row(obj))
+                by_table.setdefault(tbl, []).append(ReplaceOne({"_id": ident}, doc, upsert=True))
+                max_ids[tbl] = max(max_ids.get(tbl, 0), ident)
+        except Exception:  # noqa: BLE001
+            _stats["failures"] += 1
+            log.exception("identity mirror: could not serialise %s/%s", tbl, ident)
+    try:
+        db = _db()
+    except Exception:  # noqa: BLE001
+        _stats["failures"] += sum(len(v) for v in by_table.values())
+        log.exception("identity mirror: MongoDB unavailable; %d rows not mirrored", len(pending))
+        return
+    for tbl, ops in by_table.items():
+        try:
+            db[tbl].bulk_write(ops, ordered=False)
+            _stats["writes"] += len(ops)
+            if tbl in max_ids:
+                seed_sequence(db, tbl, max_ids[tbl])
+        except Exception:  # noqa: BLE001
+            _stats["failures"] += len(ops)
+            log.exception("identity mirror: bulk write to %s failed (%d ops)", tbl, len(ops))
+            try:
+                db["mirror_failures"].insert_one({"table": tbl, "ids": [o._filter["_id"] for o in ops]})
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def _after_rollback(session) -> None:
+    session.info.pop(_KEY, None)
+
+
+def _after_soft_rollback(session, _previous) -> None:
+    if not session.in_transaction():
+        _after_rollback(session)
+
+
+def install(session_factory) -> None:
+    """Attach the identity mirror to a sessionmaker (idempotent)."""
+    if event.contains(session_factory, "after_flush", _after_flush):
+        return
+    event.listen(session_factory, "after_flush", _after_flush)
+    event.listen(session_factory, "after_commit", _after_commit)
+    event.listen(session_factory, "after_soft_rollback", _after_soft_rollback)
+    event.listen(session_factory, "after_rollback", _after_rollback)
+
+
+def uninstall(session_factory) -> None:
+    for name, fn in (("after_flush", _after_flush), ("after_commit", _after_commit),
+                     ("after_soft_rollback", _after_soft_rollback), ("after_rollback", _after_rollback)):
+        if event.contains(session_factory, name, fn):
+            event.remove(session_factory, name, fn)
+
+
+def backfill(session, *, tables: frozenset[str] | None = None, batch: int = 500) -> dict[str, int]:
+    """One-shot copy of existing SQL rows for ``tables`` (default all IDENTITY_TABLES) into Mongo.
+
+    Idempotent (upsert by ``_id``); webhook secrets encrypted. Read-only on SQL.
+    """
+    from pymongo import ReplaceOne
+    from sqlalchemy import select
+
+    from attestra.models import Base
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.persistence.mongo.sequences import seed_sequence
+
+    db = _db()
+    counts: dict[str, int] = {}
+    wanted = tables or IDENTITY_TABLES
+    for mapper in Base.registry.mappers:
+        cls = mapper.class_
+        tbl = getattr(getattr(cls, "__table__", None), "name", None)
+        if tbl not in wanted:
+            continue
+        ops, n, top = [], 0, 0
+        for obj in session.scalars(select(cls)).yield_per(batch):
+            ops.append(ReplaceOne({"_id": int(obj.id)}, to_document(tbl, _row(obj)), upsert=True))
+            top = max(top, int(obj.id))
+            if len(ops) >= batch:
+                db[tbl].bulk_write(ops, ordered=False)
+                n += len(ops)
+                ops = []
+        if ops:
+            db[tbl].bulk_write(ops, ordered=False)
+            n += len(ops)
+        if top:
+            seed_sequence(db, tbl, top)
+        counts[tbl] = n
+    return counts

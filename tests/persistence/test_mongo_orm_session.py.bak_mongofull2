@@ -1,0 +1,74 @@
+"""MongoSession query compiler: the select() shapes used across the app."""
+from __future__ import annotations
+
+import pytest
+
+from attestra.persistence import using_mongo
+
+
+@pytest.fixture(autouse=True)
+def _mongo_only():
+    if not using_mongo():
+        pytest.skip("Mongo-only (run with --persistence=mongo)")
+
+
+def test_select_shapes(engagement):
+    from sqlalchemy import func, select
+
+    from attestra import db
+    from attestra.models import Asset, Engagement, Job, ScanRun, User
+
+    with db.session() as s:
+        eng = s.get(Engagement, engagement)
+        tid = eng.tenant_id
+        # join + where on joined table (services.scoped, org_ownership, library.routes)
+        assets = s.scalars(select(Asset).join(Engagement, Asset.engagement_id == Engagement.id)
+                           .where(Engagement.tenant_id == tid, Asset.kind.in_(["repo", "image"]))).all()
+        assert {a.kind for a in assets} == {"repo", "image"} and len(assets) == 3
+        assert s.scalars(select(Asset).join(Engagement, Engagement.id == Asset.engagement_id)
+                         .where(Engagement.tenant_id.in_([tid + 999]))).all() == []
+        # count / max / group_by count
+        assert s.scalar(select(func.count(Asset.id)).where(Asset.engagement_id == engagement)) == 4
+        assert s.scalar(select(func.count()).select_from(Asset)) == 4
+        assert s.scalar(select(func.max(Asset.criticality))) == 5
+        rows = dict(s.execute(select(Asset.kind, func.count()).where(Asset.engagement_id == engagement)
+                              .group_by(Asset.kind)).all())
+        assert rows == {"web_app": 1, "image": 1, "repo": 2}
+        # order_by desc / limit / column select
+        ids = s.scalars(select(Asset.id).order_by(Asset.id.desc()).limit(2)).all()
+        assert ids == sorted(ids, reverse=True) and len(ids) == 2
+        # job queue join with not_in (jobs.durable)
+        a = assets[0]
+        run = ScanRun(engagement_id=engagement, asset_id=a.id, tool="nuclei", profile="baseline",
+                      status="queued", requested_by="t")
+        s.add(run)
+        s.flush()
+        s.add(Job(scan_run_id=run.id, status="queued"))
+        s.flush()
+        q = select(Job).join(ScanRun, Job.scan_run_id == ScanRun.id).where(ScanRun.tool.not_in(["nuclei"]))
+        assert s.scalars(q).all() == []
+        assert len(s.scalars(select(Job).join(ScanRun, Job.scan_run_id == ScanRun.id)
+                             .where(ScanRun.engagement_id == engagement)).all()) == 1
+        # lower() equality (users.service)
+        assert s.scalars(select(User).where(func.lower(User.username) == "nobody")).first() is None
+        # is_ / is_not None, ne, like
+        assert len(s.scalars(select(Asset).where(Asset.owner.is_not(None), Asset.kind != "web_app")).all()) == 3
+        assert len(s.scalars(select(Asset).where(Asset.identifier.like("%payments%"))).all()) == 1
+
+
+def test_rollback_undoes_inserts_and_updates(engagement):
+    from attestra import db
+    from attestra.models import Asset, Engagement
+    from attestra.persistence.mongo.adapters import _db
+
+    with db.session() as s:
+        before = s.get(Engagement, engagement).name
+    with pytest.raises(RuntimeError):
+        with db.session() as s:
+            s.get(Engagement, engagement).name = "changed"
+            s.add(Asset(engagement_id=engagement, kind="repo", identifier="tmp/rollback", name="x"))
+            s.flush()
+            raise RuntimeError("boom")
+    assert _db()["engagements"].find_one({"_id": engagement})["name"] == before
+    assert _db()["assets"].find_one({"identifier": "tmp/rollback"}) is None
+

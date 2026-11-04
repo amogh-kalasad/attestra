@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from attestra import db, services
 from attestra.auth.keys import Principal
@@ -276,7 +277,7 @@ def _ui_ctx(request: Request):
 
 def _ui_tenants(s, principal) -> list[Tenant]:
     allowed = services.tenant_ids_for(s, principal)
-    rows = s.query(Tenant).order_by(Tenant.name).all()
+    rows = list(s.scalars(select(Tenant).order_by(Tenant.name)))
     return [t for t in rows if allowed is None or t.id in allowed]
 
 
@@ -415,10 +416,10 @@ def ui_entry(request: Request, entry_id: int):
             e = lib.get_entry(s, entry_id, services.tenant_ids_for(s, principal))
             from attestra.models import Engagement
 
-            recent = (
-                s.query(Finding).join(Engagement, Finding.engagement_id == Engagement.id)
-                .filter(Engagement.tenant_id == e.tenant_id).order_by(Finding.id.desc()).limit(200).all()
-            )
+            recent = list(s.scalars(
+                select(Finding).join(Engagement, Finding.engagement_id == Engagement.id)
+                .where(Engagement.tenant_id == e.tenant_id).order_by(Finding.id.desc()).limit(200)
+            ))
             return ui._render(request, "library_edit.html", {"e": e, "severities": SEVERITIES, "recent_findings": recent})
     except LookupError:
         return ui._back("/library", error="Writeup not found.")

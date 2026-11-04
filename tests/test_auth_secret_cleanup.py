@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 
 from attestra.auth_web import scan_auth
 from attestra.runner.dns_pin import PinnedTarget
@@ -53,7 +54,7 @@ def _queued_nuclei_job(s, engagement):
     from attestra.jobs.durable import enqueue
     from attestra.models import Asset, ScanRun
 
-    asset = s.query(Asset).filter(Asset.engagement_id == engagement, Asset.kind == "web_app").first()
+    asset = s.scalars(select(Asset).where(Asset.engagement_id == engagement, Asset.kind == "web_app")).first()
     run = ScanRun(
         engagement_id=engagement, asset_id=asset.id, tool="nuclei", profile="baseline",
         status="queued", requested_by="lead", auth_profile_id=1,

@@ -1,0 +1,72 @@
+"""Session handling - MongoDB only.
+
+``session()`` yields a :class:`MongoSession` (SQLAlchemy-Session look-alike that
+persists straight to MongoDB). The declarative ``Base`` stays as the schema that
+MongoSession maps; there is no SQL engine.
+"""
+from __future__ import annotations
+
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+_engine = None          # kept for callers that probe it (api.py observability)
+_SessionLocal = None
+
+_UNSET = object()
+current_tenant_ids: ContextVar[frozenset[int] | None] = ContextVar("attestra_tenant_ids", default=None)
+
+
+def normalize_url(url: str) -> str:  # legacy helper (mongo-migrate import of old SQL dumps)
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def is_postgres(url: str) -> bool:
+    return normalize_url(url).startswith("postgresql")
+
+
+@contextmanager
+def tenant_scope(tenant_ids: Iterable[int] | None) -> Iterator[None]:
+    token = current_tenant_ids.set(None if tenant_ids is None else frozenset(int(t) for t in tenant_ids))
+    try:
+        yield
+    finally:
+        current_tenant_ids.reset(token)
+
+
+def init(url: str | None = None, *, use_migrations: bool = False) -> None:
+    """Initialise MongoDB (client + schema migrations). ``url``/``use_migrations`` are ignored."""
+    from attestra.persistence.mongo.adapters import _db
+
+    _db()
+
+
+def upgrade(url: str | None = None) -> None:
+    init()
+
+
+@contextmanager
+def session(tenant_ids: Iterable[int] | None | object = _UNSET):
+    from attestra.persistence.mongo.orm_session import MongoSession
+
+    if tenant_ids is _UNSET:
+        ids = current_tenant_ids.get()
+    else:
+        ids = None if tenant_ids is None else frozenset(int(t) for t in tenant_ids)
+    s = MongoSession(ids)
+    try:
+        yield s
+        s.commit()
+    except Exception:
+        s.rollback()
+        raise

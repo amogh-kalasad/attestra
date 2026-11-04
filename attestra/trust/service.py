@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from attestra import audit, config, services
 from attestra.models import Engagement, Evidence, Finding, Report, Tenant, utcnow
+from attestra.reports.report_access import get_report_row
 from attestra.trust.models import ACCESS_LEVELS, ITEM_KINDS, TrustAccessRequest, TrustCenter, TrustItem
 
 # Role rules live here so the shared RBAC map stays untouched.
@@ -92,7 +93,7 @@ def publish(s: Session, principal, tenant_id: int, *, kind: str, title: str, sum
     item = TrustItem(tenant_id=tenant_id, kind=kind, title=title.strip()[:300], summary=summary,
                      access=access, ref_id=ref_id, ref_key=ref_key[:100], published_by=principal.actor)
     if kind == "report":
-        r = s.get(Report, ref_id or 0)
+        r = get_report_row(s, ref_id, [tenant_id])
         if not r:
             raise TrustError("report not found")
         _engagement_in_tenant(s, r.engagement_id, tenant_id)
@@ -153,7 +154,7 @@ def report_status(s: Session, item: TrustItem) -> dict:
     """Live signature check for a published report (summary only, never contents)."""
     from attestra.reports.render import verify_report
 
-    r = s.get(Report, item.ref_id or 0)
+    r = get_report_row(s, item.ref_id, [item.tenant_id])
     if not r:
         return {"verified": False, "reason": "report missing"}
     try:
@@ -251,7 +252,7 @@ def download(s: Session, slug: str, item_id: int, token: str | None) -> tuple[Pa
     if item.kind == "document":
         path = Path(item.path)
     elif item.kind == "report":
-        r = s.get(Report, item.ref_id or 0)
+        r = get_report_row(s, item.ref_id, [c.tenant_id])
         if not r or r.status != "signed":
             raise LookupError("item not found")
         path = Path(r.pdf_path or r.path)

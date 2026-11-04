@@ -258,7 +258,7 @@ class WorkerPool:
         runner = self.run_job or durable.run_one_job
         try:
             with db.session() as s:
-                job = s.get(Job, job_id)
+                job = durable.get_job(s, job_id)
                 if job is None or job.status != "running" or job.worker_id != self.worker_id:
                     return
                 runner(s, job)
@@ -268,7 +268,7 @@ class WorkerPool:
 
     def _fail_crashed(self, job_id: int, error: str) -> None:
         with db.session() as s:
-            job = s.get(Job, job_id)
+            job = durable.get_job(s, job_id)
             if job is not None and job.status == "running":
                 durable.fail_job(s, job, f"worker error: {error}")
                 run = s.get(ScanRun, job.scan_run_id)
@@ -310,7 +310,7 @@ class WorkerPool:
                     self.log(f"automated execution {active.execution_id} put back in the queue")
             return
         with db.session() as s:
-            job = s.get(Job, job_id)
+            job = durable.get_job(s, job_id)
             if job is None or job.cancel_requested:
                 return
             if job.status in ("cancelled", "running"):

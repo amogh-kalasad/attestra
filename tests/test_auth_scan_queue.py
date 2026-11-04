@@ -3,6 +3,7 @@ profile, run orchestration prepares artifacts + login check, and RBAC on profile
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from attestra.auth.roles import has_permission
 
@@ -21,7 +22,13 @@ def auth_env(monkeypatch):
     # lookup (the storefront asset host need not exist on this machine).
     import socket as _socket
 
+    _real_getaddrinfo = _socket.getaddrinfo
+
     def _fake_getaddrinfo(host, *a, **k):
+        # Loopback stays real: the Mongo test backend (pymongo pool/monitor reconnects and the
+        # mongo_test_db teardown drop) resolves 127.0.0.1/localhost through this same function.
+        if host in ("127.0.0.1", "localhost", "::1") or (isinstance(host, str) and host.startswith("127.")):
+            return _real_getaddrinfo(host, *a, **k)
         return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
 
     monkeypatch.setattr(_socket, "getaddrinfo", _fake_getaddrinfo)
@@ -88,7 +95,7 @@ def test_request_scan_carries_auth_profile(engagement, auth_env):
             config_json={"header_name": "Authorization"}, secret_value="tok", principal=principal,
         )
         s.flush()
-        asset = s.query(Asset).filter(Asset.engagement_id == engagement, Asset.kind == "web_app").first()
+        asset = s.scalars(select(Asset).where(Asset.engagement_id == engagement, Asset.kind == "web_app")).first()
         run = services.request_scan(
             s, engagement, asset_id=asset.id, tool="zap", profile="baseline",
             actor="lead", auth_profile_id=prof.id,
@@ -102,7 +109,7 @@ def test_request_scan_rejects_foreign_profile(engagement, auth_env):
     from attestra.models import Asset
 
     with db.session() as s:
-        asset = s.query(Asset).filter(Asset.engagement_id == engagement, Asset.kind == "web_app").first()
+        asset = s.scalars(select(Asset).where(Asset.engagement_id == engagement, Asset.kind == "web_app")).first()
         with pytest.raises(services.ServiceError):
             services.request_scan(
                 s, engagement, asset_id=asset.id, tool="zap", profile="baseline",
@@ -113,7 +120,7 @@ def test_request_scan_rejects_foreign_profile(engagement, auth_env):
 def _make_run(s, eid, profile_id, tool="zap"):
     from attestra.models import Asset, ScanRun
 
-    asset = s.query(Asset).filter(Asset.engagement_id == eid, Asset.kind == "web_app").first()
+    asset = s.scalars(select(Asset).where(Asset.engagement_id == eid, Asset.kind == "web_app")).first()
     run = ScanRun(
         engagement_id=eid, asset_id=asset.id, tool=tool, profile="baseline",
         status="queued", requested_by="lead", auth_profile_id=profile_id,

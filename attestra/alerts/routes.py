@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from attestra import db, services
 from attestra.alerts import service as alerts
 from attestra.auth.roles import has_permission
+from attestra.web import data_access
+from attestra.web import settings_store as store
 
 api_router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 ui_router = APIRouter(include_in_schema=False)
@@ -40,32 +41,17 @@ def _default_tenant(s, principal) -> int:
     ``tenant_ids_for`` returns ``None`` for unrestricted platform leads/admins —
     that means every tenant, so we take the first by name, not an error.
     """
-    from sqlalchemy import select
-
-    from attestra.models import Tenant
-
-    if principal.tenant_id:
-        return int(principal.tenant_id)
-    allowed = services.tenant_ids_for(s, principal)
-    if allowed is not None:
-        if not allowed:
-            raise alerts.AlertError("no tenant in scope for email alert settings")
-        return sorted(allowed)[0]
-    row = s.scalars(select(Tenant).order_by(Tenant.name, Tenant.id)).first()
-    if row is None:
-        raise alerts.AlertError("no tenant in scope for email alert settings")
-    return int(row.id)
+    return store.alert_default_tenant(s, principal)
 
 
 @api_router.get("/settings")
 def get_settings(tenant_id: int | None = None, principal=Depends(_principal)):
     try:
-        with db.session() as s:
+        with data_access.identity_session() as s:
             tid = tenant_id if tenant_id is not None else _default_tenant(s, principal)
-            alerts._check_tenant(s, principal, tid)
-            row = alerts.get_settings(s, tid)
-            out = alerts.settings_dict(row, tid)
-            out["known_emails"] = alerts.known_tenant_emails(s, tid)
+            store.alert_check_tenant(s, principal, tid)
+            out = store.alert_settings(s, tid)
+            out["known_emails"] = store.alert_known_emails(s, tid)
             return out
     except (LookupError, alerts.AlertError) as e:
         raise _err(e) from e
@@ -74,10 +60,9 @@ def get_settings(tenant_id: int | None = None, principal=Depends(_principal)):
 @api_router.put("/settings")
 def put_settings(body: SettingsIn, tenant_id: int | None = None, principal=Depends(_principal)):
     try:
-        with db.session() as s:
+        with data_access.identity_session() as s:
             tid = tenant_id if tenant_id is not None else _default_tenant(s, principal)
-            row = alerts.update_settings(s, principal, tid, **body.model_dump(exclude_unset=True))
-            return alerts.settings_dict(row, tid)
+            return store.alert_update(s, principal, tid, **body.model_dump(exclude_unset=True))
     except (LookupError, alerts.AlertError) as e:
         raise _err(e) from e
 
@@ -111,25 +96,15 @@ def ui_alerts(request: Request, tenant_id: int | None = None):
     p = _ui_principal(request)
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage email alerts.")
-    with db.session() as s:
+    with data_access.identity_session() as s:
         try:
             tid = tenant_id if tenant_id is not None else _default_tenant(s, p)
-            alerts._check_tenant(s, p, tid)
+            store.alert_check_tenant(s, p, tid)
         except (LookupError, alerts.AlertError) as e:
             return _back("/", error=str(e))
-        row = alerts.get_settings(s, tid)
-        settings = alerts.settings_dict(row, tid)
-        tenants = []
-        allowed = services.tenant_ids_for(s, p)
-        from sqlalchemy import select
-
-        from attestra.models import Tenant
-
-        q = select(Tenant).order_by(Tenant.name)
-        if allowed is not None:
-            q = q.where(Tenant.id.in_(allowed))
-        tenants = [{"id": t.id, "name": t.name} for t in s.scalars(q)]
-        known = alerts.known_tenant_emails(s, tid)
+        settings = store.alert_settings(s, tid)
+        tenants = store.alert_tenants(s, p)
+        known = store.alert_known_emails(s, tid)
         from attestra.users import mailer
 
         smtp = mailer.smtp_configured()
@@ -159,8 +134,8 @@ def ui_alerts_save(
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage email alerts.")
     try:
-        with db.session() as s:
-            alerts.update_settings(
+        with data_access.identity_session() as s:
+            store.alert_update(
                 s,
                 p,
                 tenant_id,

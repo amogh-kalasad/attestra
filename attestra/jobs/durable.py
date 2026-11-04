@@ -1,4 +1,4 @@
-"""Durable SQLAlchemy-backed job queue for ScanRuns."""
+"""Durable MongoDB-backed job queue for ScanRuns."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit, config, services
@@ -48,41 +48,29 @@ def signal_job_cancel(job_id: int) -> None:
 
 
 def enqueue(s: Session, scan_run_id: int) -> Job:
-    job = Job(scan_run_id=scan_run_id, status="queued")
-    s.add(job)
-    s.flush()
-    audit.record(s, "system", "job.enqueue", "job", job.id, scan_run_id=scan_run_id)
-    return job
+    from attestra.persistence.mongo.adapters import mongo_enqueue_job
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    run = s.get(ScanRun, scan_run_id)
+    doc = mongo_enqueue_job(scan_run_id, tool=(run.tool if run else ""))
+    return MongoJob(doc)
 
 
 def claim_job(s: Session, worker_id: str, *, exclude_tools: Iterable[str] = ()) -> Job | None:
     """Atomically claim the next queued job.
 
-    The conditional UPDATE (``status == 'queued'``) is the lock: when two threads or
-    processes pick the same row only one UPDATE matches, and the loser tries the next
+    The conditional update (``status == 'queued'``) is the lock: when two threads or
+    processes pick the same document only one update matches, and the loser tries the next
     candidate. ``exclude_tools`` skips jobs for tools this worker is already running and
     must not run twice at once (shared template cache).
     """
-    q = select(Job).where(Job.status == "queued")
-    skip = sorted({t for t in exclude_tools if t})
-    if skip:
-        q = q.join(ScanRun, Job.scan_run_id == ScanRun.id).where(ScanRun.tool.not_in(skip))
-    for job in s.scalars(q.order_by(Job.id).limit(5)).all():
-        result = s.execute(
-            update(Job)
-            .where(Job.id == job.id, Job.status == "queued")
-            .values(
-                status="running",
-                worker_id=worker_id,
-                heartbeat_at=utcnow(),
-                attempts=Job.attempts + 1,
-            )
-            .execution_options(synchronize_session=False)
-        )
-        if result.rowcount == 1:
-            s.refresh(job)
-            return job
-    return None
+    from attestra.persistence.mongo.adapters import mongo_claim_job
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    doc = mongo_claim_job(worker_id, exclude_tools=exclude_tools)
+    if not doc:
+        return None
+    return MongoJob(doc)
 
 
 def touch_heartbeats(s: Session, job_ids: Iterable[int], worker_id: str) -> int:
@@ -90,13 +78,9 @@ def touch_heartbeats(s: Session, job_ids: Iterable[int], worker_id: str) -> int:
     ids = [int(j) for j in job_ids]
     if not ids:
         return 0
-    result = s.execute(
-        update(Job)
-        .where(Job.id.in_(ids), Job.status == "running", Job.worker_id == worker_id)
-        .values(heartbeat_at=utcnow())
-        .execution_options(synchronize_session=False)
-    )
-    return int(result.rowcount or 0)
+    from attestra.persistence.mongo.adapters import mongo_touch_heartbeats
+
+    return mongo_touch_heartbeats(ids, worker_id)
 
 
 class JobCancel(threading.Event):
@@ -120,49 +104,43 @@ def mark_job_running(s: Session, job: Job) -> None:
 
 
 def complete_job(s: Session, job: Job) -> None:
+    from attestra.persistence.mongo.adapters import mongo_complete_job
+
+    mongo_complete_job(job.id, worker_id=job.worker_id or "worker")
     job.status = "done"
     job.heartbeat_at = utcnow()
-    audit.record(s, job.worker_id or "worker", "job.complete", "job", job.id)
 
 
 def fail_job(s: Session, job: Job, error: str, *, retry: bool = True) -> None:
-    job.error = error[:2000]
-    if retry and job.attempts < config.JOB_MAX_ATTEMPTS and not job.cancel_requested:
-        job.status = "queued"
-        job.worker_id = ""
-    else:
-        job.status = "failed"
-    audit.record(s, job.worker_id or "worker", "job.fail", "job", job.id, error=error[:500])
+    from attestra.persistence.mongo.adapters import mongo_fail_job
+
+    doc = mongo_fail_job(job.id, error, retry=retry, worker_id=job.worker_id or "worker")
+    if doc:
+        job.status = doc["status"]
+        job.error = doc.get("error") or ""
+        job.worker_id = doc.get("worker_id") or ""
 
 
 def request_cancel(s: Session, job_id: int) -> Job:
-    job = s.get(Job, job_id)
-    if not job:
-        raise LookupError(f"job {job_id} not found")
-    job.cancel_requested = True
+    from attestra.persistence.mongo.adapters import mongo_request_cancel
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    doc = mongo_request_cancel(job_id)  # LookupError when missing; audits job.cancel_requested
     signal_job_cancel(job_id)
-    audit.record(s, "system", "job.cancel_requested", "job", job.id)
-    return job
+    return MongoJob(doc)
 
 
 def recover_interrupted_jobs(s: Session, *, exclude_worker_id: str | None = None) -> int:
     """Requeue jobs with stale heartbeats (never the ones ``exclude_worker_id`` is running)."""
-    cutoff = utcnow() - timedelta(seconds=config.JOB_STALE_HEARTBEAT_S)
-    q = select(Job).where(Job.status == "running", Job.heartbeat_at < cutoff)
-    if exclude_worker_id:
-        q = q.where(Job.worker_id != exclude_worker_id)
-    jobs = list(s.scalars(q))
-    for job in jobs:
-        job.status = "queued"
-        job.worker_id = ""
-        audit.record(s, "system", "job.recover", "job", job.id)
-    return len(jobs)
+    from attestra.persistence.mongo.adapters import mongo_recover_jobs
+
+    return mongo_recover_jobs(exclude_worker_id=exclude_worker_id)
 
 
 def resume_queued_jobs(s: Session, worker_id: str | None = None) -> int:
     """Re-check gate for queued jobs; refuse those outside the window."""
     n = 0
-    for job in s.scalars(select(Job).where(Job.status == "queued")):
+    for job in queued_jobs(s):
         run = s.get(ScanRun, job.scan_run_id)
         if not run:
             continue
@@ -369,8 +347,9 @@ def _apply_auth_plan(s: Session, run: ScanRun, plan, kwargs: dict) -> None:
 def active_scan_run_ids(s: Session) -> set[int]:
     """ScanRun ids whose job is running with a fresh heartbeat (another live worker)."""
     cutoff = utcnow() - timedelta(seconds=config.JOB_STALE_HEARTBEAT_S)
-    q = select(Job.scan_run_id).where(Job.status == "running", Job.heartbeat_at >= cutoff)
-    return {int(x) for x in s.scalars(q) if x is not None}
+    from attestra.persistence.mongo.adapters import mongo_fresh_running
+
+    return {int(d["scan_run_id"]) for d in mongo_fresh_running(cutoff)}
 
 
 def sweep_auth_secrets(s: Session) -> list[str]:
@@ -402,3 +381,42 @@ def _hash_file(path: Path, chunk: int = 1024 * 1024) -> str:
 
 def new_worker_id() -> str:
     return f"worker-{uuid.uuid4().hex[:12]}"
+
+
+# ---------------------------------------------------------------- backend-neutral job lookups (mongofull M1)
+def get_job(s: Session, job_id: int):
+    """Job by id (MongoJob write-through proxy)."""
+    from attestra.persistence.mongo.adapters import mongo_get_job
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    doc = mongo_get_job(job_id)
+    return MongoJob(doc) if doc else None
+
+
+def job_for_scan_run(s: Session, scan_run_id: int):
+    from attestra.persistence.mongo.adapters import mongo_job_for_scan_run
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    doc = mongo_job_for_scan_run(scan_run_id)
+    return MongoJob(doc) if doc else None
+
+
+def jobs_for_engagement(s: Session, engagement_id: int) -> list:
+    from attestra.persistence.mongo.adapters import mongo_jobs_for_scan_runs
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    run_ids = list(s.scalars(select(ScanRun.id).where(ScanRun.engagement_id == engagement_id)))
+    return [MongoJob(d) for d in mongo_jobs_for_scan_runs(run_ids)]
+
+
+def queued_jobs(s: Session) -> list:
+    from attestra.persistence.mongo.adapters import mongo_jobs_by_status
+    from attestra.persistence.mongo.jobs_proxy import MongoJob
+
+    return [MongoJob(d) for d in mongo_jobs_by_status("queued")]
+
+
+def count_fresh_running(s: Session, cutoff) -> int:
+    from attestra.persistence.mongo.adapters import mongo_fresh_running
+
+    return len(mongo_fresh_running(cutoff))

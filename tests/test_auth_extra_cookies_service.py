@@ -7,9 +7,10 @@ from tests.test_auth_scan_queue import _lead, auth_env  # noqa: F401 - fixture r
 
 
 def _audit_text(s, action):
-    from attestra.models import AuditEvent
 
-    ev = s.query(AuditEvent).filter(AuditEvent.action == action).all()
+    from attestra.audit import find_events
+
+    ev = find_events(s, action=action)
     assert ev
     return str([getattr(e, "detail", None) or getattr(e, "details", None) for e in ev])
 

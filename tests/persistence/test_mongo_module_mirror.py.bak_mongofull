@@ -1,0 +1,94 @@
+﻿"""Module-table mirror (dualwrite_identity.MODULE_TABLES): SQL commits replay into Mongo.
+
+Runs against a throwaway ``attestra_test_*`` database only.
+"""
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+
+pytest.importorskip("pymongo")
+pytestmark = pytest.mark.mongo
+
+
+@pytest.fixture
+def mongo_mode(fresh_db, mongo_test_db, monkeypatch):
+    import attestra.config as cfg
+
+    monkeypatch.setattr(cfg, "PERSISTENCE_BACKEND", "mongo")
+    monkeypatch.setenv("ATTESTRA_PERSISTENCE", "mongo")
+    return mongo_test_db
+
+
+def _tenant(s):
+    from attestra.models import Tenant
+
+    t = Tenant(name="mirror-t")
+    s.add(t)
+    s.flush()
+    return t.id
+
+
+def test_module_tables_cover_writers():
+    from attestra.persistence.mongo.dualwrite import MIRRORED_TABLES
+    from attestra.persistence.mongo.dualwrite_identity import IDENTITY_TABLES, MIRROR_TABLES, MODULE_TABLES
+
+    assert MODULE_TABLES <= MIRROR_TABLES and IDENTITY_TABLES <= MIRROR_TABLES
+    assert not (MODULE_TABLES & MIRRORED_TABLES)  # never double-mirrored with the domain mirror
+    assert not ({"jobs", "audit_events", "credit_transactions", "tenant_credit_accounts"} & MIRROR_TABLES)
+
+
+def test_library_and_suppression_rows_mirror_and_delete(mongo_mode):
+    from attestra import db, library, tuning
+    from attestra.library import service as lib
+    from attestra.models import utcnow
+
+    _ = library
+    mdb = mongo_mode
+    with db.session() as s:
+        tid = _tenant(s)
+        e = lib.create_entry(s, tid, {"title": "Reflected XSS", "default_severity": "high"}, actor="t")
+        r = tuning.create_suppression(
+            s, tid, actor="t", reason="known FP", expires_at=utcnow() + timedelta(days=3), tool="zap"
+        )
+        s.commit()
+        eid, rid = e.id, r.id
+    doc = mdb["library_entries"].find_one({"_id": eid})
+    assert doc and doc["title"] == "Reflected XSS" and doc["tenant_id"] == tid
+    assert mdb["suppression_rules"].find_one({"_id": rid})["tool"] == "zap"
+    with db.session() as s:
+        lib.delete_entry(s, lib.get_entry(s, eid), actor="t")
+        s.commit()
+    assert mdb["library_entries"].find_one({"_id": eid}) is None
+
+
+def test_rollback_mirrors_nothing(mongo_mode):
+    from attestra import db
+    from attestra.library import service as lib
+
+    with db.session() as s:
+        tid = _tenant(s)
+        e = lib.create_entry(s, tid, {"title": "Never committed"}, actor="t")
+        eid = e.id
+        s.rollback()
+    assert mongo_mode["library_entries"].find_one({"_id": eid}) is None
+
+
+def test_backfill_copies_module_rows(mongo_mode, monkeypatch):
+    import attestra.config as cfg
+    from attestra import db
+    from attestra.library import service as lib
+    from attestra.persistence.mongo import dualwrite_identity as dwi
+
+    monkeypatch.setattr(cfg, "PERSISTENCE_BACKEND", "sql")  # write SQL-only, then backfill
+    with db.session() as s:
+        tid = _tenant(s)
+        eid = lib.create_entry(s, tid, {"title": "Backfilled"}, actor="t").id
+        s.commit()
+    assert mongo_mode["library_entries"].find_one({"_id": eid}) is None
+    monkeypatch.setattr(cfg, "PERSISTENCE_BACKEND", "mongo")
+    with db.session() as s:
+        counts = dwi.backfill(s, tables=frozenset({"library_entries"}))
+    assert counts["library_entries"] >= 1
+    assert mongo_mode["library_entries"].find_one({"_id": eid})["title"] == "Backfilled"

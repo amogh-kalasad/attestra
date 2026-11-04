@@ -1,0 +1,95 @@
+"""Dispatch helpers: SQL call sites can forward to Mongo when persistence=mongo."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Any
+
+from attestra import config
+from attestra.persistence import using_mongo
+from attestra.persistence.mongo.client import get_db, init_mongo
+from attestra.persistence.mongo.repositories.ops import AuditRepository, CreditRepository, JobRepository
+from attestra.persistence.mongo.serialization import utcnow
+
+
+def _db():
+    try:
+        return get_db()
+    except Exception:
+        init_mongo()
+        return get_db()
+
+
+def mongo_audit_record(actor: str, action: str, entity: str, entity_id: int | None = None, **details: Any):
+    return AuditRepository(_db()).record(actor, action, entity, entity_id, **details)
+
+
+def mongo_audit_verify() -> tuple[bool, int | None]:
+    return AuditRepository(_db()).verify()
+
+
+def mongo_claim_job(worker_id: str, *, exclude_tools=()) -> dict[str, Any] | None:
+    return JobRepository(_db()).claim(worker_id, exclude_tools=list(exclude_tools or ()))
+
+
+def mongo_enqueue_job(scan_run_id: int) -> dict[str, Any]:
+    job = JobRepository(_db()).enqueue(scan_run_id)
+    AuditRepository(_db()).record("system", "job.enqueue", "job", job["id"], scan_run_id=scan_run_id)
+    return job
+
+
+def mongo_complete_job(job_id: int, worker_id: str = "") -> dict[str, Any] | None:
+    return JobRepository(_db()).complete(job_id, worker_id=worker_id)
+
+
+def mongo_fail_job(job_id: int, error: str, *, retry: bool = True, worker_id: str = "") -> dict[str, Any] | None:
+    return JobRepository(_db()).fail(
+        job_id,
+        error,
+        retry=retry,
+        max_attempts=int(config.JOB_MAX_ATTEMPTS),
+        worker_id=worker_id,
+    )
+
+
+def mongo_recover_jobs(*, exclude_worker_id: str | None = None) -> int:
+    cutoff = utcnow() - timedelta(seconds=int(config.JOB_STALE_HEARTBEAT_S))
+    return JobRepository(_db()).recover_stale(stale_before=cutoff, exclude_worker_id=exclude_worker_id)
+
+
+def mongo_consume_credit(
+    tenant_id: int,
+    *,
+    actor: str,
+    engagement_id: int,
+    user_id: int | None = None,
+    idempotency_key: str | None = None,
+):
+    from attestra.services import ServiceError
+
+    if not config.subscription_enforcement_enabled():
+        return None
+    try:
+        return CreditRepository(_db()).consume_for_scan_admit(
+            tenant_id,
+            actor=actor,
+            engagement_id=engagement_id,
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            enforce=True,
+        )
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def mongo_allocate_credits(tenant_id: int, amount: int, *, actor: str, **kwargs):
+    from attestra.services import ServiceError
+
+    try:
+        return CreditRepository(_db()).allocate(tenant_id, amount, actor=actor, **kwargs)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def require_mongo_mode() -> bool:
+    return using_mongo()

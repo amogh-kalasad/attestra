@@ -42,7 +42,9 @@ async def sweep(client, *, actor: str = "worker:temporal") -> int:
     with db.session() as s:
         services.enqueue_due_schedules(s, actor=actor)
     with db.session() as s:
-        pending = [(j.scan_run_id, j.id) for j in s.scalars(select(Job).where(Job.status == "queued"))]
+        from attestra.jobs.durable import queued_jobs
+
+        pending = [(j.scan_run_id, j.id) for j in queued_jobs(s)]
     for run_id, job_id in pending:
         await start_scan_workflow(run_id, job_id, client=client)
     return len(pending)

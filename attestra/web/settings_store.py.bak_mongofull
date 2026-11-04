@@ -1,0 +1,180 @@
+"""Backend switch for tenant email-alert and Certification Authority settings routes.
+
+SQL mode delegates to ``attestra.alerts.service`` / ``attestra.certification.service``
+unchanged. Mongo mode reads/writes the ``email_alert_settings`` / ``certification_authority``
+collections through the settings repositories, but still runs the *service* functions for
+validation, permission checks, messages and audit: they are given a ``_RowSession`` whose
+only row is an attribute view of the Mongo document, and the mutated fields are then
+written back with the repository. That keeps one source of truth for the rules until the
+services owner ports these two services to Mongo (then this module collapses to calls).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from attestra import services
+from attestra.alerts import service as alerts
+from attestra.certification import service as ca
+from attestra.persistence import using_mongo
+
+_ALERT_FIELDS = ("notify_new_high", "notify_header_change", "notify_sla_missed", "recipients")
+
+
+def _mdb():
+    from attestra.web.data_access import mongo_db
+
+    return mongo_db()
+
+
+class _RowSession:
+    """Session stand-in for one pre-loaded row (``get``/``scalar`` return it; writes no-op)."""
+
+    def __init__(self, row: Any) -> None:
+        self.row = row
+
+    def get(self, _model, _ident=None):
+        return self.row
+
+    def scalar(self, _stmt):
+        return self.row
+
+    def add(self, _obj) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
+# ---------------------------------------------------------------- email alerts
+
+
+def alert_tenant_ids(s, principal):
+    return services.tenant_ids_for(s, principal)
+
+
+def alert_default_tenant(s, principal) -> int:
+    """Tenant for settings when the caller did not pass tenant_id (first by name when unrestricted)."""
+    if principal.tenant_id:
+        return int(principal.tenant_id)
+    allowed = services.tenant_ids_for(s, principal)
+    if allowed is not None:
+        if not allowed:
+            raise alerts.AlertError("no tenant in scope for email alert settings")
+        return sorted(allowed)[0]
+    tenants = alert_tenants(s, principal)
+    if not tenants:
+        raise alerts.AlertError("no tenant in scope for email alert settings")
+    return int(tenants[0]["id"])
+
+
+def alert_tenants(s, principal) -> list[dict]:
+    """Tenants in scope as ``{"id", "name"}`` ordered by name, then id."""
+    allowed = services.tenant_ids_for(s, principal)
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        q: dict = {} if allowed is None else {"_id": {"$in": sorted(int(t) for t in allowed)}}
+        docs = _mdb()[C.TENANTS].find(q, {"name": 1}).sort([("name", 1), ("_id", 1)])
+        return [{"id": int(d["_id"]), "name": d.get("name", "")} for d in docs]
+    from sqlalchemy import select
+
+    from attestra.models import Tenant
+
+    q = select(Tenant).order_by(Tenant.name, Tenant.id)
+    if allowed is not None:
+        q = q.where(Tenant.id.in_(allowed))
+    return [{"id": t.id, "name": t.name} for t in s.scalars(q)]
+
+
+def alert_check_tenant(s, principal, tenant_id: int) -> None:
+    alerts._check_tenant(s, principal, tenant_id)
+
+
+def _alert_repo():
+    from attestra.persistence.mongo.repositories.settings import EmailAlertSettingsRepository
+
+    return EmailAlertSettingsRepository(_mdb(), tenant_ids=None)
+
+
+def _alert_row(doc):
+    from attestra.persistence.mongo.repositories.settings import EMAIL_ALERT_DEFAULTS, as_row
+
+    return as_row(doc, EMAIL_ALERT_DEFAULTS)
+
+
+def alert_settings(s, tenant_id: int) -> dict:
+    if using_mongo():
+        return alerts.settings_dict(_alert_row(_alert_repo().get(tenant_id)), tenant_id)
+    return alerts.settings_dict(alerts.get_settings(s, tenant_id), tenant_id)
+
+
+def alert_known_emails(s, tenant_id: int) -> list[str]:
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        q = {"tenant_id": int(tenant_id), "email": {"$nin": ["", None]}, "used_at": None, "revoked_at": None}
+        emails = (str(d.get("email") or "").strip() for d in _mdb()[C.USER_INVITES].find(q, {"email": 1}))
+        return sorted({e.lower() for e in emails if e and alerts._EMAIL_RE.match(e)})
+    return alerts.known_tenant_emails(s, tenant_id)
+
+
+def alert_update(s, principal, tenant_id: int, **fields) -> dict:
+    """Validated partial update; returns ``settings_dict``. Raises LookupError / AlertError."""
+    if not using_mongo():
+        return alerts.settings_dict(alerts.update_settings(s, principal, tenant_id, **fields), tenant_id)
+    from attestra.web.data_access import tenant_exists
+
+    alerts._check_tenant(None, principal, tenant_id)
+    if not tenant_exists(None, tenant_id):
+        raise LookupError(f"tenant {tenant_id} not found")
+    repo = _alert_repo()
+    row = _alert_row(repo.ensure(tenant_id))
+    row.recipients = list(row.recipients or [])
+    alerts.update_settings(_RowSession(row), principal, tenant_id, **fields)  # validates + audits
+    doc = repo.update(tenant_id, actor=principal.actor, **{k: getattr(row, k) for k in _ALERT_FIELDS})
+    return alerts.settings_dict(_alert_row(doc), tenant_id)
+
+
+# ---------------------------------------------------------------- certification authority
+
+
+def _ca_repo():
+    from attestra.persistence.mongo.repositories.settings import CertificationAuthorityRepository
+
+    return CertificationAuthorityRepository(_mdb(), tenant_ids=None)
+
+
+def _ca_row(doc):
+    from attestra.persistence.mongo.repositories.settings import CA_FIELDS, as_row
+
+    return as_row(doc, {**{k: "" for k in CA_FIELDS}, "updated_by": "", "updated_at": None})
+
+
+def ca_settings(s) -> dict:
+    if using_mongo():
+        return ca.settings_dict(_ca_row(_ca_repo().get()))
+    return ca.settings_dict(ca.get_settings(s))
+
+
+def ca_update(s, principal, **fields) -> dict:
+    """Validated partial update (Super Admin only); returns ``settings_dict``. Raises CertificationError."""
+    if not using_mongo():
+        return ca.settings_dict(ca.update_settings(s, principal, **fields))
+    from attestra.persistence.mongo.repositories.settings import CA_FIELDS, CA_SINGLETON_ID
+
+    ca._require_admin(principal)  # before any read of the singleton
+    repo = _ca_repo()
+    current = _ca_row(repo.get() or {"_id": CA_SINGLETON_ID})
+    for name in CA_FIELDS:
+        if getattr(current, name, None) is None:
+            setattr(current, name, "")
+    ca.update_settings(_RowSession(current), principal, **fields)  # validates + audits
+    doc = repo.update(actor=getattr(principal, "actor", "") or "", **{k: getattr(current, k) for k in CA_FIELDS})
+    return ca.settings_dict(_ca_row(doc))
+
+
+__all__ = [
+    "alert_check_tenant", "alert_default_tenant", "alert_known_emails", "alert_settings", "alert_tenant_ids",
+    "alert_tenants", "alert_update", "ca_settings", "ca_update",
+]

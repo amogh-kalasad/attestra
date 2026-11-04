@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from attestra import scoring
+from attestra.audit import find_events
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -35,7 +36,7 @@ def test_set_weights_rescores_and_audits(loaded):
     from sqlalchemy import select
 
     from attestra import audit, db, tuning
-    from attestra.models import AuditEvent, Finding
+    from attestra.models import Finding
 
     with db.session() as s:
         tid = _tenant_id(s, loaded)
@@ -43,7 +44,7 @@ def test_set_weights_rescores_and_audits(loaded):
         tuning.set_weights(s, tid, actor="lead", criticality={5: 3.0}, internet=1.3, cde=1.3)
         after = {f.id: f.risk_score for f in s.scalars(select(Finding))}
         assert any(after[i] > before[i] for i in before)
-        assert s.scalars(select(AuditEvent).where(AuditEvent.action == "tenant.risk_weights")).first()
+        assert find_events(s, action="tenant.risk_weights")
         assert audit.verify(s) == (True, None)
         tuning.clear_weights(s, tid, actor="lead")
         assert {f.id: f.risk_score for f in s.scalars(select(Finding))} == before
@@ -61,10 +62,9 @@ def test_set_weights_validation(engagement):
 
 
 def test_suppression_drops_matching_findings(engagement):
-    from sqlalchemy import select
 
     from attestra import db, services, tuning
-    from attestra.models import AuditEvent, utcnow
+    from attestra.models import utcnow
 
     with db.session() as s:
         tid = _tenant_id(s, engagement)
@@ -78,9 +78,9 @@ def test_suppression_drops_matching_findings(engagement):
         )
         assert run.new_findings == 0
         assert rule.hits == 1
-        ev = s.scalars(select(AuditEvent).where(AuditEvent.action == "import.create")).all()[-1]
+        ev = find_events(s, action="import.create")[-1]
         assert ev.details["suppressed"] == 1
-        assert s.scalars(select(AuditEvent).where(AuditEvent.action == "suppression.create")).first()
+        assert find_events(s, action="suppression.create")
 
         tuning.revoke_suppression(s, rule.id, actor="lead")
         run2 = services.import_results(

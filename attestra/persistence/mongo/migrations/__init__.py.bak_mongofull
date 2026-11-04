@@ -1,0 +1,54 @@
+"""Versioned MongoDB schema migrations."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from pymongo.database import Database
+
+from attestra.persistence.mongo import collections as C
+from attestra.persistence.mongo.indexes import ensure_indexes
+
+log = logging.getLogger("attestra.persistence.mongo")
+
+# Ordered list of (revision_id, description, apply_fn)
+MIGRATIONS: list[tuple[str, str, Callable[[Database], None]]] = []
+
+
+def _m0001_baseline(db: Database) -> None:
+    for name in C.DOMAIN_COLLECTIONS:
+        db[name]  # touch / create empty
+    db[C.ID_SEQUENCES]
+    db[C.AUDIT_CHAIN_HEAD]
+    db[C.SCHEMA_MIGRATIONS]
+    ensure_indexes(db)
+    # Genesis head for audit chain (mirrors SQL GENESIS semantics for new DBs).
+    db[C.AUDIT_CHAIN_HEAD].update_one(
+        {"_id": "head"},
+        {"$setOnInsert": {"last_id": 0, "last_hash": "0" * 64, "updated_at": datetime.now(UTC)}},
+        upsert=True,
+    )
+
+
+MIGRATIONS.append(("0001_mongo_baseline", "Create collections, indexes, audit head", _m0001_baseline))
+
+
+def applied_revisions(db: Database) -> set[str]:
+    return {doc["_id"] for doc in db[C.SCHEMA_MIGRATIONS].find({}, {"_id": 1})}
+
+
+def apply_pending(db: Database) -> list[str]:
+    done = applied_revisions(db)
+    applied: list[str] = []
+    for rev, description, fn in MIGRATIONS:
+        if rev in done:
+            continue
+        log.info("mongo_migration_apply %s %s", rev, description)
+        fn(db)
+        db[C.SCHEMA_MIGRATIONS].insert_one(
+            {"_id": rev, "description": description, "applied_at": datetime.now(UTC)}
+        )
+        applied.append(rev)
+    return applied

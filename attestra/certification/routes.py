@@ -8,9 +8,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from attestra import db
 from attestra.auth.roles import has_permission
 from attestra.certification import service as ca
+from attestra.web import data_access
+from attestra.web import settings_store as store
 
 api_router = APIRouter(prefix="/api/certification-authority", tags=["certification-authority"])
 ui_router = APIRouter(include_in_schema=False)
@@ -56,17 +57,16 @@ def get_ca_settings(principal=Depends(_principal)):
     """Read Certification Authority settings (Super Admin only)."""
     if not has_permission(principal.role, "certification.manage"):
         raise HTTPException(403, "only a Super Admin can view Certification Authority settings")
-    with db.session() as s:
-        return ca.settings_dict(ca.get_settings(s))
+    with data_access.identity_session() as s:
+        return store.ca_settings(s)
 
 
 @api_router.put("")
 def put_ca_settings(body: SettingsIn, principal=Depends(_principal)):
     """Partial JSON update (Super Admin only). Use POST …/logo to upload a logo."""
     try:
-        with db.session() as s:
-            row = ca.update_settings(s, principal, **body.model_dump(exclude_unset=True))
-            return ca.settings_dict(row)
+        with data_access.identity_session() as s:
+            return store.ca_update(s, principal, **body.model_dump(exclude_unset=True))
     except ca.CertificationError as e:
         raise _err(e) from e
 
@@ -76,9 +76,8 @@ async def post_ca_logo(logo: UploadFile = File(...), principal=Depends(_principa
     """Replace the brand logo (Super Admin only)."""
     data = await logo.read()
     try:
-        with db.session() as s:
-            row = ca.update_settings(s, principal, logo=data)
-            return ca.settings_dict(row)
+        with data_access.identity_session() as s:
+            return store.ca_update(s, principal, logo=data)
     except ca.CertificationError as e:
         raise _err(e) from e
 
@@ -116,8 +115,8 @@ def ui_ca_page(request: Request):
         if ui_principal(request) is None:
             return _back("/login", error="Sign in as a Super Admin to manage Certification Authority.")
         return _back("/", error="Only a Super Admin can manage Certification Authority settings.")
-    with db.session() as s:
-        settings = ca.settings_dict(ca.get_settings(s))
+    with data_access.identity_session() as s:
+        settings = store.ca_settings(s)
     return _render(request, "certification_authority.html", {"settings": settings})
 
 
@@ -146,8 +145,8 @@ async def ui_ca_save(
         return _back("/", error="Only a Super Admin can manage Certification Authority settings.")
     logo_bytes = await logo.read() if logo and logo.filename else None
     try:
-        with db.session() as s:
-            ca.update_settings(
+        with data_access.identity_session() as s:
+            store.ca_update(
                 s,
                 p,
                 legal_name=legal_name,

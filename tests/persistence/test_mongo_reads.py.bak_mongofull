@@ -1,0 +1,148 @@
+﻿"""Read cutover (ATTESTRA_MONGO_READS=domain): Mongo read models match the SQL rows.
+
+Throwaway ``attestra_test_*`` DBs only.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+from tests.persistence.test_mongo_jobflow import _mongo_available, _runs, mdb, mongo_mode  # noqa: F401
+
+pytestmark = pytest.mark.skipif(not _mongo_available(), reason="MongoDB replica set not available")
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+@pytest.fixture
+def seeded(mongo_mode, mdb):
+    """Import findings + scan runs through SQL with the mirror on, after backfilling fixture rows."""
+    from attestra import config as cfg
+    from attestra import db, services
+    from attestra.migration.engine import import_data
+    from attestra.persistence.mongo.dualwrite import MIRRORED_TABLES
+
+    import attestra.persistence.mongo.config as mc
+
+    import_data(cfg.DATABASE_URL, mongo_uri=mc.MONGODB_URI, mongo_db=mdb.name, tables=sorted(MIRRORED_TABLES))
+    with db.session() as s:
+        services.import_results(s, mongo_mode, tool="cyclonedx", filename="bom.json",
+                                data=(FIXTURES / "cyclonedx.json").read_bytes(), actor="tester")
+    _runs(mongo_mode, 2)
+    return mongo_mode
+
+
+def _ms(v):
+    # Mongo stores datetimes with millisecond precision
+    return v.replace(microsecond=v.microsecond // 1000 * 1000) if isinstance(v, datetime) else v
+
+
+def _cols(rows, names):
+    return [tuple(_ms(getattr(r, n)) for n in names) for r in rows]
+
+
+def _both(monkeypatch, fn):
+    from attestra import db
+
+    monkeypatch.delenv("ATTESTRA_MONGO_READS", raising=False)
+    with db.session() as s:
+        sql = fn(s)
+        sql_vals = sql if not isinstance(sql, list) else list(sql)
+        sql_snapshot = fn.snap(sql_vals) if hasattr(fn, "snap") else sql_vals
+    monkeypatch.setenv("ATTESTRA_MONGO_READS", "domain")
+    with db.session() as s:
+        mongo = fn(s)
+        mongo_snapshot = fn.snap(mongo) if hasattr(fn, "snap") else mongo
+    return sql_snapshot, mongo_snapshot, mongo
+
+
+def test_list_findings_from_mongo_matches_sql(seeded, monkeypatch):
+    from attestra import services
+    from attestra.persistence.mongo.read_models import DocView
+
+    names = ("id", "title", "severity", "status", "risk_score", "asset_id", "engagement_id", "tools", "first_seen")
+
+    def fn(s):
+        return services.list_findings(s, seeded)
+    fn.snap = lambda rows: _cols(rows, names)
+    sql, mongo, raw = _both(monkeypatch, fn)
+    assert sql and sql == mongo
+    assert all(isinstance(r, DocView) for r in raw)
+    # relationship walk used by templates
+    assert raw[0].asset is not None and raw[0].asset.id == raw[0].asset_id
+    assert raw[0].engagement.id == seeded
+    with pytest.raises(AttributeError):
+        raw[0].status = "fixed"
+
+    def by_sev(s):
+        return services.list_findings(s, seeded, severity=sql[0][2])
+    by_sev.snap = lambda rows: _cols(rows, ("id",))
+    a, b, _ = _both(monkeypatch, by_sev)
+    assert a == b and a
+
+
+def test_list_scans_and_passed_checks_from_mongo(seeded, monkeypatch):
+    from attestra import services
+
+    def scans(s):
+        return services.list_scans(s, seeded)
+    scans.snap = lambda rows: _cols(rows, ("id", "tool", "status", "engagement_id", "asset_id", "started_at", "profile"))
+    a, b, raw = _both(monkeypatch, scans)
+    assert a == b and len(a) >= 2
+    assert raw[0].asset.engagement_id == seeded
+
+    def checks(s):
+        return services.list_passed_checks(s, seeded)
+    a, b, _ = _both(monkeypatch, checks)
+    assert a == b
+
+
+def test_reads_stay_sql_without_flag(seeded, monkeypatch):
+    from attestra import db, services
+    from attestra.models import Finding
+
+    monkeypatch.delenv("ATTESTRA_MONGO_READS", raising=False)
+    with db.session() as s:
+        assert all(isinstance(f, Finding) for f in services.list_findings(s, seeded))
+
+
+def test_engagements_comments_assignments_collapse_from_mongo(seeded, monkeypatch):
+    from types import SimpleNamespace
+
+    from attestra import assignments, comments, crossmerge, db, services
+    from attestra.models import Engagement, User
+
+    with db.session() as s:
+        tid = s.get(Engagement, seeded).tenant_id
+        u = User(username="alice", role="tester", tenant_id=tid, password_hash="x", active=True)
+        s.add(u)
+        s.flush()
+        uid = u.id
+    p = SimpleNamespace(role="tester", tenant_id=tid, user_id=uid, actor="alice", username="alice")
+    admin = SimpleNamespace(role="admin", tenant_id=None, user_id=None, actor="admin")
+    monkeypatch.delenv("ATTESTRA_MONGO_READS", raising=False)
+    with db.session() as s:
+        fids = [f.id for f in services.list_findings(s, seeded)]
+        comments.add_comment(s, fids[0], body="first", principal=p)
+        comments.add_comment(s, fids[0], body="second", principal=p)
+        assignments.assign_finding(s, fids[0], assignee="alice", actor="lead")
+
+    def run(s):
+        return (
+            [e.id for e in services.list_engagements(s, admin)],
+            [e.id for e in services.list_engagements(s, p)],
+            [(c["body"] if isinstance(c, dict) else c) for c in comments.list_comments(s, fids[0], p)],
+            {k: [c.body for c in v] for k, v in comments.comments_for_findings(s, fids).items()},
+            assignments.assignees_for_engagement(s, seeded),
+            [(f.id, getattr(f, "cross_sources", None) is not None) for f in crossmerge.collapse(s, services.list_findings(s, seeded))],
+        )
+
+    with db.session() as s:
+        sql = run(s)
+    monkeypatch.setenv("ATTESTRA_MONGO_READS", "domain")
+    with db.session() as s:
+        mongo = run(s)
+    assert sql == mongo
+    assert sql[2] == ["first", "second"] and sql[4] == {fids[0]: "alice"} and seeded in sql[1]

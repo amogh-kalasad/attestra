@@ -30,7 +30,7 @@ Synthetic data used by both `attestra/cli.py cmd_demo` and the test suite lives 
 
 Shared fixtures that isolate each test from real data and from other tests.
 
-- `fresh_db`: patches [[attestra/config.py#DATA_DIR]] and [[attestra/config.py#DATABASE_URL]], resets `db._engine`/`db._SessionLocal` to `None`, and calls [[attestra/db.py#init]] with a fresh `tmp_path` SQLite URL. Disposes the engine on teardown.
+- `fresh_db`: patches [[attestra/config.py#DATA_DIR]], points at a throwaway `attestra_test_*` Mongo DB via `mongo_test_db`, and resets `db._engine`/`db._SessionLocal` to `None`.
 - `engagement`: creates an engagement with a valid authorization covering `production`+`staging`, and four assets (web app, container image, two repos).
 - `loaded`: extends `engagement` by importing all four fixture tool files and applying KEV+EPSS enrichment.
 - `api_credentials` / `auth_headers`: lead + reviewer users with Bearer API keys.
@@ -546,27 +546,11 @@ Compliance engine rollup, assessor overrides, report generation, four-eyes appro
 
 Key assertions: PCI DSS 4, ISO 27001, SOC 2 evaluations return non-empty lists with valid status values; critical CDE findings drive at least one control to `not_met`; confirmed status overrides engine proposal; unknown framework raises `ValueError`; `generate_report` writes HTML to disk; `approve_report` signs with different actor; same actor rejected by four-eyes rule; `verify_report` confirms hash and HMAC.
 
-## test_migrations.py
+## Mongo schema migrations
 
-Alembic baseline builds an empty SQLite DB whose tables match SQLAlchemy metadata.
+Mongo init applies document schema migrations; SQL Alembic tests are retired.
 
-Calls `alembic upgrade head` then `downgrade base` via [[attestra/db.py#upgrade]] config paths. Asserts every table in [[attestra/db.py#Base]] metadata appears after upgrade and disappears after downgrade. Head revision is `0027_finding_observations_rls`; evidence provenance columns and `finding_observations` are present at head.
-
-## Phase 10 migrations
-
-Master Phase 10: head column parity, representative-data upgrade, and partial `0026` resume (`tests/test_phase10_migrations.py`, `docs/MASTER_IMPL_PHASE10_MIGRATIONS.md`).
-
-### Upgrade head column parity
-
-Empty SQLite upgraded to head exposes credits, tenant profile, observation, dedup, and evidence provenance columns.
-
-### Representative data survives upgrade
-
-Rows inserted at `0025_finding_observations` keep finding id, observation tool, evidence path/sha256, and credit balance after upgrade to head.
-
-### Partial 0026 resume
-
-A DB with provenance columns already present (failed mid-`0026`) finishes `upgrade head` without error.
+[[attestra/persistence/mongo/client.py#init_mongo]] runs pending revisions under `attestra/persistence/mongo/migrations`. Coverage lives under `tests/persistence/` (indexes, backup/restore, ORM session, jobflow). Legacy Alembic trees and `tests/test_migrations.py` are archived under `.migration_backups/sql_removal/`.
 
 ## Phase 1 security and runner tests
 

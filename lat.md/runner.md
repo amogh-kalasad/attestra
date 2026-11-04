@@ -120,3 +120,15 @@ Passive Google Safe Browsing v4 reputation lookup for in-scope target URLs.
 OWASP ZAP scanner adapter and authenticated context wiring for Docker-based baseline/full scans.
 
 See [[runner#Scanner runs#ZAP]] for the adapter report mount and scope quarantine. When [[attestra/config.py#AUTH_WEB_ENABLED]] is on, [[attestra/auth_web/zap_auth.py#build_zap_auth_context]] / [[attestra/auth_web/zap_auth.py#write_zap_auth_files]] prepare JSON/YAML plus a ``.context`` file under the scanner ``out_dir`` (mounted at ``/zap/wrk``). [[attestra/auth_web/zap_auth.py#load_profile_secret]] reads secrets only via [[attestra/credentials/store.py#get_secret]] with engagement tenant checks. Supported methods: form (``formBasedAuthentication``), header (session headers), cookie (httpSessions); ``sso_bootstrap`` is blocked and never bypasses MFA. [[attestra/runner/scanners/zap.py#ZapAdapter#build_argv]] accepts optional ``auth_context_path`` / ``auth_opts`` and wires ``-n`` / ``-U`` only for mounted ``.context`` files — never passwords via ``-z`` or argv logged into ScanRun.extra.
+
+## Authenticated scan wiring
+
+Link a scan run to an auth credential profile and pass session material into ZAP/Nuclei without putting secrets on argv.
+
+Migrations `0031_scan_run_auth`, `0032_auth_profile_extra_headers`, and `0033_auth_profile_extra_cookies` add `auth_profile_id` / auth result fields on [[attestra/models.py#ScanRun]] plus optional non-secret headers and encrypted extra cookies on [[attestra/models.py#AuthCredentialProfile]]. [[attestra/auth_web/scan_auth.py]] loads the profile, resolves [[attestra/credentials/store.py#get_secret]], and builds scanner auth options. Worker paths pass those options into adapters; plaintext never enters SQL columns or ScanRun logs.
+
+## Email OTP login
+
+Best-effort form login that fetches an emailed one-time code so authenticated scanners can reuse the resulting session.
+
+[[attestra/auth_web/otp.py]] drives injectable HTTP and IMAP callables (unit-testable without live mail). Profile `config_json` names login/OTP URLs and field names; the credential store holds the password and optional IMAP app password. Secrets are never logged. JavaScript-only SPA logins may still require a pasted cookie/header method instead.

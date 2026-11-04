@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sqlalchemy import select
+from attestra.audit import find_events
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -190,7 +190,6 @@ def test_incomplete_run_is_ignored(engagement):
 def test_sync_engagement_idempotent_and_dry_run(engagement):
     from attestra import db
     from attestra.auth_web.checklist_auto import sync_engagement
-    from attestra.models import AuditEvent
 
     with db.session() as s:
         _import_zap(s, engagement)
@@ -203,10 +202,10 @@ def test_sync_engagement_idempotent_and_dry_run(engagement):
         first = sync_engagement(s, engagement)
         assert {c["ref"] for c in first["changes"]} == {"WSTG-ATHN-04"}
     with db.session() as s:
-        n_audit = len(list(s.scalars(select(AuditEvent))))
+        n_audit = len(find_events(s))
         second = sync_engagement(s, engagement)
         assert second["changes"] == []
-        assert len(list(s.scalars(select(AuditEvent)))) == n_audit
+        assert len(find_events(s)) == n_audit
 
 
 def test_nuclei_template_mapping_is_conservative():

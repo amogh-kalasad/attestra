@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "attestra"
+version = "1.0.0"
+description = "Attestra: security testing evidence, OWASP-aligned findings and compliance reporting (PCI DSS, ISO 27001, SOC 2)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "sqlalchemy>=2.0",
+  "pydantic>=2.6",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "python-multipart>=0.0.9",
+  "alembic>=1.13",
+  "cryptography>=42",
+  "dnspython>=2.6",
+  "defusedxml>=0.7",
+  # Pure-Python PDF engine so report PDFs work on a fresh install (Windows included).
+  "xhtml2pdf>=0.2.11",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
+  # MongoDB-native persistence (Phase 3+); SQLAlchemy remains until Phase 11 cutover.
+  "pymongo>=4.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "httpx2>=2.0", "ruff>=0.5"]
+postgres = ["psycopg[binary]>=3.1"]
+oidc = ["authlib>=1.3"]
+docs = ["docxtpl>=0.16", "weasyprint>=61"]
+s3 = ["boto3>=1.34"]
+screenshots = ["Pillow>=10"]
+temporal = ["temporalio>=1.7"]
+observability = [
+  "opentelemetry-api>=1.24",
+  "opentelemetry-sdk>=1.24",
+  "opentelemetry-instrumentation-fastapi>=0.45b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.45b0",
+  "opentelemetry-exporter-otlp-proto-http>=1.24",
+]
+
+[project.scripts]
+attestra = "attestra.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["attestra*"]
+
+[tool.setuptools.package-data]
+attestra = ["compliance/data/*.yaml", "compliance/data/packs/*.yaml", "compliance/data/*.md", "reports/templates/*.j2", "reports/templates/docx/*", "web/templates/*.html", "web/static/*.css", "web/static/*.js", "web/static/fonts/*.woff2", "reports/fonts/*.ttf", "reports/fonts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "integration: live scanner or docker runs; skipped when tools are missing",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# Pre-existing long lines in v0.1 sources; keep CI green without a broad reformat.
+ignore = ["E501"]

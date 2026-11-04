@@ -5,13 +5,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import func, select
+
+from attestra.audit import find_events
 
 
 # @lat: [[tests#Phase 0 integrity#Auditor ownership of confirmations]]
 def test_lead_cannot_confirm_control(loaded):
     from attestra import db, services
-    from attestra.models import AuditEvent
     from attestra.services import ServiceError
 
     with db.session() as s:
@@ -23,9 +23,7 @@ def test_lead_cannot_confirm_control(loaded):
                 s, loaded, framework="pci_dss_4", ref=ref, status="partial",
                 assessor="priya.lead", rationale="lead trying to confirm", role="lead",
             )
-        refused = list(
-            s.scalars(select(AuditEvent).where(AuditEvent.action == "control.confirm_refused"))
-        )
+        refused = find_events(s, action="control.confirm_refused")
         assert refused, "lead confirm attempt must write control.confirm_refused"
         assert any(e.actor == "priya.lead" for e in refused)
 
@@ -59,16 +57,11 @@ def test_auditor_can_confirm_and_lead_cannot_overwrite(loaded):
 def test_lead_api_confirm_returns_403(client, loaded):
     """Lead Bearer POST to compliance/confirm returns 403 and commits the refuse audit."""
     from attestra import db, services
-    from attestra.models import AuditEvent
 
     with db.session() as s:
         results = services.compliance(s, loaded, "pci_dss_4")
         ref = next((r.ref for r in results if not r.finding_ids), results[0].ref)
-        before = s.scalar(
-            select(func.count()).select_from(AuditEvent).where(
-                AuditEvent.action == "control.confirm_refused"
-            )
-        ) or 0
+        before = len(find_events(s, action="control.confirm_refused"))
 
     r = client.post(
         f"/api/engagements/{loaded}/compliance/confirm",
@@ -83,11 +76,7 @@ def test_lead_api_confirm_returns_403(client, loaded):
     assert "not allowed" in r.json()["detail"]
 
     with db.session() as s:
-        after = s.scalar(
-            select(func.count()).select_from(AuditEvent).where(
-                AuditEvent.action == "control.confirm_refused"
-            )
-        ) or 0
+        after = len(find_events(s, action="control.confirm_refused"))
         assert after > before, "API lead confirm must commit control.confirm_refused"
 
 
@@ -160,6 +149,7 @@ def test_bare_risk_accepted_transition_refused(loaded):
 
 def test_accept_risk_creates_record_and_status(loaded):
     from attestra import db, services
+    from attestra.models import Finding
 
     with db.session() as s:
         f = next(x for x in services.list_findings(s, loaded) if x.status in ("new", "triaged", "validated"))
@@ -167,7 +157,7 @@ def test_accept_risk_creates_record_and_status(loaded):
             s, f.id, expires_on=date.today() + timedelta(days=30),
             rationale="Compensating control in place", actor="lead", owner_user_id=None,
         )
-        s.refresh(f)
+        f = s.get(Finding, f.id)  # list_findings returns read-only views; reload through the session
         assert f.status == "risk_accepted"
         assert row.finding_id == f.id
         assert row.rationale.startswith("Compensating")

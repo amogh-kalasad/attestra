@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from attestra.audit import find_events
 from attestra.runner.gate import GateError, check
 
 
@@ -162,7 +163,7 @@ def test_gate_audit_scan_refused(engagement):
     from sqlalchemy import select
 
     from attestra import db
-    from attestra.models import Asset, AuditEvent
+    from attestra.models import Asset
 
     with db.session() as s:
         asset = s.scalars(
@@ -177,7 +178,7 @@ def test_gate_audit_scan_refused(engagement):
             check(s, engagement, asset_id, tool="nuclei", profile="active", actor="audittest")
         except GateError:
             pass
-        events = list(s.scalars(select(AuditEvent).where(AuditEvent.action == "scan.refused")))
+        events = find_events(s, action="scan.refused")
         assert any(e.actor == "audittest" for e in events)
 
 

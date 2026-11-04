@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import pytest
 
+from attestra.audit import find_events
 from tests.test_auth_scan_queue import _lead, auth_env  # noqa: F401 - fixture re-export
 
 
 def test_create_and_update_extra_headers(engagement, auth_env):  # noqa: F811
     from attestra import db, services
     from attestra.auth_web import profiles
-    from attestra.models import AuditEvent
 
     with db.session() as s:
         p = _lead(s, engagement)
@@ -25,7 +25,7 @@ def test_create_and_update_extra_headers(engagement, auth_env):  # noqa: F811
         profiles.update_extra_headers(s, engagement, row.id, extra_headers="X-Tenant-Id: t1", principal=p)
         s.commit()
         assert row.extra_headers == "X-Tenant-Id: t1"
-        ev = s.query(AuditEvent).filter(AuditEvent.action == "auth_profile.extra_headers").all()
+        ev = find_events(s, action="auth_profile.extra_headers")
         assert ev and "t1" not in str([getattr(e, "detail", None) or getattr(e, "details", None) for e in ev])
 
         with pytest.raises(services.ServiceError):

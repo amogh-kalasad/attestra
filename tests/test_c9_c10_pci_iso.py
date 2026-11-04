@@ -8,6 +8,7 @@ from datetime import date, timedelta
 import pytest
 
 from attestra import db, services
+from attestra.audit import find_events
 from attestra.importers import asv
 from tests.conftest import FIXTURES
 
@@ -52,12 +53,12 @@ def _import(eid, data=ASV_JSON, name="asv.json"):
 def test_import_asv_results_stores_items_and_audits(engagement):
     sid, passing, items, failing = _import(engagement)
     assert (passing, items, failing) == (False, 3, 1)
-    from attestra.models import AsvScan, AuditEvent
+    from attestra.models import AsvScan
 
     with db.session() as s:
         row = s.get(AsvScan, sid)
         assert row.source == "import" and len(row.items) == 3 and len(row.sha256) == 64
-        assert any(e.action == "asv.import" for e in s.query(AuditEvent).all())
+        assert any(e.action == "asv.import" for e in find_events(s))
 
 
 def test_import_asv_bad_file_is_service_error(engagement):

@@ -102,18 +102,12 @@ def _latest_assignees(s: Session, finding_ids: list[int]) -> dict[int, str]:
     """Map finding id → current assignee username (empty string if unassigned / never set)."""
     if not finding_ids:
         return {}
-    rows = list(
-        s.scalars(
-            select(FindingAssignment)
-            .where(FindingAssignment.finding_id.in_(finding_ids))
-            .order_by(FindingAssignment.id.desc())
-        )
-    )
+    from attestra.persistence.mongo.read_models import view_all
+
+    q = {"finding_id": {"$in": [int(i) for i in finding_ids]}}
     latest: dict[int, str] = {}
-    for row in rows:
-        if row.finding_id in latest:
-            continue
-        latest[row.finding_id] = (row.assignee or "").strip()
+    for row in view_all(FindingAssignment, q, sort=[("_id", -1)]):
+        latest.setdefault(row.finding_id, (row.assignee or "").strip())
     return latest
 
 
@@ -133,6 +127,8 @@ def findings_assigned_to(s: Session, engagement_id: int, username: str) -> list[
 
 def assignees_for_engagement(s: Session, engagement_id: int) -> dict[int, str]:
     """Current assignee username per finding id (omit findings with no current assignee)."""
-    ids = list(s.scalars(select(Finding.id).where(Finding.engagement_id == engagement_id)))
+    from attestra.persistence.mongo.adapters import _db
+
+    ids = [d["_id"] for d in _db()["findings"].find({"engagement_id": int(engagement_id)}, {"_id": 1})]
     latest = _latest_assignees(s, ids)
     return {fid: name for fid, name in latest.items() if name}

@@ -168,7 +168,9 @@ def push_signed_report(
     connector: GrcConnector | None = None,
 ) -> dict[str, Any]:
     """Push metadata for a signed report. Raises when disabled or report is not signed."""
-    r = s.get(Report, report_id)
+    from attestra.reports.report_access import get_report_row
+
+    r = get_report_row(s, report_id)
     if not r:
         raise LookupError(f"report {report_id} not found")
     if r.status != "signed":

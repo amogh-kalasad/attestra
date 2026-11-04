@@ -23,10 +23,20 @@ service:
   type: ClusterIP
   port: 80
 
-# Empty = SQLite on the PVC. Set to postgresql+psycopg://... for Step 6.1.
+# Legacy SQL URL (only when persistence=sql). Prefer Mongo for normal operations.
 databaseUrl: ""
+# MongoDB (Phase 11 default). Replica set required for multi-document transactions.
+# REQUIRED when persistenceBackend=mongo: either set mongodbUri here (stored in the
+# chart Secret) or put ATTESTRA_MONGODB_URI in `existingSecret`. Use an authenticated
+# app user, e.g.:
+#   mongodb://attestra_app:<url-encoded-password>@attestra-mongo:27017/attestra?replicaSet=rs0&authSource=admin
+# Never ship an unauthenticated URI. See docs/mongodb_migration/SECURE_LOCAL_MONGO.md.
+mongodbUri: ""
+mongodbDb: attestra
+persistenceBackend: mongo   # mongo (default) | sql (legacy)
+storageBackend: mongo       # mongo GridFS | local | s3
 # Use an existing Secret with keys ATTESTRA_API_KEY_PEPPER, ATTESTRA_SESSION_SECRET
-# (and optionally ATTESTRA_DATABASE_URL). If empty, the chart creates one from `secrets`.
+# (and optionally ATTESTRA_DATABASE_URL / ATTESTRA_MONGODB_URI). If empty, the chart creates one from `secrets`.
 existingSecret: ""
 secrets:
   apiKeyPepper: ""     # REQUIRED in production; install fails if empty and no existingSecret

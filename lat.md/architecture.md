@@ -23,7 +23,7 @@ How the Python package is split: interfaces call shared services; importers, com
 | Compliance | CWE → objective → PCI / ISO / SOC 2 | [[attestra/compliance/engine.py]] |
 | Reports | Jinja HTML, four-eyes, HMAC signature | [[attestra/reports/render.py]], [[attestra/reports/signing.py]] |
 | Evidence and audit | Content-addressed files; hash-chained log | [[attestra/services.py#_store]], [[attestra/audit.py]] |
-| Data | SQLAlchemy models; SQLite or PostgreSQL; Alembic for production schema | [[attestra/models.py]], [[attestra/db.py]], [[attestra/db.py#upgrade]], [[attestra/config.py]], [[migrations/versions/0001_baseline.py]] |
+| Data | MongoDB only (replica set + GridFS); SQLAlchemy models remain as the MongoSession schema | [[attestra/bootstrap.py#init_persistence]], [[attestra/persistence/mongo/client.py#init_mongo]], [[attestra/db.py]], [[attestra/models.py]], [[attestra/config.py]] |
 
 ## Design decisions
 
@@ -57,13 +57,19 @@ PCI evaluation only counts findings on CDE assets (plus unmatched locations, con
 
 Raw artifacts are masked, hashed write-once; audit is append-only; backups use manifests.
 
-Raw imports and evidence are masked ([[attestra/evidence/mask.py#mask_bytes]]), SHA-256 hashed, and stored write-once via [[attestra/storage/__init__.py#get_storage]] ([[attestra/services.py#_store]]). Retention and purge live in [[attestra/ops/retention.py#purge_expired]]; backup/restore with sha256 manifests in [[attestra/ops/backup.py#backup]]. The audit log is hash-chained and append-only ([[attestra/audit.py]]). Reports carry Ed25519 or HMAC signatures ([[attestra/reports/signing.py]]).
+Raw imports and evidence are masked ([[attestra/evidence/mask.py#mask_bytes]]), SHA-256 hashed, and stored write-once via [[attestra/storage/__init__.py#get_storage]] ([[attestra/services.py#_store]]). Retention and purge live in [[attestra/ops/retention.py#purge_expired]]; backup/restore with sha256 manifests in [[attestra/ops/backup.py#backup]] (Mongo logical export via [[attestra/ops/mongo_backup.py#backup_mongo]]). The audit log is hash-chained and append-only ([[attestra/audit.py]]). Reports carry Ed25519 or HMAC signatures ([[attestra/reports/signing.py]]).
 
 ## Schema migrations
 
-Production and `attestra init` / serve apply Alembic to head; tests still use fast `create_all`.
+Document schema migrations run on Mongo init; SQL/Alembic is archived (migrate-source only).
 
-[[attestra/db.py#upgrade]] runs Alembic (`alembic.ini`, [[migrations/env.py]]) against [[attestra/config.py#DATABASE_URL]]. [[attestra/db.py#init]] takes `use_migrations=True` for CLI/API startup; pytest uses `create_all` for speed. Baseline revision: [[migrations/versions/0001_baseline.py]]. Head: `0027_finding_observations_rls`. Master Phase 1–9 schema map, backfill policy (no destructive historical rewrite), and rollback notes: `docs/MASTER_IMPL_PHASE10_MIGRATIONS.md`. Evidence provenance uses SQLite-safe `batch_alter_table` in [[migrations/versions/0026_evidence_provenance.py]]; observation RLS is [[migrations/versions/0027_finding_observations_rls.py]] / [[attestra/rls.py#FINDING_OBSERVATION_POLICIES]].
+[[attestra/persistence/mongo/client.py#init_mongo]] applies pending revisions under `attestra/persistence/mongo/migrations` (baseline indexes, identity/webhook indexes, partial unique credit idempotency keys). [[attestra/db.py#init]] / [[attestra/db.py#upgrade]] open Mongo only. Legacy SQL trees and the one-shot SQL→Mongo importer live under `.migration_backups/sql_removal/`.
+
+## MongoDB persistence
+
+Runtime persistence is MongoDB only; `db.session()` yields a MongoSession.
+
+Bootstrap: [[attestra/bootstrap.py#init_persistence]]. Client: [[attestra/persistence/mongo/client.py#init_mongo]]; repos under `attestra/persistence/mongo/repositories/`; GridFS [[attestra/storage/mongo.py#MongoStorage]]; tenant filters [[attestra/persistence/mongo/tenant.py]]. Session façade: [[attestra/db.py#session]] → MongoSession. Domain write paths (audit, jobs, credits, reports) hit Mongo repositories. Logical backup: [[attestra/ops/mongo_backup.py#backup_mongo]]. Post-cutover helpers: [[attestra/migration/engine.py#validate]]. Design notes: `docs/mongodb_migration/`.
 
 
 ## Engagement flow
@@ -110,7 +116,7 @@ Packages added after the core flow. Each one calls the shared services and recor
 - [[attestra/webhooks/service.py]] and [[attestra/integrations/tickets.py]]: signed outbound webhooks and pluggable ticket sync (Jira, GitHub, ServiceNow, Azure DevOps); closed/done/resolved back-sync to `fixed` also requests a pending retest when none is open.
 - [[attestra/alerts/service.py]]: tenant email alerts for new Critical/High findings, security header changes, and missed SLA (SMTP off by default).
 - [[attestra/ai_narratives.py]]: AI draft text, off by default, used only after tester approval.
-- [[attestra/tuning.py]] and [[attestra/rls.py]]: per-tenant risk weights and suppression, and PostgreSQL row-level security.
+- [[attestra/tuning.py]]: per-tenant risk weights and suppression.
 - [[attestra/runner/ownership.py]]: target ownership check by DNS TXT, well-known file, or owner confirmation for a private IP; [[attestra/runner/ownership.py#set_token]] reuses a token from another target.
 - [[attestra/integrations/grc.py]]: optional GRC evidence push (Vanta/Drata/Sprinto webhook), off by default.
 - [[attestra/reports/signoff.py]]: builds the sign-off banner ([[attestra/reports/signoff.py#banner_html]]) and adds it only to the viewed page ([[attestra/reports/signoff.py#inject]]); the sealed file is never changed.

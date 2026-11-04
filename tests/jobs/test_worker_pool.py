@@ -113,7 +113,8 @@ def test_touch_heartbeats_only_own_running_jobs(engagement):
         hb_a = s.get(Job, a).heartbeat_at
         hb_b = s.get(Job, b).heartbeat_at
         assert hb_a.replace(tzinfo=None) > old.replace(tzinfo=None) + timedelta(minutes=30)
-        assert hb_b.replace(tzinfo=None) == old.replace(tzinfo=None)
+        # Mongo stores milliseconds
+        assert hb_b.replace(tzinfo=None, microsecond=hb_b.microsecond // 1000 * 1000) == old.replace(tzinfo=None, microsecond=old.microsecond // 1000 * 1000)
 
 
 def test_job_cancel_is_per_job_but_follows_engagement_halt():

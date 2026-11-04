@@ -38,6 +38,13 @@ def _print(obj) -> None:
     print(json.dumps(obj, indent=2, default=str))
 
 
+def _init_identity_db() -> None:
+    """Open the MongoDB store (users, API keys, memberships, invites live there)."""
+    from attestra.persistence.mongo.client import init_mongo
+
+    init_mongo()
+
+
 def _resolve_actor(args) -> tuple[str, int | None]:
     """Return (actor name, user_id) for CLI writes.
 
@@ -71,16 +78,17 @@ def _resolve_actor(args) -> tuple[str, int | None]:
 
 def cmd_init(args) -> None:
     from attestra import config
+    from attestra.bootstrap import init_persistence
 
     config.validate_runtime_config()
-    db.init(use_migrations=True)
-    print("Database ready.")
+    backend = init_persistence(use_migrations=True)
+    print("MongoDB ready." if backend == "mongo" else "Database ready.")
 
 
 def cmd_user_add(args) -> None:
     from attestra.auth.keys import create_user
 
-    db.init(use_migrations=True)
+    _init_identity_db()
     with db.session() as s:
         user = create_user(
             s,
@@ -96,7 +104,8 @@ def cmd_user_add(args) -> None:
 def cmd_user_set_password(args) -> None:
     import getpass
 
-    from attestra.users.service import set_password
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.users.mongo_service import set_password
 
     password = args.password
     if password is None:
@@ -108,11 +117,10 @@ def cmd_user_set_password(args) -> None:
         actor = f"cli:{getpass.getuser()}"
     except Exception:  # noqa: BLE001 - no login name on this host
         actor = "cli"
-    db.init(use_migrations=True)
+    _init_identity_db()
     try:
-        with db.session() as s:
-            user = set_password(s, args.username, password, actor=actor)
-            name, active = user.username, user.active
+        user = set_password(_db(), args.username, password, actor=actor)
+        name, active = user["username"], user.get("active", True)
     except (services.ServiceError, LookupError) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(2)
@@ -161,7 +169,7 @@ def cmd_key_create(args) -> None:
     from attestra.auth.keys import create_api_key
     from attestra.models import User
 
-    db.init(use_migrations=True)
+    _init_identity_db()
     with db.session() as s:
         user = s.scalar(select(User).where(User.username == args.username.strip().lower()))
         if not user:
@@ -176,7 +184,7 @@ def cmd_key_create(args) -> None:
 def cmd_key_list(args) -> None:
     from attestra.auth.keys import list_api_keys
 
-    db.init(use_migrations=True)
+    _init_identity_db()
     with db.session() as s:
         rows = list_api_keys(s, username=args.username)
     if not rows:
@@ -193,7 +201,7 @@ def cmd_key_list(args) -> None:
 def cmd_key_revoke(args) -> None:
     from attestra.auth.keys import revoke_api_key
 
-    db.init(use_migrations=True)
+    _init_identity_db()
     actor, _ = _resolve_actor(args)
     try:
         with db.session() as s:
@@ -206,14 +214,15 @@ def cmd_key_revoke(args) -> None:
 
 
 def cmd_user_disable(args) -> None:
-    from attestra.users.service import UserAdminError, disable_by_username
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.users.mongo_service import disable_by_username
+    from attestra.users.service import UserAdminError
 
-    db.init(use_migrations=True)
+    _init_identity_db()
     principal = _resolve_principal(args)
     try:
-        with db.session() as s:
-            user = disable_by_username(s, principal, args.username)
-            name, active = user.username, user.active
+        user = disable_by_username(_db(), principal, args.username)
+        name, active = user["username"], user.get("active", True)
     except (UserAdminError, LookupError) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(2)
@@ -432,10 +441,43 @@ def cmd_verify_report(args) -> None:
 
 
 def cmd_verify_audit(args) -> None:
-    with db.session() as s:
-        ok, bad = audit.verify(s)
+    from attestra.persistence.mongo.client import init_mongo
+
+    init_mongo()
+    ok, bad = audit.verify(None)
     print("Audit chain intact." if ok else f"Audit chain BROKEN at event {bad}.")
     sys.exit(0 if ok else 1)
+
+
+def _mongo_migrate_archived(args) -> None:
+    print(
+        "error: SQL->Mongo assess/plan/import is archived under "
+        ".migration_backups/sql_removal/attestra/migration/ "
+        "(runtime is Mongo-only; use validate/status for the live DB)",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+def cmd_mongo_migrate_validate(args) -> None:
+    import json
+
+    from attestra.migration.engine import validate
+
+    report = validate(mongo_uri=args.mongo_uri, mongo_db=args.mongo_db)
+    print(json.dumps(report, indent=2, default=str))
+    sys.exit(0 if report.get("ok") else 1)
+
+
+def cmd_mongo_migrate_status(args) -> None:
+    import json
+
+    from attestra.migration.engine import status
+
+    print(json.dumps(status(args.run_id, mongo_uri=args.mongo_uri, mongo_db=args.mongo_db), indent=2, default=str))
+
+
+
 
 
 def cmd_expire_risk(args) -> None:
@@ -863,6 +905,25 @@ def main(argv: list[str] | None = None) -> None:
     sp.set_defaults(fn=cmd_verify_report)
 
     sub.add_parser("verify-audit", help="verify the audit log hash chain").set_defaults(fn=cmd_verify_audit)
+
+    sp = sub.add_parser("mongo-migrate", help="Mongo migration helpers (validate/status; SQL import archived)")
+    mig = sp.add_subparsers(dest="mongo_migrate_cmd", required=True)
+    for name, help_text in (
+        ("assess", "archived: SQL source assess"),
+        ("plan", "archived: SQL source plan"),
+        ("import", "archived: SQL->Mongo import"),
+    ):
+        archived = mig.add_parser(name, help=help_text)
+        archived.set_defaults(fn=_mongo_migrate_archived)
+    spv = mig.add_parser("validate", help="verify Mongo audit hash chain")
+    spv.add_argument("--mongo-uri", default=None)
+    spv.add_argument("--mongo-db", default=None)
+    spv.set_defaults(fn=cmd_mongo_migrate_validate)
+    sps = mig.add_parser("status", help="show checkpoint status for a migration run")
+    sps.add_argument("--run-id", required=True)
+    sps.add_argument("--mongo-uri", default=None)
+    sps.add_argument("--mongo-db", default=None)
+    sps.set_defaults(fn=cmd_mongo_migrate_status)
 
     sp = sub.add_parser("serve", help="run the API and dashboard")
     sp.add_argument("--host", default="127.0.0.1")

@@ -1,0 +1,7 @@
+"""Persistence backend for Attestra: MongoDB only."""
+
+from __future__ import annotations
+
+
+def persistence_backend() -> str:
+    return "mongo"

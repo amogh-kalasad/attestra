@@ -1,0 +1,44 @@
+"""Shared repository primitives."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pymongo.database import Database
+
+from attestra.persistence.mongo.sequences import next_id
+from attestra.persistence.mongo.serialization import with_id
+from attestra.persistence.mongo.tenant import TenantIds
+
+
+class BaseRepository:
+    collection_name: str = ""
+    sequence_name: str = ""
+
+    def __init__(self, db: Database, *, tenant_ids: TenantIds = None):
+        self.db = db
+        self.tenant_ids = tenant_ids
+        self.col = db[self.collection_name]
+
+    def allocate_id(self) -> int:
+        return next_id(self.db, self.sequence_name or self.collection_name)
+
+    def get_raw(self, doc_id: int) -> dict[str, Any] | None:
+        doc = self.col.find_one({"_id": int(doc_id)})
+        return with_id(doc) if doc else None
+
+    def insert_with_id(self, fields: dict[str, Any], *, doc_id: int | None = None) -> dict[str, Any]:
+        new_id = int(doc_id) if doc_id is not None else self.allocate_id()
+        doc = {"_id": new_id, **fields}
+        self.col.insert_one(doc)
+        return with_id(doc)
+
+    def replace(self, doc_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
+        doc = {"_id": int(doc_id), **fields}
+        result = self.col.replace_one({"_id": int(doc_id)}, doc)
+        if result.matched_count == 0:
+            return None
+        return with_id(doc)
+
+    def delete(self, doc_id: int) -> bool:
+        return self.col.delete_one({"_id": int(doc_id)}).deleted_count == 1

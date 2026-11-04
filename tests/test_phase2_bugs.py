@@ -9,8 +9,9 @@ from sqlalchemy import select
 
 from attestra import db, services
 from attestra.api import app
+from attestra.audit import find_events
 from attestra.auth.keys import create_user
-from attestra.models import DISPLAY_LABELS, TEST_TYPES, AuditEvent, Engagement
+from attestra.models import DISPLAY_LABELS, TEST_TYPES, Engagement
 from attestra.web.ui import label
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -89,13 +90,8 @@ def test_evidence_download_ui_route(fresh_db, loaded):
     assert f"/engagements/{eid}/evidence/{evid}/download" in page.text
 
     with db.session() as s:
-        rows = list(
-            s.scalars(
-                select(AuditEvent).where(
-                    AuditEvent.action == "evidence.download",
-                    AuditEvent.entity_id == evid,
-                )
-            )
+        rows = find_events(
+            s, action="evidence.download", entity_id=evid
         )
         assert len(rows) >= 1
 

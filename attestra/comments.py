@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit, services
@@ -65,16 +64,10 @@ def list_comments(s: Session, finding_id: int, principal) -> list[dict]:
     if not has_permission(principal.role, "finding.read"):
         raise services.ServiceError("not allowed: cannot read comments")
     _visible_finding(s, finding_id, principal)
-    rows = list(
-        s.scalars(
-            select(FindingComment)
-            .where(FindingComment.finding_id == finding_id, FindingComment.deleted.is_(False))
-            .order_by(FindingComment.id)
-        )
-    )
-    authors = {}
-    for uid in {c.author_user_id for c in rows}:
-        authors[uid] = s.get(User, uid)
+    from attestra.persistence.mongo.read_models import view_all, view_one
+
+    rows = view_all(FindingComment, {"finding_id": int(finding_id), "deleted": {"$ne": True}}, sort=[("_id", 1)])
+    authors = {uid: view_one(User, uid) for uid in {c.author_user_id for c in rows} if uid is not None}
     return [_comment_dict(c, authors.get(c.author_user_id)) for c in rows]
 
 
@@ -146,14 +139,10 @@ def comments_for_findings(s: Session, finding_ids: list[int]) -> dict[int, list[
     """Active comments keyed by finding id (for optional report inclusion)."""
     if not finding_ids:
         return {}
-    rows = list(
-        s.scalars(
-            select(FindingComment)
-            .where(FindingComment.finding_id.in_(finding_ids), FindingComment.deleted.is_(False))
-            .order_by(FindingComment.id)
-        )
-    )
+    from attestra.persistence.mongo.read_models import view_all
+
     out: dict[int, list[FindingComment]] = {fid: [] for fid in finding_ids}
-    for c in rows:
+    q = {"finding_id": {"$in": [int(i) for i in finding_ids]}, "deleted": {"$ne": True}}
+    for c in view_all(FindingComment, q, sort=[("_id", 1)]):
         out.setdefault(c.finding_id, []).append(c)
     return out

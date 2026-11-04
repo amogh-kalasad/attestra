@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit
@@ -27,23 +26,34 @@ class CertificationError(ValueError):
     """Invalid Certification Authority input or unauthorized mutation."""
 
 
+# ---------------------------------------------------------------- Mongo backend
+
+
+def _ca_repo():
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.persistence.mongo.repositories.settings import CertificationAuthorityRepository
+
+    return CertificationAuthorityRepository(_db(), tenant_ids=None)
+
+
+def _ca_row(doc):
+    """Attribute view of the CA document (all fields default to "")."""
+    from attestra.persistence.mongo.repositories.settings import CA_FIELDS, as_row
+
+    return as_row(doc, {**{k: "" for k in CA_FIELDS}, "updated_by": "", "updated_at": None})
+
+
 def _require_admin(principal) -> None:
     if principal is None or not has_permission(getattr(principal, "role", ""), "certification.manage"):
         raise CertificationError("only a Super Admin can manage Certification Authority settings")
 
 
-def get_settings(s: Session) -> CertificationAuthority | None:
-    return s.get(CertificationAuthority, _SINGLETON_ID)
+def get_settings(s: Session | None) -> CertificationAuthority | None:
+    return _ca_row(_ca_repo().get())
 
 
-def ensure_settings(s: Session) -> CertificationAuthority:
-    row = get_settings(s)
-    if row is not None:
-        return row
-    row = CertificationAuthority(id=_SINGLETON_ID)
-    s.add(row)
-    s.flush()
-    return row
+def ensure_settings(s: Session | None) -> CertificationAuthority:
+    return get_settings(s) or _ca_row({"_id": _SINGLETON_ID})
 
 
 def format_address(row: CertificationAuthority | None) -> str:
@@ -228,7 +238,10 @@ def update_settings(
 
     row.updated_by = getattr(principal, "actor", "") or ""
     row.updated_at = utcnow()
-    s.flush()
+    from attestra.persistence.mongo.repositories.settings import CA_FIELDS
+
+    doc = _ca_repo().update(actor=row.updated_by, **{k: getattr(row, k, "") or "" for k in CA_FIELDS})
+    row = _ca_row(doc)
     audit.record(
         s,
         row.updated_by,

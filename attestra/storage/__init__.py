@@ -23,6 +23,10 @@ class Storage(Protocol):
 
 def get_storage() -> Storage:
     backend = (config.STORAGE_BACKEND or "local").lower()
+    if backend in ("mongo", "mongodb", "gridfs"):
+        from attestra.storage.mongo import MongoStorage
+
+        return MongoStorage()
     if backend == "s3":
         from attestra.storage.s3 import S3Storage
 

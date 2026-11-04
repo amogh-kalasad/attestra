@@ -133,7 +133,10 @@ def test_finding_impact_urls_references_rows(loaded):
     from attestra.reports import generate_report
 
     with db.session() as s:
-        f = services.list_findings(s, loaded)[0]
+        from attestra.models import Finding
+
+        fid = services.list_findings(s, loaded)[0].id
+        f = s.get(Finding, fid)
         f.impact = "Session takeover on admin accounts."
         f.affected_urls = ["https://app.example/admin", "POST /api/login"]
         f.references = ["https://owasp.org/www-community/attacks/Session_fixation", "CWE-384"]

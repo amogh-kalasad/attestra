@@ -10,13 +10,12 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from sqlalchemy import update
 from temporalio import activity
 from temporalio.exceptions import ApplicationError, CancelledError
 
 from attestra import audit, db
 from attestra.jobs import durable
-from attestra.models import Job, ScanRun, utcnow
+from attestra.models import ScanRun, utcnow
 
 HEARTBEAT_EVERY_S = 2.0
 TERMINAL = ("done", "failed", "cancelled")
@@ -31,27 +30,24 @@ class ScanActivityResult:
 
 def _claim(job_id: int, worker_id: str) -> str:
     """Claim this specific job. A row left 'running' by a dead attempt is reclaimed."""
-    with db.session() as s:
-        job = s.get(Job, job_id)
-        if job is None:
-            raise ApplicationError(f"job {job_id} not found", non_retryable=True)
-        if job.status in TERMINAL:
-            return job.status
-        res = s.execute(
-            update(Job)
-            .where(Job.id == job_id, Job.status.in_(("queued", "running")))
-            .values(status="running", worker_id=worker_id, heartbeat_at=utcnow(), attempts=Job.attempts + 1)
-        )
-        if res.rowcount != 1:
-            return s.get(Job, job_id).status
-        if job.status == "running":
+    from attestra.persistence.mongo.adapters import mongo_claim_specific, mongo_get_job
+
+    prev, doc = mongo_claim_specific(job_id, worker_id)
+    if prev is None:
+        raise ApplicationError(f"job {job_id} not found", non_retryable=True)
+    if prev in TERMINAL:
+        return prev
+    if doc is None:
+        return (mongo_get_job(job_id) or {}).get("status", "")
+    if prev == "running":
+        with db.session() as s:
             audit.record(s, "system", "job.recover", "job", job_id, via="temporal")
-        return "running"
+    return "running"
 
 
 def _result(job_id: int) -> ScanActivityResult:
     with db.session() as s:
-        job = s.get(Job, job_id)
+        job = durable.get_job(s, job_id)
         run = s.get(ScanRun, job.scan_run_id)
         return ScanActivityResult(job.status, run.status if run else "", job.error or "")
 
@@ -66,14 +62,14 @@ def run_scan_job(job_id: int) -> ScanActivityResult:
         return _result(job_id)
 
     with db.session() as s:
-        engagement_id = s.get(Job, job_id).scan_run.engagement_id
+        engagement_id = s.get(ScanRun, durable.get_job(s, job_id).scan_run_id).engagement_id
     cancel = threading.Event()
     errors: list[BaseException] = []
 
     def _work() -> None:
         try:
             with db.session() as s:
-                job = s.get(Job, job_id)
+                job = durable.get_job(s, job_id)
                 durable.run_one_job(s, job, cancel=cancel)
         except BaseException as exc:  # noqa: BLE001 - re-raised below
             errors.append(exc)
@@ -100,13 +96,13 @@ def run_scan_job(job_id: int) -> ScanActivityResult:
 
 def _cancel_requested(job_id: int) -> bool:
     with db.session() as s:
-        job = s.get(Job, job_id)
+        job = durable.get_job(s, job_id)
         return bool(job and job.cancel_requested)
 
 
 def _requeue(job_id: int, error: str) -> None:
     with db.session() as s:
-        job = s.get(Job, job_id)
+        job = durable.get_job(s, job_id)
         if job and job.status == "running":
             job.status = "queued"
             job.worker_id = ""
@@ -117,7 +113,7 @@ def _requeue(job_id: int, error: str) -> None:
 def mark_scan_cancelled(job_id: int) -> ScanActivityResult:
     """Record a workflow cancel on the job + scan rows (idempotent)."""
     with db.session() as s:
-        job = s.get(Job, job_id)
+        job = durable.get_job(s, job_id)
         if job is None:
             raise ApplicationError(f"job {job_id} not found", non_retryable=True)
         job.cancel_requested = True
@@ -135,7 +131,7 @@ def mark_scan_cancelled(job_id: int) -> ScanActivityResult:
 def mark_scan_failed(job_id: int, error: str) -> ScanActivityResult:
     """Retries exhausted: close the job as failed."""
     with db.session() as s:
-        job = s.get(Job, job_id)
+        job = durable.get_job(s, job_id)
         if job and job.status not in TERMINAL:
             job.status = "failed"
             job.error = (error or job.error)[:2000]

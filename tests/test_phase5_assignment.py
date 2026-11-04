@@ -4,8 +4,9 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from attestra import db
+from attestra.audit import find_events
 from attestra.auth.keys import create_user
-from attestra.models import AuditEvent, Engagement, Finding, FindingAssignment, Tenant, TenantMembership
+from attestra.models import Engagement, Finding, FindingAssignment, Tenant, TenantMembership
 from attestra.services import ServiceError
 
 
@@ -43,9 +44,8 @@ def test_assign_finding_and_audit(engagement):
         assert row.assigned_by == "lead"
         assert row.rule_id is None
         assert assignments.current_assignee(s, fid) == "alice"
-        ev = s.scalars(
-            select(AuditEvent).where(AuditEvent.action == "finding.assigned", AuditEvent.entity_id == fid)
-        ).first()
+        ev = next(iter(find_events(
+            s, action="finding.assigned", entity_id=fid)), None)
         assert ev is not None
         assert ev.details.get("assignee") == "alice"
         assert ev.details.get("user_id") == 1
@@ -76,9 +76,8 @@ def test_unassign_finding_and_audit(engagement):
             .order_by(FindingAssignment.id.desc())
         ).first()
         assert last is not None and last.assignee == ""
-        ev = s.scalars(
-            select(AuditEvent).where(AuditEvent.action == "finding.unassigned", AuditEvent.entity_id == fid)
-        ).first()
+        ev = next(iter(find_events(
+            s, action="finding.unassigned", entity_id=fid)), None)
         assert ev is not None
         assert ev.actor == "lead"
 

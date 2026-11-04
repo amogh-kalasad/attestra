@@ -1,0 +1,24 @@
+﻿"""The fresh_db fixture honours --persistence / ATTESTRA_TEST_PERSISTENCE."""
+from __future__ import annotations
+
+import os
+
+
+def _mode(request) -> str:
+    opt = request.config.getoption("--persistence", default=None)
+    return (opt or os.environ.get("ATTESTRA_TEST_PERSISTENCE") or "sql").strip().lower()
+
+
+def test_fresh_db_backend_matches_mode(fresh_db, request):
+    import attestra.config as cfg
+
+    if _mode(request) == "mongo":
+        from attestra.persistence.mongo.client import get_db
+
+        assert cfg.PERSISTENCE_BACKEND == "mongo"
+        assert os.environ["ATTESTRA_PERSISTENCE"] == "mongo"
+        name = get_db().name
+        assert name.startswith("attestra_test_") and name != "attestra"
+    else:
+        assert cfg.PERSISTENCE_BACKEND == "sql"
+        assert os.environ["ATTESTRA_PERSISTENCE"] == "sql"

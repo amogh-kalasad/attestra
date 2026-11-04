@@ -1,0 +1,283 @@
+﻿"""MongoDB-native webhook service (same rules as ``webhooks.service``, dict documents).
+
+Endpoint secrets are encrypted at rest and decrypted only to sign a delivery.
+Every function takes ``db`` (a pymongo Database) and ``tenant_ids`` (``None`` = unscoped
+operator/admin; a frozenset = the caller's tenants, see
+``service_bridge.tenant_ids_for_principal``).
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from types import SimpleNamespace
+from typing import Any
+from urllib.parse import urlsplit
+
+from attestra.models import SEVERITIES
+from attestra.persistence.mongo import collections as C
+from attestra.persistence.mongo.repositories.ops import AuditRepository
+from attestra.persistence.mongo.repositories.webhooks import (
+    FindingAssignmentRepository,
+    WebhookDeliveryRepository,
+    WebhookEndpointRepository,
+    WorkflowRuleRepository,
+)
+from attestra.persistence.mongo.secrets_codec import SecretCodecError
+from attestra.persistence.mongo.serialization import ensure_utc, utcnow
+from attestra.persistence.mongo.tenant import TenantAccessDenied, TenantIds
+from attestra.webhooks import formats
+from attestra.webhooks.guard import WebhookUrlError, check_url
+from attestra.webhooks.service import ACTIONS, BACKOFF_SECONDS, MAX_ATTEMPTS, WebhookError, _rank, default_sender
+
+log = logging.getLogger(__name__)
+
+
+def _audit(db, actor: str, action: str, entity: str, entity_id, **details) -> None:
+    AuditRepository(db).record(actor, action, entity, entity_id, **details)
+
+
+def _ep_obj(ep: dict[str, Any]) -> SimpleNamespace:
+    """Attribute view for senders written against the SQL model (``ep.url`` etc.). No secret."""
+    return SimpleNamespace(id=ep["id"], tenant_id=ep["tenant_id"], url=ep["url"], format=ep.get("format", "json"),
+                           name=ep.get("name", ""), active=ep.get("active", True), events=ep.get("events", []))
+
+
+# ---------------------------------------------------------------- endpoints
+
+
+def create_endpoint(db, tenant_ids: TenantIds, tenant_id: int, *, url: str, actor: str, name: str = "",
+                    fmt: str = "json", events: list[str] | None = None, resolver=None) -> tuple[dict, str]:
+    """Returns (endpoint doc without secret, plaintext secret to show once)."""
+    if fmt not in formats.FORMATS:
+        raise WebhookError(f"format must be one of {', '.join(formats.FORMATS)}")
+    events = list(dict.fromkeys(events or []))
+    bad = [e for e in events if e not in formats.EVENTS]
+    if bad:
+        raise WebhookError(f"unknown events: {', '.join(bad)}")
+    try:
+        check_url(url, **({"resolver": resolver} if resolver else {}))
+    except WebhookUrlError as exc:
+        raise WebhookError(str(exc)) from exc
+    if db[C.TENANTS].find_one({"_id": int(tenant_id)}, {"_id": 1}) is None:
+        raise LookupError(f"tenant {tenant_id} not found")
+    try:
+        ep, secret = WebhookEndpointRepository(db, tenant_ids=tenant_ids).create(
+            tenant_id, url=url, created_by=actor, name=name, fmt=fmt, events=events)
+    except TenantAccessDenied:
+        raise LookupError(f"tenant {tenant_id} not found") from None
+    except SecretCodecError as exc:
+        raise WebhookError(f"webhook secrets need ATTESTRA_CREDENTIAL_FERNET_KEY ({exc})") from exc
+    _audit(db, actor, "webhook.create", "webhook_endpoint", ep["id"], tenant_id=int(tenant_id),
+           host=urlsplit(url).hostname, events=events)
+    return ep, secret
+
+
+def list_endpoints(db, tenant_ids: TenantIds, *, tenant_id: int | None = None) -> list[dict]:
+    return WebhookEndpointRepository(db, tenant_ids=tenant_ids).list(tenant_id=tenant_id)
+
+
+def deactivate_endpoint(db, tenant_ids: TenantIds, endpoint_id: int, *, actor: str) -> dict:
+    ep = WebhookEndpointRepository(db, tenant_ids=tenant_ids).deactivate(endpoint_id)
+    if not ep:
+        raise LookupError(f"webhook {endpoint_id} not found")
+    _audit(db, actor, "webhook.deactivate", "webhook_endpoint", ep["id"])
+    return ep
+
+
+def rotate_secret(db, tenant_ids: TenantIds, endpoint_id: int, *, actor: str) -> str:
+    try:
+        plain = WebhookEndpointRepository(db, tenant_ids=tenant_ids).rotate_secret(endpoint_id)
+    except SecretCodecError as exc:
+        raise WebhookError(str(exc)) from exc
+    if plain is None:
+        raise LookupError(f"webhook {endpoint_id} not found")
+    _audit(db, actor, "webhook.rotate_secret", "webhook_endpoint", int(endpoint_id))
+    return plain
+
+
+def list_deliveries(db, tenant_ids: TenantIds, endpoint_id: int, *, limit: int = 100) -> list[dict]:
+    if WebhookEndpointRepository(db, tenant_ids=tenant_ids).get(endpoint_id) is None:
+        raise LookupError(f"webhook {endpoint_id} not found")
+    return WebhookDeliveryRepository(db, tenant_ids=tenant_ids).list_for_endpoint(endpoint_id, limit=limit)
+
+
+# ---------------------------------------------------------------- rules
+
+
+def create_rule(db, tenant_ids: TenantIds, tenant_id: int, *, action: str, actor: str, name: str = "", event: str = "",
+                min_severity: str = "info", status: str = "", endpoint_id: int | None = None,
+                assignee: str = "") -> dict:
+    if action not in ACTIONS:
+        raise WebhookError(f"action must be one of {', '.join(ACTIONS)}")
+    if min_severity not in SEVERITIES:
+        raise WebhookError(f"min_severity must be one of {', '.join(SEVERITIES)}")
+    if event and event not in formats.EVENTS:
+        raise WebhookError(f"unknown event {event}")
+    if action == "notify":
+        ep = WebhookEndpointRepository(db, tenant_ids=tenant_ids).get(endpoint_id) if endpoint_id else None
+        if not ep or int(ep["tenant_id"]) != int(tenant_id):
+            raise WebhookError("notify rules need a webhook endpoint of the same tenant")
+    if action == "assign" and not assignee.strip():
+        raise WebhookError("assign rules need an assignee")
+    try:
+        rule = WorkflowRuleRepository(db, tenant_ids=tenant_ids).create(
+            tenant_id, action=action, created_by=actor, name=name, event=event, min_severity=min_severity,
+            status=status, endpoint_id=endpoint_id if action == "notify" else None, assignee=assignee.strip())
+    except TenantAccessDenied:
+        raise LookupError(f"tenant {tenant_id} not found") from None
+    _audit(db, actor, "workflow_rule.create", "workflow_rule", rule["id"], tenant_id=int(tenant_id), rule_action=action)
+    return rule
+
+
+def list_rules(db, tenant_ids: TenantIds, *, tenant_id: int | None = None) -> list[dict]:
+    return WorkflowRuleRepository(db, tenant_ids=tenant_ids).list(tenant_id=tenant_id)
+
+
+def deactivate_rule(db, tenant_ids: TenantIds, rule_id: int, *, actor: str) -> dict:
+    rule = WorkflowRuleRepository(db, tenant_ids=tenant_ids).deactivate(rule_id)
+    if not rule:
+        raise LookupError(f"rule {rule_id} not found")
+    _audit(db, actor, "workflow_rule.deactivate", "workflow_rule", rule["id"])
+    return rule
+
+
+def rule_matches(rule: dict, event: str, finding: dict) -> bool:
+    if not rule.get("active", True) or (rule.get("event") and rule["event"] != event):
+        return False
+    if _rank(finding.get("severity", "info")) < _rank(rule.get("min_severity", "info")):
+        return False
+    return not rule.get("status") or rule["status"] == finding.get("status")
+
+
+# ---------------------------------------------------------------- emit
+
+
+def finding_data(f: dict, **extra) -> dict:
+    return {
+        "finding_id": f["id"], "engagement_id": f["engagement_id"], "title": f.get("title", ""),
+        "severity": f.get("severity", "info"), "status": f.get("status", ""), "risk_score": f.get("risk_score"),
+        "location": f.get("location", ""), **extra,
+    }
+
+
+def emit(db, event: str, *, tenant_id: int, data: dict, finding: dict | None = None, actor: str = "system") -> list[dict]:
+    """Queue deliveries for subscribed endpoints and run matching workflow rules (system scope)."""
+    eps = WebhookEndpointRepository(db)
+    deliveries = WebhookDeliveryRepository(db)
+    out: list[dict] = []
+    queued: set[int] = set()
+    for ep in eps.list(tenant_id=tenant_id, active_only=True):
+        if not ep.get("events") or event in ep["events"]:
+            out.append(deliveries.queue(ep, event, data))
+            queued.add(int(ep["id"]))
+    if finding is not None:
+        for rule in WorkflowRuleRepository(db).list(tenant_id=tenant_id, active_only=True):
+            if not rule_matches(rule, event, finding):
+                continue
+            if rule["action"] == "notify" and rule.get("endpoint_id") and int(rule["endpoint_id"]) not in queued:
+                ep = eps.get(int(rule["endpoint_id"]))
+                if ep and ep.get("active") and int(ep["tenant_id"]) == int(tenant_id):
+                    out.append(deliveries.queue(ep, event, {**data, "rule_id": rule["id"]}))
+                    queued.add(int(ep["id"]))
+            elif rule["action"] == "assign":
+                FindingAssignmentRepository(db).create(finding["id"], rule["assignee"], rule_id=rule["id"],
+                                                      assigned_by=f"rule:{rule['id']}")
+                _audit(db, actor, "finding.assigned", "finding", finding["id"], assignee=rule["assignee"], rule_id=rule["id"])
+            elif rule["action"] == "ticket":
+                # Ticket sync is still SQL-backed (integrations.tickets); record the skip so it is visible.
+                _audit(db, actor, "workflow.ticket_skipped", "finding", finding["id"], rule_id=rule["id"],
+                       reason="ticket sync not available on the MongoDB path yet")
+    return out
+
+
+def safe_emit_finding(db, finding: dict, event: str, *, actor: str = "system", **extra) -> None:
+    try:
+        eng = db[C.ENGAGEMENTS].find_one({"_id": int(finding["engagement_id"])}, {"tenant_id": 1})
+        if eng is not None:
+            emit(db, event, tenant_id=int(eng["tenant_id"]), data=finding_data(finding, **extra), finding=finding, actor=actor)
+    except Exception:  # noqa: BLE001
+        log.exception("webhook emit failed for %s", event)
+
+
+def safe_emit_report(db, report: dict, *, actor: str = "system") -> None:
+    try:
+        eng = db[C.ENGAGEMENTS].find_one({"_id": int(report["engagement_id"])}, {"tenant_id": 1})
+        if eng is not None:
+            data = {"report_id": report["id"], "engagement_id": report["engagement_id"], "kind": report.get("kind"),
+                    "version": report.get("version"), "sha256": report.get("sha256"), "signed_by": report.get("approved_by")}
+            emit(db, "report.signed", tenant_id=int(eng["tenant_id"]), data=data, actor=actor)
+    except Exception:  # noqa: BLE001
+        log.exception("webhook emit failed for report.signed")
+
+
+def safe_emit_scan(db, run: dict, event: str, *, actor: str = "system", **extra) -> None:
+    try:
+        if event == "scan.finished" and run.get("status") != "done":
+            return
+        eng = db[C.ENGAGEMENTS].find_one({"_id": int(run["engagement_id"])}, {"tenant_id": 1})
+        if eng is None:
+            return
+        data = {"scan_id": run["id"], "engagement_id": run["engagement_id"], "asset_id": run.get("asset_id"),
+                "tool": run.get("tool"), "profile": run.get("profile"), "status": run.get("status"), **extra}
+        emit(db, event, tenant_id=int(eng["tenant_id"]), data=data, actor=actor)
+    except Exception:  # noqa: BLE001
+        log.exception("webhook emit failed for %s", event)
+
+
+# ---------------------------------------------------------------- delivery
+
+
+def deliver(db, d: dict, *, sender=None, now: datetime | None = None) -> dict:
+    """Send one (claimed) delivery and persist the outcome. Same retry/backoff as SQL."""
+    now = ensure_utc(now) or utcnow()
+    repo = WebhookDeliveryRepository(db)
+    eps = WebhookEndpointRepository(db)
+    ep = eps.get(int(d["endpoint_id"]))
+    if not ep or not ep.get("active"):
+        return repo.finish(d["id"], status="failed", last_error="endpoint inactive") or d
+    try:
+        secret = eps.reveal_secret(int(ep["id"]))
+    except (SecretCodecError, LookupError) as exc:
+        attempts = int(d.get("attempts", 0)) + 1
+        return repo.finish(d["id"], status="failed" if attempts >= MAX_ATTEMPTS else "pending", attempts=attempts,
+                           last_error=f"secret unavailable: {exc}"[:500],
+                           next_attempt_at=now + timedelta(seconds=BACKOFF_SECONDS[min(attempts, len(BACKOFF_SECONDS)) - 1])) or d
+    body = formats.encode(formats.render(ep.get("format", "json"), d["event"], d.get("payload") or {}, d["id"]))
+    ts, sig = formats.sign(secret, body)
+    del secret
+    headers = {
+        "Content-Type": "application/json", "User-Agent": "attestra-webhooks/1", formats.TS_HEADER: ts,
+        formats.SIG_HEADER: sig, "X-Attestra-Event": d["event"], "X-Attestra-Delivery": str(d["id"]),
+    }
+    attempts = int(d.get("attempts", 0)) + 1
+    code = None
+    try:
+        code = (sender or default_sender)(_ep_obj(ep), body, headers)
+        ok = 200 <= code < 300
+        err = "" if ok else f"HTTP {code}"
+    except (OSError, WebhookUrlError) as exc:
+        ok, err = False, str(exc)[:500]
+    fields: dict[str, Any] = {"attempts": attempts, "last_error": err}
+    if code is not None:
+        fields["last_status_code"] = code
+    if ok:
+        fields.update(status="delivered", delivered_at=now)
+    elif attempts >= MAX_ATTEMPTS:
+        fields["status"] = "failed"
+    else:
+        fields.update(status="pending", next_attempt_at=now + timedelta(seconds=BACKOFF_SECONDS[attempts - 1]))
+    return repo.finish(d["id"], **fields) or d
+
+
+def dispatch_due(db, *, sender=None, now: datetime | None = None, limit: int = 50, tenant_ids: TenantIds = None) -> list[dict]:
+    now = ensure_utc(now) or utcnow()
+    claimed = WebhookDeliveryRepository(db, tenant_ids=tenant_ids).claim_due(now=now, limit=limit)
+    return [deliver(db, d, sender=sender, now=now) for d in claimed]
+
+
+__all__ = [
+    "create_endpoint", "create_rule", "deactivate_endpoint", "deactivate_rule", "deliver", "dispatch_due",
+    "emit", "finding_data", "list_deliveries", "list_endpoints", "list_rules", "rotate_secret", "rule_matches",
+    "safe_emit_finding", "safe_emit_report", "safe_emit_scan",
+]

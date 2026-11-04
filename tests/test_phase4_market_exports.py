@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
-from sqlalchemy import select
 
-from attestra.models import AuditEvent
+from attestra.audit import find_events
 from attestra.reports.render import KINDS
 
 FRAMEWORK_FOR = {"compliance": "pci_dss_4", "iso_soa": "iso_27001_2022"}
@@ -93,10 +92,7 @@ def test_engagement_json_export_shape_and_audit(loaded):
     """Version fields, top-level keys, controls/reports present; audited as engagement.exported."""
     import json
 
-    from sqlalchemy import select
-
     from attestra import __version__, db, services
-    from attestra.models import AuditEvent
     from attestra.reports import generate_report
     from attestra.reports.engagement_export import EXPORT_SCHEMA_VERSION, export_engagement_json
 
@@ -150,14 +146,8 @@ def test_engagement_json_export_shape_and_audit(loaded):
         # Must be JSON-serializable without a custom default.
         json.dumps(payload)
 
-        events = list(
-            s.scalars(
-                select(AuditEvent).where(
-                    AuditEvent.action == "engagement.exported",
-                    AuditEvent.entity == "engagement",
-                    AuditEvent.entity_id == loaded,
-                )
-            )
+        events = find_events(
+            s, action="engagement.exported", entity="engagement", entity_id=loaded
         )
         assert events
         assert events[-1].details.get("format") == "json"
@@ -198,6 +188,7 @@ def test_engagement_json_export_formula_and_secret_absence(loaded):
     import json
 
     from attestra import db, services
+    from attestra.models import Finding
     from attestra.reports.engagement_export import export_engagement_json
 
     secret = "s3cret-export-token-9f3a"
@@ -206,7 +197,7 @@ def test_engagement_json_export_formula_and_secret_absence(loaded):
 
     with db.session() as s:
         findings = services.list_findings(s, loaded)
-        f = findings[0]
+        f = s.get(Finding, findings[0].id)  # list_findings returns read-only views
         f.title = formula  # formula-like title stays a plain string in JSON (not an Excel cell)
         services.add_evidence(
             s,
@@ -271,12 +262,13 @@ def test_xlsx_three_sheets(loaded):
 def test_xlsx_formula_guard(loaded):
     """A finding title of =cmd() is prefixed with a single quote in the Findings sheet."""
     from attestra import db, services
+    from attestra.models import Finding
     from attestra.reports.xlsx_export import export_engagement_xlsx
 
     with db.session() as s:
         findings = services.list_findings(s, loaded)
         assert findings
-        findings[0].title = "=cmd()"
+        s.get(Finding, findings[0].id).title = "=cmd()"  # list_findings returns read-only views
         data = export_engagement_xlsx(s, loaded, actor="tester")
 
     wb = load_workbook(io.BytesIO(data))
@@ -348,14 +340,8 @@ def test_xlsx_export_audits_engagement_exported(loaded):
 
     with db.session() as s:
         export_engagement_xlsx(s, loaded, actor="tester")
-        events = list(
-            s.scalars(
-                select(AuditEvent).where(
-                    AuditEvent.action == "engagement.exported",
-                    AuditEvent.entity == "engagement",
-                    AuditEvent.entity_id == loaded,
-                )
-            )
+        events = find_events(
+            s, action="engagement.exported", entity="engagement", entity_id=loaded
         )
     assert events
     assert events[-1].details.get("format") == "xlsx"

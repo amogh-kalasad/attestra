@@ -9,11 +9,11 @@ DATA_DIR = Path(os.environ.get("ATTESTRA_DATA_DIR", Path.cwd() / "data")).resolv
 
 # Google Safe Browsing (webcheck). Off by default; needs both flag and API key.
 # ATTESTRA_GSB_ENABLED=1 and ATTESTRA_GSB_API_KEY=... — key is never logged or stored.
-# Production default is PostgreSQL 16 (Phase 6.1), e.g.
-#   ATTESTRA_DATABASE_URL=postgresql+psycopg://attestra_app:***@db:5432/attestra
-# (install the ``postgres`` extra). SQLite stays as the zero-config local/dev fallback.
-POSTGRES_URL_EXAMPLE = "postgresql+psycopg://attestra_app:change-me@localhost:5432/attestra"
-DATABASE_URL = os.environ.get("ATTESTRA_DATABASE_URL", f"sqlite:///{DATA_DIR / 'attestra.db'}")
+
+# Runtime is MongoDB only. ATTESTRA_PERSISTENCE is retained for older deploy env files.
+PERSISTENCE_BACKEND = os.environ.get("ATTESTRA_PERSISTENCE", "mongo").strip().lower() or "mongo"
+MONGODB_URI = os.environ.get("ATTESTRA_MONGODB_URI", "mongodb://127.0.0.1:27017/?replicaSet=rs0")
+MONGODB_DB = os.environ.get("ATTESTRA_MONGODB_DB", "attestra")
 
 # Remediation SLA in days per severity. Critical within 30 days aligns with PCI DSS 6.3.3.
 SLA_DAYS = {"critical": 30, "high": 60, "medium": 90, "low": 180, "info": None}
@@ -48,7 +48,9 @@ OIDC_AUTO_PROVISION = os.environ.get("ATTESTRA_OIDC_AUTO_PROVISION", "true").low
 # Secrets backend (attestra/secret_store.py): env (default) or vault (Vault/OpenBao KV v2).
 SECRETS_BACKEND = os.environ.get("ATTESTRA_SECRETS_BACKEND", "env")
 
-STORAGE_BACKEND = os.environ.get("ATTESTRA_STORAGE", "local")
+# Default durable artifact store follows persistence: GridFS when mongo, else local files.
+_STORAGE_DEFAULT = "mongo" if PERSISTENCE_BACKEND == "mongo" else "local"
+STORAGE_BACKEND = os.environ.get("ATTESTRA_STORAGE", _STORAGE_DEFAULT)
 S3_BUCKET = os.environ.get("ATTESTRA_S3_BUCKET", "")
 S3_ENDPOINT = os.environ.get("ATTESTRA_S3_ENDPOINT", "")
 S3_OBJECT_LOCK = os.environ.get("ATTESTRA_S3_OBJECT_LOCK", "").lower() in ("1", "true", "yes")

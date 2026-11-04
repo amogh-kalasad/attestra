@@ -17,13 +17,12 @@ def test_reject_loop(loaded):
         r = generate_report(s, loaded, kind="technical", actor=author.username, user_id=author.id)
         rid = r.id
         submit_report(s, rid, actor=author.username, user_id=author.id)
-        qa_reject(s, rid, actor=qa.username, note="Missing executive summary section", user_id=qa.id)
-        s.refresh(r)
-        assert r.status == "rejected"
-        assert "executive" in r.rejection_note.lower()
+        rejected = qa_reject(s, rid, actor=qa.username, note="Missing executive summary section", user_id=qa.id)
+        assert rejected.status == "rejected"
+        assert "executive" in (rejected.rejection_note or "").lower()
         # resubmit after reject
-        submit_report(s, rid, actor=author.username, user_id=author.id)
-        assert r.status == "submitted"
+        resubmitted = submit_report(s, rid, actor=author.username, user_id=author.id)
+        assert resubmitted.status == "submitted"
 
 
 def test_same_user_cannot_do_two_steps(loaded):

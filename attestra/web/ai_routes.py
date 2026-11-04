@@ -14,9 +14,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from attestra import ai_narratives as ai
-from attestra import audit, db, services
+from attestra import audit, services
 from attestra.auth.keys import Principal
 from attestra.auth.roles import has_permission
+from attestra.web import data_access
 
 PERM_DRAFT = "report.generate"  # admin, lead, tester
 PERM_APPROVE = "finding.write"  # admin, lead, tester
@@ -96,7 +97,7 @@ def _decide(s, eid: int, did: str, principal: Principal, *, approve: bool, text:
 
 def _with_session(fn, *args, **kwargs):
     try:
-        with db.session() as s:
+        with data_access.session() as s:
             return fn(s, *args, **kwargs)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e

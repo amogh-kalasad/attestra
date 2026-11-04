@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+from attestra.audit import find_events
+
 
 def test_deny_host_beats_allow(engagement):
     """A deny rule for a host beats the allow-list entry."""
@@ -33,10 +35,8 @@ def test_allow_rule_still_works_without_deny(engagement):
 
 def test_remove_scope_rule_audited(engagement):
     """Removing a scope rule creates an audit event."""
-    from sqlalchemy import select
 
     from attestra import db, services
-    from attestra.models import AuditEvent
 
     with db.session() as s:
         rule = services.add_scope_rule(
@@ -48,7 +48,7 @@ def test_remove_scope_rule_audited(engagement):
         services.remove_scope_rule(s, rule_id, actor="tester")
 
     with db.session() as s:
-        events = list(s.scalars(select(AuditEvent).where(AuditEvent.action == "scope_rule.remove")))
+        events = find_events(s, action="scope_rule.remove")
         assert len(events) >= 1
         assert any(e.entity_id == rule_id for e in events)
 

@@ -144,6 +144,19 @@ def _atomic_write_readonly(path: Path, data: bytes) -> None:
     path.chmod(0o444)
 
 
+def _set_export_fields(report, **fields) -> None:
+    """ORM rows: set attributes. Mongo read models: write the export metadata to Mongo."""
+    from attestra.persistence.mongo.read_models import DocView
+
+    if isinstance(report, DocView):
+        from attestra.persistence.mongo import report_store
+
+        report_store.set_fields(report.id, fields)
+        return
+    for k, v in fields.items():
+        setattr(report, k, v)
+
+
 def to_docx(report: Report, html_path: Path | None = None) -> tuple[Path, str]:
     src = Path(html_path or report.path)
     html = src.read_text(encoding="utf-8", errors="replace")
@@ -162,7 +175,7 @@ def to_docx(report: Report, html_path: Path | None = None) -> tuple[Path, str]:
     sha = hashlib.sha256(data).hexdigest()
     out = src.with_suffix(".docx")
     _atomic_write_readonly(out, data)
-    report.docx_path, report.docx_sha256 = str(out), sha
+    _set_export_fields(report, docx_path=str(out), docx_sha256=sha)
     return out, sha
 
 
@@ -184,7 +197,7 @@ def to_pdf(report: Report, html_path: Path | None = None) -> tuple[Path, str]:
     sha = hashlib.sha256(data).hexdigest()
     out = src.with_suffix(".pdf")
     _atomic_write_readonly(out, data)
-    report.pdf_path, report.pdf_sha256 = str(out), sha
+    _set_export_fields(report, pdf_path=str(out), pdf_sha256=sha)
     return out, sha
 
 

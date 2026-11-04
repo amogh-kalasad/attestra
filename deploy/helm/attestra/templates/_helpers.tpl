@@ -19,6 +19,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   valueFrom: { secretKeyRef: { name: {{ include "attestra.secretName" . }}, key: ATTESTRA_API_KEY_PEPPER } }
 - name: ATTESTRA_SESSION_SECRET
   valueFrom: { secretKeyRef: { name: {{ include "attestra.secretName" . }}, key: ATTESTRA_SESSION_SECRET } }
+- { name: ATTESTRA_PERSISTENCE, value: {{ .Values.persistenceBackend | default "mongo" | quote }} }
+- { name: ATTESTRA_STORAGE, value: {{ .Values.storageBackend | default "mongo" | quote }} }
+- { name: ATTESTRA_MONGODB_DB, value: {{ .Values.mongodbDb | default "attestra" | quote }} }
+{{- if or .Values.mongodbUri (eq (.Values.persistenceBackend | default "mongo") "mongo") }}
+{{- /* Mongo mode: URI always comes from the Secret (chart-made or existingSecret). */}}
+- name: ATTESTRA_MONGODB_URI
+  valueFrom: { secretKeyRef: { name: {{ include "attestra.secretName" . }}, key: ATTESTRA_MONGODB_URI } }
+{{- end }}
 {{- if .Values.databaseUrl }}
 - name: ATTESTRA_DATABASE_URL
   valueFrom: { secretKeyRef: { name: {{ include "attestra.secretName" . }}, key: ATTESTRA_DATABASE_URL } }

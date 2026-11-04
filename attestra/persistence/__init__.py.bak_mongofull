@@ -1,0 +1,19 @@
+"""Persistence backends for Attestra.
+
+Production default is MongoDB (``ATTESTRA_PERSISTENCE=mongo``). SQLAlchemy remains
+available via ``ATTESTRA_PERSISTENCE=sql`` for legacy runtime, pytest fixtures, and
+as the read-only source for ``attestra mongo-migrate``.
+"""
+
+from __future__ import annotations
+
+from attestra import config
+
+
+def persistence_backend() -> str:
+    """Return ``mongo`` (default) or ``sql``."""
+    return (getattr(config, "PERSISTENCE_BACKEND", None) or "mongo").strip().lower()
+
+
+def using_mongo() -> bool:
+    return persistence_backend() == "mongo"

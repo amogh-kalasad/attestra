@@ -1,0 +1,178 @@
+"""Dispatch helpers: SQL call sites can forward to Mongo when persistence=mongo."""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Any
+
+from attestra import config
+from attestra.persistence import using_mongo
+from attestra.persistence.mongo.client import get_db, init_mongo
+from attestra.persistence.mongo.repositories.ops import AuditRepository, CreditRepository, JobRepository
+from attestra.persistence.mongo.serialization import utcnow
+
+
+def _db():
+    try:
+        return get_db()
+    except Exception:
+        init_mongo()
+        return get_db()
+
+
+def mongo_audit_record(actor: str, action: str, entity: str, entity_id: int | None = None, **details: Any):
+    return AuditRepository(_db()).record(actor, action, entity, entity_id, **details)
+
+
+def mongo_audit_verify() -> tuple[bool, int | None]:
+    return AuditRepository(_db()).verify()
+
+
+def mongo_claim_job(worker_id: str, *, exclude_tools=()) -> dict[str, Any] | None:
+    return JobRepository(_db()).claim(worker_id, exclude_tools=list(exclude_tools or ()))
+
+
+def mongo_enqueue_job(scan_run_id: int, tool: str = "") -> dict[str, Any]:
+    job = JobRepository(_db()).enqueue(scan_run_id, tool=tool)
+    AuditRepository(_db()).record("system", "job.enqueue", "job", job["id"], scan_run_id=scan_run_id)
+    return job
+
+
+def mongo_complete_job(job_id: int, worker_id: str = "") -> dict[str, Any] | None:
+    return JobRepository(_db()).complete(job_id, worker_id=worker_id)
+
+
+def mongo_fail_job(job_id: int, error: str, *, retry: bool = True, worker_id: str = "") -> dict[str, Any] | None:
+    return JobRepository(_db()).fail(
+        job_id,
+        error,
+        retry=retry,
+        max_attempts=int(config.JOB_MAX_ATTEMPTS),
+        worker_id=worker_id,
+    )
+
+
+def mongo_recover_jobs(*, exclude_worker_id: str | None = None) -> int:
+    cutoff = utcnow() - timedelta(seconds=int(config.JOB_STALE_HEARTBEAT_S))
+    return JobRepository(_db()).recover_stale(stale_before=cutoff, exclude_worker_id=exclude_worker_id)
+
+
+def mongo_consume_credit(
+    tenant_id: int,
+    *,
+    actor: str,
+    engagement_id: int,
+    user_id: int | None = None,
+    idempotency_key: str | None = None,
+):
+    from attestra.services import ServiceError
+
+    if not config.subscription_enforcement_enabled():
+        return None
+    try:
+        return CreditRepository(_db()).consume_for_scan_admit(
+            tenant_id,
+            actor=actor,
+            engagement_id=engagement_id,
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            enforce=True,
+        )
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def mongo_allocate_credits(tenant_id: int, amount: int, *, actor: str, **kwargs):
+    from attestra.services import ServiceError
+
+    try:
+        return CreditRepository(_db()).allocate(tenant_id, amount, actor=actor, **kwargs)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
+
+
+def require_mongo_mode() -> bool:
+    return using_mongo()
+
+
+# ---------------------------------------------------------------- job helpers (mongofull M1)
+_TERMINAL = ("done", "failed", "cancelled")
+
+
+def mongo_get_job(job_id: int) -> dict[str, Any] | None:
+    return JobRepository(_db()).get(int(job_id))
+
+
+def mongo_set_job_fields(job_id: int, fields: dict[str, Any]) -> None:
+    JobRepository(_db()).col.update_one({"_id": int(job_id)}, {"$set": dict(fields)})
+
+
+def mongo_job_for_scan_run(scan_run_id: int) -> dict[str, Any] | None:
+    from attestra.persistence.mongo.serialization import with_id
+
+    doc = JobRepository(_db()).col.find_one({"scan_run_id": int(scan_run_id)})
+    return with_id(doc) if doc else None
+
+
+def mongo_jobs_for_scan_runs(scan_run_ids) -> list[dict[str, Any]]:
+    from attestra.persistence.mongo.serialization import with_id
+
+    ids = [int(i) for i in scan_run_ids]
+    if not ids:
+        return []
+    return [with_id(d) for d in JobRepository(_db()).col.find({"scan_run_id": {"$in": ids}}).sort("_id", 1)]
+
+
+def mongo_jobs_by_status(status: str) -> list[dict[str, Any]]:
+    from attestra.persistence.mongo.serialization import with_id
+
+    return [with_id(d) for d in JobRepository(_db()).col.find({"status": status}).sort("_id", 1)]
+
+
+def mongo_touch_heartbeats(job_ids, worker_id: str) -> int:
+    return JobRepository(_db()).touch_heartbeats([int(j) for j in job_ids], worker_id)
+
+
+def mongo_request_cancel(job_id: int) -> dict[str, Any]:
+    return JobRepository(_db()).request_cancel(int(job_id))
+
+
+def mongo_fresh_running(cutoff) -> list[dict[str, Any]]:
+    from attestra.persistence.mongo.serialization import with_id
+
+    q = {"status": "running", "heartbeat_at": {"$gte": cutoff}}
+    return [with_id(d) for d in JobRepository(_db()).col.find(q)]
+
+
+def mongo_claim_specific(job_id: int, worker_id: str):
+    """Temporal: claim one given job. Returns (previous_status | None, claimed_doc | None)."""
+    from pymongo import ReturnDocument
+
+    from attestra.persistence.mongo.serialization import with_id
+
+    repo = JobRepository(_db())
+    cur = repo.get(int(job_id))
+    if not cur:
+        return None, None
+    if cur.get("status") in _TERMINAL:
+        return cur["status"], None
+    doc = repo.col.find_one_and_update(
+        {"_id": int(job_id), "status": {"$in": ["queued", "running"]}},
+        {"$set": {"status": "running", "worker_id": worker_id, "heartbeat_at": utcnow()}, "$inc": {"attempts": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return cur.get("status"), (with_id(doc) if doc else None)
+
+
+def mongo_attach_credit_scan_run(tx_id: int, scan_run_id: int) -> None:
+    from attestra.persistence.mongo import collections as C
+
+    _db()[C.CREDIT_TRANSACTIONS].update_one({"_id": int(tx_id)}, {"$set": {"scan_run_id": int(scan_run_id)}})
+
+
+def mongo_refund_credit(tenant_id: int, *, actor: str, debit_tx_id: int, reason: str, **kwargs):
+    return CreditRepository(_db()).refund(tenant_id, actor=actor, debit_tx_id=debit_tx_id, reason=reason, **kwargs)
+
+
+def mongo_credit_account(tenant_id: int) -> dict[str, Any]:
+    return CreditRepository(_db()).ensure_account(int(tenant_id))

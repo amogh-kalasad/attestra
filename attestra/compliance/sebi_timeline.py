@@ -2,7 +2,7 @@
 
 Milestones are computed from window, authorizations, scans, signed reports, and
 retests. Optional notes/status overrides persist as JSON under
-``DATA_DIR/tenants/{tid}/sebi_timeline/{eid}.json`` (no Alembic migration).
+``DATA_DIR/tenants/{tid}/sebi_timeline/{eid}.json`` (file overlay; no schema migration).
 """
 
 from __future__ import annotations

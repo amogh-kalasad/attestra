@@ -1,0 +1,211 @@
+"""Mongo-mode end-to-end (enqueue -> worker -> scan run -> report sign) and single audit chain.
+
+Uses throwaway ``attestra_test_*`` databases only (dropped afterwards).
+"""
+from __future__ import annotations
+
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+from tests.persistence.test_mongo_jobflow import _mongo_available, _runs, mdb, mongo_mode  # noqa: F401
+
+pytestmark = pytest.mark.skipif(not _mongo_available(), reason="MongoDB replica set not available")
+
+
+def _fake_scanner(monkeypatch, tmp_path):
+    from attestra.jobs import durable
+
+    raw = tmp_path / "out.json"
+    raw.write_text("{}", encoding="utf-8")
+    res = SimpleNamespace(extra={}, error="", quarantine=False, quarantine_reason="", raw_path=raw,
+                          tool_version="1", image_digest="sha256:x", import_tool="trivy")
+    monkeypatch.setattr(durable, "check", lambda *a, **k: "target")
+    monkeypatch.setattr(durable, "get_adapter", lambda tool: SimpleNamespace(scan=lambda *a, **k: res))
+    monkeypatch.setattr(durable.services, "import_results", lambda *a, **k: SimpleNamespace(id=None, notes_json=""))
+    import attestra.webhooks.service as wh
+
+    monkeypatch.setattr(wh, "safe_emit_scan", lambda *a, **k: None)
+
+
+def test_e2e_enqueue_worker_scan_report_signed(mongo_mode, mdb, monkeypatch, tmp_path):
+    from attestra import audit, db
+    from attestra.jobs.pool import WorkerPool
+    from attestra.models import ScanRun
+    from attestra.reports import render
+
+    _fake_scanner(monkeypatch, tmp_path)
+    monkeypatch.setattr(render, "_assert_not_before_window", lambda *a, **k: None)
+    [(run_id, job_id)] = _runs(mongo_mode, 1)
+    pool = WorkerPool(worker_id="e2e", concurrency=1, housekeeping=False, log=lambda m: None)
+    assert pool.tick() == 1 and pool.wait_idle(20)
+    assert mdb["jobs"].find_one({"_id": job_id})["status"] == "done"
+
+    with db.session() as s:
+        assert s.get(ScanRun, run_id).status == "done"
+        rep = render.generate_report(s, mongo_mode, kind="technical", actor="author")
+        rid = rep.id
+    with db.session() as s:
+        render.submit_report(s, rid, actor="author", user_id=1)
+    with db.session() as s:
+        render.qa_approve(s, rid, actor="qa", user_id=2)
+
+    errors, ok = [], []
+
+    def sign(i):
+        try:
+            with db.session() as s:
+                render.sign_report(s, rid, actor=f"lead{i}", user_id=10 + i, role="lead")
+            ok.append(i)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    ts = [threading.Thread(target=sign, args=(i,)) for i in range(4)]
+    [t.start() for t in ts]
+    [t.join(60) for t in ts]
+    assert len(ok) == 1, (ok, errors)
+    assert mdb["audit_events"].count_documents({"action": "report.sign", "entity_id": rid}) == 1
+    actions = {d["action"] for d in mdb["audit_events"].find({}, {"action": 1})}
+    assert {"job.complete", "report.submit", "report.qa_approve", "report.sign"} <= actions
+    assert audit.verify(None) == (True, None)
+
+
+@pytest.mark.sql_only  # needs a legacy SQL audit chain to migrate
+def test_sql_chain_migrates_into_single_mongo_chain(engagement, mdb, monkeypatch):
+    """Legacy SQL audit chain imported via mongo-migrate continues as one verified chain."""
+    from attestra import audit, db
+    from attestra import config as cfg
+    from attestra.migration.engine import import_data
+
+    with db.session() as s:
+        for i in range(5):
+            audit.record(s, "legacy", "legacy.event", "thing", i, n=i)
+    with db.session() as s:
+        assert audit.verify(s) == (True, None)
+        sql_count = s.execute(__import__("sqlalchemy").text("select count(*) from audit_events")).scalar()
+
+    name = mdb.name
+    import attestra.persistence.mongo.config as mc
+
+    import_data(cfg.DATABASE_URL, mongo_uri=mc.MONGODB_URI, mongo_db=name, tables=["audit_events"])
+    from attestra.persistence.mongo.client import get_db
+
+    mdb = get_db()
+    assert mdb.name == name
+    assert mdb["audit_events"].count_documents({}) == sql_count
+    monkeypatch.setattr(cfg, "PERSISTENCE_BACKEND", "mongo")
+    audit.record(None, "new", "mongo.event", "thing", 1)
+    assert mdb["audit_events"].count_documents({}) == sql_count + 1
+    last = mdb["audit_events"].find_one(sort=[("_id", -1)])
+    prev = mdb["audit_events"].find_one({"_id": last["_id"] - 1})
+    assert last["prev_hash"] == prev["hash"]
+    assert audit.verify(None) == (True, None)
+
+
+def _sql_ids(table):
+    from sqlalchemy import text
+
+    from attestra import db
+
+    with db.session() as s:
+        return {int(r[0]) for r in s.execute(text(f"select id from {table}"))}
+
+
+def test_dualwrite_mirrors_domain_tables(mongo_mode, mdb, monkeypatch, tmp_path):
+    from attestra import db
+    from attestra.jobs.pool import WorkerPool
+    from attestra.models import ScanRun
+    from attestra.persistence.mongo.dualwrite import MIRRORED_TABLES
+    from attestra.reports import render
+
+    _fake_scanner(monkeypatch, tmp_path)
+    monkeypatch.setattr(render, "_assert_not_before_window", lambda *a, **k: None)
+    [(run_id, _)] = _runs(mongo_mode, 1)
+    pool = WorkerPool(worker_id="dw", concurrency=1, housekeeping=False, log=lambda m: None)
+    assert pool.tick() == 1 and pool.wait_idle(20)
+    with db.session() as s:
+        rid = render.generate_report(s, mongo_mode, kind="technical", actor="author").id
+
+    # scan_runs / reports in Mongo track SQL state
+    assert mdb["scan_runs"].find_one({"_id": run_id})["status"] == "done"
+    assert mdb["reports"].find_one({"_id": rid})["status"] == "draft"
+    # the engagement fixture rows were written before mongo mode: only new rows are mirrored
+    assert run_id in {d["_id"] for d in mdb["scan_runs"].find({}, {"_id": 1})}
+    assert "jobs" not in MIRRORED_TABLES and "audit_events" not in MIRRORED_TABLES
+
+    # rollback mirrors nothing
+    with pytest.raises(RuntimeError):
+        with db.session() as s:
+            run = s.get(ScanRun, run_id)
+            run.status = "failed"
+            s.flush()
+            raise RuntimeError("boom")
+    assert mdb["scan_runs"].find_one({"_id": run_id})["status"] == "done"
+
+    # delete mirrors
+    with db.session() as s:
+        s.delete(s.get(ScanRun, run_id))
+    assert mdb["scan_runs"].find_one({"_id": run_id}) is None
+
+
+def test_dualwrite_full_copy_after_backfill(mongo_mode, mdb):
+    """Backfill (mongo-migrate import) + dual-write keeps every mirrored table id-identical."""
+    from attestra import config as cfg
+    from attestra.migration.engine import import_data
+    from attestra.persistence.mongo.client import get_db
+    from attestra.persistence.mongo.dualwrite import MIRRORED_TABLES
+
+    import attestra.persistence.mongo.config as mc
+
+    name = mdb.name
+    import_data(cfg.DATABASE_URL, mongo_uri=mc.MONGODB_URI, mongo_db=name, tables=sorted(MIRRORED_TABLES))
+    _runs(mongo_mode, 2)
+    m = get_db()
+    assert m.name == name
+    for tbl in MIRRORED_TABLES:
+        try:
+            sql = _sql_ids(tbl)
+        except Exception:  # table absent in this schema
+            continue
+        assert {d["_id"] for d in m[tbl].find({}, {"_id": 1})} == sql, tbl
+
+
+def test_evidence_read_resolves_gridfs_with_tenant_check(mongo_mode, mdb, monkeypatch):
+    from attestra import config as cfg
+    from attestra import services
+
+    monkeypatch.setattr(cfg, "STORAGE_BACKEND", "mongo")
+    path = services._store(5, "evidence", "ab" * 32, "shot.txt", b"BODY-123")
+    assert path.read_bytes().startswith(b"mongo://")
+    assert services.read_evidence_bytes(path, 5) == b"BODY-123"
+    with pytest.raises(LookupError):
+        services.read_evidence_bytes(path, 6)
+
+
+def test_tenant_ids_and_scoped_getters_use_mongo_memberships(mongo_mode, mdb):
+    from sqlalchemy import select
+
+    from attestra import db, services
+    from attestra.models import Asset, Engagement
+
+    with db.session() as s:
+        tid = s.get(Engagement, mongo_mode).tenant_id
+        aid = s.scalars(select(Asset).where(Asset.engagement_id == mongo_mode)).first().id
+    member = SimpleNamespace(role="tester", tenant_id=None, user_id=9001)
+    outsider = SimpleNamespace(role="tester", tenant_id=tid + 1000, user_id=9002)
+    viewer = SimpleNamespace(role="client_viewer", tenant_id=None, user_id=9003)
+    mdb["tenant_memberships"].insert_one({"_id": 777001, "user_id": 9001, "tenant_id": tid})
+    with db.session() as s:
+        assert services.tenant_ids_for(s, member) == {tid}
+        assert services.tenant_ids_for(s, viewer) == set()
+        assert services.tenant_ids_for(s, SimpleNamespace(role="admin", tenant_id=None, user_id=1)) is None
+        assert [e.id for e in services.list_engagements(s, member)] == [mongo_mode]
+        assert services.list_engagements(s, outsider) == []
+        assert services.get_asset(s, aid, member).id == aid
+        with pytest.raises(LookupError):
+            services.get_asset(s, aid, outsider)
+        with pytest.raises(LookupError):
+            services.get_finding(s, 987654, member)
+        with pytest.raises(LookupError):
+            services.get_report(s, 987654, member)

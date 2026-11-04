@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
-from attestra import db, services
-from attestra.models import Tenant, WebhookDelivery, WebhookEndpoint, WorkflowRule
+from attestra import services
+from attestra.web import data_access
 from attestra.webhooks import formats
 from attestra.webhooks import service as wh
 
@@ -20,10 +19,14 @@ def _require(permission: str):
     return require(permission)
 
 
-def _call(fn):
+def _call(mongo_fn, principal):
+    """Run ``mongo_fn(db, tenant_ids)`` with HTTP error mapping."""
+    from attestra.persistence.mongo.secrets_codec import SecretCodecError
+
     try:
-        with db.session() as s:
-            return fn(s)
+        return mongo_fn(data_access.mongo_db(), services.tenant_ids_for(None, principal))
+    except SecretCodecError as e:
+        raise HTTPException(503, f"webhook secret encryption unavailable: {e}") from e
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except wh.WebhookError as e:
@@ -32,9 +35,8 @@ def _call(fn):
 
 def _tenant_ok(s, principal, tenant_id: int) -> None:
     """Scope check plus row existence (``tenant_ids_for`` None = all tenants, not skip existence)."""
-    t = s.get(Tenant, tenant_id)
     allowed = services.tenant_ids_for(s, principal)
-    if not t or (allowed is not None and tenant_id not in allowed):
+    if not data_access.tenant_exists(s, tenant_id) or (allowed is not None and tenant_id not in allowed):
         raise LookupError(f"tenant {tenant_id} not found")
 
 
@@ -57,103 +59,103 @@ class RuleIn(BaseModel):
     assignee: str = ""
 
 
-def _ep_out(ep: WebhookEndpoint) -> dict:
+def _ep_out(ep) -> dict:
+    ep = data_access.as_obj(ep)
     return {"id": ep.id, "tenant_id": ep.tenant_id, "name": ep.name, "url": ep.url, "format": ep.format, "events": ep.events, "active": ep.active}
 
 
-def _rule_out(r: WorkflowRule) -> dict:
+def _rule_out(r) -> dict:
+    r = data_access.as_obj(r)
     return {"id": r.id, "tenant_id": r.tenant_id, "name": r.name, "event": r.event, "min_severity": r.min_severity,
             "status": r.status, "action": r.action, "endpoint_id": r.endpoint_id, "assignee": r.assignee, "active": r.active}
 
 
 @router.get("/api/webhooks")
 def list_endpoints(principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        allowed = services.tenant_ids_for(s, principal)
-        q = select(WebhookEndpoint).order_by(WebhookEndpoint.id)
-        if allowed is not None:
-            q = q.where(WebhookEndpoint.tenant_id.in_(allowed))
-        return [_ep_out(e) for e in s.scalars(q)]
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        return [_ep_out(e) for e in mwh.list_endpoints(mdb, allowed)]
+
+    return _call(mongo_fn, principal)
 
 
 @router.post("/api/webhooks", status_code=201)
 def create_endpoint(body: EndpointIn, principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        _tenant_ok(s, principal, body.tenant_id)
-        ep = wh.create_endpoint(s, body.tenant_id, url=body.url, actor=principal.actor, name=body.name, fmt=body.format, events=body.events)
-        return {**_ep_out(ep), "secret": ep.secret, "note": "store the secret now; it is not shown again"}
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        _tenant_ok(None, principal, body.tenant_id)
+        ep, secret = mwh.create_endpoint(mdb, allowed, body.tenant_id, url=body.url, actor=principal.actor,
+                                         name=body.name, fmt=body.format, events=body.events)
+        return {**_ep_out(ep), "secret": secret, "note": "store the secret now; it is not shown again"}
+
+    return _call(mongo_fn, principal)
 
 
 @router.delete("/api/webhooks/{wid}")
 def delete_endpoint(wid: int, principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        ep = s.get(WebhookEndpoint, wid)
-        if not ep:
-            raise LookupError(f"webhook {wid} not found")
-        _tenant_ok(s, principal, ep.tenant_id)
-        return _ep_out(wh.deactivate_endpoint(s, wid, actor=principal.actor))
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        return _ep_out(mwh.deactivate_endpoint(mdb, allowed, wid, actor=principal.actor))
+
+    return _call(mongo_fn, principal)
 
 
 @router.get("/api/webhooks/{wid}/deliveries")
 def deliveries(wid: int, principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        ep = s.get(WebhookEndpoint, wid)
-        if not ep:
-            raise LookupError(f"webhook {wid} not found")
-        _tenant_ok(s, principal, ep.tenant_id)
-        rows = s.scalars(select(WebhookDelivery).where(WebhookDelivery.endpoint_id == wid).order_by(WebhookDelivery.id.desc()).limit(200))
-        return [{"id": d.id, "event": d.event, "status": d.status, "attempts": d.attempts, "last_status_code": d.last_status_code,
-                 "last_error": d.last_error, "next_attempt_at": d.next_attempt_at, "delivered_at": d.delivered_at} for d in rows]
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        rows = mwh.list_deliveries(mdb, allowed, wid, limit=200)
+        return [{"id": d["id"], "event": d.get("event"), "status": d.get("status"), "attempts": d.get("attempts", 0),
+                 "last_status_code": d.get("last_status_code"), "last_error": d.get("last_error", ""),
+                 "next_attempt_at": d.get("next_attempt_at"), "delivered_at": d.get("delivered_at")} for d in rows]
+
+    return _call(mongo_fn, principal)
 
 
 @router.post("/api/webhooks/dispatch")
 def dispatch(principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        done = wh.dispatch_due(s, tenant_ids=services.tenant_ids_for(s, principal))
-        return {"attempted": len(done), "delivered": sum(1 for d in done if d.status == "delivered")}
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        done = mwh.dispatch_due(mdb, tenant_ids=allowed)
+        return {"attempted": len(done), "delivered": sum(1 for d in done if d.get("status") == "delivered")}
+
+    return _call(mongo_fn, principal)
 
 
 @router.get("/api/workflow-rules")
 def list_rules(principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        allowed = services.tenant_ids_for(s, principal)
-        q = select(WorkflowRule).order_by(WorkflowRule.id)
-        if allowed is not None:
-            q = q.where(WorkflowRule.tenant_id.in_(allowed))
-        return [_rule_out(r) for r in s.scalars(q)]
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        return [_rule_out(r) for r in mwh.list_rules(mdb, allowed)]
+
+    return _call(mongo_fn, principal)
 
 
 @router.post("/api/workflow-rules", status_code=201)
 def create_rule(body: RuleIn, principal=Depends(_require("webhook.manage"))):
-    def fn(s):
-        _tenant_ok(s, principal, body.tenant_id)
-        data = body.model_dump(exclude={"tenant_id"})
-        return _rule_out(wh.create_rule(s, body.tenant_id, actor=principal.actor, **data))
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        _tenant_ok(None, principal, body.tenant_id)
+        data = body.model_dump(exclude={"tenant_id"})
+        return _rule_out(mwh.create_rule(mdb, allowed, body.tenant_id, actor=principal.actor, **data))
+
+    return _call(mongo_fn, principal)
 
 
 def _deactivate_rule(rid: int, principal):
-    def fn(s):
-        r = s.get(WorkflowRule, rid)
-        if not r:
-            raise LookupError(f"rule {rid} not found")
-        _tenant_ok(s, principal, r.tenant_id)
-        return _rule_out(wh.deactivate_rule(s, rid, actor=principal.actor))
+    def mongo_fn(mdb, allowed):
+        from attestra.webhooks import mongo_service as mwh
 
-    return _call(fn)
+        return _rule_out(mwh.deactivate_rule(mdb, allowed, rid, actor=principal.actor))
+
+    return _call(mongo_fn, principal)
 
 
 @router.delete("/api/workflow-rules/{rid}", summary="Deactivate a workflow rule")

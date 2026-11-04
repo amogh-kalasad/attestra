@@ -103,7 +103,9 @@ def purge_expired(s: Session, *, dry_run: bool = True, actor: str = "cli") -> di
         s.delete(run)
         deleted["imports"] += 1
 
-    for r in list(s.scalars(select(Report))):
+    from attestra.reports.report_access import scoped_reports
+
+    for r in scoped_reports(s, s.scalars(select(Report))):
         if r.legal_hold:
             continue
         eng = s.get(Engagement, r.engagement_id)

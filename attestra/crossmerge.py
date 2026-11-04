@@ -243,13 +243,11 @@ def _obs_by_finding(s: Session, ids: list[int]) -> dict[int, list[Any]]:
     out: dict[int, list[Any]] = defaultdict(list)
     if not ids:
         return out
+    from attestra.persistence.mongo.read_models import view_all
+
     for i in range(0, len(ids), 500):
-        chunk = ids[i : i + 500]
-        for o in s.scalars(
-            select(FindingObservation)
-            .where(FindingObservation.finding_id.in_(chunk))
-            .order_by(FindingObservation.id)
-        ):
+        q = {"finding_id": {"$in": [int(x) for x in ids[i : i + 500]]}}
+        for o in view_all(FindingObservation, q, sort=[("_id", 1)]):
             out[o.finding_id].append(o)
     return out
 
@@ -511,14 +509,15 @@ def group_view(s: Session, f: Any) -> dict:
     from attestra.models import Finding
 
     root = f.merged_into_id or f.id
-    members = list(
-        s.scalars(
-            select(Finding)
-            .where(Finding.engagement_id == f.engagement_id)
-            .where((Finding.id == root) | (Finding.merged_into_id == root))
-            .order_by(Finding.id)
-        )
+    from attestra.persistence.mongo.read_models import view_all
+
+    members = view_all(
+        Finding,
+        {"engagement_id": f.engagement_id, "$or": [{"_id": root}, {"merged_into_id": root}]},
+        sort=[("_id", 1)],
     )
+    if all(m.id != f.id for m in members):
+        members.append(f)
     if f not in members:
         members.append(f)
     obs_by = _obs_by_finding(s, [m.id for m in members])

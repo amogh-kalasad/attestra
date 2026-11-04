@@ -168,35 +168,45 @@ def principal_from_claims(s, claims: dict[str, Any]):
     The IdP is the source of truth for role and tenant: they are refreshed on each login.
     Client roles (client_viewer) require a tenant claim.
     """
-    from sqlalchemy import select
-
-    from attestra.auth.keys import Principal
-    from attestra.models import Tenant, User
-
     username = str(claims.get(config.OIDC_USERNAME_CLAIM) or claims.get("sub") or "").strip().lower()
     if not username:
         raise OIDCError("token has no username claim")
     role = map_oidc_role(claims)
     tenant_id = map_oidc_tenant(claims)
-    if tenant_id is not None and s.get(Tenant, tenant_id) is None:
-        raise OIDCError("unknown tenant in token")
+    if tenant_id is not None:
+        from attestra.persistence.mongo import collections as C
+        from attestra.persistence.mongo.adapters import _db
+
+        if _db()[C.TENANTS].find_one({"_id": int(tenant_id)}, {"_id": 1}) is None:
+            raise OIDCError("unknown tenant in token")
     if role == "client_viewer" and tenant_id is None:
         raise OIDCError("client users need a tenant claim")
-    user = s.scalar(select(User).where(User.username == username))
+    return _principal_from_claims_mongo(claims, username, role, tenant_id)
+
+
+def _principal_from_claims_mongo(claims: dict[str, Any], username: str, role: str, tenant_id: int | None):
+    """Mongo-mode user link/provision (users are Mongo-owned in mongo mode)."""
+    from attestra.auth.keys import Principal
+    from attestra.persistence.mongo import collections as C
+    from attestra.persistence.mongo.adapters import _db
+    from attestra.persistence.mongo.repositories.identity import UserAdminRepository
+
+    db = _db()
+    users = UserAdminRepository(db)
+    user = users.find_by_username(username)
     if user is None:
         if not config.OIDC_AUTO_PROVISION:
             raise OIDCError("user not provisioned")
-        # password_hash "oidc" never verifies (not scrypt), so local password login stays impossible.
-        user = User(username=username, display_name=str(claims.get("name") or username)[:200],
-                    password_hash="oidc", role=role, tenant_id=tenant_id, active=True)
-        s.add(user)
-        s.flush()
-    elif not user.active:
+        user = users.create(username, password_hash="oidc", role=role,
+                            display_name=str(claims.get("name") or username)[:200],
+                            tenant_id=tenant_id, active=True)
+    elif not user.get("active", True):
         raise OIDCError("user disabled")
     else:
-        user.role = role
-        user.tenant_id = tenant_id
-    return Principal(user_id=user.id, username=user.username, display_name=user.display_name,
+        db[C.USERS].update_one({"_id": int(user.get("id", user.get("_id")))},
+                               {"$set": {"role": role, "tenant_id": tenant_id}})
+    uid = int(user.get("id", user.get("_id")))
+    return Principal(user_id=uid, username=user["username"], display_name=user.get("display_name") or username,
                      role=role, tenant_id=tenant_id)
 
 

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from attestra import db
 from attestra.api_security import RateLimiter
 from attestra.users import mailer
 from attestra.users import service as us
+from attestra.web import data_access
 
 # Accept/reset endpoints are public, so they get a tight per-IP limit.
 LIMITER = RateLimiter(limit=10, window_s=60.0)
@@ -32,10 +34,32 @@ def _link(request: Request, purpose: str, raw: str) -> str:
     return f"{base}/{'reset' if purpose == 'reset' else 'invite'}/{raw}"
 
 
-def _call(fn, *args, **kwargs):
+def _svc(name: str):
+    """User-admin function by name from ``users.mongo_service`` (takes the Mongo db, returns dicts).
+
+    Error types are shared with ``users.service`` (``us.UserAdminError``).
+    """
+    from attestra.users import mongo_service
+
+    return getattr(mongo_service, name)
+
+
+@contextmanager
+def _uow():
+    """The Mongo database handle (the ``mongo_service`` unit of work)."""
+    yield data_access.mongo_db()
+
+
+def _run(name: str, *args, **kwargs):
+    with _uow() as uow:
+        return _svc(name)(uow, *args, **kwargs)
+
+
+def _call(name: str, *args, **kwargs):
+    """API call; a single Mongo dict result is returned as an attribute row (``u.id``)."""
     try:
-        with db.session() as s:
-            return fn(s, *args, **kwargs)
+        out = _run(name, *args, **kwargs)
+        return data_access.as_obj(out) if isinstance(out, dict) else out
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except us.UserAdminError as e:
@@ -43,9 +67,10 @@ def _call(fn, *args, **kwargs):
         raise HTTPException(403 if "not allowed" in msg else 400, msg) from e
 
 
-def _issue(request: Request, fn, *args, **kwargs) -> dict:
-    with db.session() as s:
-        inv, raw = fn(s, *args, **kwargs)
+def _issue(request: Request, name: str, *args, **kwargs) -> dict:
+    with _uow() as uow:
+        inv, raw = _svc(name)(uow, *args, **kwargs)
+        inv = data_access.as_obj(inv)
         out = {"id": inv.id, "purpose": inv.purpose, "email": inv.email, "role": inv.role,
                "tenant_id": inv.tenant_id, "engagement_id": inv.engagement_id,
                "expires_at": us._aware(inv.expires_at).isoformat()}
@@ -59,9 +84,9 @@ def _issue(request: Request, fn, *args, **kwargs) -> dict:
     return out
 
 
-def _issue_safe(request: Request, fn, *args, **kwargs) -> dict:
+def _issue_safe(request: Request, name: str, *args, **kwargs) -> dict:
     try:
-        return _issue(request, fn, *args, **kwargs)
+        return _issue(request, name, *args, **kwargs)
     except LookupError as e:
         raise HTTPException(404, str(e)) from e
     except us.UserAdminError as e:
@@ -100,59 +125,59 @@ class ResetIn(BaseModel):
 
 @api_router.get("/users")
 def api_list_users(tenant_id: int | None = None, principal=Depends(_principal)):
-    return _call(us.list_users, principal, tenant_id)
+    return _call("list_users", principal, tenant_id)
 
 
 @api_router.get("/users/invites")
 def api_list_invites(principal=Depends(_principal)):
-    return _call(us.list_invites, principal)
+    return _call("list_invites", principal)
 
 
 @api_router.post("/users/invites", status_code=201)
 def api_invite(body: InviteIn, request: Request, principal=Depends(_principal)):
-    return _issue_safe(request, us.create_invite, principal, email=body.email, role=body.role,
+    return _issue_safe(request, "create_invite", principal, email=body.email, role=body.role,
                        tenant_id=body.tenant_id, engagement_id=body.engagement_id, ttl_hours=body.ttl_hours)
 
 
 @api_router.delete("/users/invites/{iid}")
 def api_revoke_invite(iid: int, principal=Depends(_principal)):
-    _call(us.revoke_invite, principal, iid)
+    _call("revoke_invite", principal, iid)
     return {"revoked": iid}
 
 
 @api_router.post("/users/{uid}/role")
 def api_set_role(uid: int, body: RoleIn, principal=Depends(_principal)):
-    u = _call(us.set_role, principal, uid, body.role)
+    u = _call("set_role", principal, uid, body.role)
     return {"id": u.id, "role": u.role}
 
 
 @api_router.post("/users/{uid}/disable")
 def api_disable(uid: int, principal=Depends(_principal)):
-    u = _call(us.set_active, principal, uid, False)
+    u = _call("set_active", principal, uid, False)
     return {"id": u.id, "active": u.active}
 
 
 @api_router.post("/users/{uid}/enable")
 def api_enable(uid: int, principal=Depends(_principal)):
-    u = _call(us.set_active, principal, uid, True)
+    u = _call("set_active", principal, uid, True)
     return {"id": u.id, "active": u.active}
 
 
 @api_router.post("/users/{uid}/reset-password")
 def api_reset(uid: int, request: Request, principal=Depends(_principal)):
-    return _issue_safe(request, us.create_reset, principal, uid)
+    return _issue_safe(request, "create_reset", principal, uid)
 
 
 @api_router.post("/invites/accept", status_code=201, dependencies=[Depends(_rate_limit)])
 def api_accept(body: AcceptIn):
-    u = _call(us.accept_invite, body.token, username=body.username, password=body.password,
+    u = _call("accept_invite", body.token, username=body.username, password=body.password,
               display_name=body.display_name)
     return {"id": u.id, "username": u.username, "role": u.role}
 
 
 @api_router.post("/password-reset", dependencies=[Depends(_rate_limit)])
 def api_password_reset(body: ResetIn):
-    u = _call(us.complete_reset, body.token, password=body.password)
+    u = _call("complete_reset", body.token, password=body.password)
     return {"id": u.id, "username": u.username}
 
 
@@ -187,12 +212,12 @@ def ui_users(request: Request, tenant_id: int | None = None):
     p = _ui_principal(request)
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage users.")
-    with db.session() as s:
+    with _uow() as uow:
         ctx = {
-            "users": us.list_users(s, p, tenant_id),
-            "invites": us.list_invites(s, p),
-            "tenants": us.tenants_for_form(s, p),
-            "engagements": us.engagements_for_form(s, p),
+            "users": _svc("list_users")(uow, p, tenant_id),
+            "invites": _svc("list_invites")(uow, p),
+            "tenants": _svc("tenants_for_form")(uow, p),
+            "engagements": _svc("engagements_for_form")(uow, p),
             "roles": us.assignable_roles(p),
             "all_roles": us.ROLES,
             "is_admin": p.role == "admin",
@@ -207,9 +232,9 @@ def _opt_int(v: str) -> int | None:
     return int(v) if v.isdigit() else None
 
 
-def _ui_issue(request: Request, fn, *args, **kwargs):
+def _ui_issue(request: Request, name: str, *args, **kwargs):
     try:
-        out = _issue(request, fn, *args, **kwargs)
+        out = _issue(request, name, *args, **kwargs)
     except (us.UserAdminError, LookupError) as e:
         return _back("/users", error=str(e))
     return _render(request, "users_link.html", {"inv": out})
@@ -221,7 +246,7 @@ def ui_invite(request: Request, email: str = Form(...), role: str = Form(...), t
     p = _ui_principal(request)
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage users.")
-    return _ui_issue(request, us.create_invite, p, email=email, role=role, tenant_id=_opt_int(tenant_id),
+    return _ui_issue(request, "create_invite", p, email=email, role=role, tenant_id=_opt_int(tenant_id),
                      engagement_id=_opt_int(engagement_id))
 
 
@@ -230,16 +255,15 @@ def ui_reset(request: Request, uid: int):
     p = _ui_principal(request)
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage users.")
-    return _ui_issue(request, us.create_reset, p, uid)
+    return _ui_issue(request, "create_reset", p, uid)
 
 
-def _ui_do(request: Request, ok: str, fn, *args):
+def _ui_do(request: Request, ok: str, name: str, *args):
     p = _ui_principal(request)
     if p is None:
         return _back("/login", error="Sign in as an admin or lead to manage users.")
     try:
-        with db.session() as s:
-            fn(s, p, *args)
+        _run(name, p, *args)
     except (us.UserAdminError, LookupError) as e:
         return _back("/users", error=str(e))
     return _back("/users", msg=ok)
@@ -247,28 +271,27 @@ def _ui_do(request: Request, ok: str, fn, *args):
 
 @ui_router.post("/users/{uid}/role")
 def ui_role(request: Request, uid: int, role: str = Form(...)):
-    return _ui_do(request, "Role updated.", us.set_role, uid, role)
+    return _ui_do(request, "Role updated.", "set_role", uid, role)
 
 
 @ui_router.post("/users/{uid}/disable")
 def ui_disable(request: Request, uid: int):
-    return _ui_do(request, "User disabled.", us.set_active, uid, False)
+    return _ui_do(request, "User disabled.", "set_active", uid, False)
 
 
 @ui_router.post("/users/{uid}/enable")
 def ui_enable(request: Request, uid: int):
-    return _ui_do(request, "User enabled.", us.set_active, uid, True)
+    return _ui_do(request, "User enabled.", "set_active", uid, True)
 
 
 @ui_router.post("/users/invites/{iid}/revoke")
 def ui_revoke(request: Request, iid: int):
-    return _ui_do(request, "Invite revoked.", us.revoke_invite, iid)
+    return _ui_do(request, "Invite revoked.", "revoke_invite", iid)
 
 
 def _token_page(request: Request, token: str, purpose: str, template: str, error: str | None = None):
     try:
-        with db.session() as s:
-            info = us.peek(s, token, purpose)
+        info = _run("peek", token, purpose)
     except us.UserAdminError as e:
         return _render(request, template, {"invalid": str(e), "token": "", "info": {}})
     return _render(request, template, {"invalid": None, "token": token, "info": info, "form_error": error})
@@ -285,8 +308,7 @@ def ui_accept(request: Request, token: str, username: str = Form(...), password:
     if password != confirm:
         return _token_page(request, token, "invite", "invite_accept.html", "Passwords do not match.")
     try:
-        with db.session() as s:
-            us.accept_invite(s, token, username=username, password=password, display_name=display_name)
+        _run("accept_invite", token, username=username, password=password, display_name=display_name)
     except us.UserAdminError as e:
         return _token_page(request, token, "invite", "invite_accept.html", str(e))
     return _back("/login", msg="Account created. Sign in with your new username and password.")
@@ -302,8 +324,7 @@ def ui_reset_submit(request: Request, token: str, password: str = Form(...), con
     if password != confirm:
         return _token_page(request, token, "reset", "invite_reset.html", "Passwords do not match.")
     try:
-        with db.session() as s:
-            us.complete_reset(s, token, password=password)
+        _run("complete_reset", token, password=password)
     except us.UserAdminError as e:
         return _token_page(request, token, "reset", "invite_reset.html", str(e))
     return _back("/login", msg="Password updated. Sign in with your new password.")

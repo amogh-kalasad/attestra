@@ -66,7 +66,9 @@ def public_view(s: Session, report_id: int, sig: str, *, base_url: str = "") -> 
 
     Never includes findings, evidence, sealed HTML, or letter grades.
     """
-    r = s.get(Report, report_id)
+    from attestra.reports.report_access import get_report_row
+
+    r = get_report_row(s, report_id)
     if r is None or r.status != "signed" or not r.signature or not r.sha256:
         return None
     if not check_sig(report_id, r.sha256, sig):

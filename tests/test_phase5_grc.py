@@ -7,11 +7,11 @@ import logging
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
 
 from attestra import db
+from attestra.audit import find_events
 from attestra.integrations import grc
-from attestra.models import AuditEvent, Report
+from attestra.models import Report
 
 
 def _signed_report(s, engagement_id: int) -> Report:
@@ -66,7 +66,7 @@ def test_grc_push_posts_metadata_without_secret(engagement, monkeypatch, caplog)
         with caplog.at_level(logging.DEBUG):
             out = grc.push_signed_report(s, rid, actor="lead", connector=grc.connector_from_env(http_post=post))
         assert out == {"ok": True, "id": "ev-1"}
-        rows = list(s.scalars(select(AuditEvent).where(AuditEvent.action == "report.grc_pushed")))
+        rows = find_events(s, action="report.grc_pushed")
         assert len(rows) == 1
         assert rows[0].details.get("backend") == "vanta"
         assert secret not in str(rows[0].details)
@@ -86,7 +86,7 @@ def test_safe_push_noop_when_disabled(engagement, monkeypatch):
     with db.session() as s:
         r = _signed_report(s, engagement)
         assert grc.safe_push_grc_report(s, r.id, actor="system") is None
-        assert list(s.scalars(select(AuditEvent).where(AuditEvent.action == "report.grc_pushed"))) == []
+        assert find_events(s, action="report.grc_pushed") == []
 
 
 # @lat: [[tests#Phase 5 workflow#GRC rejects unsigned]]

@@ -12,10 +12,9 @@ from datetime import date
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from attestra import __version__, audit, config, services
+from attestra import __version__, config, services
 from attestra.compliance import load_library, objectives_for
 from attestra.dedup import detected_by_label
 from attestra.models import (
@@ -25,7 +24,6 @@ from attestra.models import (
     SEVERITIES,
     TEST_TYPES,
     Engagement,
-    ImportRun,
     Report,
     Retest,
     ScanRun,
@@ -68,16 +66,12 @@ def _trend_svg(current: Counter, previous: Counter | None) -> str:
 
 
 def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
-    prev = s.scalars(
-        select(Engagement)
-        .where(Engagement.tenant_id == eng.tenant_id, Engagement.id < eng.id)
-        .order_by(Engagement.id.desc())
-        .limit(1)
-    ).first()
+    from attestra.persistence.mongo import report_reads
+
+    prev = report_reads.previous_engagement(eng.tenant_id, eng.id)
     if not prev:
         return None
-    findings = services.list_findings(s, prev.id)
-    open_f = [f for f in findings if f.status in OPEN_STATUSES]
+    open_f = [f for f in services.list_findings(s, prev.id) if f.status in OPEN_STATUSES]
     return Counter(f.severity for f in open_f)
 
 
@@ -97,12 +91,9 @@ def report_change_label(status: str) -> str:
 
 def _report_history(s: Session, engagement_id: int, kind: str = "", framework: str = "") -> list[dict]:
     """Prior report rows for document-control tables (newest first, capped)."""
-    q = select(Report).where(Report.engagement_id == engagement_id)
-    if kind:
-        q = q.where(Report.kind == kind)
-    if framework:
-        q = q.where(Report.framework == framework)
-    rows = list(s.scalars(q.order_by(Report.id.desc()).limit(20)))
+    from attestra.persistence.mongo import report_reads
+
+    rows = report_reads.reports(engagement_id, kind=kind, framework=framework, newest_first=True, limit=20)
     return [
         {
             "id": r.id,
@@ -195,9 +186,9 @@ def _retests_for_engagement(s: Session, engagement_id: int, findings: list) -> d
     ids = list(owner)
     if not ids:
         return {}
-    rows = list(
-        s.scalars(select(Retest).where(Retest.finding_id.in_(ids)).order_by(Retest.id.desc()))
-    )
+    from attestra.persistence.mongo import report_reads
+
+    rows = report_reads.retests_for_findings(engagement_id, ids, newest_first=True)
     out: dict[int, list[Retest]] = {}
     for row in rows:
         out.setdefault(owner.get(row.finding_id, row.finding_id), []).append(row)
@@ -340,8 +331,8 @@ def _evidence_embeds(findings: list) -> dict[int, list[dict]]:
                 embeds.append(meta)
                 continue
             try:
-                data = path.read_bytes()
-            except OSError:
+                data = services.read_stored_bytes(path)
+            except (OSError, LookupError):
                 continue
             if hashlib.sha256(data).hexdigest() != e.sha256:
                 continue
@@ -371,9 +362,8 @@ def _evidence_limitations(findings: list) -> dict[int, list[str]]:
     return out
 
 
-def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
+def _observations_by_finding(s: Session, findings: list, engagement_id: int | None = None) -> dict[int, list]:
     """Scanner observations for report attribution (canonical findings only once)."""
-    from attestra.models import FindingObservation
 
     from attestra.reports.consolidate import member_ids
 
@@ -384,13 +374,11 @@ def _observations_by_finding(s: Session, findings: list) -> dict[int, list]:
     ids = list(owner)
     if not ids:
         return {}
-    rows = list(
-        s.scalars(
-            select(FindingObservation)
-            .where(FindingObservation.finding_id.in_(ids))
-            .order_by(FindingObservation.id)
-        )
-    )
+    if engagement_id is None:  # callers outside _context: the findings' own engagement
+        engagement_id = findings[0].engagement_id
+    from attestra.persistence.mongo import report_reads
+
+    rows = report_reads.observations_for_findings(engagement_id, ids)
     out: dict[int, list] = {}
     seen: set[tuple] = set()
     for o in rows:
@@ -481,8 +469,8 @@ def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
             if not path.is_file():
                 continue
             try:
-                raw = path.read_bytes()
-            except OSError:
+                raw = services.read_stored_bytes(path)
+            except (OSError, LookupError):
                 continue
             if hashlib.sha256(raw).hexdigest() != e.sha256:
                 continue
@@ -532,9 +520,9 @@ def _branding(s: Session, tenant_id: int | None, kind: str) -> dict:
 
 
 def _scan_history(s: Session, engagement_id: int) -> list[ScanRun]:
-    return list(
-        s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id.desc()).limit(50))
-    )
+    from attestra.persistence.mongo import report_reads
+
+    return report_reads.scan_runs(engagement_id, newest_first=True, limit=50)
 
 
 def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
@@ -610,6 +598,11 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     from attestra import crossmerge
 
     all_findings = services.list_findings(s, engagement_id)
+    # Read models are read-only; report code annotates findings with transient fields.
+    from attestra.persistence.mongo import report_reads
+
+    report_reads.engagement_doc(engagement_id, eng.tenant_id)  # tenant-scoped read guard
+    all_findings = report_reads.annotatable(all_findings)
     # Cross-tool merge: one entry per issue; related rows are listed under Sources.
     findings = crossmerge.collapse(s, all_findings)
     # Report-only consolidation (DB untouched): one entry per issue, so per-URL scanner
@@ -635,7 +628,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
 
     by_sev = Counter(f.severity for f in open_f)
     prev_by_sev = _previous_open_by_sev(s, eng)
-    imports = list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == engagement_id).order_by(ImportRun.id)))
+    imports = report_reads.import_runs(engagement_id, eng.tenant_id)
     lib = load_library()
     frameworks = {}
     for fw in ([framework] if framework else eng.frameworks):
@@ -674,7 +667,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "tenant": eng.tenant.name,
         "type_label": engagement_type_label(eng.type),
         "detected_by": detected_by_label,
-        "observations_by_finding": _observations_by_finding(s, reportable),
+        "observations_by_finding": _observations_by_finding(s, reportable, engagement_id),
         "evidence_limitations": _evidence_limitations(reportable),
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
@@ -799,14 +792,54 @@ def generate_report(
     else:
         framework = ""
 
-    version = (
-        s.scalar(
-            select(func.max(Report.version)).where(
-                Report.engagement_id == engagement_id, Report.kind == kind, Report.framework == framework
-            )
+    version = _next_version(s, engagement_id, kind, framework)
+    html = render_html(
+        s, engagement_id, kind=kind, framework=framework, version=version, actor=actor,
+        generated_at=utcnow(), include_comments=include_comments, eng=eng,
+    )
+    sha = hashlib.sha256(html).hexdigest()
+
+    config.ensure_dirs()
+    suffix = f"-{framework}" if framework else ""
+    report_dir = config.DATA_DIR / "tenants" / str(eng.tenant_id) / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    path = report_dir / f"eng{eng.id}-{kind}{suffix}-v{version}.html"
+    path.write_bytes(html)
+    path.chmod(0o444)
+
+    from attestra.persistence.mongo import report_store
+
+    try:
+        return report_store.create(
+            engagement_id=engagement_id, kind=kind, framework=framework, version=version,
+            path=str(path), sha256=sha, generated_by=actor, generated_by_user_id=user_id, actor=actor,
+            audit_details={"kind": kind, "framework": framework, "version": version, "sha256": sha},
         )
-        or 0
-    ) + 1
+    except report_store.ReportConflict as exc:
+        raise services.ServiceError(str(exc)) from exc
+
+
+def _next_version(s: Session, engagement_id: int, kind: str, framework: str) -> int:
+    """Next report version for (engagement, kind, framework)."""
+    from attestra.persistence.mongo import report_reads
+
+    return report_reads.max_report_version(engagement_id, kind, framework) + 1
+
+
+def render_html(
+    s: Session,
+    engagement_id: int,
+    *,
+    kind: str,
+    framework: str = "",
+    version: int = 1,
+    actor: str = "",
+    generated_at=None,
+    include_comments: bool = False,
+    eng: Engagement | None = None,
+) -> bytes:
+    """Render report HTML bytes (no file, no Report row). Deterministic for fixed inputs."""
+    eng = eng if eng is not None else services.get_engagement(s, engagement_id)
     ctx = _context(s, engagement_id, framework, include_comments=include_comments, kind=kind)
     ctx["report_history"] = _report_history(s, engagement_id, kind=kind, framework=framework)
     if kind == "iso_soa":
@@ -843,37 +876,46 @@ def generate_report(
             group_findings_by_llm_top10(ctx["findings"]) if ctx["show_llm_top10"] else []
         )
     # Generated files are always draft until the separate sign-off workflow completes.
-    ctx.update(kind=kind, version=version, generated_by=actor, generated_at=utcnow(), is_draft=True)
+    ctx.update(kind=kind, version=version, generated_by=actor,
+               generated_at=generated_at if generated_at is not None else utcnow(), is_draft=True)
     from attestra.library.templates import render_custom  # tenant template, else built-in
 
     custom = render_custom(s, eng.tenant_id, kind, ctx)
-    html = (custom if custom is not None else _env.get_template(f"{kind}.html.j2").render(**ctx)).encode("utf-8")
-    sha = hashlib.sha256(html).hexdigest()
-
-    config.ensure_dirs()
-    suffix = f"-{framework}" if framework else ""
-    report_dir = config.DATA_DIR / "tenants" / str(eng.tenant_id) / "reports"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    path = report_dir / f"eng{eng.id}-{kind}{suffix}-v{version}.html"
-    path.write_bytes(html)
-    path.chmod(0o444)
-
-    r = Report(
-        engagement_id=engagement_id, kind=kind, framework=framework, version=version,
-        path=str(path), sha256=sha, generated_by=actor, generated_by_user_id=user_id,
-        status="draft",
-    )
-    s.add(r)
-    s.flush()
-    audit.record(s, actor, "report.generate", "report", r.id, kind=kind, framework=framework, version=version, sha256=sha)
-    return r
+    return (custom if custom is not None else _env.get_template(f"{kind}.html.j2").render(**ctx)).encode("utf-8")
 
 
 def _get_report(s: Session, report_id: int) -> Report:
-    r = s.get(Report, report_id)
+    from attestra.persistence.mongo import report_reads
+
+    r = report_reads.report(report_id)
     if not r:
         raise LookupError(f"report {report_id} not found")
     return r
+
+
+def get_report(s: Session, report_id: int, tenant_ids=None) -> Report:
+    """Public report lookup: read-only Mongo view (write through the workflow functions).
+
+    ``tenant_ids`` (None = unrestricted) hides reports of other tenants as "not found".
+    """
+    from attestra.persistence.mongo import report_reads
+
+    r = report_reads.report(report_id, tenant_ids=tenant_ids)
+    if not r:
+        raise LookupError(f"report {report_id} not found")
+    return r
+
+
+def _mongo_transition(r, *, from_status, updates: dict, actor: str, action: str, sha_guard: bool = True, **details):
+    from attestra.persistence.mongo import report_store
+
+    try:
+        return report_store.transition(
+            r.id, from_status=from_status, expected_sha256=r.sha256 if sha_guard else None,
+            updates=updates, actor=actor, action=action, audit_details=details,
+        )
+    except report_store.ReportConflict as exc:
+        raise services.ServiceError(str(exc)) from exc
 
 
 def _assert_hash(r: Report) -> None:
@@ -894,10 +936,8 @@ def submit_report(s: Session, report_id: int, *, actor: str, user_id: int | None
         raise services.ServiceError(f"cannot submit report in status '{r.status}'")
     _assert_not_before_window(services.get_engagement(s, r.engagement_id))
     _assert_hash(r)
-    r.status = "submitted"
-    r.rejection_note = ""
-    audit.record(s, actor, "report.submit", "report", r.id)
-    return r
+    return _mongo_transition(r, from_status=("draft", "rejected"), actor=actor, action="report.submit",
+                             updates={"status": "submitted", "rejection_note": ""})
 
 
 def qa_approve(s: Session, report_id: int, *, actor: str, user_id: int | None = None) -> Report:
@@ -909,10 +949,8 @@ def qa_approve(s: Session, report_id: int, *, actor: str, user_id: int | None = 
     ):
         raise services.ServiceError("four-eyes rule: QA must be a different person from the author")
     _assert_hash(r)
-    r.status = "qa_approved"
-    r.qa_by, r.qa_by_user_id = actor, user_id
-    audit.record(s, actor, "report.qa_approve", "report", r.id)
-    return r
+    return _mongo_transition(r, from_status="submitted", actor=actor, action="report.qa_approve",
+                             updates={"status": "qa_approved", "qa_by": actor, "qa_by_user_id": user_id})
 
 
 def qa_reject(s: Session, report_id: int, *, actor: str, note: str, user_id: int | None = None) -> Report:
@@ -923,11 +961,10 @@ def qa_reject(s: Session, report_id: int, *, actor: str, note: str, user_id: int
         raise services.ServiceError("a rejection note is required")
     if _user_conflict(user_id, r.generated_by_user_id):
         raise services.ServiceError("four-eyes rule: QA must be a different person from the author")
-    r.status = "rejected"
-    r.rejection_note = note.strip()
-    r.qa_by, r.qa_by_user_id = actor, user_id
-    audit.record(s, actor, "report.qa_reject", "report", r.id, note=note.strip())
-    return r
+    return _mongo_transition(
+        r, from_status="submitted", actor=actor, action="report.qa_reject", sha_guard=False, note=note.strip(),
+        updates={"status": "rejected", "rejection_note": note.strip(), "qa_by": actor, "qa_by_user_id": user_id},
+    )
 
 
 def sign_report(
@@ -954,17 +991,7 @@ def sign_report(
         raise services.ServiceError("four-eyes rule: signer must differ from author and QA")
     _assert_not_before_window(services.get_engagement(s, r.engagement_id))
     _assert_hash(r)
-    r.signature = signing.sign(r.sha256)
-    r.algorithm = signing.algorithm_of(r.signature)
-    r.approved_by, r.approved_by_user_id, r.status, r.signed_at = actor, user_id, "signed", utcnow()
-    audit.record(s, actor, "report.sign", "report", r.id, sha256=r.sha256, signature=r.signature, algorithm=r.algorithm)
-    from attestra.webhooks.service import safe_emit_report
-
-    safe_emit_report(s, r, actor=actor)
-    from attestra.integrations.grc import safe_push_grc_report
-
-    safe_push_grc_report(s, r.id, actor=actor)
-    return r
+    return _mongo_sign(s, r, actor=actor, user_id=user_id, from_status="qa_approved")
 
 
 def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | None = None) -> Report:
@@ -986,22 +1013,28 @@ def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | Non
     elif actor.strip().lower() == r.generated_by.strip().lower():
         raise services.ServiceError("four-eyes rule: the approver must be a different person from the author")
     _assert_hash(r)
-    # Legacy fast-path: mark QA as same approver step then sign
-    if r.status in ("draft", "rejected"):
-        r.status = "submitted"
-    r.qa_by, r.qa_by_user_id = actor, user_id
-    r.status = "qa_approved"
-    r.signature = signing.sign(r.sha256)
-    r.algorithm = signing.algorithm_of(r.signature)
-    r.approved_by, r.approved_by_user_id, r.status, r.signed_at = actor, user_id, "signed", utcnow()
-    audit.record(s, actor, "report.sign", "report", r.id, sha256=r.sha256, signature=r.signature, algorithm=r.algorithm)
+    # Legacy fast-path: QA and sign by the same approver in one guarded write.
+    return _mongo_sign(s, r, actor=actor, user_id=user_id, from_status=("draft", "rejected", "submitted"),
+                       qa=(actor, user_id))
+
+
+def _mongo_sign(s: Session, r, *, actor: str, user_id: int | None, from_status, qa=None):
+    """Mongo: sign (status+hash guarded) and audit in one transaction, then notify."""
+    signature = signing.sign(r.sha256)
+    algorithm = signing.algorithm_of(signature)
+    updates = {"status": "signed", "signature": signature, "algorithm": algorithm,
+               "approved_by": actor, "approved_by_user_id": user_id, "signed_at": utcnow()}
+    if qa is not None:
+        updates["qa_by"], updates["qa_by_user_id"] = qa
+    signed = _mongo_transition(r, from_status=from_status, updates=updates, actor=actor, action="report.sign",
+                               sha256=r.sha256, signature=signature, algorithm=algorithm)
     from attestra.webhooks.service import safe_emit_report
 
-    safe_emit_report(s, r, actor=actor)
+    safe_emit_report(s, signed, actor=actor)
     from attestra.integrations.grc import safe_push_grc_report
 
-    safe_push_grc_report(s, r.id, actor=actor)
-    return r
+    safe_push_grc_report(s, signed.id, actor=actor)
+    return signed
 
 
 def verify_report(s: Session, report_id: int) -> dict:

@@ -6,10 +6,9 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from attestra.models import AuditEvent, utcnow
+from attestra.models import AuditEvent
 
 GENESIS = "0" * 64
 
@@ -22,25 +21,59 @@ def _digest(prev_hash: str, ts: str, actor: str, action: str, entity: str, entit
 
 
 def record(s: Session, actor: str, action: str, entity: str, entity_id: int | None = None, **details) -> AuditEvent:
-    last = s.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(1)).first()
-    prev = last.hash if last else GENESIS
-    ts = utcnow()
+    from attestra.persistence.mongo.adapters import mongo_audit_record
+
+    doc = mongo_audit_record(actor, action, entity, entity_id, **details)
+    # Return a lightweight stand-in so callers that read .id still work.
     ev = AuditEvent(
-        ts=ts, actor=actor, action=action, entity=entity, entity_id=entity_id, details=details, prev_hash=prev
+        ts=doc["ts"],
+        actor=actor,
+        action=action,
+        entity=entity,
+        entity_id=entity_id,
+        details=details,
+        prev_hash=doc["prev_hash"],
+        hash=doc["hash"],
     )
-    ev.hash = _digest(prev, ts.isoformat(), actor, action, entity, entity_id, details)
-    s.add(ev)
-    s.flush()
+    ev.id = doc["id"]
     return ev
 
 
-def verify(s: Session) -> tuple[bool, int | None]:
+def verify(s: Session | None = None) -> tuple[bool, int | None]:
     """Return (ok, first_bad_event_id)."""
-    prev = GENESIS
-    for ev in s.scalars(select(AuditEvent).order_by(AuditEvent.id)):
-        ts = ev.ts if ev.ts.tzinfo else ev.ts.replace(tzinfo=utcnow().tzinfo)
-        expected = _digest(prev, ts.isoformat(), ev.actor, ev.action, ev.entity, ev.entity_id, ev.details)
-        if ev.prev_hash != prev or ev.hash != expected:
-            return False, ev.id
-        prev = ev.hash
-    return True, None
+    from attestra.persistence.mongo.adapters import mongo_audit_verify
+
+    return mongo_audit_verify()
+
+
+def find_events(
+    s: Session | None,
+    *,
+    action: str | None = None,
+    entity: str | None = None,
+    entity_id: int | None = None,
+    limit: int | None = None,
+) -> list[AuditEvent]:
+    """Backend-neutral audit read (oldest first). Mongo docs come back as detached AuditEvent objects."""
+    from attestra.persistence.mongo.adapters import _db
+
+    q: dict = {}
+    if action is not None:
+        q["action"] = action
+    if entity is not None:
+        q["entity"] = entity
+    if entity_id is not None:
+        q["entity_id"] = entity_id
+    cur = _db()["audit_events"].find(q).sort("_id", 1)
+    if limit:
+        cur = cur.limit(int(limit))
+    out = []
+    for d in cur:
+        ev = AuditEvent(
+            ts=d.get("ts"), actor=d.get("actor"), action=d.get("action"), entity=d.get("entity"),
+            entity_id=d.get("entity_id"), details=d.get("details") or {},
+            prev_hash=d.get("prev_hash"), hash=d.get("hash"),
+        )
+        ev.id = d["_id"]
+        out.append(ev)
+    return out

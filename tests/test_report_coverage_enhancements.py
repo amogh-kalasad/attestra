@@ -52,12 +52,13 @@ def test_nine_frameworks_load():
 # @lat: [[tests#Report coverage enhancements#Stored fields rendered in technical report]]
 def test_technical_renders_stored_fields(loaded):
     from attestra import db, services
+    from attestra.models import Finding
     from attestra.reports import generate_report
 
     with db.session() as s:
         findings = services.list_findings(s, loaded)
         assert findings
-        f = findings[0]
+        f = s.get(Finding, findings[0].id)  # list_findings returns read-only views
         f.cvss_vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
         f.owasp_top10 = "A03:2021"
         f.asvs_ref = "V5.1.1"

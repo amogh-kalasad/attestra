@@ -1,0 +1,326 @@
+"""Route data-access seam for the web UI and REST API (mongofull, web/API track).
+
+Every read/write a route used to do inline with ``db.session()`` / ``select()`` goes
+through this module, so the routes themselves hold no SQLAlchemy code and the backend
+can be switched here in one place.
+
+Backend rules (``ATTESTRA_PERSISTENCE``):
+
+* ``sql``   - everything is SQLAlchemy, exactly as before.
+* ``mongo`` - Mongo-owned data is read from Mongo:
+    - audit events (Mongo holds the hash chain; SQL rows are stale),
+    - identity: session-cookie user lookup, password sign-in and API-key auth
+      (``attestra.users.mongo_service``), tenant lists for the credits page.
+  Domain rows (engagements, findings, evidence, reports, imports ...) are still
+  read through the SQL unit of work, because ``services.py`` still takes an ORM
+  ``Session`` during the dual-write phase (``persistence.mongo.dualwrite`` mirrors
+  every commit). Route-level domain reads can be cut over early with
+  ``ATTESTRA_MONGO_READS=domain`` (or ``all``); they then come from the mirrored
+  Mongo collections, tenant-scoped via ``services.assert_engagement_access`` which
+  every caller runs first.
+
+``session()`` is the single seam that still opens a SQL unit of work. Once the
+services owner exposes Mongo-backed service functions it should yield a
+``MongoUnitOfWork`` in mongo mode instead; no route needs to change.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import Any
+
+from attestra import db
+from attestra.persistence import using_mongo
+
+
+# ------------------------------------------------------------------ backend switches
+def mongo_reads(area: str) -> bool:
+    """True when ``area`` ("domain") reads come from Mongo (opt-in cutover)."""
+    if not using_mongo():
+        return False
+    raw = os.environ.get("ATTESTRA_MONGO_READS", "")
+    areas = {a.strip().lower() for a in raw.split(",") if a.strip()}
+    return "all" in areas or area in areas
+
+
+def _mdb():
+    from attestra.persistence.mongo.adapters import _db
+
+    return _db()
+
+
+class MongoRow(SimpleNamespace):
+    """Attribute view of a Mongo document so templates/serialisers work unchanged."""
+
+    def __getattr__(self, name: str) -> Any:  # missing optional fields read as None
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return None
+
+
+def _row(doc: dict[str, Any]) -> MongoRow:
+    d = dict(doc)
+    if "_id" in d:
+        d.setdefault("id", d.pop("_id"))
+    return MongoRow(**d)
+
+
+def _find(collection: str, query: dict, *, sort: list | None = None, limit: int = 0) -> list[MongoRow]:
+    cur = _mdb()[collection].find(query)
+    if sort:
+        cur = cur.sort(sort)
+    if limit:
+        cur = cur.limit(int(limit))
+    return [_row(d) for d in cur]
+
+
+# ------------------------------------------------------------------ unit of work
+@contextmanager
+def session() -> Iterator[Any]:
+    """Unit of work for one request (see module docstring)."""
+    with db.session() as s:
+        yield s
+
+
+def commit(s) -> None:
+    if hasattr(s, "commit"):
+        s.commit()
+
+
+# ------------------------------------------------------------------ identity
+def _principal_from_user(user) -> Any:
+    from attestra.auth.keys import Principal
+
+    get = user.get if isinstance(user, dict) else lambda k, d=None: getattr(user, k, d)
+    return Principal(
+        user_id=int(get("id") if get("id") is not None else get("_id")),
+        username=get("username"),
+        display_name=get("display_name") or "",
+        role=get("role"),
+        tenant_id=get("tenant_id"),
+    )
+
+
+def principal_for_uid(s, uid: int):
+    """Active user behind a session cookie, or None (disabled/deleted users rejected)."""
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        user = _mdb()[C.USERS].find_one({"_id": int(uid)})
+        if not user or not user.get("active"):
+            return None
+        return _principal_from_user(user)
+    from attestra.models import User
+
+    user = s.get(User, int(uid))
+    if not user or not user.active:
+        return None
+    return _principal_from_user(user)
+
+
+def authenticate_bearer(s, raw_key: str):
+    if using_mongo():
+        from attestra.users import mongo_service
+
+        return mongo_service.authenticate_api_key(_mdb(), raw_key)
+    from attestra.auth.keys import authenticate_api_key
+
+    return authenticate_api_key(s, raw_key)
+
+
+def authenticate_password(s, username: str, password: str):
+    if using_mongo():
+        from attestra.users import mongo_service
+
+        return mongo_service.authenticate_password(_mdb(), username, password)
+    from attestra.auth.keys import authenticate_password as sql_auth
+
+    return sql_auth(s, username, password)
+
+
+def tenants_for_principal(s, principal) -> list:
+    """Admin: all tenants by name. Others: their home tenant only."""
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        if principal.role == "admin":
+            return _find(C.TENANTS, {}, sort=[("name", 1)])
+        if principal.tenant_id:
+            return _find(C.TENANTS, {"_id": int(principal.tenant_id)})
+        return []
+    from sqlalchemy import select
+
+    from attestra.models import Tenant
+
+    if principal.role == "admin":
+        return list(s.scalars(select(Tenant).order_by(Tenant.name)))
+    if principal.tenant_id:
+        t = s.get(Tenant, principal.tenant_id)
+        return [t] if t else []
+    return []
+
+
+# ------------------------------------------------------------------ engagements (SQL object graph)
+def list_engagements(s, principal) -> list:
+    """Tenant-scoped engagements, newest first (ORM objects: templates walk relationships)."""
+    from attestra import services
+    from attestra.models import Engagement
+
+    return list(s.scalars(services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())))
+
+
+def scoped_engagements_query(s, principal):
+    from attestra import services
+    from attestra.models import Engagement
+
+    return services.scoped(s, Engagement, principal).order_by(Engagement.id.desc())
+
+
+# ------------------------------------------------------------------ single rows (write-path objects)
+def get_finding(s, fid: int):
+    from attestra.models import Finding
+
+    return s.get(Finding, int(fid))
+
+
+def get_finding_in_engagement(s, eid: int, fid: int):
+    """Finding ``fid`` if it belongs to engagement ``eid`` (caller checked engagement access)."""
+    f = get_finding(s, fid)
+    if not f or f.engagement_id != eid:
+        raise LookupError(f"finding {fid} not found")
+    return f
+
+
+def get_evidence(s, evid: int):
+    from attestra.models import Evidence
+
+    return s.get(Evidence, int(evid))
+
+
+def get_asset(s, aid: int):
+    from attestra.models import Asset
+
+    return s.get(Asset, int(aid))
+
+
+def get_report(s, rid: int):
+    from attestra.models import Report
+
+    return s.get(Report, int(rid))
+
+
+def scoped_report(s, rid: int, principal):
+    from attestra import services
+    from attestra.models import Report
+
+    return s.scalar(services.scoped(s, Report, principal).where(Report.id == int(rid)))
+
+
+# ------------------------------------------------------------------ lists (read-only; Mongo cutover capable)
+def import_runs_for_engagement(s, eid: int) -> list:
+    if mongo_reads("domain"):
+        from attestra.persistence.mongo import collections as C
+
+        return _find(C.IMPORT_RUNS, {"engagement_id": int(eid)}, sort=[("_id", -1)])
+    from sqlalchemy import select
+
+    from attestra.models import ImportRun
+
+    return list(s.scalars(select(ImportRun).where(ImportRun.engagement_id == eid).order_by(ImportRun.id.desc())))
+
+
+def reports_for_engagement(s, eid: int) -> list:
+    if mongo_reads("domain"):
+        from attestra.persistence.mongo import collections as C
+
+        return _find(C.REPORTS, {"engagement_id": int(eid)}, sort=[("_id", -1)])
+    from sqlalchemy import select
+
+    from attestra.models import Report
+
+    return list(s.scalars(select(Report).where(Report.engagement_id == eid).order_by(Report.id.desc())))
+
+
+def findings_for_engagement(s, eid: int) -> list:
+    """Raw findings (ORM: callers such as dedup read relationships)."""
+    from sqlalchemy import select
+
+    from attestra.models import Finding
+
+    return list(s.scalars(select(Finding).where(Finding.engagement_id == eid)))
+
+
+def observations_for_finding(s, fid: int) -> list:
+    if mongo_reads("domain"):
+        from attestra.persistence.mongo import collections as C
+
+        return _find(C.FINDING_OBSERVATIONS, {"finding_id": int(fid)}, sort=[("_id", 1)])
+    from sqlalchemy import select
+
+    from attestra.models import FindingObservation
+
+    return list(
+        s.scalars(select(FindingObservation).where(FindingObservation.finding_id == fid).order_by(FindingObservation.id))
+    )
+
+
+def evidence_for_finding(s, fid: int) -> list:
+    from sqlalchemy import select
+
+    from attestra.models import Evidence
+
+    return list(s.scalars(select(Evidence).where(Evidence.finding_id == fid).order_by(Evidence.id)))
+
+
+def proof_replays_for_finding(s, fid: int) -> list:
+    if mongo_reads("domain"):
+        from attestra.persistence.mongo import collections as C
+
+        return _find(C.PROOF_REPLAYS, {"finding_id": int(fid)}, sort=[("_id", -1)])
+    from sqlalchemy import select
+
+    from attestra.models import ProofReplay
+
+    return list(s.scalars(select(ProofReplay).where(ProofReplay.finding_id == fid).order_by(ProofReplay.id.desc())))
+
+
+# ------------------------------------------------------------------ audit (Mongo-owned in mongo mode)
+def audit_events(s) -> list:
+    """Whole audit chain, oldest first."""
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        return _find(C.AUDIT_EVENTS, {}, sort=[("_id", 1)])
+    from sqlalchemy import select
+
+    from attestra.models import AuditEvent
+
+    return list(s.scalars(select(AuditEvent).order_by(AuditEvent.id)))
+
+
+def audit_events_for_engagement(s, eid: int, finding_ids, report_ids, *, limit: int = 500) -> list:
+    """Events on the engagement, its findings and its reports, newest first."""
+    finding_ids = [int(i) for i in finding_ids or []]
+    report_ids = [int(i) for i in report_ids or []]
+    if using_mongo():
+        from attestra.persistence.mongo import collections as C
+
+        clauses: list[dict] = [{"entity": "engagement", "entity_id": int(eid)}]
+        if finding_ids:
+            clauses.append({"entity": "finding", "entity_id": {"$in": finding_ids}})
+        if report_ids:
+            clauses.append({"entity": "report", "entity_id": {"$in": report_ids}})
+        return _find(C.AUDIT_EVENTS, {"$or": clauses}, sort=[("_id", -1)], limit=limit)
+    from sqlalchemy import or_, select
+
+    from attestra.models import AuditEvent
+
+    conds = [(AuditEvent.entity == "engagement") & (AuditEvent.entity_id == eid)]
+    if finding_ids:
+        conds.append((AuditEvent.entity == "finding") & AuditEvent.entity_id.in_(finding_ids))
+    if report_ids:
+        conds.append((AuditEvent.entity == "report") & AuditEvent.entity_id.in_(report_ids))
+    return list(s.scalars(select(AuditEvent).where(or_(*conds)).order_by(AuditEvent.id.desc()).limit(limit)))

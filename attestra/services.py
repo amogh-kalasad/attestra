@@ -46,7 +46,6 @@ from attestra.models import (
     Finding,
     FindingObservation,
     ImportRun,
-    Job,
     Nonconformity,
     RiskAcceptance,
     ScanRun,
@@ -150,6 +149,38 @@ def assert_evidence_path_readable(path: Path, tenant_id: int) -> Path:
     return resolved
 
 
+def read_stored_bytes(path: Path) -> bytes:
+    """Bytes behind a stored path; follows ``mongo://`` sidecar records written by :func:`_store`."""
+    data = Path(path).read_bytes()
+    if data.startswith(b"mongo://") and len(data) < 1024 and b"\n" not in data.strip():
+        from attestra.storage.mongo import MongoStorage
+
+        return MongoStorage().get(data.decode("utf-8").strip())
+    return data
+
+
+def read_evidence_bytes(path: Path | str, tenant_id: int) -> bytes:
+    """Tenant-checked evidence read for API/UI downloads (local files and GridFS).
+
+    Stable signature: ``read_evidence_bytes(ev.path, engagement.tenant_id) -> bytes``.
+    Raises LookupError when the file is outside the tenant roots or missing.
+    """
+    resolved = assert_evidence_path_readable(Path(path), tenant_id)
+    data = resolved.read_bytes()
+    if data.startswith(b"mongo://") and len(data) < 1024:
+        uri = data.decode("utf-8").strip()
+        key = uri[len("mongo://"):]
+        if key.startswith("tenants/") and not key.startswith(f"tenants/{int(tenant_id)}/"):
+            raise LookupError("evidence not found")
+        from attestra.storage.mongo import MongoStorage
+
+        try:
+            return MongoStorage().get(uri)
+        except FileNotFoundError as exc:
+            raise LookupError("evidence not found") from exc
+    return data
+
+
 def client_may_download_evidence(role: str, kind: str) -> bool:
     """Whether ``role`` may download an evidence row of ``kind``."""
     # @lat: [[authorization#Evidence file security]]
@@ -171,16 +202,11 @@ def tenant_ids_for(s: Session, principal) -> set[int] | None:
     role = getattr(principal, "role", None)
     if role == "admin":
         return None
-    ids: set[int] = set()
-    if principal.tenant_id is not None:
-        ids.add(principal.tenant_id)
-    for m in s.scalars(select(TenantMembership).where(TenantMembership.user_id == principal.user_id)):
-        ids.add(m.tenant_id)
-    if not ids:
-        if role == "client_viewer":
-            return set()
-        return None
-    return ids
+    # Memberships are owned by Mongo (users/settings port).
+    from attestra.persistence.mongo.service_bridge import MongoUnitOfWork, tenant_ids_for_principal
+
+    got = tenant_ids_for_principal(MongoUnitOfWork(tenant_ids=None), principal)
+    return None if got is None else set(got)
 
 
 def ensure_tenant_membership(s: Session, principal, tenant_id: int) -> None:
@@ -223,6 +249,45 @@ def assert_engagement_access(s: Session, engagement_id: int, principal) -> Engag
     if allowed is not None and eng.tenant_id not in allowed:
         raise LookupError(f"engagement {engagement_id} not found")
     return eng
+
+
+def list_engagements(s: Session, principal=None) -> list[Engagement]:
+    """Engagements the principal may see, newest first. Stable API for web/api layers."""
+    from attestra.persistence.mongo.read_models import view_all
+
+    allowed = tenant_ids_for(s, principal)
+    q = {} if allowed is None else {"tenant_id": {"$in": sorted(allowed)}}
+    return view_all(Engagement, q, sort=[("_id", -1)])
+
+
+def _scoped_child(s: Session, model, row_id: int, principal, label: str):
+    row = s.get(model, int(row_id))
+    if row is None:
+        raise LookupError(f"{label} {row_id} not found")
+    if principal is not None:
+        assert_engagement_access(s, row.engagement_id, principal)  # LookupError when out of scope
+    return row
+
+
+def get_finding(s: Session, finding_id: int, principal=None) -> Finding:
+    """Tenant-checked finding lookup; raises LookupError (also for other tenants)."""
+    return _scoped_child(s, Finding, finding_id, principal, "finding")
+
+
+def get_report(s: Session, report_id: int, principal=None) -> Report:
+    from attestra.models import Report as _Report
+
+    return _scoped_child(s, _Report, report_id, principal, "report")
+
+
+def get_evidence(s: Session, evidence_id: int, principal=None) -> Evidence:
+    """Evidence row whose finding's engagement the principal may access."""
+    ev = s.get(Evidence, int(evidence_id))
+    if ev is None:
+        raise LookupError(f"evidence {evidence_id} not found")
+    if principal is not None:
+        get_finding(s, ev.finding_id, principal)
+    return ev
 
 
 def ownership_validity_days_for_tenant(s: Session, tenant_id: int) -> int:
@@ -1557,7 +1622,7 @@ def _tenant_weights(f: Finding):
 
     from attestra import tuning
 
-    s = object_session(f)
+    s = getattr(f, "_sess", None) or object_session(f)  # MongoRecord carries its MongoSession
     if s is None or f.engagement_id is None:
         return None
     eng = s.get(Engagement, f.engagement_id)
@@ -1616,12 +1681,17 @@ def list_passed_checks(s: Session, engagement_id: int) -> list[dict]:
     """C5: merged pass/fail/skipped check rows from scan runs and imports."""
     from attestra.checks import FAILED, PASSED, SKIPPED, load_checks_json, merge_check_lists
 
+    from attestra.persistence.mongo.read_models import view_all
+
     lists: list[list[dict]] = []
-    for run in s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id)):
+    q = {"engagement_id": int(engagement_id)}
+    scan_rows = view_all(ScanRun, q, sort=[("_id", 1)])
+    import_rows = view_all(ImportRun, q, sort=[("_id", 1)])
+    for run in scan_rows:
         rows = load_checks_json(run.checks_json)
         if rows:
             lists.append(rows)
-    for run in s.scalars(select(ImportRun).where(ImportRun.engagement_id == engagement_id).order_by(ImportRun.id)):
+    for run in import_rows:
         rows = load_checks_json(run.checks_json)
         if rows:
             lists.append(rows)
@@ -1722,16 +1792,16 @@ def list_findings(
     asset_id: int | None = None,
 ) -> list[Finding]:
     """List findings for an engagement, optionally filtered by status/severity/tool/target."""
-    from sqlalchemy.orm import joinedload
+    from attestra.persistence.mongo.read_models import view_all
 
-    q = select(Finding).options(joinedload(Finding.asset)).where(Finding.engagement_id == engagement_id)
+    mq: dict = {"engagement_id": int(engagement_id)}
     if status:
-        q = q.where(Finding.status == status)
+        mq["status"] = status
     if severity:
-        q = q.where(Finding.severity == severity)
+        mq["severity"] = severity
     if asset_id is not None:
-        q = q.where(Finding.asset_id == asset_id)
-    rows = list(s.scalars(q.order_by(Finding.risk_score.desc(), Finding.id)).unique())
+        mq["asset_id"] = int(asset_id)
+    rows = view_all(Finding, mq, sort=[("risk_score", -1), ("_id", 1)])
     if tool:
         needle = tool.strip().lower()
         rows = [f for f in rows if any(str(t).lower() == needle for t in (f.tools or []))]
@@ -2456,7 +2526,9 @@ def request_scan(
 
 def list_scans(s: Session, engagement_id: int) -> list[ScanRun]:
     get_engagement(s, engagement_id)
-    return list(s.scalars(select(ScanRun).where(ScanRun.engagement_id == engagement_id).order_by(ScanRun.id.desc())))
+    from attestra.persistence.mongo.read_models import view_all
+
+    return view_all(ScanRun, {"engagement_id": int(engagement_id)}, sort=[("_id", -1)])
 
 
 def get_asset(s: Session, asset_id: int, principal=None) -> Asset:
@@ -2671,7 +2743,7 @@ def cancel_scan(s: Session, scan_id: int, *, actor: str, principal=None) -> Scan
     if run.status not in _SCAN_CANCELABLE:
         raise ServiceError(f"cannot cancel a {run.status} scan")
 
-    job = s.scalars(select(Job).where(Job.scan_run_id == run.id)).first()
+    job = durable_mod.job_for_scan_run(s, run.id)
     if job is not None:
         durable_mod.request_cancel(s, job.id)
         if job.status in ("queued", "running", "cancelled"):
@@ -2696,11 +2768,7 @@ def halt_engagement(s: Session, engagement_id: int, *, actor: str) -> Engagement
 
     eng = get_engagement(s, engagement_id)
     eng.status = "halted"
-    jobs = list(
-        s.scalars(
-            select(Job).join(ScanRun, Job.scan_run_id == ScanRun.id).where(ScanRun.engagement_id == engagement_id)
-        )
-    )
+    jobs = durable_mod.jobs_for_engagement(s, engagement_id)
     for job in jobs:
         if job.status in ("queued", "running"):
             job.cancel_requested = True

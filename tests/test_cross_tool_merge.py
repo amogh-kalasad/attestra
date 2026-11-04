@@ -6,6 +6,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from attestra.audit import find_events
+
 SHOP = "https://shop.example.com"
 
 
@@ -205,7 +207,6 @@ def test_cwe_merge_needs_specific_cwe_and_shared_path(engagement):
 # ------------------------------------------------------------------ triage preserved
 def test_triage_history_preserved_and_recompute_idempotent(engagement):
     from attestra import crossmerge, db, services
-    from attestra.models import AuditEvent
 
     with db.session() as s:
         aid = _asset_id(s, engagement)
@@ -228,7 +229,7 @@ def test_triage_history_preserved_and_recompute_idempotent(engagement):
         again = crossmerge.recompute(s, engagement, actor="tester")
         assert again["linked"] == 0 and again["unlinked"] == 0
         assert len(_all(s, engagement)) == 2
-        events = list(s.scalars(select(AuditEvent).where(AuditEvent.action == "finding.cross_merge")))
+        events = find_events(s, action="finding.cross_merge")
         assert [e.entity_id for e in events] == [low.id]
 
         # Primary marked false positive: the open related row is shown instead, with its own severity.

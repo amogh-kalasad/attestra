@@ -17,14 +17,11 @@ from attestra.auth.roles import has_permission
 from attestra.models import (
     OPEN_STATUSES,
     Asset,
-    EmailAlertSent,
     EmailAlertSettings,
     Engagement,
     Finding,
     ImportRun,
     ScanRun,
-    UserInvite,
-    utcnow,
 )
 from attestra.users import mailer
 
@@ -39,6 +36,35 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 class AlertError(ValueError):
     pass
+
+
+# ---------------------------------------------------------------- Mongo backend
+# Settings, invite emails and send-once dedup live in Mongo; rows are returned as attribute
+# objects (``as_row``) so callers/``settings_dict`` are unchanged.
+
+
+def _mdb():
+    from attestra.persistence.mongo.adapters import _db
+
+    return _db()
+
+
+def _settings_repo():
+    from attestra.persistence.mongo.repositories.settings import EmailAlertSettingsRepository
+
+    return EmailAlertSettingsRepository(_mdb(), tenant_ids=None)
+
+
+def _settings_row(doc):
+    from attestra.persistence.mongo.repositories.settings import EMAIL_ALERT_DEFAULTS, as_row
+
+    return as_row(doc, EMAIL_ALERT_DEFAULTS)
+
+
+def _sent_repo():
+    from attestra.persistence.mongo.repositories.settings import EmailAlertSentRepository
+
+    return EmailAlertSentRepository(_mdb(), tenant_ids=None)
 
 
 def public_base_url() -> str:
@@ -85,18 +111,12 @@ def _check_tenant(s: Session, principal, tenant_id: int) -> None:
         raise AlertError("not allowed to manage email alerts")
 
 
-def get_settings(s: Session, tenant_id: int) -> EmailAlertSettings | None:
-    return s.scalar(select(EmailAlertSettings).where(EmailAlertSettings.tenant_id == tenant_id))
+def get_settings(s: Session | None, tenant_id: int) -> EmailAlertSettings | None:
+    return _settings_row(_settings_repo().get(tenant_id))
 
 
-def ensure_settings(s: Session, tenant_id: int) -> EmailAlertSettings:
-    row = get_settings(s, tenant_id)
-    if row is not None:
-        return row
-    row = EmailAlertSettings(tenant_id=tenant_id)
-    s.add(row)
-    s.flush()
-    return row
+def ensure_settings(s: Session | None, tenant_id: int) -> EmailAlertSettings:
+    return _settings_row(_settings_repo().ensure(tenant_id))
 
 
 def settings_dict(row: EmailAlertSettings | None, tenant_id: int) -> dict:
@@ -132,18 +152,19 @@ def update_settings(
     recipients=None,
 ) -> EmailAlertSettings:
     _check_tenant(s, principal, tenant_id)
-    row = ensure_settings(s, tenant_id)
-    if notify_new_high is not None:
-        row.notify_new_high = bool(notify_new_high)
-    if notify_header_change is not None:
-        row.notify_header_change = bool(notify_header_change)
-    if notify_sla_missed is not None:
-        row.notify_sla_missed = bool(notify_sla_missed)
+    from attestra.persistence.mongo import collections as C
+
+    if _mdb()[C.TENANTS].count_documents({"_id": int(tenant_id)}, limit=1) == 0:
+        raise LookupError(f"tenant {tenant_id} not found")
+    fields = {
+        k: bool(v)
+        for k, v in (("notify_new_high", notify_new_high), ("notify_header_change", notify_header_change),
+                     ("notify_sla_missed", notify_sla_missed))
+        if v is not None
+    }
     if recipients is not None:
-        row.recipients = _normalize_emails(recipients)
-    row.updated_by = principal.actor
-    row.updated_at = utcnow()
-    s.flush()
+        fields["recipients"] = _normalize_emails(recipients)  # validate before any write
+    row = _settings_row(_settings_repo().update(tenant_id, actor=principal.actor, **fields))
     audit.record(
         s, principal.actor, "alert.settings.update", "email_alert_settings", row.id,
         tenant_id=tenant_id,
@@ -161,14 +182,10 @@ def known_tenant_emails(s: Session, tenant_id: int) -> list[str]:
     Matches [[attestra/users/service.py#list_invites]]: only unused, non-revoked invites.
     """
     # @lat: [[interfaces#Email alerts]]
-    rows = s.scalars(
-        select(UserInvite.email).where(
-            UserInvite.tenant_id == tenant_id,
-            UserInvite.email != "",
-            UserInvite.used_at.is_(None),
-            UserInvite.revoked_at.is_(None),
-        )
-    )
+    from attestra.persistence.mongo import collections as C
+
+    q = {"tenant_id": int(tenant_id), "email": {"$nin": ["", None]}, "used_at": None, "revoked_at": None}
+    rows = [d.get("email") or "" for d in _mdb()[C.USER_INVITES].find(q, {"email": 1})]
     return sorted({e.strip().lower() for e in rows if e and _EMAIL_RE.match(e.strip())})
 
 
@@ -223,31 +240,11 @@ def _send(
 
 
 def _already_sent(s: Session, event: str, entity_type: str, entity_id: int) -> bool:
-    return (
-        s.scalar(
-            select(EmailAlertSent.id).where(
-                EmailAlertSent.event_type == event,
-                EmailAlertSent.entity_type == entity_type,
-                EmailAlertSent.entity_id == entity_id,
-            )
-        )
-        is not None
-    )
+    return _sent_repo().already_sent(event, entity_type, entity_id)
 
 
 def _mark_sent(s: Session, tenant_id: int, event: str, entity_type: str, entity_id: int) -> None:
-    if _already_sent(s, event, entity_type, entity_id):
-        return
-    s.add(
-        EmailAlertSent(
-            tenant_id=tenant_id,
-            event_type=event,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            sent_at=utcnow(),
-        )
-    )
-    s.flush()
+    _sent_repo().mark_sent(tenant_id, event, entity_type, entity_id)
 
 
 # ---------------------------------------------------------------- new Crit/High (grouped)

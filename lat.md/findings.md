@@ -37,6 +37,12 @@ Confidence-based consolidation across scanners within one engagement.
 
 When the exact fingerprint misses, [[attestra/dedup.py#find_best_soft_match]] scores candidates (asset, location, CVE/package, CWE+param, cross-tool). Scores at or above [[attestra/dedup.py#MERGE_THRESHOLD]] merge into the canonical finding; mid-band scores stay separate and set `possible_duplicate_of` on the new [[attestra/models.py#FindingObservation]]; low scores create a new finding. Title, CVE, CWE, severity, or hostname alone never merge. Every import stores a [[attestra/models.py#FindingObservation]] (migration `0025_finding_observations`). UI/API show **Detected by** via [[attestra/dedup.py#detected_by_label]]. Historical review uses [[attestra/dedup.py#suggest_historical_duplicates]] / `GET /api/engagements/{eid}/dedup-suggestions` without automatic destructive merges.
 
+### Cross-tool merge
+
+Present the same issue from different tools as one finding while preserving observation history.
+
+[[attestra/crossmerge.py]] links related finding rows to a primary after import (migration `0029_cross_tool_merge`). [[attestra/crossmerge.py#recompute_safely]] runs inside a savepoint so a merge failure cannot abort the parent import transaction. Report consolidation still reads the merged view; original tool observations remain on [[attestra/models.py#FindingObservation]].
+
 ## Certificate expiry warning
 
 Warn before a certificate expires using 30 / 14 / 7 day bands, with one finding per cert.

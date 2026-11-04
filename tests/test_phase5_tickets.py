@@ -45,7 +45,7 @@ def _validate(s, fid):
 
 # @lat: [[tests#Phase 5 workflow#Jira create via mock HTTP]]
 def test_jira_create_via_mock_http(engagement):
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
 
     http = _FakeHttp({"key": "SEC-99"})
@@ -72,7 +72,7 @@ def test_jira_create_via_mock_http(engagement):
 
 # @lat: [[tests#Phase 5 workflow#GitHub create via mock HTTP]]
 def test_github_create_via_mock_http(engagement):
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
 
     http = _FakeHttp({"number": 42})
@@ -96,7 +96,7 @@ def test_github_create_via_mock_http(engagement):
 def test_webhook_closed_fixes_and_requests_retest(engagement):
     from sqlalchemy import select
 
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
     from attestra.models import AuditEvent, Retest
     from attestra.retest import open_retests
@@ -124,13 +124,11 @@ def test_webhook_closed_fixes_and_requests_retest(engagement):
         assert len(pending) == 1 and pending[0].result == ""
         assert pending[0].finalized_at is None
 
-        retest_ev = s.scalars(
-            select(AuditEvent).where(AuditEvent.action == "finding.ticket_retest")
-        ).first()
+        retest_ev = next(iter(_audit.find_events(s, action="finding.ticket_retest")), None)
         assert retest_ev is not None
         assert retest_ev.details["ticket_ref"] == ref
         assert retest_ev.details["retest_id"] == pending[0].id
-        req_ev = s.scalars(select(AuditEvent).where(AuditEvent.action == "retest.request")).first()
+        req_ev = next(iter(_audit.find_events(s, action="retest.request")), None)
         assert req_ev is not None and req_ev.entity_id == pending[0].id
 
         # Second closed event: already fixed -> audit only, no duplicate retest
@@ -143,7 +141,7 @@ def test_webhook_closed_fixes_and_requests_retest(engagement):
 def test_disallowed_transition_stays_audit_only(engagement):
     from sqlalchemy import select
 
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
     from attestra.models import AuditEvent, Finding
     from attestra.retest import open_retests
@@ -157,12 +155,10 @@ def test_disallowed_transition_stays_audit_only(engagement):
         out = tickets.apply_ticket_state(s, ref, "closed", actor="webhook:jira")
         assert out.status == "new"
         assert open_retests(s, fid) == []
-        skipped = s.scalars(
-            select(AuditEvent).where(AuditEvent.action == "finding.ticket_state")
-        ).first()
+        skipped = next(iter(_audit.find_events(s, action="finding.ticket_state")), None)
         assert skipped is not None and skipped.details.get("applied") is False
         assert (
-            s.scalars(select(AuditEvent).where(AuditEvent.action == "finding.ticket_retest")).first()
+            next(iter(_audit.find_events(s, action="finding.ticket_retest")), None)
             is None
         )
 
@@ -194,7 +190,7 @@ def test_webhook_signature_still_required(client, monkeypatch):
 
 # @lat: [[tests#Phase 5 workflow#Unknown backend and disabled stay safe]]
 def test_unknown_backend_and_disabled_stay_safe(client, engagement, monkeypatch):
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
 
     monkeypatch.delenv("ATTESTRA_TICKETS_BACKEND", raising=False)
@@ -217,7 +213,7 @@ def test_unknown_backend_and_disabled_stay_safe(client, engagement, monkeypatch)
 
 # @lat: [[tests#Phase 5 workflow#ServiceNow and Azure DevOps stubs]]
 def test_servicenow_and_azure_devops_stubs(engagement):
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
 
     assert "servicenow" in tickets.BACKENDS and "azure_devops" in tickets.BACKENDS
@@ -267,7 +263,7 @@ def test_servicenow_and_azure_devops_stubs(engagement):
 
 # @lat: [[tests#Phase 5 workflow#Existing open retest is not duplicated]]
 def test_existing_open_retest_not_duplicated(engagement):
-    from attestra import db
+    from attestra import audit as _audit, db
     from attestra.integrations import tickets
     from attestra.models import Finding
     from attestra.retest import open_retests, request_retest

@@ -8,7 +8,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit
@@ -16,7 +15,6 @@ from attestra.models import (
     SEVERITIES,
     Engagement,
     Finding,
-    FindingAssignment,
     WebhookDelivery,
     WebhookEndpoint,
     WorkflowRule,
@@ -145,31 +143,29 @@ def finding_data(f: Finding, **extra) -> dict:
     }
 
 
+def _mdb():
+    from attestra.persistence.mongo.adapters import _db
+
+    return _db()
+
+
+def _finding_doc(f) -> dict | None:
+    """Finding (ORM row or dict) as the dict shape ``webhooks.mongo_service`` expects."""
+    if f is None or isinstance(f, dict):
+        return f
+    return {k: getattr(f, k, None) for k in ("id", "engagement_id", "title", "severity", "status", "risk_score",
+                                              "location", "asset_id")}
+
+
 def emit(s: Session, event: str, *, tenant_id: int, data: dict, finding: Finding | None = None, actor: str = "system") -> list[WebhookDelivery]:
-    """Queue deliveries for subscribed endpoints and run matching workflow rules."""
-    out: list[WebhookDelivery] = []
-    queued: set[int] = set()
-    for ep in s.scalars(select(WebhookEndpoint).where(WebhookEndpoint.tenant_id == tenant_id, WebhookEndpoint.active.is_(True))):
-        if not ep.events or event in ep.events:
-            out.append(_queue(s, ep, event, data))
-            queued.add(ep.id)
-    if finding is not None:
-        rules = s.scalars(select(WorkflowRule).where(WorkflowRule.tenant_id == tenant_id, WorkflowRule.active.is_(True)).order_by(WorkflowRule.id))
-        for rule in rules:
-            if not rule_matches(rule, event, finding):
-                continue
-            if rule.action == "notify" and rule.endpoint_id and rule.endpoint_id not in queued:
-                ep = s.get(WebhookEndpoint, rule.endpoint_id)
-                if ep and ep.active and ep.tenant_id == tenant_id:
-                    out.append(_queue(s, ep, event, {**data, "rule_id": rule.id}))
-                    queued.add(ep.id)
-            elif rule.action == "assign":
-                s.add(FindingAssignment(finding_id=finding.id, assignee=rule.assignee, rule_id=rule.id, assigned_by=f"rule:{rule.id}"))
-                audit.record(s, actor, "finding.assigned", "finding", finding.id, assignee=rule.assignee, rule_id=rule.id)
-            elif rule.action == "ticket":
-                _ticket(s, finding, rule, actor)
-    s.flush()
-    return out
+    """Queue deliveries for subscribed endpoints and run matching workflow rules.
+
+    Endpoints/rules/deliveries live in Mongo: delegates to ``webhooks.mongo_service.emit``
+    (returns delivery dicts) so existing callers need no change.
+    """
+    from attestra.webhooks import mongo_service as mwh
+
+    return mwh.emit(_mdb(), event, tenant_id=int(tenant_id), data=data, finding=_finding_doc(finding), actor=actor)
 
 
 def _ticket(s: Session, finding: Finding, rule: WorkflowRule, actor: str) -> None:
@@ -271,12 +267,6 @@ def deliver(s: Session, d: WebhookDelivery, *, sender: Sender | None = None, now
 
 
 def dispatch_due(s: Session, *, sender: Sender | None = None, now: datetime | None = None, limit: int = 50, tenant_ids=None) -> list[WebhookDelivery]:
-    now = now or utcnow()
-    q = select(WebhookDelivery).where(WebhookDelivery.status == "pending").order_by(WebhookDelivery.id)
-    if tenant_ids is not None:
-        q = q.where(WebhookDelivery.tenant_id.in_(tenant_ids))
-    due = [d for d in s.scalars(q) if _aware(d.next_attempt_at) <= now][:limit]
-    for d in due:
-        deliver(s, d, sender=sender, now=now)
-    s.flush()
-    return due
+    from attestra.webhooks import mongo_service as mwh
+
+    return mwh.dispatch_due(_mdb(), sender=sender, now=now, limit=limit, tenant_ids=tenant_ids)

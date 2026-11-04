@@ -22,13 +22,13 @@ Exposed at `GET /api/audit/verify` and CLI `verify-audit`.
 
 Where audit rows and related blobs live.
 
-Audit rows live in the same SQLAlchemy database as engagements and findings ([[attestra/db.py]]). Evidence blobs live on disk under [[attestra/config.py#DATA_DIR]] subdirs created by [[attestra/config.py#ensure_dirs]].
+Audit rows live in the MongoDB `audit_events` collection (same store as engagements and findings via [[attestra/db.py#session]]). Evidence blobs are content-addressed via [[attestra/storage/__init__.py#get_storage]] (GridFS when storage is mongo; otherwise under [[attestra/config.py#DATA_DIR]]).
 
 ## Append-only enforcement
 
-Database triggers refuse UPDATE/DELETE on audit events.
+Audit writes are append-only; chain verify detects tampering.
 
-SQLite triggers `audit_events_no_update` / `audit_events_no_delete` are installed by Alembic [[migrations/versions/0006_evidence_hardening.py]] and by [[attestra/db.py#_install_audit_triggers]] after `create_all`. Downloads of evidence and reports call [[attestra/audit.py#record]]. `GET /api/audit/export` returns events plus chain proof.
+Mongo audit append goes through [[attestra/audit.py#record]] / the audit repository (hash-chained, no update/delete API). Downloads of evidence and reports also call [[attestra/audit.py#record]]. `GET /api/audit/export` returns events plus chain proof.
 
 ## Ownership, scan and user actions
 

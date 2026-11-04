@@ -1,0 +1,487 @@
+"""Operational repositories: audit chain, jobs, credits, artifacts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from pymongo import ReturnDocument
+
+from attestra.persistence.mongo import collections as C
+from attestra.persistence.mongo.repositories.base import BaseRepository
+from attestra.persistence.mongo.serialization import utcnow, with_id
+from attestra.persistence.mongo.tenant import require_tenant_access, tenant_filter
+from attestra.persistence.mongo.transactions import with_transaction
+
+GENESIS = "0" * 64
+
+
+def _audit_digest(prev_hash: str, ts_iso: str, actor: str, action: str, entity: str, entity_id, details: dict) -> str:
+    payload = json.dumps(
+        [prev_hash, ts_iso, actor, action, entity, entity_id, details],
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+class AuditRepository(BaseRepository):
+    collection_name = C.AUDIT_EVENTS
+
+    def record(self, actor: str, action: str, entity: str, entity_id: int | None = None, **details: Any) -> dict[str, Any]:
+        """Append an audit event with serialized head locking (multi-doc transaction)."""
+
+        def _txn(session) -> dict[str, Any]:
+            head_col = self.db[C.AUDIT_CHAIN_HEAD]
+            head = head_col.find_one({"_id": "head"}, session=session)
+            if not head:
+                prev_hash = GENESIS
+                # last_id 0 means next allocate starts at 1 via sequences or max+1
+            else:
+                prev_hash = head["last_hash"]
+            new_id = self.allocate_id()
+            ts = utcnow()
+            # Persist the exact ISO string used in the hash so BSON Date round-trips
+            # cannot break verify() (matches SQLAlchemy audit semantics).
+            ts_iso = ts.isoformat()
+            digest = _audit_digest(prev_hash, ts_iso, actor, action, entity, entity_id, details)
+            doc = {
+                "_id": new_id,
+                "ts": ts,
+                "ts_iso": ts_iso,
+                "actor": actor,
+                "action": action,
+                "entity": entity,
+                "entity_id": entity_id,
+                "details": details,
+                "prev_hash": prev_hash,
+                "hash": digest,
+            }
+            self.col.insert_one(doc, session=session)
+            head_col.update_one(
+                {"_id": "head"},
+                {"$set": {"last_id": new_id, "last_hash": digest, "updated_at": ts}},
+                upsert=True,
+                session=session,
+            )
+            return with_id(doc)
+
+        return with_transaction(_txn)
+
+    def verify(self) -> tuple[bool, int | None]:
+        prev = GENESIS
+        for ev in self.col.find().sort("_id", 1):
+            ts_iso = ev.get("ts_iso")
+            if not ts_iso:
+                ts = ev["ts"]
+                ts_iso = ts if isinstance(ts, str) else ts.isoformat()
+            expected = _audit_digest(
+                prev, ts_iso, ev["actor"], ev["action"], ev["entity"], ev.get("entity_id"), ev.get("details") or {}
+            )
+            if ev.get("prev_hash") != prev or ev.get("hash") != expected:
+                return False, int(ev["_id"])
+            prev = ev["hash"]
+        return True, None
+
+
+class JobRepository(BaseRepository):
+    collection_name = C.JOBS
+
+    def enqueue(self, scan_run_id: int, *, doc_id: int | None = None) -> dict[str, Any]:
+        return self.insert_with_id(
+            {
+                "scan_run_id": int(scan_run_id),
+                "status": "queued",
+                "attempts": 0,
+                "worker_id": "",
+                "heartbeat_at": None,
+                "cancel_requested": False,
+                "error": "",
+                "lease_token": None,
+            },
+            doc_id=doc_id,
+        )
+
+    def claim(self, worker_id: str, *, exclude_tools: list[str] | None = None) -> dict[str, Any] | None:
+        """Atomically claim the next queued job (optional tool exclusion via scan_runs)."""
+        skip = sorted({t for t in (exclude_tools or []) if t})
+        q: dict[str, Any] = {"status": "queued"}
+        if skip:
+            blocked = [
+                int(d["_id"])
+                for d in self.db[C.SCAN_RUNS].find({"tool": {"$in": skip}}, {"_id": 1})
+            ]
+            if blocked:
+                q["scan_run_id"] = {"$nin": blocked}
+        for candidate in self.col.find(q).sort("_id", 1).limit(5):
+            lease = hashlib.sha256(f"{worker_id}:{candidate['_id']}:{utcnow().isoformat()}".encode()).hexdigest()[:32]
+            doc = self.col.find_one_and_update(
+                {"_id": candidate["_id"], "status": "queued"},
+                {
+                    "$set": {
+                        "status": "running",
+                        "worker_id": worker_id,
+                        "heartbeat_at": utcnow(),
+                        "lease_token": lease,
+                    },
+                    "$inc": {"attempts": 1},
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+            if doc:
+                return with_id(doc)
+        return None
+
+    def get(self, job_id: int) -> dict[str, Any] | None:
+        return self.get_raw(job_id)
+
+    def complete(self, job_id: int, *, worker_id: str = "") -> dict[str, Any] | None:
+        doc = self.col.find_one_and_update(
+            {"_id": int(job_id)},
+            {"$set": {"status": "done", "heartbeat_at": utcnow(), "error": ""}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc:
+            AuditRepository(self.db).record(worker_id or doc.get("worker_id") or "worker", "job.complete", "job", int(job_id))
+        return with_id(doc) if doc else None
+
+    def fail(
+        self,
+        job_id: int,
+        error: str,
+        *,
+        retry: bool = True,
+        max_attempts: int = 3,
+        worker_id: str = "",
+    ) -> dict[str, Any] | None:
+        job = self.get_raw(job_id)
+        if not job:
+            return None
+        err = (error or "")[:2000]
+        if retry and int(job.get("attempts") or 0) < max_attempts and not job.get("cancel_requested"):
+            update = {"status": "queued", "worker_id": "", "error": err, "lease_token": None}
+        else:
+            update = {"status": "failed", "error": err}
+        doc = self.col.find_one_and_update(
+            {"_id": int(job_id)},
+            {"$set": update},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc:
+            AuditRepository(self.db).record(
+                worker_id or job.get("worker_id") or "worker",
+                "job.fail",
+                "job",
+                int(job_id),
+                error=err[:500],
+            )
+        return with_id(doc) if doc else None
+
+    def touch_heartbeats(self, job_ids: list[int], worker_id: str) -> int:
+        ids = [int(j) for j in job_ids]
+        if not ids:
+            return 0
+        result = self.col.update_many(
+            {"_id": {"$in": ids}, "status": "running", "worker_id": worker_id},
+            {"$set": {"heartbeat_at": utcnow()}},
+        )
+        return int(result.modified_count)
+
+    def request_cancel(self, job_id: int) -> dict[str, Any]:
+        doc = self.col.find_one_and_update(
+            {"_id": int(job_id)},
+            {"$set": {"cancel_requested": True}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if not doc:
+            raise LookupError(f"job {job_id} not found")
+        AuditRepository(self.db).record("system", "job.cancel_requested", "job", int(job_id))
+        return with_id(doc)
+
+    def recover_stale(self, *, stale_before, exclude_worker_id: str | None = None) -> int:
+        q: dict[str, Any] = {"status": "running", "heartbeat_at": {"$lt": stale_before}}
+        if exclude_worker_id:
+            q["worker_id"] = {"$ne": exclude_worker_id}
+        n = 0
+        for job in self.col.find(q):
+            self.col.update_one(
+                {"_id": job["_id"], "status": "running"},
+                {"$set": {"status": "queued", "worker_id": "", "lease_token": None}},
+            )
+            AuditRepository(self.db).record("system", "job.recover", "job", int(job["_id"]))
+            n += 1
+        return n
+
+
+class CreditRepository(BaseRepository):
+    collection_name = C.TENANT_CREDIT_ACCOUNTS
+
+    def get_account(self, tenant_id: int) -> dict[str, Any] | None:
+        require_tenant_access(tenant_id, self.tenant_ids)
+        doc = self.col.find_one({"_id": int(tenant_id)})
+        if not doc:
+            return None
+        out = with_id(doc)
+        out["tenant_id"] = out["id"]
+        return out
+
+    def ensure_account(self, tenant_id: int, *, initial_balance: int = 0) -> dict[str, Any]:
+        require_tenant_access(tenant_id, self.tenant_ids)
+        existing = self.get_account(tenant_id)
+        if existing:
+            return existing
+        doc = {"_id": int(tenant_id), "balance": int(initial_balance), "grant_total": int(initial_balance)}
+        try:
+            self.col.insert_one(doc)
+        except Exception:
+            existing = self.get_account(tenant_id)
+            if existing:
+                return existing
+            raise
+        out = with_id(doc)
+        out["tenant_id"] = out["id"]
+        return out
+
+    def apply_ledger(
+        self,
+        tenant_id: int,
+        amount: int,
+        reason: str,
+        *,
+        actor: str = "",
+        idempotency_key: str | None = None,
+        user_id: int | None = None,
+        engagement_id: int | None = None,
+        scan_run_id: int | None = None,
+        renewal_request_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Atomically adjust balance and insert a ledger row. ``amount`` may be negative."""
+        require_tenant_access(tenant_id, self.tenant_ids)
+
+        def _txn(session) -> dict[str, Any]:
+            tx_col = self.db[C.CREDIT_TRANSACTIONS]
+            if idempotency_key:
+                prior = tx_col.find_one({"idempotency_key": idempotency_key}, session=session)
+                if prior:
+                    return with_id(prior)
+            acct = self.col.find_one({"_id": int(tenant_id)}, session=session)
+            if not acct:
+                raise LookupError(f"credit account for tenant {tenant_id} not found")
+            new_balance = int(acct["balance"]) + int(amount)
+            if new_balance < 0:
+                raise ValueError("insufficient credits")
+            self.col.update_one(
+                {"_id": int(tenant_id)},
+                {"$set": {"balance": new_balance}},
+                session=session,
+            )
+            from attestra.persistence.mongo.sequences import next_id
+
+            tx_id = next_id(self.db, C.CREDIT_TRANSACTIONS)
+            tx = {
+                "_id": tx_id,
+                "tenant_id": int(tenant_id),
+                "amount": int(amount),
+                "balance_after": new_balance,
+                "reason": reason,
+                "actor": actor,
+                "user_id": user_id,
+                "engagement_id": engagement_id,
+                "scan_run_id": scan_run_id,
+                "renewal_request_id": renewal_request_id,
+                "idempotency_key": idempotency_key,
+                "created_at": utcnow(),
+            }
+            tx_col.insert_one(tx, session=session)
+            return with_id(tx)
+
+        return with_transaction(_txn)
+
+    def list_transactions(self, tenant_id: int) -> list[dict[str, Any]]:
+        require_tenant_access(tenant_id, self.tenant_ids)
+        q = {"tenant_id": int(tenant_id)}
+        q.update(tenant_filter("tenant_id", self.tenant_ids))
+        return [with_id(d) for d in self.db[C.CREDIT_TRANSACTIONS].find(q).sort("_id", 1)]
+
+    def consume_for_scan_admit(
+        self,
+        tenant_id: int,
+        *,
+        actor: str,
+        engagement_id: int,
+        user_id: int | None = None,
+        idempotency_key: str | None = None,
+        enforce: bool = True,
+    ) -> dict[str, Any] | None:
+        """Consume one credit at scan admission. Returns None when enforcement is off."""
+        if not enforce:
+            return None
+        self.ensure_account(tenant_id, initial_balance=0)
+        try:
+            tx = self.apply_ledger(
+                tenant_id,
+                -1,
+                "scan_admit",
+                actor=actor,
+                idempotency_key=idempotency_key,
+                user_id=user_id,
+                engagement_id=engagement_id,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "The organization has exhausted its available test-run credits. "
+                "Request additional credits or ask a Super Admin to allocate more."
+            ) from exc
+        AuditRepository(self.db).record(
+            actor,
+            "credits.consume",
+            "credit_transaction",
+            tx["id"],
+            tenant_id=tenant_id,
+            engagement_id=engagement_id,
+            balance=tx["balance_after"],
+            reason="scan_admit",
+        )
+        return tx
+
+    def allocate(
+        self,
+        tenant_id: int,
+        amount: int,
+        *,
+        actor: str,
+        note: str = "",
+        user_id: int | None = None,
+        renewal_request_id: int | None = None,
+        reason: str = "admin_allocate",
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        if amount < 1:
+            raise ValueError("allocation amount must be at least 1")
+        self.ensure_account(tenant_id, initial_balance=0)
+
+        def _txn(session) -> dict[str, Any]:
+            tx_col = self.db[C.CREDIT_TRANSACTIONS]
+            if idempotency_key:
+                prior = tx_col.find_one({"idempotency_key": idempotency_key}, session=session)
+                if prior:
+                    return with_id(prior)
+            acct = self.col.find_one({"_id": int(tenant_id)}, session=session)
+            if not acct:
+                raise LookupError(f"credit account for tenant {tenant_id} not found")
+            new_balance = int(acct["balance"]) + int(amount)
+            new_grant = int(acct.get("grant_total") or 0) + int(amount)
+            self.col.update_one(
+                {"_id": int(tenant_id)},
+                {"$set": {"balance": new_balance, "grant_total": new_grant, "updated_at": utcnow()}},
+                session=session,
+            )
+            from attestra.persistence.mongo.sequences import next_id
+
+            tx_id = next_id(self.db, C.CREDIT_TRANSACTIONS)
+            tx = {
+                "_id": tx_id,
+                "tenant_id": int(tenant_id),
+                "amount": int(amount),
+                "balance_after": new_balance,
+                "reason": reason,
+                "actor": actor,
+                "user_id": user_id,
+                "engagement_id": None,
+                "scan_run_id": None,
+                "renewal_request_id": renewal_request_id,
+                "idempotency_key": idempotency_key,
+                "note": note or f"Allocated {amount} credit(s)",
+                "created_at": utcnow(),
+            }
+            tx_col.insert_one(tx, session=session)
+            return with_id(tx)
+
+        tx = with_transaction(_txn)
+        AuditRepository(self.db).record(
+            actor,
+            "credits.allocate",
+            "credit_transaction",
+            tx["id"],
+            tenant_id=tenant_id,
+            amount=amount,
+            balance=tx["balance_after"],
+            reason=reason,
+        )
+        return tx
+
+    def refund(
+        self,
+        tenant_id: int,
+        *,
+        actor: str,
+        debit_tx_id: int,
+        reason: str,
+        scan_run_id: int | None = None,
+        engagement_id: int | None = None,
+        note: str = "",
+    ) -> dict[str, Any] | None:
+        key = f"refund:{reason}:tx:{debit_tx_id}"
+        tx = self.apply_ledger(
+            tenant_id,
+            1,
+            reason,
+            actor=actor,
+            idempotency_key=key,
+            engagement_id=engagement_id,
+            scan_run_id=scan_run_id,
+        )
+        AuditRepository(self.db).record(
+            actor,
+            "credits.refund",
+            "credit_transaction",
+            tx["id"],
+            tenant_id=tenant_id,
+            scan_run_id=scan_run_id,
+            balance=tx["balance_after"],
+            reason=reason,
+            note=note or "Credit refund",
+        )
+        return tx
+
+
+class ArtifactRepository(BaseRepository):
+    collection_name = C.ARTIFACTS
+
+    def get_by_uri(self, uri: str) -> dict[str, Any] | None:
+        doc = self.col.find_one({"uri": uri})
+        return with_id(doc) if doc else None
+
+    def register(
+        self,
+        uri: str,
+        sha256: str,
+        *,
+        gridfs_id: Any,
+        tenant_id: int | None = None,
+        content_type: str = "application/octet-stream",
+        key: str = "",
+        size: int = 0,
+    ) -> dict[str, Any]:
+        if tenant_id is not None:
+            require_tenant_access(tenant_id, self.tenant_ids)
+        existing = self.get_by_uri(uri)
+        if existing:
+            if existing.get("sha256") != sha256:
+                raise ValueError(f"refusing overwrite of existing artifact: {uri}")
+            return existing
+        return self.insert_with_id(
+            {
+                "uri": uri,
+                "sha256": sha256,
+                "gridfs_id": gridfs_id,
+                "tenant_id": tenant_id,
+                "content_type": content_type,
+                "key": key,
+                "size": int(size),
+                "immutable": True,
+                "created_at": utcnow(),
+            }
+        )

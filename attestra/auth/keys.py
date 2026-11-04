@@ -104,11 +104,16 @@ def create_api_key(s: Session, user: User) -> tuple[ApiKey, str]:
 
 def list_api_keys(s: Session, *, username: str | None = None) -> list[dict]:
     """Return API key rows (id, user, prefix, timestamps). Never includes the secret."""
-    q = select(ApiKey, User).join(User, ApiKey.user_id == User.id).order_by(ApiKey.id)
+    # Two single-entity queries (no multi-entity join) so this also runs on the Mongo session.
+    uq = select(User)
     if username:
-        q = q.where(User.username == username.strip().lower())
+        uq = uq.where(User.username == username.strip().lower())
+    users = {u.id: u for u in s.scalars(uq)}
+    if not users:
+        return []
     out = []
-    for key, user in s.execute(q):
+    for key in s.scalars(select(ApiKey).where(ApiKey.user_id.in_(list(users))).order_by(ApiKey.id)):
+        user = users[key.user_id]
         out.append({
             "id": key.id,
             "user_id": user.id,
