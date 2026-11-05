@@ -159,7 +159,13 @@ Concept-keyed fix packs so findings get accurate remediation instead of mismatch
 
 Technical report TOC and body completeness for professional VAPT deliverables.
 
-[[attestra/reports/render.py#_tools_and_versions]] builds `tools_and_versions` from observations, scan runs, imports, and finding tools — recorded `tool_version` only, else “version not recorded” (never invented). [[attestra/reports/render.py#_retest_request_rows]] feeds `#retesting`. [[attestra/reports/render.py#_attach_finding_narrative_fields]] attaches validation label, reproduction steps, and CVSS version onto finding cards. Technical template adds `#tools-and-versions`, honesty `#testing-limitations` / `#assumptions`, explicit DRAFT QA placeholders on `#document-control` / `#sign-off`, and keeps Phase 4 `#security-testing-coverage`. Finding cards show validation, repro, root cause, impact, and remediation when data exists. Doc: `docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`. Phase 9 covers sealed QA polish and ENG1 V21 regression.
+[[attestra/reports/render.py#_tools_and_versions]] builds `tools_and_versions` from observations, scan runs, imports, and finding tools — recorded `tool_version` only, else “version not recorded” (never invented). [[attestra/reports/render.py#_retest_request_rows]] feeds `#retesting`. [[attestra/reports/render.py#_attach_finding_narrative_fields]] attaches validation label, reproduction steps, and CVSS version onto finding cards. Technical template adds `#tools-and-versions`, honesty `#testing-limitations` / `#assumptions`, explicit DRAFT QA placeholders on `#document-control` / `#sign-off`, and keeps Phase 4 `#security-testing-coverage`. Finding cards show validation, repro, root cause, impact, and remediation when data exists. Doc: `docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`. Automated approval QA is [[architecture#World-class report QA (Phase 9)]]; ENG1 V21 regression is Phase 10.
+
+## World-class report QA (Phase 9)
+
+Automated sealed-report QA that blocks approval when critical data inconsistencies remain.
+
+[[attestra/reports/qa/runner.py#run_report_qa]] / [[attestra/reports/qa/runner.py#assert_qa_allows_approval]] run data-level checks (finding counts, CVSS, evidence hashes, remediation CSP mismatch, coverage honesty, checklist incomplete-as-passed, required anchors). Wired into [[attestra/reports/render.py#qa_approve]], [[attestra/reports/render.py#sign_report]], and legacy [[attestra/reports/render.py#approve_report]]; API `GET /api/reports/{rid}/qa`. See [[reports#World-class report QA (Phase 9)]]; doc `docs/WORLDCLASS_VAPT_PHASE9_REPORT_QA.md`. PDF visual QA and ENG1 V21 are deferred.
 
 ## Observability
 

@@ -753,6 +753,7 @@
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-approve">
             <button type="submit" class="secondary">QA approve</button>
           </form>
+          <div class="meta">Automated report QA runs on approve (GET /api/reports/{{ r.id }}/qa).</div>
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-reject" class="row">
             <input name="note" required aria-label="Reason for rejecting" placeholder="Reason (needed to reject)" style="width:150px;min-width:140px">
             <button type="submit" class="secondary">QA reject</button>

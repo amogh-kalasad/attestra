@@ -1143,6 +1143,21 @@ def verify(rid: int, principal: Principal = Depends(require("report.read"))):
     return _run(verify_report, rid)
 
 
+@app.get("/api/reports/{rid}/qa")
+def report_qa(rid: int, principal: Principal = Depends(require("report.read"))):
+    """Run automated report QA checks (read-only; does not change status)."""
+    from attestra.reports.qa import qa_result_dict, run_report_qa
+
+    def fn(s):
+        r = data_access.scoped_report(s, rid, principal)
+        if not r:
+            raise LookupError("report not found")
+        services.get_engagement(s, r.engagement_id, principal)
+        return qa_result_dict(run_report_qa(s, rid))
+
+    return _run(fn)
+
+
 @app.post("/api/reports/{rid}/export")
 def report_export(rid: int, principal: Principal = Depends(require("report.read"))):
     from attestra.reports.export import export_report_formats

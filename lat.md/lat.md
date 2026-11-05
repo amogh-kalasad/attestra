@@ -22,6 +22,8 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - World-class risk scoring (Phase 5): [[architecture#World-class risk scoring (Phase 5)]] (`docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md`)
 - World-class finding normalization (Phase 6): [[architecture#World-class finding normalization (Phase 6)]]
 - World-class report engine sections (Phase 8): [[architecture#World-class report engine sections (Phase 8)]] (`docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`)
+- World-class report QA (Phase 9): [[architecture#World-class report QA (Phase 9)]] / [[reports#World-class report QA (Phase 9)]] (`docs/WORLDCLASS_VAPT_PHASE9_REPORT_QA.md`)
+- World-class report QA (Phase 9): [[reports#World-class report QA (Phase 9)]]
 
 MongoDB is the runtime store (see [[architecture#MongoDB migration (in progress)]]); cutover design notes live in `docs/mongodb_migration/`.
 

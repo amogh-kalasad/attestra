@@ -2938,3 +2938,27 @@ Security-header and CORS snapshots record present/missing values without forcing
 ### Reflecting mock finding
 
 A tiny reflecting HTML mock yields injection and XSS `finding_candidate` true; a secure non-reflecting page stays false.
+
+## World-class Phase 9 report QA
+
+Automated sealed-report QA checks and approval gates (`tests/test_report_qa_phase9.py`).
+
+### Clean technical report QA ok
+
+A freshly generated technical report with consistent findings returns `ok` True (no critical issues; warnings/info allowed).
+
+### Bad CVSS vector raises issues
+
+A reportable finding with a malformed CVSS vector (and score set) produces a critical `malformed_cvss_vector` issue from `run_report_qa`.
+
+### Evidence hash mismatch critical
+
+When on-disk evidence bytes no longer match the stored sha256, QA raises critical `evidence_hash_mismatch`.
+
+### QA approve blocked on critical
+
+`qa_approve` raises ServiceError and leaves status submitted when critical QA issues are present.
+
+### Remediation CSP mismatch flagged
+
+A Permissions-Policy finding with CSP-only remediation text is flagged `remediation_csp_mismatch`.

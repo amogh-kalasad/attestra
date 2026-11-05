@@ -1314,6 +1314,10 @@ def qa_approve(s: Session, report_id: int, *, actor: str, user_id: int | None = 
     ):
         raise services.ServiceError("four-eyes rule: QA must be a different person from the author")
     _assert_hash(r)
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    from attestra.reports.qa import assert_qa_allows_approval, run_report_qa
+
+    assert_qa_allows_approval(run_report_qa(s, report_id))
     return _mongo_transition(r, from_status="submitted", actor=actor, action="report.qa_approve",
                              updates={"status": "qa_approved", "qa_by": actor, "qa_by_user_id": user_id})
 
@@ -1356,6 +1360,10 @@ def sign_report(
         raise services.ServiceError("four-eyes rule: signer must differ from author and QA")
     _assert_not_before_window(services.get_engagement(s, r.engagement_id))
     _assert_hash(r)
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    from attestra.reports.qa import assert_qa_allows_approval, run_report_qa
+
+    assert_qa_allows_approval(run_report_qa(s, report_id))
     return _mongo_sign(s, r, actor=actor, user_id=user_id, from_status="qa_approved")
 
 
@@ -1378,6 +1386,10 @@ def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | Non
     elif actor.strip().lower() == r.generated_by.strip().lower():
         raise services.ServiceError("four-eyes rule: the approver must be a different person from the author")
     _assert_hash(r)
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    from attestra.reports.qa import assert_qa_allows_approval, run_report_qa
+
+    assert_qa_allows_approval(run_report_qa(s, report_id))
     # Legacy fast-path: QA and sign by the same approver in one guarded write.
     return _mongo_sign(s, r, actor=actor, user_id=user_id, from_status=("draft", "rejected", "submitted"),
                        qa=(actor, user_id))
