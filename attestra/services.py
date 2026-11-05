@@ -533,14 +533,27 @@ def get_engagement(s: Session, engagement_id: int, principal=None) -> Engagement
 
 
 def engagement_coverage_snapshot(
-    s: Session, engagement_id: int, principal=None
+    s: Session, engagement_id: int, principal=None, *, include_ledger: bool = False
 ) -> dict:
-    """Lightweight PT coverage honesty snapshot (Phase 3), separate from vuln counts."""
+    """PT coverage honesty snapshot (Phase 3/4), separate from vuln counts.
+
+    Includes endpoint/method/param/role buckets, deferred vs skipped automated
+    cases, ``coverage_pct_endpoints``, ``ledger_entry_count``, and always
+    ``scan_completion_is_not_security_coverage=True``. When ``include_ledger``
+    is true, also attaches the Phase 4 ``ledger`` list from
+    [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]].
+    """
     # @lat: [[architecture#World-class PT coverage honesty (Phase 3)]]
+    # @lat: [[architecture#World-class coverage execution engine (Phase 4)]]
     eng = get_engagement(s, engagement_id, principal=principal)
     from attestra.automated_vapt.coverage.snapshot import build_coverage_snapshot
 
-    return build_coverage_snapshot(s, eng.id)
+    snap = build_coverage_snapshot(s, eng.id)
+    if include_ledger:
+        from attestra.automated_vapt.coverage.ledger import collect_engagement_ledger
+
+        snap = {**snap, "ledger": collect_engagement_ledger(s, eng.id)}
+    return snap
 
 
 def add_authorization(

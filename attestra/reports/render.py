@@ -629,6 +629,17 @@ def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
     }
 
 
+def _security_testing_coverage_context(s: Session, eng: Engagement) -> dict:
+    """Phase 4 coverage snapshot for technical reports; never folded into vuln counts."""
+    # @lat: [[reports#Generation]]
+    # @lat: [[architecture#World-class coverage visibility (Phase 4)]]
+    try:
+        snap = services.engagement_coverage_snapshot(s, eng.id)
+    except Exception:
+        snap = None
+    return {"security_testing_coverage": snap}
+
+
 def _safe_to_host_context(eng: Engagement, open_critical_high: int) -> dict:
     """Safe-to-Host letter fields for attestation; never claims compliance certification."""
     # @lat: [[reports#Safe-to-Host attestation]]
@@ -801,6 +812,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "ca": _ca_report_context(s),
         **_ai_context(engagement_id, eng.tenant_id),
         **_auth_web_report_context(s, eng),
+        **_security_testing_coverage_context(s, eng),
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }

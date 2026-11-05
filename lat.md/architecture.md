@@ -115,7 +115,25 @@ General classifiers mark scanner and automated-testing observations without trea
 
 Security-testing coverage is tracked separately from vulnerability counts; skipped or limited work must not read as passed.
 
-[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `passed` when notes contain incomplete-coverage markers (`not covered`, `not tested`, `skipped`, `limited`, `forms not covered`, `blind`) via [[attestra/auth_web/checklists.py#notes_imply_incomplete_coverage]], and still requires evidence to leave `blocked`. Auto-apply ([[attestra/auth_web/checklist_auto.py#apply_verdicts]]) never upgrades `blocked`→`passed` without evidence and refuses incomplete notes; limited T21 probes stay `blocked`. Snapshot: [[attestra/automated_vapt/coverage/snapshot.py#build_coverage_snapshot]] / [[attestra/services.py#engagement_coverage_snapshot]] (checklist + route + automated case totals). Category→module map: [[attestra/automated_vapt/testing/coverage_matrix.py#PHASE3_COVERAGE]]. Delivery: `docs/WORLDCLASS_VAPT_PHASE3_PT_COVERAGE.md`. Phase 4 deepens endpoint/param/role engines.
+[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `passed` when notes contain incomplete-coverage markers (`not covered`, `not tested`, `skipped`, `limited`, `forms not covered`, `blind`) via [[attestra/auth_web/checklists.py#notes_imply_incomplete_coverage]], and still requires evidence to leave `blocked`. Auto-apply ([[attestra/auth_web/checklist_auto.py#apply_verdicts]]) never upgrades `blocked`→`passed` without evidence and refuses incomplete notes; limited T21 probes stay `blocked`. Snapshot: [[attestra/automated_vapt/coverage/snapshot.py#build_coverage_snapshot]] / [[attestra/services.py#engagement_coverage_snapshot]] (checklist + route + automated case totals). Category→module map: [[attestra/automated_vapt/testing/coverage_matrix.py#PHASE3_COVERAGE]]. Delivery: `docs/WORLDCLASS_VAPT_PHASE3_PT_COVERAGE.md`. Phase 4 deepens the snapshot, ledger, and report/API surfacing (see below).
+
+## World-class coverage execution engine (Phase 4)
+
+Extends the Phase 3 snapshot with endpoint auth buckets, methods, params, roles, and deferred-case honesty.
+
+[[attestra/automated_vapt/coverage/snapshot.py#build_coverage_snapshot]] / [[attestra/automated_vapt/coverage/models.py#CoverageSnapshot]] add authenticated/unauthenticated endpoint counts (route `authenticated` or non-empty `role_name`), `methods_tested`, parameter and role totals (elements preferred, else ledger/query keys), `automated_cases_blocked` / `test_cases_blocked` (DEFERRED distinct from SKIPPED), `coverage_pct_endpoints` via [[attestra/auth_web/coverage.py#_route_bucket]], `ledger_entry_count` from [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]], and always `scan_completion_is_not_security_coverage=True`. Vulnerability severity totals stay out of this object. [[attestra/services.py#engagement_coverage_snapshot]] returns that dict and optionally attaches a ledger. Delivery: `docs/WORLDCLASS_VAPT_PHASE4_COVERAGE_ENGINE.md`.
+
+## World-class test execution ledger (Phase 4)
+
+Per-case coverage rows under `AutomatedTestExecution.result_json.coverage_ledger`, separate from vuln counts.
+
+[[attestra/automated_vapt/coverage/ledger.py#CoverageLedgerEntry]] holds test_id, category, target_endpoint, optional http_method, parameters, execution_status, executed_at, auth_context, evidence_refs, short result, limitation, block_or_fail_reason, and engagement/execution/asset ids. [[attestra/automated_vapt/coverage/ledger.py#entries_from_case_result]] extracts endpoints from observations, evidence pairs, pages, replay endpoints, module probes, and finding_location. [[attestra/automated_vapt/core/orchestrator.py#run_execution]] appends via [[attestra/automated_vapt/coverage/ledger.py#merge_ledger]] after each case (persists mid-run). Statuses map PASSED/FINDING/FAILED/SKIPPED/DEFERRED; DEFERRED/SKIPPED always set limitation (not full coverage). Aggregate with [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]] / [[attestra/automated_vapt/coverage/ledger.py#build_coverage_ledger]].
+
+## World-class coverage visibility (Phase 4)
+
+Surfaces security-testing coverage separately from vulnerability counts via API and technical reports.
+
+`GET /api/engagements/{eid}/coverage` ([[attestra/api.py#engagement_coverage]]) requires `engagement.read`, returns [[attestra/services.py#engagement_coverage_snapshot]], and with `?ledger=1` includes the Phase 4 ledger list. Technical report context key `security_testing_coverage` from [[attestra/reports/render.py#_security_testing_coverage_context]] drives the **Security testing coverage** subsection in `technical.html.j2` (endpoints discovered/tested/untested, checklist passed/failed/blocked/not_started, automated successful/failed/skipped, exclusions note). PDF uses the same HTML path. Scan completion must never be presented as 100% security testing coverage; skipped/blocked ≠ passed.
 
 ## Observability
 

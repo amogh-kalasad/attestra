@@ -398,6 +398,21 @@ def get_engagement(eid: int, principal: Principal = Depends(require("engagement.
     return _run(lambda s: _eng_dict(services.get_engagement(s, eid, principal)))
 
 
+@app.get("/api/engagements/{eid}/coverage")
+def engagement_coverage(
+    eid: int,
+    ledger: int = Query(0, description="Set to 1 to include Phase 4 execution ledger rows"),
+    principal: Principal = Depends(require("engagement.read")),
+):
+    """Security-testing coverage snapshot (separate from vulnerability counts)."""
+    # @lat: [[architecture#World-class coverage visibility (Phase 4)]]
+    return _run(
+        lambda s: services.engagement_coverage_snapshot(
+            s, eid, principal, include_ledger=bool(ledger)
+        )
+    )
+
+
 @app.post("/api/engagements/{eid}/authorizations", status_code=201)
 async def add_authorization(
     eid: int,

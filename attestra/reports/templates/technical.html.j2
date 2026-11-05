@@ -15,6 +15,7 @@
     <li><a href="#summary">Summary</a></li>
     <li><a href="#findings-overview">Findings overview</a></li>
     {% if passed_checks %}<li><a href="#status-checks">Status checks</a></li>{% endif %}
+    {% if security_testing_coverage %}<li><a href="#security-testing-coverage">Security testing coverage</a></li>{% endif %}
     {% if auth_checklist_section %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
@@ -239,6 +240,27 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     <td class="mono">{{ c.evidence or "—" }}</td>
   </tr>
   {% endfor %}
+</table>
+{% endif %}
+
+{% if security_testing_coverage %}
+{% set sec.n = sec.n + 1 %}<h2 id="security-testing-coverage">{{ sec.n }}. Security testing coverage</h2>
+<p class="meta">Coverage is tracked separately from vulnerability counts. Skipped and blocked checks are not counted as passed. Scan completion is not the same as security testing coverage.</p>
+{% if security_testing_coverage.exclusions_note %}
+<p class="meta">{{ security_testing_coverage.exclusions_note }}</p>
+{% endif %}
+<table>
+  <tr><th>Measure</th><th>Count</th></tr>
+  <tr><td>Endpoints discovered</td><td>{{ security_testing_coverage.endpoints_discovered }}</td></tr>
+  <tr><td>Endpoints tested</td><td>{{ security_testing_coverage.endpoints_tested }}</td></tr>
+  <tr><td>Endpoints untested</td><td>{{ security_testing_coverage.endpoints_untested }}</td></tr>
+  <tr><td>Checklist passed</td><td>{{ security_testing_coverage.checklist_passed }}</td></tr>
+  <tr><td>Checklist failed</td><td>{{ security_testing_coverage.checklist_failed }}</td></tr>
+  <tr><td>Checklist blocked</td><td>{{ security_testing_coverage.checklist_blocked }}</td></tr>
+  <tr><td>Checklist not started</td><td>{{ security_testing_coverage.checklist_not_started }}</td></tr>
+  <tr><td>Automated cases successful</td><td>{{ security_testing_coverage.automated_cases_successful }}</td></tr>
+  <tr><td>Automated cases failed</td><td>{{ security_testing_coverage.automated_cases_failed }}</td></tr>
+  <tr><td>Automated cases skipped</td><td>{{ security_testing_coverage.automated_cases_skipped }}</td></tr>
 </table>
 {% endif %}
 

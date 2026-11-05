@@ -2719,6 +2719,50 @@ Checklist honesty gates and coverage snapshot separate from vuln counts (`tests/
 
 When the sibling [[attestra/automated_vapt/testing/_reflection.py]] module exists, unencoded vs escaped reflection detection is smoke-checked; otherwise the test is skipped.
 
+## World-class Phase 4 coverage snapshot
+
+Deepens [[attestra/automated_vapt/coverage/models.py#CoverageSnapshot]] with auth/method/param/role buckets (`tests/test_coverage_snapshot_phase4.py`).
+
+### Endpoint auth method role param fields
+
+[[attestra/automated_vapt/coverage/snapshot.py#build_coverage_snapshot]] counts authenticated vs unauthenticated routes, visited HTTP methods, element parameters, and discovered/tested roles with `coverage_pct_endpoints` and always `scan_completion_is_not_security_coverage`.
+
+### Deferred blocked distinct from skipped
+
+Automated `DEFERRED` cases land in `automated_cases_blocked` / `test_cases_blocked` while `SKIPPED` stays in `automated_cases_skipped`; ledger rows contribute `ledger_entry_count` and optional method/param enrichment.
+
+### Empty inventory zero coverage pct
+
+With no route inventory the snapshot reports zero endpoint coverage percent and empty method/role/param totals while still flagging incomplete coverage.
+
+## Phase 4 coverage API and report
+
+Surfaces security-testing coverage separately from vulnerability counts (`tests/test_coverage_report_phase4.py`).
+
+### Coverage API returns snapshot
+
+`GET /api/engagements/{eid}/coverage` returns snapshot fields from [[attestra/services.py#engagement_coverage_snapshot]] and includes a `ledger` list when `?ledger=1`.
+
+### Technical report includes coverage section
+
+Generated technical HTML includes the Security testing coverage heading and endpoint/checklist/automated coverage keys without folding them into vulnerability severity totals.
+
+## Phase 4 test execution ledger
+
+Structured per-case coverage rows on automated executions (`tests/test_coverage_ledger_phase4.py`).
+
+### Entries from case result probes
+
+[[attestra/automated_vapt/coverage/ledger.py#entries_from_case_result]] builds endpoint/method/param rows from module probes, pages, and replay endpoints with mapped execution_status.
+
+### Deferred and skipped set limitation
+
+DEFERRED and SKIPPED ledger rows always include a limitation explaining incomplete coverage.
+
+### Merge and engagement collect
+
+[[attestra/automated_vapt/coverage/ledger.py#merge_ledger]] dedupes by execution/test/endpoint/method/auth; [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]] aggregates COMPLETED/FAILED `coverage_ledger` blobs.
+
 ## World-class Phase 3 safe probes
 
 Safe non-destructive injection/XSS/file/header helpers and run modules (`tests/automated_vapt/test_phase3_safe_probes.py`).

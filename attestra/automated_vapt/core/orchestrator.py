@@ -295,6 +295,12 @@ def run_execution(
                     target_url=ex.target_base_url,
                 )
         results: list[dict[str, Any]] = []
+        coverage_ledger: list[dict[str, Any]] = []
+        from attestra.automated_vapt.coverage.ledger import (
+            entries_from_case_result,
+            merge_ledger,
+        )
+
         for tid in ctx.test_case_ids:
             pairs_before = len(ctx.extra.get("_http_pairs") or [])
             shots_before = set((ctx.extra.get("_screenshots") or {}).keys())
@@ -342,13 +348,40 @@ def run_execution(
                         http_pairs=pairs,
                         screenshots=shots,
                     )
+            # Phase 4 ledger: extract while evidence_pairs still present, then strip.
+            auth_ctx = None
+            sess = ctx.extra.get("_session_auth")
+            if sess is not None and hasattr(sess, "public"):
+                auth_ctx = sess.public()
+            elif isinstance(case_result.get("auth"), dict):
+                auth_ctx = case_result.get("auth")
+            coverage_ledger = merge_ledger(
+                coverage_ledger,
+                entries_from_case_result(
+                    case_result,
+                    engagement_id=eng.id,
+                    execution_id=ex.id,
+                    asset_id=asset.id if asset is not None else ex.asset_id,
+                    auth_context=auth_ctx,
+                    executed_at=utcnow(),
+                ),
+            )
             # HttpPair objects are not JSON-serializable; strip before persist.
             case_result.pop("evidence_pairs", None)
             case_result.pop("finding_evidence_pairs", None)
             results.append(case_result)
+            # Persist cases + ledger after each case so FAILED mid-run still retains rows.
+            ex.result_json = json.dumps(
+                {"cases": results, "coverage_ledger": coverage_ledger},
+                sort_keys=True,
+            )
+            s.flush()
 
         ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
-        ex.result_json = json.dumps({"cases": results}, sort_keys=True)
+        ex.result_json = json.dumps(
+            {"cases": results, "coverage_ledger": coverage_ledger},
+            sort_keys=True,
+        )
         exec_mgr.transition(ex, "COMPLETED")
         audit.record(
             s,
