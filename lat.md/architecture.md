@@ -103,7 +103,13 @@ Capabilities intentionally left for later phases (see `docs/GAP_ANALYSIS_CURRENT
 
 Phase 1 of the world-class VA + PT improvement prompt is an audit-only gap analysis against ENG1 technical report v21; no product code changed in that pass.
 
-Full scorecard, ENG1 issue register (CORS/cdn-cgi, Cloudflare cookies, HSTS evidence contradiction, weak-cipher evidence, XSS-Protection mapping, wrong Permissions-Policy remediation), and prioritized backlog for Phases 2–10 live in `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md`. Highest-priority follow-on is a unified finding validation engine that does not treat scanner alerts as confirmed without evidence.
+Full scorecard, ENG1 issue register (CORS/cdn-cgi, Cloudflare cookies, HSTS evidence contradiction, weak-cipher evidence, XSS-Protection mapping, wrong Permissions-Policy remediation), and prioritized backlog for Phases 2–10 live in `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md`.
+
+## World-class finding validation (Phase 2)
+
+General classifiers mark scanner and automated-testing observations without treating alerts as confirmed.
+
+[[attestra/finding_validation/classify.py#classify_observation]] returns a validation class plus optional severity/CWE/OWASP/WSTG overrides. CDN/CF helpers live in [[attestra/finding_validation/infrastructure.py]]; header contradiction helpers in [[attestra/finding_validation/headers.py]]. Import apply + post-capture reconcile: [[attestra/services.py#_apply_import_validation]], [[attestra/finding_validation/reconcile.py#reconcile_validation_from_evidence]]. Delivery note: `docs/WORLDCLASS_VAPT_PHASE2_VALIDATION.md`. See [[findings#Lifecycle#Validation class vs workflow status]].
 
 ## Observability
 

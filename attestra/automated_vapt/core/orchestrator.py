@@ -328,6 +328,7 @@ def run_execution(
                         or validation.get("recommendation")
                         or "Enforce object-level authorization and retest."
                     ),
+                    false_positive=case_result.get("false_positive") or {},
                 )
                 if finding is not None:
                     case_result["finding_id"] = finding.id
@@ -884,6 +885,7 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             or (obs.get("account_a_proj_b_status") == 200 and protected)
         )
     )
+    evidence_pairs = result.get("evidence_pairs") or []
     vctx = {
         "executed": True,
         "in_scope": True,
@@ -896,8 +898,9 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         or obs.get("users_status"),
         "protected_data_exposed": protected,
         "authorization_bypass": bypass or bool(result.get("finding_candidate") and protected),
-        "reproducible": True,
-        "evidence_supports": True,
+        # Do not hard-code evidence strength: require captured pairs for CONFIRMED path.
+        "reproducible": bool(evidence_pairs) or bool(obs),
+        "evidence_supports": bool(evidence_pairs) or bool(protected or bypass),
         "finding_candidate": bool(result.get("finding_candidate")),
         "authorized_access": bool(obs.get("authorized_ok") and obs.get("unauthorized_blocked")),
     }

@@ -47,12 +47,25 @@ def _zap(data: bytes) -> Iterator[HttpPair]:
     for site in sites:
         for alert in site.get("alerts") or []:
             for inst in alert.get("instances") or []:
-                req_h = inst.get("request-header") or inst.get("requestHeader") or ""
-                resp_h = inst.get("response-header") or inst.get("responseHeader") or ""
+                # traditional-json-plus: kebab-case; some exports: camelCase or lowercase.
+                req_h = (
+                    inst.get("request-header")
+                    or inst.get("requestHeader")
+                    or inst.get("requestheader")
+                    or ""
+                )
+                resp_h = (
+                    inst.get("response-header")
+                    or inst.get("responseHeader")
+                    or inst.get("responseheader")
+                    or ""
+                )
                 if not req_h or not resp_h:
                     continue
-                req = req_h.rstrip("\r\n") + "\r\n\r\n" + (inst.get("request-body") or inst.get("requestBody") or "")
-                resp = resp_h.rstrip("\r\n") + "\r\n\r\n" + (inst.get("response-body") or inst.get("responseBody") or "")
+                req_b = inst.get("request-body") or inst.get("requestBody") or inst.get("requestbody") or ""
+                resp_b = inst.get("response-body") or inst.get("responseBody") or inst.get("responsebody") or ""
+                req = req_h.rstrip("\r\n") + "\r\n\r\n" + req_b
+                resp = resp_h.rstrip("\r\n") + "\r\n\r\n" + resp_b
                 yield pair_from_raw(req, resp, url=inst.get("uri") or "", match=inst.get("evidence") or "", source="zap")
 
 

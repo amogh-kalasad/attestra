@@ -60,7 +60,7 @@ A run succeeds only when the report file exists and the importer can read it. A 
 
 ZAP runs only in Docker. The report folder is mounted at `/zap/wrk`, the only place the ZAP scripts write their JSON report.
 
-[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside. Authenticated ZAP contexts from credential profiles are built by [[attestra/auth_web/zap_auth.py]] without putting secrets on argv.
+[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside. Authenticated ZAP contexts from credential profiles are built by [[attestra/auth_web/zap_auth.py]] without putting secrets on argv. Packaged `-J` traditional-json often omits HTTP messages; when instances do include headers (e.g. traditional-json-plus uploads), [[attestra/importers/zap.py#parse]] and [[attestra/proof/capture.py#_zap]] surface them for validation.
 
 ### webcheck (passive headers and DNS)
 

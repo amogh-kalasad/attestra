@@ -9,6 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra.automated_vapt.validation.severity_calculator import severity_for
+from attestra.finding_validation.classify import (
+    elite_status_to_validation,
+    should_create_elite_finding,
+)
 from attestra.fingerprint import fingerprint
 from attestra.models import Finding
 from attestra.proof.pair import HttpPair
@@ -33,10 +37,12 @@ def create_finding_from_validation(
     location: str = "",
     actor: str = "automated_vapt",
     recommendation: str = "Enforce object-level authorization and retest.",
+    false_positive: dict[str, Any] | None = None,
 ) -> Finding | None:
-    """Create a finding only for CONFIRMED or POTENTIAL validation statuses."""
+    """Create a finding only for CONFIRMED or POTENTIAL when FP checker allows it."""
     status = (validation.get("status") or "").upper()
-    if status not in ("CONFIRMED", "POTENTIAL"):
+    fp_check = false_positive or validation.get("false_positive") or {}
+    if not should_create_elite_finding(validation, fp_check):
         return None
     sev = severity_for(cwe=cwe, hints={"protected_data_exposed": status == "CONFIRMED"})
     loc = location or title
@@ -66,6 +72,8 @@ def create_finding_from_validation(
         location=loc[:1000],
         severity=sev,
         owasp_top10="A01:2021-Broken Access Control",
+        validation_status=elite_status_to_validation(status),
+        validation_reasons=list(validation.get("reasons") or []),
         risk_score=float(risk_score(None, sev)),
         sla_due=sla_due(sev),
     )

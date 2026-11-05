@@ -21,6 +21,8 @@ Tool keys registered in [[attestra/importers/__init__.py#PARSERS]] and their par
 
 Entry point: [[attestra/importers/__init__.py#parse]].
 
+[[attestra/importers/zap.py#parse]] appends truncated `requestHeader` / `responseHeader` / `statusCode` snippets to `evidence_refs` when alert instances include them (e.g. traditional-json-plus); packaged `-J` traditional-json often omits messages. [[attestra/proof/capture.py#_zap]] accepts kebab-case, camelCase, and lowercase header keys for HttpPair auto-capture.
+
 Observatory and SSL Labs never call those sites from Attestra. Failed Observatory tests and weak SSL Labs protocols/certs become findings; variants match webcheck header ids and testssl TLS ids so re-imports merge instead of doubling.
 
 ### Burp and Nessus XML

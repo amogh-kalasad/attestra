@@ -1453,6 +1453,7 @@ def import_results(
             )
             f.asset = asset
             _apply_owasp(f)
+            _apply_import_validation(f, nf)
             s.add(f)
             s.flush()  # need finding.id for observation FK
             existing[fp] = f
@@ -1503,6 +1504,8 @@ def import_results(
             if not f.cwe and nf.cwe:
                 f.cwe = nf.cwe
                 _apply_owasp(f)
+            # Re-run validation classifiers when new evidence_refs arrive on merge.
+            _apply_import_validation(f, nf, only_if_stronger=True)
             if f.status == "fixed":
                 # Reappeared after being marked fixed: reopen.
                 f.status = "validated" if f.validated_by else "triaged"
@@ -1588,6 +1591,13 @@ def import_results(
     from attestra.proof.hooks import after_import
 
     after_import(s, engagement_id, tool, data, [existing[fp] for fp in existing if fp not in known_fps], actor=actor)
+    # Phase 2: reclassify header-missing claims using captured HTTP pair evidence.
+    try:
+        from attestra.finding_validation.reconcile import reconcile_validation_from_evidence
+
+        reconcile_validation_from_evidence(s, engagement_id)
+    except Exception:
+        pass
     # Cross-tool merge: link the same issue reported by different tools (never deletes rows).
     from attestra import crossmerge
 
@@ -1615,6 +1625,47 @@ def _apply_owasp(f: Finding) -> None:
     f.owasp_top10 = refs["owasp_top10"]
     f.asvs_ref = refs["asvs_ref"]
     f.wstg_ref = refs["wstg_ref"]
+
+
+_VALIDATION_STRENGTH = {
+    "unvalidated": 0,
+    "potential": 1,
+    "needs_manual_validation": 2,
+    "informational": 3,
+    "not_reproducible": 4,
+    "false_positive": 4,
+    "accepted_risk": 4,
+    "confirmed": 5,
+}
+
+
+def _apply_import_validation(f: Finding, nf, *, only_if_stronger: bool = False) -> None:
+    """Classify imported observation into Finding.validation_status (not workflow status)."""
+    from attestra.finding_validation.classify import (
+        apply_classification_to_finding,
+        classify_observation,
+    )
+
+    result = classify_observation(
+        title=nf.title or f.title or "",
+        description=nf.description or f.description or "",
+        recommendation=nf.recommendation or f.recommendation or "",
+        location=nf.location or f.location or "",
+        param=getattr(nf, "param", "") or "",
+        severity=nf.severity or f.severity or "",
+        cwe=nf.cwe if nf.cwe is not None else f.cwe,
+        rule_ids=[nf.rule_id] if getattr(nf, "rule_id", None) else list(f.rule_ids or []),
+        evidence_refs=list(getattr(nf, "evidence_refs", None) or []),
+        tools=[nf.tool] if getattr(nf, "tool", None) else list(f.tools or []),
+    )
+    if only_if_stronger:
+        before = getattr(f, "validation_status", None) or "unvalidated"
+        after = result.get("validation_status") or "unvalidated"
+        if _VALIDATION_STRENGTH.get(after, 0) < _VALIDATION_STRENGTH.get(before, 0):
+            return
+        if after == before == "unvalidated":
+            return
+    apply_classification_to_finding(f, result)
 
 
 def _tenant_weights(f: Finding):

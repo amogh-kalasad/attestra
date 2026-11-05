@@ -2654,3 +2654,51 @@ Redaction, two-panel render, annotation, and manifest verify succeed.
 Foreign hosts are rejected by scope validation.
 
 
+
+## World-class Phase 2 finding validation
+
+Finding validation classifiers and create gate (`tests/test_finding_validation.py`).
+
+### CDN challenge URL
+
+CDN challenge path and Cloudflare cookie name helpers match known infrastructure markers.
+
+### CF cookie informational
+
+SameSite findings on `cf_clearance` classify as informational.
+
+### CDN CORS informational
+
+CORS/cross-domain findings on cdn-cgi challenge URLs classify as informational.
+
+### Permissions on cdn-cgi
+
+Permissions-Policy missing claims on cdn-cgi URLs classify as informational.
+
+### HSTS evidence contradiction
+
+HSTS-not-set claims with Strict-Transport-Security max-age evidence classify as not_reproducible.
+
+### Weak cipher needs evidence
+
+Weak-cipher findings without suite names classify as needs_manual_validation.
+
+### XSS-Protection remapped
+
+Deprecated XSS-Protection findings become informational with CWE-693 and misconfiguration OWASP mapping.
+
+### Default unvalidated
+
+Ordinary scanner alerts remain unvalidated until evidence-backed confirmation.
+
+### Elite FP gate
+
+Automated create requires CONFIRMED or POTENTIAL and rejects likely false positives.
+
+### Apply does not touch workflow
+
+Classification updates validation fields only; workflow status stays unchanged.
+
+### Reconcile from http pair
+
+Engagement HTTP pair evidence reclassifies HSTS-missing findings as not_reproducible.

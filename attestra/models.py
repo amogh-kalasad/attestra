@@ -458,6 +458,9 @@ class Finding(Base):
     kev: Mapped[bool] = mapped_column(Boolean, default=False)
     risk_score: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(20), default="new")
+    # Evidence validation class (separate from workflow status). See finding_validation.
+    validation_status: Mapped[str] = mapped_column(String(40), default="unvalidated")
+    validation_reasons: Mapped[list] = mapped_column(JSON, default=list)
     sla_due: Mapped[date | None] = mapped_column(Date)
     occurrences: Mapped[int] = mapped_column(Integer, default=1)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

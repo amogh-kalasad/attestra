@@ -100,9 +100,9 @@ Open statuses for compliance roll-up: [[attestra/models.py#OPEN_STATUSES]].
 
 ### Validation class vs workflow status
 
-Finding workflow status and Elite evidence validation class are separate models today.
+Workflow `status` and finding `validation_status` are separate; scanners stay unvalidated until evidence-backed.
 
-[[attestra/models.py#TRANSITIONS]] covers triage/validation/fix/FP/risk acceptance. Elite [[attestra/automated_vapt/validation/vulnerability_validator.py#validate_result]] emits CONFIRMED/POTENTIAL/NOT_VULNERABLE/INCONCLUSIVE/NEEDS_MANUAL_REVIEW and [[attestra/automated_vapt/integrations/attestra_findings.py#create_finding_from_validation]] still creates rows as `new`. Prompt labels such as Not Reproducible are not first-class statuses yet. Gap analysis: `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md` and [[architecture#World-class security testing audit (Phase 1)]].
+[[attestra/models.py#TRANSITIONS]] covers triage/fix/FP/risk acceptance workflow. [[attestra/finding_validation/statuses.py]] defines validation classes (`unvalidated`, `confirmed`, `needs_manual_validation`, `potential`, `false_positive`, `informational`, `not_reproducible`, `accepted_risk`). [[attestra/finding_validation/classify.py#classify_observation]] applies general CDN/CF cookie, CORS-on-cdn-cgi, XSS-Protection remapping, header-evidence contradiction, and weak-cipher evidence rules without hardcoding engagement finding IDs. [[attestra/finding_validation/classify.py#apply_classification_to_finding]] sets validation fields only (never workflow status). Elite [[attestra/automated_vapt/validation/vulnerability_validator.py#validate_result]] statuses map via [[attestra/finding_validation/classify.py#elite_status_to_validation]]; create is gated by [[attestra/finding_validation/classify.py#should_create_elite_finding]] (CONFIRMED/POTENTIAL and not likely FP). Gap analysis: `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md` and [[architecture#World-class security testing audit (Phase 1)]].
 
 ## Enrichment
 

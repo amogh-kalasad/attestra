@@ -239,6 +239,8 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         "title": f.title,
         "severity": f.severity,
         "status": f.status,
+        "validation_status": getattr(f, "validation_status", None) or "unvalidated",
+        "validation_reasons": list(getattr(f, "validation_reasons", None) or []),
         "risk_score": f.risk_score,
         "cvss_score": f.cvss_score,
         "cvss_vector": f.cvss_vector,

@@ -3,6 +3,11 @@
 The report folder is mounted at /zap/wrk, the only place zap-baseline.py / zap-full-scan.py
 write their -J report. Exit codes 1 (WARN) and 2 (FAIL) still come with a valid report.
 
+Message inclusion (request/response headers on alert instances) depends on the ZAP image and
+report template: packaged ``-J`` uses traditional-json without HTTP messages; traditional-json-plus
+(or uploads that already embed headers) may include them. Missing messages remain a known
+limitation surfaced in validation — there is no safe verified ``-z`` config that adds them to ``-J``.
+
 Optional authenticated scans (Phase 7 / auth-web): when ``ATTESTRA_AUTH_WEB_ENABLED`` is on and
 ``auth_opts`` point at a per-scan secret dir (outside ``data/raw``), the adapter mounts it
 read-only at ``/zap/attestra-secrets``; the single crawl hook injects the session headers
