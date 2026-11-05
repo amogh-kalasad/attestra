@@ -155,6 +155,12 @@ Concept-keyed fix packs so findings get accurate remediation instead of mismatch
 
 [[attestra/remediation/packs.py#REMEDIATION_PACKS]] covers HSTS/CSP/COEP/COOP/CORP/Permissions-Policy, deprecated X-XSS-Protection, CORS, SameSite cookies, weak TLS ciphers, IDOR, SQLi, and reflected XSS. Matching in [[attestra/remediation/match.py#pack_for_finding]] / [[attestra/remediation/match.py#resolve_concepts]] prefers crossmerge concepts and rejects CSP packs for Permissions-Policy titles. [[attestra/remediation/match.py#remediation_for_finding]] exposes pack fields plus legacy `recommendation_text`. Library/API/report wiring: [[attestra/library/service.py#guidance_for_finding]], [[attestra/library/service.py#finding_api_fix_fields]], [[attestra/services.py#_apply_remediation_recommendation]], [[attestra/reports/render.py#_attach_remediation_packs]]. See [[findings#Remediation packs (Phase 7)]]; doc `docs/WORLDCLASS_VAPT_PHASE7_REMEDIATION.md`.
 
+## World-class report engine sections (Phase 8)
+
+Technical report TOC and body completeness for professional VAPT deliverables.
+
+[[attestra/reports/render.py#_tools_and_versions]] builds `tools_and_versions` from observations, scan runs, imports, and finding tools — recorded `tool_version` only, else “version not recorded” (never invented). [[attestra/reports/render.py#_retest_request_rows]] feeds `#retesting`. [[attestra/reports/render.py#_attach_finding_narrative_fields]] attaches validation label, reproduction steps, and CVSS version onto finding cards. Technical template adds `#tools-and-versions`, honesty `#testing-limitations` / `#assumptions`, explicit DRAFT QA placeholders on `#document-control` / `#sign-off`, and keeps Phase 4 `#security-testing-coverage`. Finding cards show validation, repro, root cause, impact, and remediation when data exists. Doc: `docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`. Phase 9 covers sealed QA polish and ENG1 V21 regression.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.

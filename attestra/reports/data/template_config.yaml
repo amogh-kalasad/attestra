@@ -56,16 +56,21 @@ kinds:
       - toc
       - scope
       - methodology
+      - tools_and_versions
       - standards
       - risk_legend
       - summary
       - findings_overview
       - passed_checks
+      - security_testing_coverage
       - site_grades
       - tls_summary
       - findings_detail
       - disclaimer
+      - retesting
       - conclusion
+      - sign_off
+      - appendix
   retest:
     label: Retest and remediation verification report
     assessment_types: [retest, vapt, va, pt]

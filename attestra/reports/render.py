@@ -65,6 +65,64 @@ def _finding_cvss_version(f) -> str:
 def _finding_business_risk(f):
     """Sibling Phase 5 field; None when column not merged yet."""
     return getattr(f, "business_risk", None)
+
+
+def _finding_validation_status_label(f) -> str:
+    """Human label for validation_status; never invents Confirmed."""
+    # @lat: [[reports#Generation]]
+    from attestra.finding_validation.statuses import VALIDATION_STATUS_LABELS
+    from attestra.reports.labels import STATUS_LABELS, humanize
+
+    raw = _validation_status_of(f)
+    if not raw:
+        return VALIDATION_STATUS_LABELS.get("unvalidated", "Unvalidated")
+    if raw in VALIDATION_STATUS_LABELS:
+        return VALIDATION_STATUS_LABELS[raw]
+    if raw in STATUS_LABELS:
+        return STATUS_LABELS[raw]
+    return humanize(raw)
+
+
+def _reproduction_steps_for_finding(f) -> str:
+    """Stored reproduction_steps when present; else a short location/tool default."""
+    # @lat: [[reports#Generation]]
+    from attestra.reports.labels import tool_label
+
+    stored = getattr(f, "reproduction_steps", None)
+    if isinstance(stored, str) and stored.strip():
+        return stored.strip()
+    if isinstance(stored, (list, tuple)):
+        lines = [str(x).strip() for x in stored if str(x).strip()]
+        if lines:
+            return "\n".join(lines)
+
+    url = (getattr(f, "location", None) or "").strip()
+    if not url:
+        urls = getattr(f, "affected_urls", None) or []
+        if isinstance(urls, str) and urls.strip():
+            url = urls.strip()
+        elif isinstance(urls, (list, tuple)):
+            for u in urls:
+                if str(u).strip():
+                    url = str(u).strip()
+                    break
+
+    param = (getattr(f, "param", None) or "").strip()
+    tools = getattr(f, "tools", None) or []
+    if isinstance(tools, str):
+        tools = [tools]
+    tool_names = [tool_label(t) for t in tools if t]
+    tool_phrase = ", ".join(tool_names) if tool_names else "scanner"
+
+    if url and param:
+        step1 = f"1. Navigate to {url} (parameter: {param})."
+    elif url:
+        step1 = f"1. Navigate to {url}."
+    else:
+        step1 = "1. Navigate to the affected asset or endpoint for this finding."
+    return f"{step1} 2. Reproduce with {tool_phrase} evidence attached."
+
+
 from attestra.reports import signing
 from attestra.reports.labels import register_jinja_filters
 from attestra.reports.template_config import (
@@ -289,6 +347,99 @@ def _retests_for_engagement(s: Session, engagement_id: int, findings: list) -> d
 def _latest_retest(retests_by_finding: dict[int, list[Retest]], finding_id: int) -> Retest | None:
     rows = retests_by_finding.get(finding_id) or []
     return rows[0] if rows else None
+
+
+_VERSION_NOT_RECORDED = "version not recorded"
+
+
+def _tools_and_versions(
+    findings: list,
+    observations_by_finding: dict[int, list],
+    imports: list,
+    scan_history: list,
+) -> list[dict]:
+    """Distinct tools with recorded versions only; never invent versions.
+
+    Sources: FindingObservation.tool_version, ScanRun.tool_version, finding.tools,
+    and import-run tool names. Missing versions become "version not recorded".
+    """
+    # @lat: [[reports#Generation]]
+    buckets: dict[str, dict] = {}
+
+    def ensure(tool: str) -> dict | None:
+        raw = (tool or "").strip()
+        if not raw:
+            return None
+        key = raw.lower().replace("-", "_")
+        if key not in buckets:
+            buckets[key] = {"tool": raw, "versions": set()}
+        return buckets[key]
+
+    for rows in (observations_by_finding or {}).values():
+        for o in rows or []:
+            b = ensure(getattr(o, "tool", None) or "")
+            if not b:
+                continue
+            ver = (getattr(o, "tool_version", None) or "").strip()
+            if ver:
+                b["versions"].add(ver)
+
+    for run in scan_history or []:
+        b = ensure(getattr(run, "tool", None) or "")
+        if not b:
+            continue
+        ver = (getattr(run, "tool_version", None) or "").strip()
+        if ver:
+            b["versions"].add(ver)
+
+    for imp in imports or []:
+        ensure(getattr(imp, "tool", None) or "")
+
+    for f in findings or []:
+        for t in getattr(f, "tools", None) or []:
+            if isinstance(t, str):
+                ensure(t)
+
+    out: list[dict] = []
+    for key in sorted(buckets.keys()):
+        b = buckets[key]
+        versions = sorted(b["versions"])
+        if not versions:
+            version = _VERSION_NOT_RECORDED
+            notes = "No tool_version on observations or scan runs"
+        elif len(versions) == 1:
+            version = versions[0]
+            notes = ""
+        else:
+            version = "; ".join(versions)
+            notes = "Multiple versions recorded"
+        out.append({"tool": b["tool"], "version": version, "notes": notes})
+    return out
+
+
+def _retest_request_rows(retests_by_finding: dict[int, list], flabel) -> list[dict]:
+    """Flat retest rows for the technical Retesting information section."""
+    rows: list[dict] = []
+    for fid, retests in (retests_by_finding or {}).items():
+        for rt in retests or []:
+            rows.append(
+                {
+                    "finding_id": fid,
+                    "finding_label": flabel(fid),
+                    "result": (getattr(rt, "result", None) or "requested"),
+                    "note": (getattr(rt, "note", None) or ""),
+                    "requested_by": getattr(rt, "requested_by", None) or "",
+                    "created_at": getattr(rt, "created_at", None),
+                    "finalized_at": getattr(rt, "finalized_at", None),
+                    "finalized_by": getattr(rt, "finalized_by", None) or "",
+                    "asset_reached": bool(getattr(rt, "asset_reached", False)),
+                }
+            )
+    rows.sort(
+        key=lambda r: (r.get("created_at") is not None, r.get("created_at") or 0),
+        reverse=True,
+    )
+    return rows
 
 
 def _evidence_source_label(e) -> str:
@@ -780,6 +931,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
 
     fix_ctx = library_service.fix_context_for_engagement(s, reportable)
     _attach_remediation_packs(reportable, fix_ctx.get("remediation_by_id") or {})
+    _attach_finding_narrative_fields(reportable)
     test_types, standards = _test_types_and_standards(eng)
     retests_by_finding = _retests_for_engagement(s, engagement_id, reportable)
     branding = _branding(s, eng.tenant_id, kind or "technical")
@@ -788,6 +940,12 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     open_critical_high = sum(1 for f in vuln_open if f.severity in ("critical", "high"))
     tls_all = services.tls_summaries(s, engagement_id)
     tls_scanned = [t for t in tls_all if t.get("scanned")]
+    observations_by_finding = _observations_by_finding(s, reportable, engagement_id)
+    scan_history = _scan_history(s, engagement_id)
+    tools_and_versions = _tools_and_versions(
+        reportable, observations_by_finding, imports, scan_history
+    )
+    retest_requests = _retest_request_rows(retests_by_finding, flabel)
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -795,7 +953,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "cover_scope": _cover_scope_line(eng),
         "type_label": engagement_type_label(eng.type),
         "detected_by": detected_by_label,
-        "observations_by_finding": _observations_by_finding(s, reportable, engagement_id),
+        "observations_by_finding": observations_by_finding,
         "evidence_limitations": _evidence_limitations(reportable),
         "findings": reportable,
         "passed_checks": services.list_passed_checks(s, engagement_id),
@@ -839,6 +997,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "test_types": test_types,
         "standards": standards,
         "retests_by_finding": retests_by_finding,
+        "retest_requests": retest_requests,
         "latest_retest": lambda fid: _latest_retest(retests_by_finding, fid),
         "evidence_embeds": embeds,
         "figures": _figures_list(embeds, flabel, fnum),
@@ -853,7 +1012,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "disclaimer": branding["disclaimer"] or disclaimer_text(),
         "kind_meta": kind_config(kind) if kind else {},
         "template_config": tmpl_cfg,
-        "scan_history": _scan_history(s, engagement_id),
+        "scan_history": scan_history,
+        "tools_and_versions": tools_and_versions,
         "contact_name": eng.tenant.contact_name or "",
         "contact_email": eng.tenant.contact_email or "",
         "distribution": _distribution_list(eng),
@@ -879,6 +1039,35 @@ def _attach_remediation_packs(findings: list, remediation_by_id: dict) -> None:
                 rem = None
         try:
             setattr(f, "remediation_pack", rem)
+        except Exception:  # noqa: BLE001 — read-only proxies
+            pass
+
+
+def _attach_finding_narrative_fields(findings: list) -> None:
+    """Attach Phase 8 narrative fields onto finding view models (getattr-safe)."""
+    # @lat: [[reports#Generation]]
+    for f in findings:
+        try:
+            setattr(f, "validation_status_label", _finding_validation_status_label(f))
+        except Exception:  # noqa: BLE001 — read-only proxies
+            pass
+        try:
+            setattr(f, "reproduction_steps", _reproduction_steps_for_finding(f))
+        except Exception:  # noqa: BLE001 — read-only proxies
+            pass
+        try:
+            # Prefer stored column; fall back to vector-derived version for proxies.
+            ver = _finding_cvss_version(f)
+            if not ver:
+                vector = str(getattr(f, "cvss_vector", None) or "")
+                if vector.startswith("CVSS:"):
+                    try:
+                        from attestra.scoring import cvss_version_from_vector
+
+                        ver = cvss_version_from_vector(vector) or ""
+                    except Exception:  # noqa: BLE001
+                        ver = ""
+            setattr(f, "cvss_version", ver)
         except Exception:  # noqa: BLE001 — read-only proxies
             pass
 

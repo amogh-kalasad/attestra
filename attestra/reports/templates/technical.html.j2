@@ -10,6 +10,7 @@
     {% if figures %}<li><a href="#list-of-figures">List of figures</a></li>{% endif %}
     <li><a href="#scope">Scope and authorization</a></li>
     <li><a href="#methodology">Methodology and data sources</a></li>
+    <li><a href="#tools-and-versions">Tools and versions</a></li>
     <li><a href="#standards">Standards and test types</a></li>
     <li><a href="#risk-legend">Risk Rating Legend</a></li>
     <li><a href="#summary">Summary</a></li>
@@ -22,13 +23,15 @@
     <li><a href="#findings">Detailed findings</a></li>
     {% if automated_runs is defined and automated_runs %}<li><a href="#automated-testing-evidence">Automated testing evidence</a></li>{% endif %}
     <li><a href="#disclaimer">Assumptions, limitations and confidentiality</a></li>
+    <li><a href="#retesting">Retesting information</a></li>
     <li><a href="#conclusion">Conclusion</a></li>
-    <li><a href="#sign-off">Sign-off</a></li>
+    <li><a href="#sign-off">Sign-off / QA and approval</a></li>
     <li><a href="#appendix">Appendix</a></li>
   </ol>
 </nav>
 
 {% set sec.n = sec.n + 1 %}<h2 id="document-control">{{ sec.n }}. Document control</h2>
+<p class="meta">This generation is a <b>DRAFT</b> until QA approval and signature complete in Attestra. QA and Approved stay as explicit pending placeholders below; prior versions show recorded QA/signer names when present.</p>
 <table>
   <tr><th>Version</th><th>Status</th><th>Generated</th><th>Author</th><th>QA</th><th>Approved</th><th>Change</th><th>SHA-256</th></tr>
   <tr>
@@ -36,8 +39,8 @@
     <td>Draft (this generation)</td>
     <td>{{ generated_at|format_date }}</td>
     <td>{{ generated_by }}</td>
-    <td>—</td>
-    <td>—</td>
+    <td>Pending QA (DRAFT)</td>
+    <td>Pending approval (DRAFT)</td>
     <td>Draft generated</td>
     <td class="mono">pending freeze</td>
   </tr>
@@ -47,8 +50,8 @@
     <td>{{ r.status|status_label }}</td>
     <td>{{ r.generated_at|format_date if r.generated_at else "—" }}</td>
     <td>{{ r.generated_by }}</td>
-    <td>{{ r.qa_by or "—" }}</td>
-    <td>{{ r.approved_by or "—" }}</td>
+    <td>{% if r.qa_by %}{{ r.qa_by }}{% elif r.status in ("draft", "submitted", "rejected") %}Pending QA (DRAFT){% else %}—{% endif %}</td>
+    <td>{% if r.approved_by %}{{ r.approved_by }}{% elif r.status == "signed" %}—{% elif r.status == "qa_approved" %}Pending signature{% else %}Pending approval (DRAFT){% endif %}</td>
     <td>{{ r.change or "—" }}</td>
     <td class="mono">{{ r.sha256[:16] }}…</td>
   </tr>
@@ -151,6 +154,21 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% endfor %}
 </table>
 {% endif %}
+
+{% set sec.n = sec.n + 1 %}<h2 id="tools-and-versions">{{ sec.n }}. Tools and versions</h2>
+<p class="meta">Distinct tools seen on findings, observations, imports, and scan runs. Versions are taken only from recorded <span class="mono">tool_version</span> fields; unknown versions are labeled “version not recorded” and are never invented.</p>
+<table>
+  <tr><th>Tool</th><th>Version</th><th>Notes</th></tr>
+  {% for row in tools_and_versions %}
+  <tr>
+    <td>{{ row.tool|tool_label }}</td>
+    <td class="mono">{{ row.version }}</td>
+    <td>{{ row.notes or "—" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3">No tools recorded for this engagement yet.</td></tr>
+  {% endfor %}
+</table>
 
 {% set sec.n = sec.n + 1 %}<h2 id="standards">{{ sec.n }}. Standards and test types</h2>
 {% if test_types %}
@@ -346,13 +364,15 @@ CVSS vector and version appear on individual findings when available.</p>
     <div class="finding-header">
       <span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span>
       · Status: <b>{{ f.status|status_label }}</b>
+      {% set vlabel = f.validation_status_label if f.validation_status_label is defined and f.validation_status_label else (f.validation_status|status_label if f.validation_status is defined and f.validation_status else "Unvalidated") %}
+      · Validation: <b>{{ vlabel }}</b>
       · Priority / Business risk {{ "%.1f"|format(f.risk_score) }}{% if f.business_risk %} ({{ f.business_risk|severity_label }}){% endif %}
       · Fix by {% if f.sla_due %}{{ f.sla_due|format_date }}{% else %}—{% endif %}
       {% if f.asset and f.asset.exposure == "internet" %} · <span class="sev chip-internet">Internet-facing</span>{% endif %}
     </div>
     {% if f.cvss_score is not none or f.cvss_vector or f.epss is not none or f.kev or f.business_risk %}
     <table class="finding-meta">
-      {% set cvss_ver = f.cvss_version if f.cvss_version else (f.cvss_vector.split('/')[0].split(':')[1] if f.cvss_vector and f.cvss_vector.startswith('CVSS:') else '') %}
+      {% set cvss_ver = f.cvss_version if f.cvss_version else (finding_cvss_version(f) if finding_cvss_version is defined else (f.cvss_vector.split('/')[0].split(':')[1] if f.cvss_vector and f.cvss_vector.startswith('CVSS:') else '')) %}
       {% if f.cvss_score is not none %}<tr><th>CVSS score{% if cvss_ver %} (v{{ cvss_ver }}){% endif %}</th><td>{{ f.cvss_score }}</td></tr>{% elif cvss_ver %}<tr><th>CVSS version</th><td>v{{ cvss_ver }}</td></tr>{% endif %}
       {% if f.cvss_vector %}<tr><th>CVSS version / vector</th><td>{% if cvss_ver %}v{{ cvss_ver }} · {% endif %}<span class="mono">{{ f.cvss_vector }}</span></td></tr>{% endif %}
       {% if f.business_risk %}<tr><th>Priority / Business risk</th><td>{{ f.business_risk|severity_label }} (score {{ "%.1f"|format(f.risk_score) }})</td></tr>{% endif %}
@@ -365,37 +385,47 @@ CVSS vector and version appear on individual findings when available.</p>
     <p class="meta">Latest retest: {{ rt.result or "requested" }}{% if rt.note %} — {{ rt.note }}{% endif %}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }} by {{ rt.finalized_by }}){% endif %}</p>
     {% endif %}
   </div>
+  {% if f.asset or f.location or f.affected_urls %}
+  <div class="finding-section">
+    {% if f.asset %}
+    <p><b>Affected asset.</b> <span class="mono">{{ f.asset.identifier }}</span>{% if f.asset.name %} ({{ f.asset.name }}){% endif %}</p>
+    {% endif %}
+    {% if f.location %}
+    <p><b>Affected endpoint.</b> <span class="mono">{{ f.location|param_label }}</span></p>
+    {% endif %}
+    {% if f.affected_urls %}
+    <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
+    <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls|param_label }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u|param_label }}</li>{% endfor %}{% endif %}</ul>
+    {% endif %}
+  </div>
+  {% endif %}
   {% if f.description %}<div class="finding-section"><p><b>Description.</b> {{ f.description|param_label }}</p></div>{% endif %}
+  {% if f.reproduction_steps is defined and f.reproduction_steps %}
+  <div class="finding-section">
+    <p><b>Reproduction steps.</b></p>
+    <p style="white-space:pre-wrap">{{ f.reproduction_steps|param_label }}</p>
+  </div>
+  {% endif %}
   {% if f.impact %}<div class="finding-section"><p><b>Impact.</b> {{ f.impact|param_label }}</p></div>{% endif %}
-  {% if f.affected_urls %}
-  <div class="finding-section">
-  <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
-  <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls|param_label }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u|param_label }}</li>{% endfor %}{% endif %}</ul>
-  </div>
-  {% endif %}
-  {% if f.references %}
-  <div class="finding-section">
-  <p><b>References.</b></p>
-  <ul>{% if f.references is string %}<li>{{ f.references }}</li>{% else %}{% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}{% endif %}</ul>
-  </div>
-  {% endif %}
-  {% if f.recommendation %}
-  <div class="finding-section">
-    <p><b>Recommendation.</b></p>
-    {% set rec_bullets = recommendation_to_bullets(f.recommendation) %}
-    {% if rec_bullets %}{{ rec_bullets|safe }}{% else %}<p>{{ f.recommendation|param_label }}</p>{% endif %}
-  </div>
-  {% endif %}
   {% set rem = f.remediation_pack if f.remediation_pack is defined else none %}
   {% if rem is none and remediation_by_id is defined %}
     {% set rem = remediation_by_id.get(f.id) %}
   {% endif %}
-  {% if rem and (rem.root_cause or rem.recommended_fix or rem.verification_steps or rem.retest_instructions) %}
+  {% if rem and rem.root_cause %}
   <div class="finding-section">
-    {% if rem.root_cause %}
     <p><b>Root cause.</b></p>
     <p>{{ rem.root_cause|param_label }}</p>
-    {% endif %}
+  </div>
+  {% endif %}
+  {% if f.recommendation %}
+  <div class="finding-section">
+    <p><b>Remediation.</b></p>
+    {% set rec_bullets = recommendation_to_bullets(f.recommendation) %}
+    {% if rec_bullets %}{{ rec_bullets|safe }}{% else %}<p>{{ f.recommendation|param_label }}</p>{% endif %}
+  </div>
+  {% endif %}
+  {% if rem and (rem.recommended_fix or rem.verification_steps or rem.retest_instructions or rem.compatibility) %}
+  <div class="finding-section">
     {% if rem.recommended_fix %}
     <p><b>Recommended fix.</b></p>
     {% set rem_fix_bullets = recommendation_to_bullets(rem.recommended_fix) %}
@@ -432,6 +462,15 @@ CVSS vector and version appear on individual findings when available.</p>
   {% endfor %}
   </div>
   {% endif %}
+  {% if f.references %}
+  <div class="finding-section">
+  <p><b>References.</b></p>
+  <ul>{% if f.references is string %}<li>{{ f.references }}</li>{% else %}{% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}{% endif %}</ul>
+  </div>
+  {% endif %}
+  <div class="finding-section">
+    <p><b>Validation status.</b> {{ vlabel }}{% if f.validation_reasons is defined and f.validation_reasons %} — {{ f.validation_reasons|join("; ") }}{% endif %}</p>
+  </div>
   {% if ai_narratives and ai_narratives.get(f.id) %}<div class="finding-section"><p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p></div>{% endif %}
   {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
   {% if obs %}
@@ -448,7 +487,7 @@ CVSS vector and version appear on individual findings when available.</p>
   {% endif %}
   <p class="finding-refs-label">Technical details</p>
   <table class="finding-refs">
-    <tr><th>Location</th><td class="mono">{{ f.location|param_label }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed below){% endif %}</td></tr>
+    <tr><th>Location</th><td class="mono">{{ f.location|param_label }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed above){% endif %}</td></tr>
     {% if f.cwe %}<tr><th>CWE</th><td>CWE-{{ f.cwe }}</td></tr>{% endif %}
     {% if f.cves %}<tr><th>CVE</th><td>{{ f.cves|join(", ") }}</td></tr>{% endif %}
     {% if f.owasp_top10 %}<tr><th>OWASP Top 10</th><td>{{ f.owasp_top10 }}</td></tr>{% endif %}
@@ -460,6 +499,7 @@ CVSS vector and version appear on individual findings when available.</p>
     {% if f.report_merge_rationale is defined and f.report_merge_rationale %}<tr><th>Consolidated</th><td class="meta">{{ f.report_merge_rationale|consolidate_sentence }}</td></tr>{% endif %}
     {% if f.dedup_rationale %}<tr><th>Deduplication</th><td class="meta">{{ f.dedup_rationale|dedup_label }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</td></tr>{% endif %}
     {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
+    <tr><th>Validation status</th><td>{{ vlabel }}</td></tr>
     <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
   </table>
   {% set embeds = evidence_embeds.get(f.id, []) %}
@@ -532,15 +572,47 @@ CVSS vector and version appear on individual findings when available.</p>
 
 {% set sec.n = sec.n + 1 %}<h2 id="disclaimer">{{ sec.n }}. Assumptions, limitations and confidentiality</h2>
 <p>{{ disclaimer }}</p>
+<div id="testing-limitations">
+<p><b>Testing limitations (honesty).</b></p>
+<ul>
+  <li>Skipped or blocked checklist items are <em>not</em> passed. Incomplete coverage must not be read as a clean result.</li>
+  <li>Scan completion is <em>not</em> the same as security testing coverage. Finishing an automated scan does not imply every relevant case, endpoint, role, or business workflow was tested.</li>
+  <li>Unvalidated scanner alerts are <em>not</em> confirmed vulnerabilities. A finding remains unconfirmed until a named tester validates it with evidence (or classifies it otherwise).</li>
+  <li>Failed or incomplete scans are not evidence of absence of vulnerabilities.</li>
+</ul>
+</div>
+<div id="assumptions">
+<p><b>Assumptions.</b> Testing was performed within the authorized scope, window, and environments recorded above. Out-of-scope systems, credentials not provided, rate limits, WAF blocks, and environment unavailability may leave gaps that are reflected as skipped, blocked, or untested — never as passed.</p>
+</div>
 <p class="meta">Copyright and distribution: this report is confidential to {{ tenant }} and authorized recipients. Do not redistribute without client approval.</p>
+
+{% set sec.n = sec.n + 1 %}<h2 id="retesting">{{ sec.n }}. Retesting information</h2>
+{% if retest_requests %}
+<p class="meta">Retest requests recorded on this engagement (newest first). Finalized results also appear on individual finding cards.</p>
+<table>
+  <tr><th>Finding</th><th>Result</th><th>Requested by</th><th>Requested</th><th>Finalized</th><th>Note</th></tr>
+  {% for rt in retest_requests %}
+  <tr>
+    <td class="mono"><a href="#finding-{{ rt.finding_id }}">{{ rt.finding_label }}</a></td>
+    <td>{{ (rt.result or "requested")|status_label }}{% if rt.asset_reached %} · asset reached{% endif %}</td>
+    <td>{{ rt.requested_by or "—" }}</td>
+    <td>{{ rt.created_at|format_date if rt.created_at else "—" }}</td>
+    <td>{% if rt.finalized_at %}{{ rt.finalized_at|format_date }}{% if rt.finalized_by %} by {{ rt.finalized_by }}{% endif %}{% else %}—{% endif %}</td>
+    <td>{{ rt.note or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>No retest requests are recorded on this engagement yet. After remediation, request a retest from the engagement findings view or the client portal (with a note). Staff finalize the retest against a scan that reached the affected asset; a finding is marked fixed only when that reachability check passes. Until then, prior evidence remains unchanged.</p>
+{% endif %}
 
 {% set sec.n = sec.n + 1 %}<h2 id="conclusion">{{ sec.n }}. Conclusion</h2>
 <p>This {{ type_label }} engagement identified {{ plural(findings|length, "reportable finding") }}
 ({% for s in severities %}{{ by_sev.get(s, 0) }} {{ s|severity_label }}{% if not loop.last %}, {% endif %}{% endfor %} open vulnerabilities at generation time; {{ plural(false_positives, "false positive") }} excluded{% if informational_open %}; {{ informational_open }} informational or not-reproducible observation{{ "s" if informational_open != 1 else "" }} excluded from open-vuln counts{% endif %}).
 Remediate Critical and High issues first, then retest. Control statuses in any compliance pack remain proposals until a named assessor confirms them. Informational validation observations are not confirmed vulnerabilities.</p>
 
-{% set sec.n = sec.n + 1 %}<h2 id="sign-off">{{ sec.n }}. Sign-off</h2>
-<p class="meta">Draft generations leave QA and approval blank. Live status, hash check and signature validity appear in the Attestra sign-off record when you open the report in the product; the sealed file below stays unchanged.</p>
+{% set sec.n = sec.n + 1 %}<h2 id="sign-off">{{ sec.n }}. Sign-off / QA and approval</h2>
+<p class="meta">This sealed generation is a <b>DRAFT</b>: QA reviewer and Approved / signed rows use explicit pending placeholders. Prior document-control rows show recorded QA and signer names when a previous version completed the workflow. Live status, hash check and signature validity appear in the Attestra sign-off record when you open the report in the product; the sealed file below stays unchanged.</p>
 {% if ca and ca.authorization_statement %}<p class="meta">{{ ca.authorization_statement }}</p>{% endif %}
 <table>
   <tr><th>Role</th><th>Name</th><th>Date</th><th>Signature / mark</th></tr>
@@ -548,19 +620,19 @@ Remediate Critical and High issues first, then retest. Control statuses in any c
     <td>Author</td>
     <td>{{ generated_by }}</td>
     <td>{{ generated_at|format_date }}</td>
-    <td>Generated (draft)</td>
+    <td>Generated (DRAFT)</td>
   </tr>
   <tr>
     <td>QA reviewer</td>
+    <td>Pending QA (DRAFT)</td>
     <td>—</td>
-    <td>—</td>
-    <td>—</td>
+    <td>Pending QA (DRAFT)</td>
   </tr>
   <tr>
     <td>Approved / signed</td>
-    <td>{% if ca and ca.signer_name %}{{ ca.signer_name }}{% if ca.signer_title %}, {{ ca.signer_title }}{% endif %}{% else %}—{% endif %}</td>
+    <td>{% if ca and ca.signer_name %}{{ ca.signer_name }}{% if ca.signer_title %}, {{ ca.signer_title }}{% endif %} <span class="meta">(placeholder until signed)</span>{% else %}Pending approval (DRAFT){% endif %}</td>
     <td>—</td>
-    <td>{% if ca and ca.legal_name %}{{ ca.legal_name }}{% else %}—{% endif %}</td>
+    <td>{% if ca and ca.legal_name %}{{ ca.legal_name }} <span class="meta">(pending signature)</span>{% else %}Pending approval (DRAFT){% endif %}</td>
   </tr>
 </table>
 

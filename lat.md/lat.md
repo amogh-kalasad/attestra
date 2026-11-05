@@ -19,8 +19,9 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - [[runner]] — scoped scanner dispatch, SSRF/DNS pin, gate, durable jobs
 - [[tests]] — pytest suite: fixtures, test modules, and what each verifies
 - World-class VA + PT Phase 1 audit: [[architecture#World-class security testing audit (Phase 1)]] (`docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md`)
-- World-class risk scoring (Phase 5): [[architecture#World-class risk scoring (Phase 5)]] (\docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md\)
+- World-class risk scoring (Phase 5): [[architecture#World-class risk scoring (Phase 5)]] (`docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md`)
 - World-class finding normalization (Phase 6): [[architecture#World-class finding normalization (Phase 6)]]
+- World-class report engine sections (Phase 8): [[architecture#World-class report engine sections (Phase 8)]] (`docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`)
 
 MongoDB is the runtime store (see [[architecture#MongoDB migration (in progress)]]); cutover design notes live in `docs/mongodb_migration/`.
 

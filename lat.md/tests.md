@@ -2903,6 +2903,18 @@ Deprecated X-XSS-Protection pack tells operators to remove or set 0; it is not a
 
 [[attestra/library/fix_snippets.py#BY_TITLE]] Permissions-Policy / COEP / COOP / CORP entries use the matching header snippets, not Content-Security-Policy.
 
+## World-class Phase 8 finding narrative
+
+Technical report finding-card narrative depth: validation label, reproduction steps, and pack root cause (`tests/test_report_phase8.py`).
+
+### Technical card shows validation reproduction root cause
+
+A finding with location, tools, and a matching remediation pack renders Validation status, Reproduction steps, and Root cause in the technical HTML without inventing Confirmed for unvalidated rows.
+
+### Technical report sections tools limitations retesting
+
+Technical HTML includes `#tools-and-versions`, honesty `#testing-limitations` / `#assumptions`, `#retesting`, and explicit Pending QA / Pending approval DRAFT placeholders in document control and sign-off.
+
 ## World-class Phase 3 safe probes
 
 Safe non-destructive injection/XSS/file/header helpers and run modules (`tests/automated_vapt/test_phase3_safe_probes.py`).
