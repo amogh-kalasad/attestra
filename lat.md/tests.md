@@ -2863,6 +2863,46 @@ Same concept on app paths from different tools links with `map:{concept}@app` ra
 
 Shared CVE on the same host still merges even when path buckets differ; rationale stays `cve:{id}` without a context suffix.
 
+## World-class Phase 7 remediation
+
+Concept-keyed remediation packs, Permissions-Policy/CSP mismatch guard, library wiring, and markdown formatting (`tests/test_remediation_phase7.py`).
+
+### Permissions-Policy pack excludes CSP
+
+[[attestra/remediation/packs.py#REMEDIATION_PACKS]] entry `header:permissions-policy-missing` must not contain Content-Security-Policy nginx/apache text.
+
+### COEP pack names header
+
+COEP pack config and prose mention Cross-Origin-Embedder-Policy.
+
+### IDOR mentions authorization
+
+IDOR/BOLA pack recommends server-side object authorization.
+
+### Concept mismatch rejected
+
+Permissions-Policy titles never resolve to a CSP remediation pack.
+
+### SQLi pack parameterized
+
+SQL injection pack recommends parameterized queries / bind variables.
+
+### XSS-Protection not XSS fix
+
+Deprecated X-XSS-Protection pack tells operators to remove or set 0; it is not an XSS vulnerability fix.
+
+### Library rejects CSP guidance on Permissions-Policy
+
+[[attestra/library/fix_snippets.py#match_seed_guidance]] / [[attestra/library/fix_snippets.py#rejects_csp_guidance_for_finding]] must not attach CSP-only seed snippets to Permissions-Policy findings (shared CWE must not win).
+
+### Guidance prefers remediation pack on mismatch
+
+[[attestra/library/service.py#guidance_for_finding]] prefers the remediation pack when a tenant CSP writeup would mismatch; API fields include structured `remediation`.
+
+### Seed BY_TITLE Permissions-Policy not CSP
+
+[[attestra/library/fix_snippets.py#BY_TITLE]] Permissions-Policy / COEP / COOP / CORP entries use the matching header snippets, not Content-Security-Policy.
+
 ## World-class Phase 3 safe probes
 
 Safe non-destructive injection/XSS/file/header helpers and run modules (`tests/automated_vapt/test_phase3_safe_probes.py`).

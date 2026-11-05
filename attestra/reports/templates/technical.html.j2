@@ -386,6 +386,34 @@ CVSS vector and version appear on individual findings when available.</p>
     {% if rec_bullets %}{{ rec_bullets|safe }}{% else %}<p>{{ f.recommendation|param_label }}</p>{% endif %}
   </div>
   {% endif %}
+  {% set rem = f.remediation_pack if f.remediation_pack is defined else none %}
+  {% if rem is none and remediation_by_id is defined %}
+    {% set rem = remediation_by_id.get(f.id) %}
+  {% endif %}
+  {% if rem and (rem.root_cause or rem.recommended_fix or rem.verification_steps or rem.retest_instructions) %}
+  <div class="finding-section">
+    {% if rem.root_cause %}
+    <p><b>Root cause.</b></p>
+    <p>{{ rem.root_cause|param_label }}</p>
+    {% endif %}
+    {% if rem.recommended_fix %}
+    <p><b>Recommended fix.</b></p>
+    {% set rem_fix_bullets = recommendation_to_bullets(rem.recommended_fix) %}
+    {% if rem_fix_bullets %}{{ rem_fix_bullets|safe }}{% else %}<p>{{ rem.recommended_fix|param_label }}</p>{% endif %}
+    {% endif %}
+    {% if rem.verification_steps %}
+    <p><b>Verification.</b></p>
+    <p style="white-space:pre-wrap">{{ rem.verification_steps|param_label }}</p>
+    {% endif %}
+    {% if rem.retest_instructions %}
+    <p><b>Retest.</b></p>
+    <p>{{ rem.retest_instructions|param_label }}</p>
+    {% endif %}
+    {% if rem.compatibility %}
+    <p class="meta"><b>Compatibility.</b> {{ rem.compatibility|param_label }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
   {% set fix = fix_by_id.get(f.id) if fix_by_id is defined else none %}
   {% if fix %}
   <div class="finding-section">

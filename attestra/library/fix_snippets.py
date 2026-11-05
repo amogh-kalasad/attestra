@@ -9,7 +9,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
-FIX_TAGS = frozenset({"headers", "tls", "cookies", "csp"})
+FIX_TAGS = frozenset({"headers", "tls", "cookies", "csp", "cors"})
 IMPORTANCE_VALUES = ("High", "Medium", "Low")
 EFFORT_VALUES = ("Easy", "Medium", "Hard")
 SNIPPET_KEYS = ("nginx", "apache", "iis", "cloudflare")
@@ -23,6 +23,37 @@ FIX_FIELD_KEYS = (
     "snippet_iis",
     "snippet_cloudflare",
 )
+
+# Header concepts that must never receive CSP-only library guidance (ENG1 F-7).
+NON_CSP_HEADER_CONCEPTS = frozenset({
+    "permissions-policy",
+    "coep",
+    "coop",
+    "corp",
+    "cors",
+    "hsts",
+})
+_CSP_ONLY_MARKERS = (
+    "content-security-policy",
+    "content security policy",
+    "script-src",
+    "default-src",
+    "csp-report",
+)
+_HEADER_OWN_MARKERS: dict[str, tuple[str, ...]] = {
+    "permissions-policy": ("permissions-policy", "permissions policy", "feature-policy"),
+    "coep": ("cross-origin-embedder-policy", "coep"),
+    "coop": ("cross-origin-opener-policy", "coop"),
+    "corp": ("cross-origin-resource-policy", "corp"),
+    "cors": (
+        "access-control-allow-origin",
+        "access-control-allow-credentials",
+        "cors",
+        "cross-origin resource sharing",
+        "cross-domain",
+    ),
+    "hsts": ("strict-transport-security", "hsts", "includeSubDomains", "max-age="),
+}
 
 # Built-in fix text keyed by seed title. Merged into SEED on load / seed_defaults.
 BY_TITLE: dict[str, dict[str, str]] = {
@@ -575,11 +606,241 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "Transform Rules → Modify Response Header: set Referrer-Policy to strict-origin-when-cross-origin."
         ),
     },
+    # ZAP 10063 / nuclei permissions-policy — never CSP snippets (ENG1 F-7).
+    "Permissions Policy Header Not Set": {
+        "importance": "Medium",
+        "effort": "Easy",
+        "fix_steps": (
+            "Send a Permissions-Policy that disables unused powerful features "
+            "(camera=(), microphone=(), geolocation=(), payment=()).\n"
+            "Allow-list only origins that need a given feature.\n"
+            "Do not substitute a CSP header for Permissions-Policy."
+        ),
+        "snippet_nginx": (
+            "add_header Permissions-Policy "
+            "\"camera=(), microphone=(), geolocation=(), payment=()\" always;"
+        ),
+        "snippet_apache": (
+            "Header always set Permissions-Policy "
+            "\"camera=(), microphone=(), geolocation=(), payment=()\""
+        ),
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"Permissions-Policy\" "
+            "value=\"camera=(), microphone=(), geolocation=(), payment=()\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Transform Rules → Modify Response Header: set Permissions-Policy to "
+            "camera=(), microphone=(), geolocation=(), payment=() (adjust allow-lists)."
+        ),
+    },
+    "Cross-Origin-Embedder-Policy Header Missing": {
+        "importance": "Medium",
+        "effort": "Medium",
+        "fix_steps": (
+            "Send Cross-Origin-Embedder-Policy: require-corp (or credentialless where supported).\n"
+            "Ensure embedded cross-origin resources send a compatible CORP/CORS policy.\n"
+            "Do not substitute a CSP header for COEP."
+        ),
+        "snippet_nginx": 'add_header Cross-Origin-Embedder-Policy "require-corp" always;',
+        "snippet_apache": 'Header always set Cross-Origin-Embedder-Policy "require-corp"',
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"Cross-Origin-Embedder-Policy\" value=\"require-corp\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Transform Rules → Modify Response Header: set "
+            "Cross-Origin-Embedder-Policy to require-corp (or credentialless)."
+        ),
+    },
+    "Cross-Origin-Opener-Policy Header Missing": {
+        "importance": "Medium",
+        "effort": "Easy",
+        "fix_steps": (
+            "Send Cross-Origin-Opener-Policy: same-origin "
+            "(or same-origin-allow-popups when OAuth/payment popups need a limited opener).\n"
+            "Do not substitute a CSP header for COOP."
+        ),
+        "snippet_nginx": 'add_header Cross-Origin-Opener-Policy "same-origin" always;',
+        "snippet_apache": 'Header always set Cross-Origin-Opener-Policy "same-origin"',
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"Cross-Origin-Opener-Policy\" value=\"same-origin\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Transform Rules → Modify Response Header: set "
+            "Cross-Origin-Opener-Policy to same-origin."
+        ),
+    },
+    "Cross-Origin-Resource-Policy Header Missing": {
+        "importance": "Medium",
+        "effort": "Easy",
+        "fix_steps": (
+            "Send Cross-Origin-Resource-Policy: same-origin for private resources "
+            "(or same-site / cross-origin when intentional sharing is required).\n"
+            "Pair with COEP require-corp when opting into cross-origin isolation.\n"
+            "Do not substitute a CSP header for CORP."
+        ),
+        "snippet_nginx": 'add_header Cross-Origin-Resource-Policy "same-origin" always;',
+        "snippet_apache": 'Header always set Cross-Origin-Resource-Policy "same-origin"',
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"Cross-Origin-Resource-Policy\" value=\"same-origin\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Transform Rules → Modify Response Header: set "
+            "Cross-Origin-Resource-Policy to same-origin (or cross-origin for public assets)."
+        ),
+    },
+    "Overly permissive CORS policy": {
+        "importance": "High",
+        "effort": "Medium",
+        "fix_steps": (
+            "Allow only explicit trusted origins.\n"
+            "Never combine Access-Control-Allow-Origin: * with Access-Control-Allow-Credentials: true.\n"
+            "Validate Origin against an allow-list before echoing it."
+        ),
+        "snippet_nginx": (
+            "# Example: fixed trusted origin (prefer app-level allow-list).\n"
+            "add_header Access-Control-Allow-Origin \"https://app.example.com\" always;\n"
+            "add_header Vary \"Origin\" always;"
+        ),
+        "snippet_apache": (
+            "Header always set Access-Control-Allow-Origin \"https://app.example.com\"\n"
+            "Header always set Vary \"Origin\""
+        ),
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"Access-Control-Allow-Origin\" value=\"https://app.example.com\" />\n"
+            "        <add name=\"Vary\" value=\"Origin\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Prefer origin allow-listing in the application. Transform Rules can set a fixed "
+            "Access-Control-Allow-Origin only when a single trusted SPA origin is intended."
+        ),
+    },
 }
 
 
+def header_concept_for_text(*texts: str) -> str | None:
+    """Map finding/library title text to a header concept (incl. csp), or None."""
+    blob = " ".join(t for t in texts if t).lower()
+    if not blob:
+        return None
+    # Order matters: more specific cross-origin headers before generic "cors".
+    checks: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("permissions-policy", _HEADER_OWN_MARKERS["permissions-policy"]),
+        ("coep", ("cross-origin-embedder-policy", "coep")),
+        ("coop", ("cross-origin-opener-policy", "coop")),
+        ("corp", ("cross-origin-resource-policy", "corp")),
+        ("hsts", ("strict-transport-security", "hsts header", "missing hsts", "http strict transport")),
+        ("cors", _HEADER_OWN_MARKERS["cors"]),
+        (
+            "csp",
+            (
+                "content-security-policy",
+                "content security policy",
+                "csp header",
+                "missing csp",
+                "weak csp",
+                "script-src",
+            ),
+        ),
+    )
+    for concept, markers in checks:
+        if any(m in blob for m in markers):
+            return concept
+    return None
+
+
+def guidance_looks_csp_only(
+    *,
+    title: str = "",
+    recommendation: str = "",
+    fix_steps: str = "",
+    snippets: dict[str, str] | None = None,
+) -> bool:
+    """True when guidance is CSP-primary without the matching non-CSP header."""
+    parts = [title, recommendation, fix_steps]
+    if snippets:
+        parts.extend(str(v) for v in snippets.values() if v)
+    blob = "\n".join(parts).lower()
+    if not blob:
+        return False
+    has_csp = any(m in blob for m in _CSP_ONLY_MARKERS)
+    if not has_csp:
+        return False
+    # Own-header markers mean it is not CSP-only (e.g. CSP + frame-ancestors for clickjacking).
+    own = (
+        "permissions-policy",
+        "cross-origin-embedder-policy",
+        "cross-origin-opener-policy",
+        "cross-origin-resource-policy",
+        "strict-transport-security",
+        "access-control-allow-origin",
+    )
+    if any(m in blob for m in own):
+        return False
+    return True
+
+
+def rejects_csp_guidance_for_finding(finding: Any, guidance: dict[str, Any] | None) -> bool:
+    """Reject library/seed guidance that is CSP-only for PP/COEP/COOP/CORP/CORS/HSTS."""
+    if not guidance:
+        return False
+    concept = header_concept_for_text(
+        getattr(finding, "title", "") or "",
+        getattr(finding, "description", "") or "",
+    )
+    if concept not in NON_CSP_HEADER_CONCEPTS:
+        return False
+    return guidance_looks_csp_only(
+        title=str(guidance.get("title") or ""),
+        recommendation=str(guidance.get("recommendation") or ""),
+        fix_steps=str(guidance.get("fix_steps") or ""),
+        snippets=guidance.get("snippets") if isinstance(guidance.get("snippets"), dict) else {
+            k: str(guidance.get(f"snippet_{k}") or "") for k in SNIPPET_KEYS
+        },
+    )
+
+
 def is_fix_target(tags: list[str] | None, title: str = "") -> bool:
-    """True when a library writeup is header / TLS / cookie / CSP scoped."""
+    """True when a library writeup is header / TLS / cookie / CSP / CORS scoped."""
     tagset = {str(t).lower() for t in (tags or [])}
     if tagset & {"dns", "email", "dmarc", "dkim", "mta-sts", "tls-rpt", "dnssec"}:
         return False
@@ -596,6 +857,13 @@ def is_fix_target(tags: list[str] | None, title: str = "") -> bool:
             "referrer-policy",
             "x-frame",
             "mixed content",
+            "permissions-policy",
+            "permissions policy",
+            "cross-origin-embedder",
+            "cross-origin-opener",
+            "cross-origin-resource",
+            "cors",
+            "cross-domain",
         )
     )
 
@@ -719,7 +987,11 @@ def iis_xml_ok(text: str) -> bool:
 
 
 def match_seed_guidance(finding: Any) -> dict[str, Any] | None:
-    """Best built-in SEED guidance for a finding (rule id, then CWE, then title)."""
+    """Best built-in SEED guidance for a finding (rule id, then CWE, then title).
+
+    Skips CSP-only seed rows when the finding is Permissions-Policy / COEP / COOP /
+    CORP / CORS / HSTS so CWE collisions cannot attach the wrong header fix.
+    """
     from attestra.library.seed import SEED
 
     rules = {str(r).lower() for r in (getattr(finding, "rule_ids", None) or [])}
@@ -727,14 +999,34 @@ def match_seed_guidance(finding: Any) -> dict[str, Any] | None:
     keys = rules | {f"{t}:{r}" for t in tools for r in rules}
     cwe = getattr(finding, "cwe", None)
     title = (getattr(finding, "title", "") or "").lower()
+    finding_concept = header_concept_for_text(
+        getattr(finding, "title", "") or "",
+        getattr(finding, "description", "") or "",
+    )
 
     scored: list[tuple[int, str, dict]] = []
     for raw in SEED:
         item = enrich(raw)
         if not is_fix_target(item.get("tags"), item.get("title", "")):
             continue
-        if not has_fix_content(guidance_from_mapping(item)):
+        g = guidance_from_mapping(item)
+        if not has_fix_content(g):
             continue
+        seed_concept = header_concept_for_text(item.get("title", ""), item.get("remediation", ""))
+        if finding_concept in NON_CSP_HEADER_CONCEPTS:
+            # Exact concept mismatch: CSP seed must not win via shared CWE.
+            if seed_concept == "csp" or (
+                seed_concept is None
+                and guidance_looks_csp_only(
+                    title=item.get("title", ""),
+                    recommendation=item.get("remediation", ""),
+                    fix_steps=g.get("fix_steps", ""),
+                    snippets=g.get("snippets"),
+                )
+            ):
+                continue
+            if seed_concept and seed_concept != finding_concept:
+                continue
         score = 0
         item_rules = {r.lower() for r in (item.get("rule_ids") or [])}
         if keys and keys & item_rules:

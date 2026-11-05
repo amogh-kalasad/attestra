@@ -779,6 +779,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     from attestra.library import service as library_service
 
     fix_ctx = library_service.fix_context_for_engagement(s, reportable)
+    _attach_remediation_packs(reportable, fix_ctx.get("remediation_by_id") or {})
     test_types, standards = _test_types_and_standards(eng)
     retests_by_finding = _retests_for_engagement(s, engagement_id, reportable)
     branding = _branding(s, eng.tenant_id, kind or "technical")
@@ -833,6 +834,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "comments_by_finding": comments_by_finding,
         "fix_by_id": fix_ctx["fix_by_id"],
         "report_snippets_by_id": fix_ctx["report_snippets_by_id"],
+        "remediation_by_id": fix_ctx.get("remediation_by_id") or {},
         "server_type": fix_ctx["server_type"],
         "test_types": test_types,
         "standards": standards,
@@ -862,6 +864,23 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }
+
+
+def _attach_remediation_packs(findings: list, remediation_by_id: dict) -> None:
+    """Attach structured remediation packs onto finding view models (getattr-safe)."""
+    for f in findings:
+        rem = remediation_by_id.get(getattr(f, "id", None))
+        if rem is None:
+            try:
+                from attestra.library.service import remediation_pack_for_finding
+
+                rem = remediation_pack_for_finding(f)
+            except Exception:  # noqa: BLE001 — sibling pack optional mid-merge
+                rem = None
+        try:
+            setattr(f, "remediation_pack", rem)
+        except Exception:  # noqa: BLE001 — read-only proxies
+            pass
 
 
 def _automated_runs(s: Session, engagement_id: int) -> list[dict]:

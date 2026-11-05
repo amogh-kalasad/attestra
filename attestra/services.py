@@ -1481,6 +1481,7 @@ def import_results(
             f.asset = asset
             _apply_owasp(f)
             _apply_import_validation(f, nf)
+            _apply_remediation_recommendation(f)
             s.add(f)
             s.flush()  # need finding.id for observation FK
             existing[fp] = f
@@ -1542,6 +1543,7 @@ def import_results(
                 _apply_owasp(f)
             # Re-run validation classifiers when new evidence_refs arrive on merge.
             _apply_import_validation(f, nf, only_if_stronger=True)
+            _apply_remediation_recommendation(f)
             if f.status == "fixed":
                 # Reappeared after being marked fixed: reopen.
                 f.status = "validated" if f.validated_by else "triaged"
@@ -1661,6 +1663,52 @@ def _apply_owasp(f: Finding) -> None:
     f.owasp_top10 = refs["owasp_top10"]
     f.asvs_ref = refs["asvs_ref"]
     f.wstg_ref = refs["wstg_ref"]
+
+
+_CSP_ON_WRONG_HEADER_NOTE = (
+    "Correction: this finding is not a Content-Security-Policy issue. "
+    "Use the header-specific remediation below instead of CSP directives "
+    "(script-src / default-src)."
+)
+
+
+def _apply_remediation_recommendation(f: Finding) -> None:
+    """Fill empty recommendation from Phase 7 packs; correct CSP-on-wrong-header text."""
+    try:
+        from attestra.library.fix_snippets import (
+            NON_CSP_HEADER_CONCEPTS,
+            guidance_looks_csp_only,
+            header_concept_for_text,
+        )
+        from attestra.remediation import remediation_for_finding
+    except Exception:  # noqa: BLE001 — sibling pack optional mid-merge
+        return
+
+    try:
+        pack = remediation_for_finding(f)
+    except Exception:  # noqa: BLE001
+        return
+    if not isinstance(pack, dict):
+        return
+    text = str(pack.get("recommendation_text") or "").strip()
+    if not text and pack.get("recommended_fix"):
+        text = str(pack.get("recommended_fix") or "").strip()
+    if not text:
+        return
+
+    existing = (f.recommendation or "").strip()
+    concept = header_concept_for_text(f.title or "", f.description or "")
+    mismatched = (
+        concept in NON_CSP_HEADER_CONCEPTS
+        and existing
+        and guidance_looks_csp_only(recommendation=existing)
+    )
+    if not existing:
+        f.recommendation = text[:20000]
+        return
+    if mismatched:
+        # Replace wrong CSP guidance; keep a short correction note for analysts.
+        f.recommendation = f"{_CSP_ON_WRONG_HEADER_NOTE}\n\n{text}"[:20000]
 
 
 _VALIDATION_STRENGTH = {

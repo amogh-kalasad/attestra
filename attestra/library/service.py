@@ -14,11 +14,15 @@ from attestra.library.fix_snippets import (
     EFFORT_VALUES,
     FIX_FIELD_KEYS,
     IMPORTANCE_VALUES,
+    NON_CSP_HEADER_CONCEPTS,
+    SNIPPET_KEYS,
     api_fix_fields,
     detect_server_type,
     enrich,
     guidance_from_mapping,
+    guidance_looks_csp_only,
     has_fix_content,
+    header_concept_for_text,
     is_fix_target,
     match_seed_guidance,
     snippets_for_report,
@@ -271,15 +275,116 @@ def suggest(s: Session, f: Finding, limit: int = 3) -> list[LibraryEntry]:
     return [e for *_, e in sorted(scored, key=lambda t: (t[0], t[1]))[:limit]]
 
 
+def _safe_remediation_for_finding(f: Finding) -> dict | None:
+    """getattr/ImportError-safe pack resolve (sibling may be mid-merge)."""
+    try:
+        from attestra import remediation as rem_mod
+
+        fn = getattr(rem_mod, "remediation_for_finding", None)
+        if fn is None:
+            return None
+        out = fn(f)
+        if not isinstance(out, dict):
+            return None
+        if not (out.get("concept") or out.get("recommended_fix") or out.get("recommendation_text")):
+            return None
+        return out
+    except Exception:  # noqa: BLE001 — pack optional during parallel Phase 7 work
+        return None
+
+
+def _guidance_from_remediation_pack(pack: dict) -> dict | None:
+    """Map a remediation pack into library-style fix guidance (snippets + steps)."""
+    examples = pack.get("config_examples") if isinstance(pack.get("config_examples"), dict) else {}
+    snippets = {k: str(examples.get(k) or "").strip() for k in SNIPPET_KEYS}
+    fix_steps = str(pack.get("recommended_fix") or "").strip()
+    verify = str(pack.get("verification_steps") or "").strip()
+    if verify and verify not in fix_steps:
+        fix_steps = "\n".join(p for p in (fix_steps, verify) if p)
+    g = {
+        "importance": str(pack.get("importance") or "").strip(),
+        "effort": str(pack.get("effort") or "").strip(),
+        "fix_steps": fix_steps,
+        "snippets": snippets,
+        "snippet_nginx": snippets["nginx"],
+        "snippet_apache": snippets["apache"],
+        "snippet_iis": snippets["iis"],
+        "snippet_cloudflare": snippets["cloudflare"],
+        "source": "remediation_pack",
+        "concept": pack.get("concept"),
+    }
+    return g if has_fix_content(g) else None
+
+
+def _library_guidance_mismatched(f: Finding, entry: LibraryEntry, g: dict) -> bool:
+    """True when library guidance targets a different header than the finding.
+
+    Covers ENG1 F-7 (CSP on Permissions-Policy) and COEP/COOP/CORP/CORS/HSTS swaps
+    when several header writeups share a tool rule id.
+    """
+    finding_concept = header_concept_for_text(f.title or "", f.description or "")
+    if finding_concept not in NON_CSP_HEADER_CONCEPTS:
+        return False
+    entry_concept = header_concept_for_text(entry.title or "", entry.remediation or "")
+    if entry_concept and entry_concept != finding_concept:
+        return True
+    return guidance_looks_csp_only(
+        title=entry.title or "",
+        recommendation=entry.remediation or "",
+        fix_steps=g.get("fix_steps") or "",
+        snippets=g.get("snippets"),
+    )
+
+
+def remediation_api_fields(pack: dict | None) -> dict | None:
+    """Structured remediation object for API / reports, or None when unresolved."""
+    if not pack or not pack.get("concept"):
+        return None
+    examples = pack.get("config_examples")
+    return {
+        "concept": pack.get("concept"),
+        "root_cause": str(pack.get("root_cause") or ""),
+        "recommended_fix": str(pack.get("recommended_fix") or ""),
+        "verification_steps": str(pack.get("verification_steps") or ""),
+        "retest_instructions": str(pack.get("retest_instructions") or ""),
+        "compatibility": str(pack.get("compatibility") or ""),
+        "config_examples": dict(examples) if isinstance(examples, dict) else {},
+    }
+
+
+def remediation_pack_for_finding(f: Finding) -> dict | None:
+    """Public getattr-safe pack resolve for reports and API consumers."""
+    return remediation_api_fields(_safe_remediation_for_finding(f))
+
+
 def guidance_for_finding(s: Session, f: Finding) -> dict | None:
-    """Library (or built-in seed) fix guidance for a finding, if any."""
-    for entry in suggest(s, f, limit=3):
+    """Library / seed / remediation-pack fix guidance for a finding, if any.
+
+    Prefers a tenant library match, then seed. When the library/seed title match is
+    missing, or the match would be a CSP-only writeup for Permissions-Policy /
+    COEP / COOP / CORP / CORS / HSTS, prefer the Phase 7 remediation pack.
+    """
+    pack = _safe_remediation_for_finding(f)
+    pack_guidance = _guidance_from_remediation_pack(pack) if pack else None
+    saw_mismatch = False
+
+    for entry in suggest(s, f, limit=5):
         g = guidance_from_mapping(entry)
-        if has_fix_content(g) and is_fix_target(entry.tags, entry.title):
+        if not has_fix_content(g):
+            continue
+        if _library_guidance_mismatched(f, entry, g):
+            saw_mismatch = True
+            continue
+        if is_fix_target(entry.tags, entry.title) or has_fix_content(g):
             return g
-        if has_fix_content(g):
-            return g
-    return match_seed_guidance(f)
+
+    seed = match_seed_guidance(f)
+    # Prefer pack over nothing, and over a missing library title when concepts mismatched.
+    if pack_guidance and (saw_mismatch or seed is None):
+        return pack_guidance
+    if seed:
+        return seed
+    return pack_guidance
 
 
 def server_type_for_findings(findings: list[Finding]) -> str | None:
@@ -297,18 +402,30 @@ def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
     server_type = server_type_for_findings(findings)
     by_id: dict[int, dict] = {}
     report_snips: dict[int, list[tuple[str, str]]] = {}
+    rem_by_id: dict[int, dict] = {}
     for f in findings:
         g = guidance_for_finding(s, f)
-        if not g:
-            continue
-        by_id[f.id] = g
-        report_snips[f.id] = snippets_for_report(g, server_type)
-    return {"server_type": server_type, "fix_by_id": by_id, "report_snippets_by_id": report_snips}
+        if g:
+            by_id[f.id] = g
+            report_snips[f.id] = snippets_for_report(g, server_type)
+        rem = remediation_api_fields(_safe_remediation_for_finding(f))
+        if rem:
+            rem_by_id[f.id] = rem
+    return {
+        "server_type": server_type,
+        "fix_by_id": by_id,
+        "report_snippets_by_id": report_snips,
+        "remediation_by_id": rem_by_id,
+    }
 
 
-def finding_api_fix_fields(s: Session, f: Finding) -> dict[str, str]:
-    """Flat fix fields for API finding output (empty strings when unknown)."""
-    return api_fix_fields(guidance_for_finding(s, f))
+def finding_api_fix_fields(s: Session, f: Finding) -> dict:
+    """Flat fix fields plus optional structured ``remediation`` for API output."""
+    out: dict = api_fix_fields(guidance_for_finding(s, f))
+    rem = remediation_api_fields(_safe_remediation_for_finding(f))
+    if rem:
+        out["remediation"] = rem
+    return out
 
 
 def suggestions_for_engagement(s: Session, engagement_id: int) -> dict[int, list[LibraryEntry]]:

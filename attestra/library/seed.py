@@ -466,10 +466,12 @@ SEED: list[dict] = [
         "default_severity": "medium",
         "tags": [
             "cors",
+            "headers",
             "owasp-a05"
         ],
         "rule_ids": [
-            "zap:40040"
+            "zap:40040",
+            "zap:10098",
         ],
         "description": "The API reflects any Origin in Access-Control-Allow-Origin, sometimes together with Allow-Credentials.",
         "impact": "Any website can read authenticated API responses from a logged-in user's browser.",
@@ -477,6 +479,98 @@ SEED: list[dict] = [
         "references": [
             "https://cwe.mitre.org/data/definitions/942.html"
         ]
+    },
+    {
+        "title": "Permissions Policy Header Not Set",
+        "cwe": 693,
+        "default_severity": "low",
+        "tags": ["headers", "permissions-policy"],
+        "rule_ids": ["zap:10063", "10063"],
+        "description": (
+            "Responses omit the Permissions-Policy header, so powerful browser "
+            "features remain available to this document and nested contexts by default."
+        ),
+        "impact": (
+            "Unused capabilities such as camera, microphone, geolocation, or payment "
+            "stay enabled for this origin and embeds unless restricted elsewhere."
+        ),
+        "remediation": (
+            "Send Permissions-Policy that disables unused features "
+            "(for example camera=(), microphone=(), geolocation=(), payment=()). "
+            "Do not substitute a CSP header for Permissions-Policy."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Permissions-Policy",
+        ],
+    },
+    {
+        "title": "Cross-Origin-Embedder-Policy Header Missing",
+        "cwe": 346,
+        "default_severity": "low",
+        "tags": ["headers", "coep"],
+        "rule_ids": ["zap:90004", "90004"],
+        "description": (
+            "Cross-Origin-Embedder-Policy is not set, so the document cannot opt into "
+            "cross-origin isolation required for some powerful features."
+        ),
+        "impact": (
+            "Without COEP (and usually COOP), cross-origin isolation is unavailable "
+            "and Spectre-related mitigations that depend on it cannot apply."
+        ),
+        "remediation": (
+            "Send Cross-Origin-Embedder-Policy: require-corp (or credentialless where "
+            "supported). Ensure embedded cross-origin resources send compatible CORP/CORS. "
+            "Do not substitute a CSP header for COEP."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Embedder-Policy",
+        ],
+    },
+    {
+        "title": "Cross-Origin-Opener-Policy Header Missing",
+        "cwe": 346,
+        "default_severity": "low",
+        "tags": ["headers", "coop"],
+        "rule_ids": ["zap:90004", "90004"],
+        "description": (
+            "Cross-Origin-Opener-Policy is not set, so cross-origin window.open / OAuth "
+            "popups may retain a reference to this browsing context via window.opener."
+        ),
+        "impact": (
+            "Cross-origin pages can retain window.opener relationships that enable "
+            "interaction attacks against this origin."
+        ),
+        "remediation": (
+            "Send Cross-Origin-Opener-Policy: same-origin (or same-origin-allow-popups "
+            "when popup flows must keep a limited opener relationship). "
+            "Do not substitute a CSP header for COOP."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Opener-Policy",
+        ],
+    },
+    {
+        "title": "Cross-Origin-Resource-Policy Header Missing",
+        "cwe": 346,
+        "default_severity": "low",
+        "tags": ["headers", "corp"],
+        "rule_ids": ["zap:90004", "90004"],
+        "description": (
+            "Cross-Origin-Resource-Policy is not set on sensitive responses, so other "
+            "origins may embed or read certain resource types depending on browser defaults."
+        ),
+        "impact": (
+            "Private resources may be embeddable cross-origin; COEP require-corp also "
+            "needs compatible CORP on subresources."
+        ),
+        "remediation": (
+            "Send Cross-Origin-Resource-Policy: same-origin for private resources, or "
+            "same-site / cross-origin when intentional sharing is required. "
+            "Do not substitute a CSP header for CORP."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cross-Origin-Resource-Policy",
+        ],
     },
     {
         "title": "Verbose error messages",

@@ -149,6 +149,12 @@ Import soft-merges only at high confidence via [[attestra/dedup.py#find_best_sof
 
 Security context guards: [[attestra/finding_normalize.py#security_context_key]] / [[attestra/finding_normalize.py#path_context_bucket]] (`app`, `cdn-cgi`, `challenge`, `static`). Concept and CWE+path merges in [[attestra/crossmerge.py#match_reason]] require the same context; CVE stays host-level. Rationales include `@{bucket}` for concept/CWE links. [[attestra/crossmerge.py#explain_near_misses]] reports same-host+concept pairs that differ in context. Sibling expansions may populate [[attestra/finding_normalize.py#EXTRA_CONCEPT_RULES]]. See [[findings#Deduplication#Cross-tool deduplication]], [[findings#Deduplication#Cross-tool merge]]; doc `docs/WORLDCLASS_VAPT_PHASE6_NORMALIZE_DEDUP.md`.
 
+## World-class remediation packs (Phase 7)
+
+Concept-keyed fix packs so findings get accurate remediation instead of mismatched header text.
+
+[[attestra/remediation/packs.py#REMEDIATION_PACKS]] covers HSTS/CSP/COEP/COOP/CORP/Permissions-Policy, deprecated X-XSS-Protection, CORS, SameSite cookies, weak TLS ciphers, IDOR, SQLi, and reflected XSS. Matching in [[attestra/remediation/match.py#pack_for_finding]] / [[attestra/remediation/match.py#resolve_concepts]] prefers crossmerge concepts and rejects CSP packs for Permissions-Policy titles. [[attestra/remediation/match.py#remediation_for_finding]] exposes pack fields plus legacy `recommendation_text`. Library/API/report wiring: [[attestra/library/service.py#guidance_for_finding]], [[attestra/library/service.py#finding_api_fix_fields]], [[attestra/services.py#_apply_remediation_recommendation]], [[attestra/reports/render.py#_attach_remediation_packs]]. See [[findings#Remediation packs (Phase 7)]]; doc `docs/WORLDCLASS_VAPT_PHASE7_REMEDIATION.md`.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
