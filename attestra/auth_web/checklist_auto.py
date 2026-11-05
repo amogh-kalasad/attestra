@@ -308,10 +308,13 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
         ev = [f"automated_run:{ex.id}:{tid}"]
         fids = _canonical_ids(s, [case["finding_id"]]) if case.get("finding_id") else []
         real = tid in ("T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "FILE")
-        if status in ("SKIPPED", "FAILED"):
+        # SKIPPED / FAILED / DEFERRED never become checklist passed — record blocked with reason.
+        if status in ("SKIPPED", "FAILED", "DEFERRED"):
             if real and tid != "T22":
+                prefix = "deferred" if status == "DEFERRED" else "blocked"
+                note = f"{prefix}: {detail}" if detail else f"{prefix}: {tid} {status.lower()} — not executed as full coverage"
                 for ref in refs:
-                    out.append(Verdict(ref, "blocked", "automated_vapt", label, f"blocked: {detail}", [], ev))
+                    out.append(Verdict(ref, "blocked", "automated_vapt", label, note, [], ev))
             continue
         if tid == "T21":
             out.extend(_t21_verdicts(s, case, label, ev, fids))

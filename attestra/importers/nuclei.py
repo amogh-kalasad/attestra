@@ -25,6 +25,30 @@ def _as_list(v) -> list[str]:
     return [v] if isinstance(v, str) else list(v)
 
 
+def _evidence_refs(rec: dict) -> list[str]:
+    """Surface extractor/matcher output so classifiers can see cipher suite names."""
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        t = (text or "").strip()
+        if not t or t in seen:
+            return
+        seen.add(t)
+        refs.append(t)
+
+    for item in _as_list(rec.get("extracted-results")):
+        _add(str(item))
+    matcher = str(rec.get("matcher-name") or "").strip()
+    if matcher:
+        _add(f"matcher:{matcher}")
+    # Truncated curl can still carry suite tokens for weak-cipher templates.
+    curl = str(rec.get("curl-command") or "").strip()
+    if curl:
+        _add(curl[:500])
+    return refs
+
+
 def parse(raw: bytes) -> list[NormalizedFinding]:
     out: list[NormalizedFinding] = []
     text = raw.decode("utf-8", errors="replace").strip()
@@ -53,6 +77,7 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                 cves=[c.upper() for c in _as_list(cls.get("cve-id"))],
                 cvss_score=float(cvss) if cvss not in (None, "") else None,
                 cvss_vector=cls.get("cvss-metrics", "") or "",
+                evidence_refs=_evidence_refs(rec),
             )
         )
     return out

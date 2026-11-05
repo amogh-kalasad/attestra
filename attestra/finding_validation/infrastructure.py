@@ -66,18 +66,20 @@ def is_infrastructure_cookie_finding(
     location: str,
     evidence_text: str = "",
 ) -> bool:
-    """SameSite/cookie findings naming a CF cookie or targeting cdn-cgi."""
+    """SameSite/cookie findings naming a CF cookie or cookie-titled on cdn-cgi.
+
+    Must not treat arbitrary evidence on challenge URLs (e.g. CORS ACAO) as
+    cookie infrastructure noise — that would shadow CDN CORS classification.
+    """
     title_l = title or ""
-    if not _COOKIE_TITLE_RE.search(title_l):
-        # Still treat clear CF cookie param on any cookie-ish context.
-        if not (param or evidence_text):
-            return False
+    cookie_titled = bool(_COOKIE_TITLE_RE.search(title_l))
     if is_cloudflare_infrastructure_cookie(param or ""):
         return True
     if _cookie_name_in_text(evidence_text) or _cookie_name_in_text(param or ""):
         return True
-    if is_cdn_challenge_url(location or ""):
-        return bool(_COOKIE_TITLE_RE.search(title_l) or param or evidence_text)
+    # Cookie-titled alerts on challenge URLs are CDN noise even without a CF name.
+    if cookie_titled and is_cdn_challenge_url(location or ""):
+        return True
     return False
 
 

@@ -3,6 +3,8 @@
 Security context keeps the same concept on one host from auto-merging when the
 affected resource is infrastructure (CDN/challenge) vs application vs static.
 Sibling CONCEPT_RULES expansions may add entries via ``EXTRA_CONCEPT_RULES``.
+Import-time CWE remapping keeps deprecated X-XSS-Protection out of CWE-79 XSS
+fingerprints.
 """
 # @lat: [[findings#Deduplication#Cross-tool merge]]
 
@@ -17,6 +19,14 @@ from attestra.fingerprint import caa_host, normalize_location
 # crossmerge merges these with try/getattr so either side can land first.
 EXTRA_CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {}
 
+# Protection Mechanism Failure — not reflected XSS (CWE-79).
+XSS_PROTECTION_CWE = 693
+# Hyphen, underscore, or space (ZAP "XSS Protection"); rule id 10016.
+_XSS_PROTECTION_RE = re.compile(
+    r"(?i)xss[-_\s]?protection|xss\.?deprecated[.\-_]?header|x-xss-protection"
+    r"|xss_deprecated_header|(?:^|[\s,;])10016(?:$|[\s,;:])"
+)
+
 _CDN_CGI_MARKERS = ("/cdn-cgi/", "cdn-cgi/")
 _CHALLENGE_MARKERS = (
     "challenge-platform",
@@ -26,6 +36,36 @@ _CHALLENGE_MARKERS = (
 )
 _STATIC_PREFIXES = ("/_next/", "/__nextjs", "/_vercel/", "/static/", "/assets/")
 _HOSTPORT = re.compile(r"^[a-z0-9.-]+(:\d{1,5})?$", re.IGNORECASE)
+
+
+def is_xss_protection_deprecated(
+    *,
+    title: str = "",
+    rule_id: str = "",
+    rule_ids: list[str] | None = None,
+) -> bool:
+    """True for deprecated X-XSS-Protection hardening (not reflected XSS)."""
+    if _XSS_PROTECTION_RE.search(title or ""):
+        return True
+    blob = " ".join([rule_id or "", *(str(r) for r in (rule_ids or []))])
+    return bool(blob.strip() and _XSS_PROTECTION_RE.search(blob))
+
+
+def normalize_cwe_for_import(
+    *,
+    title: str = "",
+    rule_id: str = "",
+    rule_ids: list[str] | None = None,
+    cwe: int | None = None,
+) -> int | None:
+    """Remap misleading template CWEs before fingerprint / soft-match.
+
+    Nuclei ``xss-deprecated-header`` often ships CWE-79; that must not share a
+    fingerprint with reflected XSS at the same location.
+    """
+    if is_xss_protection_deprecated(title=title, rule_id=rule_id, rule_ids=rule_ids):
+        return XSS_PROTECTION_CWE
+    return cwe
 
 
 def _bare_location(location: str) -> str:

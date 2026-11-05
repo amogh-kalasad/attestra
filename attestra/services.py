@@ -1355,9 +1355,20 @@ def import_results(
         )
         s.add(obs)
 
+    from attestra.finding_normalize import normalize_cwe_for_import
+
     for nf, asset in matched:
         asset_id = asset.id if asset else None
         variant = getattr(nf, "variant", "") or ""
+        # Remap deprecated XSS-Protection CWE-79 → 693 before fingerprint/soft-match
+        # so Nuclei/ZAP hardening alerts do not collide with reflected XSS.
+        remapped = normalize_cwe_for_import(
+            title=nf.title or "",
+            rule_id=getattr(nf, "rule_id", "") or "",
+            cwe=nf.cwe,
+        )
+        if remapped != nf.cwe:
+            nf.cwe = remapped
         raw_kwargs = dict(
             location=nf.location,
             cwe=nf.cwe,

@@ -26,17 +26,29 @@ from attestra.finding_validation.statuses import (
     UNVALIDATED,
 )
 
+# Hyphen, underscore, or space between XSS and Protection; ZAP 10016 rule id.
 _XSS_PROTECTION_RE = re.compile(
-    r"(?i)xss-protection|xss.deprecated.header|x-xss-protection|xss_deprecated_header"
+    r"(?i)xss[-_\s]?protection|xss\.?deprecated[.\-_]?header|x-xss-protection"
+    r"|xss_deprecated_header|(?:^|[\s,;])10016(?:$|[\s,;:])"
 )
 
 _WEAK_CIPHER_RE = re.compile(r"(?i)weak[-\s]?cipher|weak\s+cipher\s+suites|cipher\s+suite")
 
-# Suite tokens: TLS_IANA names or cipher-ish tokens with algorithm markers.
+# Suite tokens: IANA TLS_/SSL_ names, OpenSSL hyphenated suites, or algorithm markers.
+# Protocol versions alone (TLS 1.0) do not count — suite or handshake proof required.
 _CIPHER_EVIDENCE_RE = re.compile(
-    r"(?i)\bTLS_[A-Z0-9_]+\b"
+    r"(?i)\b(?:TLS|SSL)_[A-Z0-9_]+\b"
+    r"|\b(?:(?:ECDHE|DHE|EECDH|EDH|AECDH)-)?(?:(?:RSA|ECDSA|DSS|PSK|anon)-)?"
+    r"(?:AES(?:128|256)?(?:GCM|CCM)?|CHACHA20-POLY1305|RC4(?:-\d+)?|3DES|DES-CBC3|"
+    r"CAMELLIA(?:128|256)?|ARIA(?:128|256)?)"
+    r"(?:-(?:SHA(?:256|384)?|MD5|POLY1305|GCM-SHA\d+|CCM(?:8)?-SHA\d+))*\b"
     r"|(?:^|[^A-Za-z0-9_])(?:AES|RC4|DES|3DES|CHACHA20|GCM|CBC|CCM)(?:[^A-Za-z0-9_]|$)"
     r"|\b(?:ECDHE|DHE|RSA)_(?:RSA|ECDSA|PSK)_[A-Z0-9_]+\b"
+)
+_HANDSHAKE_SUITE_RE = re.compile(
+    r"(?i)(?:ClientHello|ServerHello).{0,120}(?:cipher|suite)"
+    r"|cipher\s*suite\s*[:=]\s*\S+"
+    r"|offered\s+ciphers?\s*[:=]\s*\S+"
 )
 
 
@@ -76,8 +88,14 @@ def _joined_evidence(evidence_refs: list[Any] | None, evidence_texts: list[str] 
 
 
 def _has_cipher_suite_evidence(blobs: list[str]) -> bool:
+    """True when evidence text names a cipher suite or handshake cipher proof.
+
+    Protocol version strings alone are insufficient (ENG1 F-10).
+    """
     for blob in blobs:
-        if blob and _CIPHER_EVIDENCE_RE.search(blob):
+        if not blob:
+            continue
+        if _CIPHER_EVIDENCE_RE.search(blob) or _HANDSHAKE_SUITE_RE.search(blob):
             return True
     return False
 
@@ -129,13 +147,15 @@ def classify_observation(
         reasons.append(
             "Deprecated X-XSS-Protection hardening observation; not an active XSS vulnerability"
         )
+        # Remap off CWE-79 / Injection / reflected-XSS ASVS+WSTG onto CWE-693 misconfig.
         return _empty_result(
             INFORMATIONAL,
             reasons,
             severity="info",
             cwe=693,
             owasp_top10="A05:2021-Security Misconfiguration",
-            wstg_ref="",
+            asvs_ref="V14.4.3",
+            wstg_ref="WSTG-CONF-12",
             clear_injection_mapping=True,
         )
 
@@ -159,9 +179,13 @@ def classify_observation(
         )
         return _empty_result(NOT_REPRODUCIBLE, reasons)
 
-    # 6. Weak cipher without suite names in evidence.
+    # 6. Weak cipher without suite names in evidence (or description extractors).
     weak_blob = f"{title_s}\n{desc_s}\n{rule_blob}"
-    if _WEAK_CIPHER_RE.search(weak_blob) and not _has_cipher_suite_evidence(evidence_blobs):
+    # Suite tokens in description count (Nuclei often puts names there); title alone does not.
+    suite_blobs = list(evidence_blobs)
+    if desc_s:
+        suite_blobs.append(desc_s)
+    if _WEAK_CIPHER_RE.search(weak_blob) and not _has_cipher_suite_evidence(suite_blobs):
         reasons.append("Weak-cipher finding lacks cipher suite names or handshake evidence")
         return _empty_result(NEEDS_MANUAL_VALIDATION, reasons)
 
@@ -194,8 +218,14 @@ def apply_classification_to_finding(finding: Any, result: dict[str, Any]) -> Non
         if "injection" in owasp or "a03" in owasp:
             finding.owasp_top10 = result.get("owasp_top10") or "A05:2021-Security Misconfiguration"
         wstg = (getattr(finding, "wstg_ref", None) or "").lower()
-        if "xss" in wstg or "inject" in wstg:
-            finding.wstg_ref = result.get("wstg_ref") if result.get("wstg_ref") is not None else ""
+        if "xss" in wstg or "inject" in wstg or "inpv" in wstg:
+            finding.wstg_ref = (
+                result.get("wstg_ref") if result.get("wstg_ref") is not None else "WSTG-CONF-12"
+            )
+        asvs = (getattr(finding, "asvs_ref", None) or "").lower()
+        # CWE-79 catalog ASVS (V5.x input validation) is wrong for deprecated-header hardening.
+        if asvs.startswith("v5.") or "inject" in asvs:
+            finding.asvs_ref = result.get("asvs_ref") or "V14.4.3"
 
 
 def elite_status_to_validation(elite_status: str) -> str:

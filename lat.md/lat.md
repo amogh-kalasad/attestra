@@ -24,6 +24,7 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - World-class report engine sections (Phase 8): [[architecture#World-class report engine sections (Phase 8)]] (`docs/WORLDCLASS_VAPT_PHASE8_REPORT_ENGINE.md`)
 - World-class report QA (Phase 9): [[architecture#World-class report QA (Phase 9)]] / [[reports#World-class report QA (Phase 9)]] (`docs/WORLDCLASS_VAPT_PHASE9_REPORT_QA.md`)
 - World-class report QA (Phase 9): [[reports#World-class report QA (Phase 9)]]
+- World-class ENG1 V21 regression (Phase 10): [[architecture#World-class ENG1 V21 regression (Phase 10)]] / [[tests#World-class Phase 10 ENG1 V21]] (`docs/WORLDCLASS_VAPT_PHASE10_ENG1_V21.md`)
 
 MongoDB is the runtime store (see [[architecture#MongoDB migration (in progress)]]); cutover design notes live in `docs/mongodb_migration/`.
 

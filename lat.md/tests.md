@@ -1487,7 +1487,7 @@ A profile with method `none` and no secret validates to status `valid` for unaut
 
 ### Checklist rejects skipped as passed
 
-[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `status=passed` when notes imply incomplete coverage (including substrings skipped / not covered / limited / blind / not tested); the row stays unchanged.
+[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `status=passed` when notes imply incomplete coverage (including substrings skipped / blocked: / deferred / not covered / limited / blind / not tested / not executed); the row stays unchanged.
 
 ### Checklist blocked needs evidence
 
@@ -2962,3 +2962,235 @@ When on-disk evidence bytes no longer match the stored sha256, QA raises critica
 ### Remediation CSP mismatch flagged
 
 A Permissions-Policy finding with CSP-only remediation text is flagged `remediation_csp_mismatch`.
+
+## World-class Phase 10 ENG1 V21
+
+ENG1 technical report v21 regression anchors for the final world-class VA + PT phase (`tests/test_eng1_v21_regression.py`; doc `docs/WORLDCLASS_VAPT_PHASE10_ENG1_V21.md`).
+
+### Cipher needs manual without suites
+
+ENG1 F-10: weak-cipher findings without suite or handshake evidence classify as needs_manual_validation (`test_eng1_cipher_needs_manual_without_suite_names`).
+
+### Cipher suite evidence not needs manual
+
+Named cipher suite tokens in evidence remove the needs_manual gate and leave the finding unvalidated (`test_eng1_cipher_with_suite_evidence_not_needs_manual`).
+
+### Cipher suite in description counts
+
+Suite tokens in the description count as evidence depth for weak-cipher classification (`test_eng1_cipher_suite_names_in_description_count_as_evidence`).
+
+### Cipher nuclei extracts evidence
+
+[[attestra/importers/nuclei.py#_evidence_refs]] surfaces extracted-results / matcher names so classifiers see suite names (`test_eng1_cipher_nuclei_importer_surfaces_extracted_suites`).
+
+### Cipher remediation pack
+
+Weak-cipher findings resolve to the `tls:weak-cipher` AEAD remediation pack (`test_eng1_cipher_remediation_pack_is_tls_weak_cipher`).
+
+### XSS-Protection remapped not Injection
+
+Deprecated XSS-Protection classifies as informational with CWE-693 / A05 / ASVS V14.4.3 / WSTG-CONF-12, never Injection (`test_eng1_xssprot_remapped_not_injection`).
+
+### XSS-Protection apply clears Injection ASVS
+
+[[attestra/finding_validation/classify.py#apply_classification_to_finding]] remaps CWE-79 / A03 / V5.2.1 / WSTG-INPV-01 off XSS-Protection findings (`test_eng1_xssprot_apply_clears_injection_asvs_wstg`).
+
+### XSS-Protection concept not reflected XSS
+
+Concept and remediation pack are `header:xss-protection-deprecated` (remove/set 0), not a reflected XSS fix (`test_eng1_xssprot_concept_is_deprecated_header_not_xss`).
+
+### Informational excluded from open vuln
+
+[[attestra/reports/render.py#_counts_as_open_vuln]] returns false for informational validation (`test_eng1_info_informational_excluded_from_open_vuln`).
+
+### Not reproducible excluded from open vuln
+
+not_reproducible and false_positive validation classes are excluded from open-vuln KPIs (`test_eng1_info_not_reproducible_excluded_from_open_vuln`).
+
+### Needs manual still open vuln
+
+needs_manual_validation and unvalidated still count as open vulns until analyst disposition (`test_eng1_info_needs_manual_still_counts_as_open_vuln`).
+
+### XSS-Protection not open Injection KPI
+
+After XSS-Protection remap the finding is informational and must not count as an open Injection vulnerability (`test_eng1_info_xssprot_informational_not_open_vuln_kpi`).
+
+### HSTS evidence contradicts missing claim
+
+ENG1-shaped HSTS-not-set with Strict-Transport-Security max-age evidence classifies as not_reproducible via general header helpers.
+
+### HSTS missing without evidence stays open
+
+HSTS-missing claims without contradicting evidence remain unvalidated rather than auto-closed.
+
+### Permissions-Policy on cdn-cgi informational
+
+Permissions-Policy missing claims on cdn-cgi / challenge-platform URLs classify as informational.
+
+### Permissions-Policy evidence contradiction
+
+Permissions-Policy present in HTTP evidence on an application URL yields not_reproducible.
+
+### Permissions-Policy remediation not CSP
+
+Permissions-Policy titles resolve to `header:permissions-policy-missing` packs without Content-Security-Policy nginx/apache text.
+
+### CORS on challenge-platform informational
+
+Cross-domain / CORS with ACAO `*` on challenge-platform main.js is informational with a CDN/CORS reason, not a CF-cookie reason.
+
+### App-owned CORS stays unvalidated
+
+Application-path CORS misconfigurations stay unvalidated and are not treated as CDN challenge noise.
+
+### cf_clearance SameSite informational
+
+SameSite=None on `cf_clearance` classifies as informational Cloudflare infrastructure noise.
+
+### CF cookie family prefixes
+
+Known CF cookie names and `cf_` / `__cf` / `cf_chl_` prefixes classify as infrastructure cookies.
+
+### App session SameSite stays unvalidated
+
+Application session cookies with SameSite issues remain unvalidated and are not CF-noise classified.
+
+### HTTP 200 alone never Confirmed
+
+Elite validate_result treats bare HTTP 200 without exposure as NOT_VULNERABLE; create gate stays closed.
+
+### HTTP 403 blocked path not Confirmed
+
+HTTP 403 deny without data exposure is NOT_VULNERABLE / likely FP and must not create findings.
+
+### Classify default never Confirmed
+
+Scanner classify_observation stays unvalidated on status-code evidence alone and never invents Confirmed.
+
+### Deferred coverage stays blocked
+
+DEFERRED and SKIPPED coverage ledger rows are not counted as tested coverage.
+
+### Tools versions recorded fields only
+
+`tools_and_versions` uses recorded tool_version only; missing versions become “version not recorded”.
+
+### Format date helpers recorded only
+
+Report date helpers return empty for missing values and never invent timezone clocks.
+
+### Scan history methodology recorded times
+
+Technical methodology scan tables use recorded ScanRun times (or em dash), not fabricated clocks.
+
+### Evidence limitations list capture failures
+
+Report evidence limitations surface capture_failure kinds and failed capture_status notes.
+
+### Evidence embeds require hash match
+
+Screenshot embeds require on-disk bytes to match the stored sha256 before data-URI inclusion.
+
+### Evidence QA hash mismatch critical
+
+Report QA raises critical evidence_hash_mismatch when sealed evidence bytes diverge from sha256.
+
+### Pending QA DRAFT placeholders
+
+DRAFT technical reports keep pending QA placeholders on document-control / sign-off until approval.
+
+### Approval status QA check
+
+`check_approval_status` emits informational `approval_status` echoing `report.status` (e.g. draft) so DRAFT seals stay visible to reviewers.
+
+### Incomplete authenticated testing honesty
+
+T19 SKIPPED/DEFERRED maps to checklist blocked via [[attestra/auth_web/checklist_auto.py#verdicts_for_automated]]; [[attestra/auth_web/checklists.py#update_checklist_item]] refuses Passed on incomplete notes; snapshot keeps `scan_completion_is_not_security_coverage`.
+
+### Blocked IDOR BOLA never passed
+
+T20 without a ready secondary profile stays blocked on WSTG-ATHZ-04; notes with blocked:/deferred/not executed cannot become Passed via [[attestra/auth_web/checklists.py#update_checklist_item]].
+
+### Limited XSS SQLi stay blocked
+
+Limited T21/INJ/XSS probes stay blocked with honesty notes; report QA `checklist_passed_incomplete` catches Passed rows whose notes still admit gaps.
+
+### Grade HSTS evidence skips penalty
+
+Site grade skips HSTS-missing −20 when evidence shows STS max-age; breakdown reason cites evidence via [[attestra/grade.py#_hsts_missing_pass_reason]].
+
+### Grade HSTS informational skips penalty
+
+Informational HSTS-missing skips the fail with a validation_status reason (never “Has Strict-Transport-Security”).
+
+### Grade HSTS not_reproducible skips penalty
+
+not_reproducible HSTS-missing claims skip −20 with an honest validation_status breakdown reason.
+
+### Grade HSTS unvalidated still penalizes
+
+Unvalidated HSTS-missing claims without contradicting evidence still apply the −20 modifier.
+
+### Remediation Permissions-Policy pack excludes CSP
+
+[[attestra/remediation/packs.py#REMEDIATION_PACKS]] Permissions-Policy pack must not contain Content-Security-Policy nginx/apache text.
+
+### Remediation ZAP 10063 never gets CSP pack
+
+ZAP 10063 Permissions-Policy titles resolve via [[attestra/remediation/match.py#pack_for_finding]] to the PP pack only.
+
+### Remediation library rejects CSP on Permissions-Policy
+
+[[attestra/library/fix_snippets.py#rejects_csp_guidance_for_finding]] blocks CSP-only snippets on Permissions-Policy findings.
+
+### TLS OpenSSL suite evidence progresses
+
+OpenSSL hyphenated suite names in evidence progress weak-cipher past needs_manual (`test_eng1_tls_openssl_suite_evidence_not_needs_manual`).
+
+### TLS protocol alone stays needs manual
+
+TLS 1.0/1.1 version strings without suite names stay needs_manual_validation (`test_eng1_tls_protocol_versions_alone_stay_needs_manual`).
+
+### TLS grade needs_manual skips weak cipher
+
+Site grade skips tls_weak_cipher −15 when validation is needs_manual without suite evidence (`test_eng1_tls_grade_needs_manual_skips_weak_cipher_penalty`).
+
+### TLS grade informational skips weak cipher
+
+Informational weak-cipher findings do not drive the tls_weak_cipher grade fail (`test_eng1_tls_grade_informational_skips_weak_cipher_penalty`).
+
+### TLS grade suite evidence still penalizes
+
+Unvalidated weak-cipher with suite names in evidence still takes the −15 grade penalty (`test_eng1_tls_grade_suite_evidence_still_penalizes`).
+
+### TLS summary never invents suite names
+
+testssl cipher name / summarize use em-dash when no real suite token exists (`test_eng1_tls_summary_never_invents_suite_names`).
+
+### TLS cipher evidence handshake proof
+
+Handshake/ServerHello cipher suite proof progresses past needs_manual (`test_eng1_cipher_evidence_handshake_proof_progresses`).
+
+### Import XSS-Protection clears Injection
+
+Import pipeline remaps XSS-Protection alerts away from Injection CWE/OWASP on create.
+
+### Import ZAP XSS-Protection informational
+
+ZAP XSS-Protection imports classify as informational hardening, not active XSS.
+
+### Import CORS cdn-cgi informational
+
+Import of CORS/cross-domain alerts on cdn-cgi challenge URLs sets validation informational.
+
+### Import header on cdn-cgi informational
+
+Import of header-missing claims targeting cdn-cgi URLs sets validation informational.
+
+### Normalize XSS-Protection concept distinct
+
+Finding normalize / CONCEPT_RULES keep deprecated XSS-Protection distinct from reflected XSS.
+
+### Normalize Permissions-Policy not CSP
+
+Permissions-Policy missing normalizes to its own concept key, never CSP-missing/weak.

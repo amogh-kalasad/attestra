@@ -7,6 +7,9 @@ Suppressed / false-positive findings do not take points off.
 Accepted-risk findings still count. Expired/invalid certificate caps the grade at F.
 HSTS-missing fail is skipped when validation_status is not_reproducible /
 informational / validation FP, or when HTTP evidence shows HSTS present.
+tls_weak_cipher fail is skipped when validation_status is informational /
+not_reproducible / validation FP / accepted_risk, or needs_manual_validation
+without cipher-suite names in evidence (ENG1 F-10 honesty).
 """
 # @lat: [[findings#Site grade]]
 # @lat: [[architecture#World-class risk scoring (Phase 5)]]
@@ -17,11 +20,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from attestra.finding_validation.classify import _has_cipher_suite_evidence
 from attestra.finding_validation.headers import hsts_present_in_evidence
 from attestra.finding_validation.statuses import (
     ACCEPTED_RISK,
     FALSE_POSITIVE,
     INFORMATIONAL,
+    NEEDS_MANUAL_VALIDATION,
     NOT_REPRODUCIBLE,
 )
 
@@ -267,6 +272,8 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
         "csp_any": False,
         "csp_tested": False,
         "hsts_tested": False,
+        "hsts_missing_claim": False,
+        "hsts_skip_validation": False,
         "xcto_tested": False,
         "clickjack_tested": False,
         "referrer_tested": False,
@@ -310,8 +317,11 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
             saw["hsts_tested"] = True
             missing_claim = "missing" in blob or "not set" in blob or "no hsts" in blob
             if missing_claim:
+                saw["hsts_missing_claim"] = True
                 vs = _validation_of(f)
-                if vs not in _IGNORE_VALIDATION and not hsts_in_evidence:
+                if vs in _IGNORE_VALIDATION:
+                    saw["hsts_skip_validation"] = True
+                elif not hsts_in_evidence:
                     flags["hsts_missing"] = True
             if "max-age" in blob and ("short" in blob or "under" in blob or "low" in blob):
                 flags["hsts_short"] = True
@@ -358,7 +368,18 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
             flags["tls_legacy"] = True
         if "weak cipher" in blob or "rc4" in blob or "export cipher" in blob or "null cipher" in blob:
             saw["tls_tested"] = True
-            flags["tls_weak_cipher"] = True
+            vs = _validation_of(f)
+            # Informational / contradicted / FP never drive the weak-cipher fail.
+            if vs in _IGNORE_VALIDATION:
+                pass
+            elif vs == NEEDS_MANUAL_VALIDATION:
+                # ENG1 F-10: needs_manual without suite names must not take points off.
+                suite_blobs = _evidence_blobs(f)
+                suite_blobs.append(blob)
+                if _has_cipher_suite_evidence(suite_blobs):
+                    flags["tls_weak_cipher"] = True
+            else:
+                flags["tls_weak_cipher"] = True
         if "cipher" in blob or "protocol" in blob or "tls" in blob:
             if "testssl" in blob or "ssl" in blob or "tls" in blob:
                 saw["tls_tested"] = True
@@ -384,6 +405,7 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
                 flags["http_no_https_redirect"] = True
 
     # Evidence showing HSTS present overrides any missing-claim fail.
+    saw["hsts_in_evidence"] = bool(hsts_in_evidence)
     if hsts_in_evidence:
         saw["hsts_tested"] = True
         flags["hsts_missing"] = False
@@ -404,6 +426,18 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
     # Attach saw for not_tested decisions
     flags["_saw"] = saw  # type: ignore[assignment]
     return flags
+
+
+def _hsts_missing_pass_reason(saw: dict[str, bool]) -> str:
+    """Honest pass reason when the HSTS-missing modifier is not active."""
+    if saw.get("hsts_in_evidence"):
+        return "Has Strict-Transport-Security (evidence)"
+    if saw.get("hsts_skip_validation") and saw.get("hsts_missing_claim"):
+        return "HSTS-missing claim skipped (validation_status)"
+    if saw.get("hsts_missing_claim"):
+        # Claim seen but cleared without evidence/validation path above.
+        return "Has Strict-Transport-Security"
+    return "Has Strict-Transport-Security"
 
 
 # Which saw-* key means this modifier was in scope of the scan data.
@@ -472,7 +506,11 @@ def score_from_findings(findings: Iterable[Any]) -> dict[str, Any]:
             score += points  # points are negative for penalties
             breakdown.append(BreakdownRow(key, "fail" if points < 0 else "info", points, reason))
         else:
-            breakdown.append(BreakdownRow(key, "pass", 0, reason.replace("Missing ", "Has ").replace("without", "with")))
+            if key == "hsts_missing":
+                pass_reason = _hsts_missing_pass_reason(saw)
+            else:
+                pass_reason = reason.replace("Missing ", "Has ").replace("without", "with")
+            breakdown.append(BreakdownRow(key, "pass", 0, pass_reason))
 
     if score < 0:
         score = 0

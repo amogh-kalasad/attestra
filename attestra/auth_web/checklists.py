@@ -73,15 +73,18 @@ def list_checklist(session: Session, engagement_id: int) -> list[AuthChecklistIt
     )
 
 
-# Notes that imply the check was skipped, blocked, limited, or not actually executed.
+# Notes that imply the check was skipped, blocked, limited, deferred, or not executed.
 # Matched case-insensitively as substrings anywhere in the notes.
 INCOMPLETE_COVERAGE_NOTE_MARKERS: tuple[str, ...] = (
     "not covered",
     "not tested",
+    "not executed",
     "skipped",
     "limited",
     "forms not covered",
     "blind",
+    "deferred",
+    "blocked:",
 )
 
 
@@ -121,12 +124,12 @@ def update_checklist_item(
     if new_status not in CHECKLIST_STATUSES:
         raise ServiceError(f"invalid checklist status: {new_status}")
 
-    # Honesty: never mark passed when notes say skipped / limited / not covered / not executed.
+    # Honesty: never mark passed when notes say skipped / blocked / limited / deferred / not executed.
     if new_status == "passed":
         if notes_imply_incomplete_coverage(new_notes):
             raise ServiceError(
                 "cannot mark checklist item passed when notes indicate incomplete coverage "
-                "(skipped, not covered, limited, blind, or not tested)"
+                "(skipped, blocked, limited, deferred, blind, not covered, not tested, or not executed)"
             )
         if item.status == "blocked" and not new_evidence:
             raise ServiceError("cannot mark blocked checklist item passed without evidence")

@@ -43,6 +43,13 @@ _WEAK_CIPHER_HINT = re.compile(
     r"\b(RC4|NULL|EXPORT|DES\b|3DES|MD5|CBC|anon)\b",
     re.IGNORECASE,
 )
+# Real suite / cipher-family tokens only — never invent names from free text.
+_SUITE_NAME_TOKEN_RE = re.compile(
+    r"(?i)^(?:TLS_|SSL_)[A-Z0-9_]+$"
+    r"|^(?:ECDHE|DHE|EECDH|EDH|AECDH)-[A-Za-z0-9-]+$"
+    r"|^(?:AES(?:128|256)?(?:GCM|CCM)?|CHACHA20(?:-POLY1305)?|RC4(?:-\d+)?|"
+    r"3DES|DES-CBC3|CAMELLIA(?:128|256)?|ARIA(?:128|256)?)(?:-[A-Za-z0-9]+)*$"
+)
 
 
 def _entries(doc) -> list[tuple[dict, str, str]]:
@@ -423,14 +430,18 @@ def _cipher_bits(finding: str) -> int | None:
 
 
 def _cipher_name(finding: str) -> str:
-    """Best-effort cipher suite name from a cipher-* finding line."""
+    """Best-effort cipher suite name from a cipher-* finding line.
+
+    Returns an em-dash when no suite/family token is present — never invents
+    a name from arbitrary finding text (TLS summary honesty).
+    """
     parts = finding.split()
     for p in parts:
-        if p.startswith(("TLS_", "SSL_")) or "ECDHE" in p or "DHE-" in p or "AES" in p:
-            if p.startswith(("TLSv", "SSLv")):
-                continue
+        if p.startswith(("TLSv", "SSLv")):
+            continue
+        if _SUITE_NAME_TOKEN_RE.match(p):
             return p
-    return finding.strip()[:80] or "—"
+    return "—"
 
 
 def _pick_host_port(entries: list[tuple[dict, str, str]]) -> tuple[str, str]:
