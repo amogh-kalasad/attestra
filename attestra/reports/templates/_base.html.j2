@@ -84,10 +84,14 @@
   .cover-band-end { text-align: right; font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: .04em; }
   .cover-logo { max-height: 48px; max-width: 180px; margin: 0 14px 0 0; vertical-align: middle; background: #fff; padding: 4px 8px; }
   .cover-brand { margin: 0 0 14px; font-size: 13px; }
+  .cover-client { font-size: 28px; font-weight: 700; margin: 0 0 8px; line-height: 1.2; color: var(--navy); }
+  .cover-scope { font-size: 16px; font-weight: 600; margin: 0 0 14px; line-height: 1.3; color: var(--accent); }
   .cover h1 { font-size: 13px; margin: 0 0 6px; line-height: 1.3; color: var(--accent); font-weight: 700;
               text-transform: uppercase; letter-spacing: .1em; border: none; padding: 0; }
   .cover > p { font-size: 28px; font-weight: 700; margin: 0 0 16px; line-height: 1.2; color: var(--navy); }
+  .cover p.cover-scope { font-size: 16px; font-weight: 600; margin: 0 0 14px; color: var(--accent); }
   .cover p.meta { font-size: 13px; font-weight: 400; margin: 0 0 3px; color: var(--quiet); }
+  .platform-attestation { margin: 18px 0 8px; font-size: 12px; color: var(--quiet); }
   .cover-meta { width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 13px; }
   .cover-meta th, .cover-meta td { border-bottom: 1px solid var(--rule); padding: 10px 12px; vertical-align: top; background: #fff; }
   .cover-meta th { width: 14%; color: var(--quiet); font-weight: 600; font-size: 11px; text-transform: uppercase;
@@ -122,18 +126,18 @@
 {% if kind not in ("closure_letter", "attestation_letter") %}
 {% if is_draft|default(true) %}<div class="draft-mark" aria-hidden="true">DRAFT</div>{% endif %}
 <section class="cover" id="cover">
+  {# Confidential-only band: client name is the cover hero, not Attestra. #}
   <table class="cover-band" width="100%" cellpadding="0" cellspacing="0">
     <tr>
       <td class="cover-band-cell">
-        {% if logo %}<img class="cover-logo" src="{{ logo }}" alt="{{ (ca.legal_name if ca and ca.legal_name else tenant) }} logo">{% endif %}
-        <span class="cover-band-brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span>
+        {% if logo %}<img class="cover-logo" src="{{ logo }}" alt="">{% endif %}
       </td>
       <td class="cover-band-cell cover-band-end">Confidential</td>
     </tr>
   </table>
-  <div class="meta cover-brand"><span class="brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span> · {{ tenant }}</div>
+  <p class="cover-client">{{ (cover_client or tenant)|words_title }}</p>
+  {% if cover_scope %}<p class="cover-scope">{{ cover_scope }}</p>{% endif %}
   <h1>{{ (cover_title or (kind_meta.label if kind_meta and kind_meta.label else (kind|replace("_", " ") ~ " report")))|words_title }}</h1>
-  <p>{{ eng.name|words_title }}</p>
   <table class="cover-meta">
     <tr>
       <th>Client</th>
@@ -152,15 +156,6 @@
       <td>{{ version }}</td>
       <th>Date</th>
       <td>{{ today }}</td>
-    </tr>
-  </table>
-  {% if ca and (ca.contact_name or ca.contact_email or ca.contact_phone or ca.website or ca.address_formatted) %}
-  <p class="meta cover-prepared">Prepared by{% if ca.contact_name %} {{ ca.contact_name }}{% elif ca.legal_name %} {{ ca.legal_name }}{% endif %}{% if ca.contact_email %} · <a href="mailto:{{ ca.contact_email }}">{{ ca.contact_email }}</a>{% endif %}{% if ca.contact_phone %} · {{ ca.contact_phone }}{% endif %}{% if ca.website %} · {{ ca.website }}{% endif %}{% if ca.address_formatted %}<br>{{ ca.address_formatted }}{% endif %}</p>
-  {% endif %}
-  <table class="cover-spacer" width="100%" cellpadding="0" cellspacing="0" aria-hidden="true"><tr><td class="cover-spacer-cell"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="1" height="48" alt=""/></td></tr></table>
-  <table class="cover-foot" width="100%" cellpadding="0" cellspacing="0">
-    <tr>
-      <td class="cover-foot-cell">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }} · Security assessment report</td>
     </tr>
   </table>
 </section>

@@ -167,6 +167,51 @@ def _asset_kind_label(kind: str) -> str:
     return (kind or "").replace("_", " ").strip().capitalize()
 
 
+# Short cover-scope labels (client-facing); order preserved for stable wording.
+_COVER_SCOPE_KIND_LABELS = (
+    ("web_app", "Web"),
+    ("api", "API"),
+    ("mobile_app", "Mobile"),
+    ("host", "Network"),
+    ("cloud_account", "Cloud"),
+    ("repo", "Source"),
+    ("image", "Container"),
+)
+
+
+def _cover_client_name(eng: Engagement) -> str:
+    """Client-facing cover hero: tenant name, else engagement name (never blank)."""
+    tenant = (eng.tenant.name if eng.tenant else "") or ""
+    if tenant.strip():
+        return tenant.strip()
+    return (eng.name or "").strip() or "Client"
+
+
+def _cover_scope_line(eng: Engagement) -> str:
+    """One-line cover scope from engagement type + in-scope asset kinds."""
+    from attestra.models import normalize_engagement_type
+
+    label_by = dict(_COVER_SCOPE_KIND_LABELS)
+    present = {getattr(a, "kind", None) or "" for a in (eng.assets or [])}
+    seen = [label_by[k] for k, _ in _COVER_SCOPE_KIND_LABELS if k in present]
+    type_key = normalize_engagement_type(eng.type or "")
+    if type_key in ("vapt", "va", "pt"):
+        lead = "VAPT testing"
+    elif type_key == "retest":
+        lead = "Retest"
+    elif type_key == "continuous":
+        lead = "Continuous security testing"
+    else:
+        lead = f"{engagement_type_label(eng.type)} testing".strip()
+    if not seen:
+        return lead
+    if len(seen) == 1:
+        return f"{lead} for {seen[0]}"
+    if len(seen) == 2:
+        return f"{lead} for {seen[0]} and {seen[1]}"
+    return f"{lead} for {', '.join(seen[:-1])}, and {seen[-1]}"
+
+
 def _test_types_and_standards(eng: Engagement) -> tuple[list[dict], list[str]]:
     """Unique authorized test types and standards across engagement assets."""
     seen: dict[str, dict] = {}
@@ -692,6 +737,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
+        "cover_client": _cover_client_name(eng),
+        "cover_scope": _cover_scope_line(eng),
         "type_label": engagement_type_label(eng.type),
         "detected_by": detected_by_label,
         "observations_by_finding": _observations_by_finding(s, reportable, engagement_id),

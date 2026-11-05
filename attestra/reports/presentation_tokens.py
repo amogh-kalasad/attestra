@@ -124,10 +124,14 @@ pre.http-pair {{ background-color: {SURFACE_ALT}; padding: 6pt 8pt; page-break-i
 .cover-band-end {{ text-align: right; font-size: 8pt; color: #ffffff; }}
 .cover-logo {{ height: 1.1cm; margin: 0 8pt 0 0; }}
 .cover-brand {{ margin: 0 0 8pt 0; font-size: 8.5pt; }}
+.cover-client {{ font-size: 19pt; font-weight: bold; color: {NAVY}; margin: 4pt 0 6pt 0; line-height: 1.2; }}
+.cover-scope {{ font-size: 11pt; font-weight: bold; color: {ACCENT}; margin: 0 0 8pt 0; line-height: 1.3; }}
 .cover h1 {{ font-size: 9pt; color: {ACCENT}; margin: 0 0 5pt 0; line-height: 1.3; font-weight: bold;
             text-transform: uppercase; letter-spacing: 0.1em; border-bottom: none; padding-bottom: 0; }}
 .cover p {{ font-size: 19pt; font-weight: bold; color: {NAVY}; margin: 0 0 10pt 0; line-height: 1.2; }}
+.cover p.cover-scope {{ font-size: 11pt; font-weight: bold; color: {ACCENT}; margin: 0 0 8pt 0; line-height: 1.3; }}
 .cover p.meta, .cover .meta {{ font-size: 8.5pt; font-weight: normal; color: {QUIET}; line-height: 1.4; margin: 0 0 2pt 0; }}
+.platform-attestation {{ margin: 10pt 0 6pt 0; font-size: 8pt; color: {QUIET}; }}
 .cover-meta {{ width: 100%; margin: 2pt 0 8pt 0; }}
 .cover-meta th, .cover-meta td {{ border-bottom: 0.4pt solid {RULE}; padding: 7pt 8pt; vertical-align: top; font-size: 8.5pt; }}
 .cover-meta th {{ width: 14%; color: {QUIET}; font-weight: bold; font-size: 7.5pt; background-color: {SURFACE}; }}
@@ -269,10 +273,14 @@ def base_html_css() -> str:
   .cover-band-end {{ text-align: right; font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: .04em; }}
   .cover-logo {{ max-height: 48px; max-width: 180px; margin: 0 14px 0 0; vertical-align: middle; background: #fff; padding: 4px 8px; }}
   .cover-brand {{ margin: 0 0 14px; font-size: 13px; }}
+  .cover-client {{ font-size: 28px; font-weight: 700; margin: 0 0 8px; line-height: 1.2; color: var(--navy); }}
+  .cover-scope {{ font-size: 16px; font-weight: 600; margin: 0 0 14px; line-height: 1.3; color: var(--accent); }}
   .cover h1 {{ font-size: 13px; margin: 0 0 6px; line-height: 1.3; color: var(--accent); font-weight: 700;
               text-transform: uppercase; letter-spacing: .1em; border: none; padding: 0; }}
   .cover > p {{ font-size: 28px; font-weight: 700; margin: 0 0 16px; line-height: 1.2; color: var(--navy); }}
+  .cover p.cover-scope {{ font-size: 16px; font-weight: 600; margin: 0 0 14px; color: var(--accent); }}
   .cover p.meta {{ font-size: 13px; font-weight: 400; margin: 0 0 3px; color: var(--quiet); }}
+  .platform-attestation {{ margin: 18px 0 8px; font-size: 12px; color: var(--quiet); }}
   .cover-meta {{ width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 13px; }}
   .cover-meta th, .cover-meta td {{ border-bottom: 1px solid var(--rule); padding: 10px 12px; vertical-align: top; background: #fff; }}
   .cover-meta th {{ width: 14%; color: var(--quiet); font-weight: 600; font-size: 11px; text-transform: uppercase;

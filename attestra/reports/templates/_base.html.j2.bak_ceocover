@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Attestra report{% endblock %} · {{ tenant }}</title>
+<style>
+  /* Enterprise consulting palette — keep in sync with presentation_tokens.base_html_css() */
+  :root { --ink:#16181d; --navy:#0f2744; --quiet:#5b6170; --rule:#d8dce3; --rule-strong:#c9ccd4; --accent:#1b3a6b;
+          --surface:#f4f6f9; --surface-alt:#eef1f6;
+          --crit:#a1161b; --high:#d0461b; --med:#b7791f; --low:#1d5f8a; --info:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: var(--ink); background:#fff;
+         max-width: 960px; margin: 0 auto; padding: 40px 28px 80px; counter-reset: page; }
+  h1 { font-size: 26px; margin: 0 0 8px; color: var(--navy); }
+  h2 { font-size: 18px; margin: 36px 0 10px; border-bottom: 1.5px solid var(--navy); padding-bottom: 5px; color: var(--navy); }
+  h3 { font-size: 15px; margin: 22px 0 8px; color: var(--navy); }
+  p { margin: 0 0 10px; }
+  .meta { color: var(--quiet); font-size: 13px; }
+  .brand { font-weight: 700; letter-spacing: .04em; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { color: var(--navy); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+       background: var(--surface); }
+  table:not(.finding-meta):not(.finding-facts):not(.finding-refs):not(.kpis):not(.cover-band):not(.cover-meta):not(.cover-foot):not(.cover-spacer):not(.overview-sev-summary) tbody tr:nth-child(even) td { background: var(--surface-alt); }
+  .sev { display:inline-block; padding: 2px 10px; border-radius: 4px; color:#fff; font-size: 12px; font-weight:600; text-transform: capitalize; }
+  .sev-critical{background:var(--crit)} .sev-high{background:var(--high)} .sev-medium{background:var(--med)}
+  .sev-low{background:var(--low)} .sev-info{background:var(--info)}
+  .chip-internet { background: #e8f1f8; color: #0f2744; }
+  .status-passed { color: #1d5f8a; font-weight: 600; }
+  .status-failed { color: #a1161b; font-weight: 600; }
+  .st { font-weight: 600; text-transform: capitalize; }
+  .st-met{color:#1d5f8a} .st-no_exceptions{color:#2f7f8a} .st-partial{color:var(--med)} .st-not_met{color:var(--crit)}
+  .st-not_assessed,.st-not_applicable{color:var(--info)}
+  .kpis { display:flex; gap:16px; flex-wrap: wrap; margin: 12px 0 6px; }
+  .kpi { border:1px solid var(--rule); border-radius: 6px; padding: 14px 18px; min-width: 118px; background: var(--surface); }
+  .kpi b { display:block; font-size: 24px; color: var(--navy); }
+  .summary-posture { margin: 8px 0 14px; }
+  .overview-sev-summary { width: 100%; margin: 8px 0 12px; }
+  .overview-sev-summary th, .overview-sev-summary td { text-align: center; padding: 6px 4px; font-size: 12px; }
+  .overview-table th, .overview-table td { padding: 5px 6px; font-size: 12px; }
+  .overview-table .mono { font-size: 11px; }
+  .status-checks-table th, .status-checks-table td { padding: 5px 8px; font-size: 12px; }
+  .status-checks-table .mono { font-size: 11px; word-break: break-all; }
+  .site-grades th, .site-grades td { padding: 5px 8px; font-size: 12px; }
+  .site-grades .mono { font-size: 11px; word-break: break-all; }
+  .chart-block { margin: 4px 0 12px; }
+  .chart-caption, .chart-block > .meta { margin: 0 0 6px; color: var(--quiet); font-size: 12px; }
+  .appendix-table { font-size: 12px; }
+  .appendix-table th, .appendix-table td { padding: 5px 6px; }
+  .appendix-table .mono { font-size: 10px; word-break: break-all; }
+  .finding { border:1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 4px;
+              padding: 8px 10px; margin: 8px 0; background: #fff; }
+  .finding-critical { border-left-color: var(--crit); }
+  .finding-high { border-left-color: var(--high); }
+  .finding-medium { border-left-color: var(--med); }
+  .finding-low { border-left-color: var(--low); }
+  .finding-info { border-left-color: var(--info); }
+  .finding h3 { margin-top: 0; margin-bottom: 4px; }
+  .finding-head { margin: 0 0 4px; page-break-inside: avoid; page-break-after: avoid; }
+  .finding-header { margin: 0 0 3px; font-size: 13px; line-height: 1.35; color: var(--ink); }
+  .finding-facts { margin: 4px 0 8px; border: 1px solid var(--rule); background: var(--surface); }
+  .finding-facts th { width: 25%; background: transparent; color: var(--quiet); text-transform: none; letter-spacing: 0;
+                      font-size: 11px; font-weight: 600; border-bottom: none; padding: 4px 8px 2px; }
+  .finding-facts td { width: 25%; background: transparent; border-bottom: none; padding: 2px 8px 6px; font-size: 12.5px; }
+  .finding-meta { margin: 2px 0 4px; }
+  .finding-meta th, .finding-meta td { padding: 2px 6px; border-bottom: none; font-size: 12px; background: var(--surface); }
+  .finding-meta th { width: 26%; color: var(--quiet); text-transform: none; letter-spacing: 0; font-weight: 600; }
+  .finding-refs-label { margin: 4px 0 2px; font-size: 12px; color: var(--quiet); font-weight: 600; }
+  .finding-refs { margin: 2px 0 6px; }
+  .finding-refs th { width: 26%; background: var(--surface); color: var(--quiet); text-transform: none; letter-spacing: 0;
+                     font-weight: 600; font-size: 11px; }
+  .finding-section { margin: 4px 0 2px; }
+  .finding-section p { margin: 0 0 3px; }
+  .finding-evidence { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule-strong); }
+  .evidence-figure { margin: 4px 0 8px; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .note { background: var(--surface); border-left: 4px solid var(--accent); padding: 12px 16px; font-size: 13px; }
+  .cover { min-height: 72vh; display:flex; flex-direction:column; justify-content:flex-start;
+           border-bottom: none; margin: 0 0 28px; padding: 0; page-break-after: always; }
+  .cover-band { width: 100%; border-collapse: collapse; margin: 0 0 20px; background: var(--navy); }
+  .cover-band td { border: none; padding: 14px 18px; vertical-align: middle; background: var(--navy); color: #fff; }
+  .cover-band-brand { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; }
+  .cover-band-end { text-align: right; font-size: 12px; color: rgba(255,255,255,.85); letter-spacing: .04em; }
+  .cover-logo { max-height: 48px; max-width: 180px; margin: 0 14px 0 0; vertical-align: middle; background: #fff; padding: 4px 8px; }
+  .cover-brand { margin: 0 0 14px; font-size: 13px; }
+  .cover h1 { font-size: 13px; margin: 0 0 6px; line-height: 1.3; color: var(--accent); font-weight: 700;
+              text-transform: uppercase; letter-spacing: .1em; border: none; padding: 0; }
+  .cover > p { font-size: 28px; font-weight: 700; margin: 0 0 16px; line-height: 1.2; color: var(--navy); }
+  .cover p.meta { font-size: 13px; font-weight: 400; margin: 0 0 3px; color: var(--quiet); }
+  .cover-meta { width: 100%; border-collapse: collapse; margin: 6px 0 14px; font-size: 13px; }
+  .cover-meta th, .cover-meta td { border-bottom: 1px solid var(--rule); padding: 10px 12px; vertical-align: top; background: #fff; }
+  .cover-meta th { width: 14%; color: var(--quiet); font-weight: 600; font-size: 11px; text-transform: uppercase;
+                   letter-spacing: .04em; background: var(--surface); }
+  .cover-meta td { width: 36%; color: var(--ink); background: #fff; }
+  .cover-prepared { margin: 4px 0 0; }
+  .cover-spacer { width: 100%; border-collapse: collapse; flex: 1 1 auto; margin: 0; }
+  .cover-spacer td { border: none; background: transparent; height: 48px; padding: 0; font-size: 1px; color: transparent; }
+  .cover-foot { width: 100%; border-collapse: collapse; margin: 0; background: var(--navy); }
+  .cover-foot td { border: none; padding: 12px 18px; background: var(--navy); color: rgba(255,255,255,.9);
+                   font-size: 12px; letter-spacing: .03em; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc li { margin: 5px 0; }
+  .evidence-img { max-width: 100%; max-height: 360px; height: auto; width: auto; object-fit: contain;
+                   border: 1px solid var(--rule); margin: 8px 0 4px; }
+  .fig-caption { color: var(--quiet); font-size: 12px; margin: 0 0 14px; }
+  pre.http-pair { background: var(--surface-alt); border:1px solid var(--rule); border-radius:4px; padding:12px 14px;
+                  white-space:pre-wrap; word-break:break-word; max-height:420px; overflow:auto; font-size:11px; }
+  .draft-mark { position: fixed; top: 40%; left: 10%; font-size: 64px; color: rgba(15,39,68,.06);
+                transform: rotate(-28deg); pointer-events: none; z-index: 0; font-weight: 800; letter-spacing: .08em; }
+  footer { margin-top: 48px; color: var(--quiet); font-size: 12px; border-top:1px solid var(--rule); padding-top: 12px; }
+  @media print {
+    body { padding: 0; }
+    h2 { page-break-after: avoid; }
+    .finding-head { page-break-inside: avoid; page-break-after: avoid; }
+    .draft-mark { position: fixed; }
+    @page { margin: 16mm 14mm 18mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 9px; color: #5b6170; } }
+  }
+</style>
+</head>
+<body>
+{% if kind not in ("closure_letter", "attestation_letter") %}
+{% if is_draft|default(true) %}<div class="draft-mark" aria-hidden="true">DRAFT</div>{% endif %}
+<section class="cover" id="cover">
+  <table class="cover-band" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td class="cover-band-cell">
+        {% if logo %}<img class="cover-logo" src="{{ logo }}" alt="{{ (ca.legal_name if ca and ca.legal_name else tenant) }} logo">{% endif %}
+        <span class="cover-band-brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span>
+      </td>
+      <td class="cover-band-cell cover-band-end">Confidential</td>
+    </tr>
+  </table>
+  <div class="meta cover-brand"><span class="brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span> · {{ tenant }}</div>
+  <h1>{{ (cover_title or (kind_meta.label if kind_meta and kind_meta.label else (kind|replace("_", " ") ~ " report")))|words_title }}</h1>
+  <p>{{ eng.name|words_title }}</p>
+  <table class="cover-meta">
+    <tr>
+      <th>Client</th>
+      <td>{{ tenant }}{% if contact_name %} · {{ contact_name }}{% endif %}{% if contact_email %} &lt;{{ contact_email }}&gt;{% endif %}</td>
+      <th>Assessment type</th>
+      <td>{{ type_label }}</td>
+    </tr>
+    <tr>
+      <th>Engagement #</th>
+      <td>{{ eng.id }}</td>
+      <th>Window</th>
+      <td>{{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</td>
+    </tr>
+    <tr>
+      <th>Version</th>
+      <td>{{ version }}</td>
+      <th>Date</th>
+      <td>{{ today }}</td>
+    </tr>
+  </table>
+  {% if ca and (ca.contact_name or ca.contact_email or ca.contact_phone or ca.website or ca.address_formatted) %}
+  <p class="meta cover-prepared">Prepared by{% if ca.contact_name %} {{ ca.contact_name }}{% elif ca.legal_name %} {{ ca.legal_name }}{% endif %}{% if ca.contact_email %} · <a href="mailto:{{ ca.contact_email }}">{{ ca.contact_email }}</a>{% endif %}{% if ca.contact_phone %} · {{ ca.contact_phone }}{% endif %}{% if ca.website %} · {{ ca.website }}{% endif %}{% if ca.address_formatted %}<br>{{ ca.address_formatted }}{% endif %}</p>
+  {% endif %}
+  <table class="cover-spacer" width="100%" cellpadding="0" cellspacing="0" aria-hidden="true"><tr><td class="cover-spacer-cell"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" width="1" height="48" alt=""/></td></tr></table>
+  <table class="cover-foot" width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td class="cover-foot-cell">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }} · Security assessment report</td>
+    </tr>
+  </table>
+</section>
+{% else %}
+<div class="meta"><span class="brand">{{ ca.legal_name if ca and ca.legal_name else "ATTESTRA" }}</span> · {{ tenant }} · Engagement #{{ eng.id }} · {{ kind|capitalize }} report v{{ version }}</div>
+{% endif %}
+{% block body %}{% endblock %}
+<footer>
+  Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }} by {{ generated_by }} with Attestra {{ version_str }}.
+  {% if ca and (ca.legal_name or ca.address_formatted or ca.contact_email or ca.contact_phone) %}
+  {% if ca.legal_name %}{{ ca.legal_name }}. {% endif %}{% if ca.address_formatted %}{{ ca.address_formatted }}. {% endif %}{% if ca.contact_email %}{{ ca.contact_email }}{% endif %}{% if ca.contact_phone %}{% if ca.contact_email %} · {% endif %}{{ ca.contact_phone }}{% endif %}{% if ca.website %}{% if ca.contact_email or ca.contact_phone %} · {% endif %}{{ ca.website }}{% endif %}
+  <br>
+  {% endif %}
+  QA, approval and signature are not part of this file. They are recorded separately in the Attestra sign-off record,
+  shown when you open this report in Attestra; check the SHA-256 and signature with
+  <span class="mono">attestra verify-report</span>. Confidential.
+  {% if kind not in ("closure_letter", "attestation_letter") %}
+  <br>Page numbers appear when printed or exported to PDF (Page X of Y).
+  {% endif %}
+</footer>
+</body>
+</html>
