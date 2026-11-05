@@ -2823,6 +2823,46 @@ Unvalidated HSTS-missing claims still apply the −20 modifier when no contradic
 
 [[attestra/reports/render.py#_finding_cvss_version]] and [[attestra/reports/render.py#_finding_business_risk]] return empty/None when sibling fields are absent.
 
+## World-class Phase 6 finding normalization
+
+Dedup/merge honesty fields, security-context merge guards, observation retention, and export Sources (`tests/test_finding_normalize_phase6.py`, `tests/test_cross_tool_merge.py`).
+
+### Finding dict exposes merge honesty fields
+
+[[attestra/api.py#_finding_dict]] exposes `merged_into_id`, `merge_rationale`, `dedup_confidence`, `dedup_rationale`, `validation_status`, `tools_count`, and loaded-only `observations_count`.
+
+### Soft merge preserves observations
+
+Import merge of a second tool into a canonical finding (exact fingerprint or high-confidence soft match) keeps one finding, both tools, and multiple [[attestra/models.py#FindingObservation]] rows.
+
+### Crossmerge keeps observations on members
+
+[[attestra/crossmerge.py#recompute]] links related rows without deleting [[attestra/models.py#FindingObservation]] rows on either member.
+
+### JSON export includes merge rationale
+
+[[attestra/reports/engagement_export.py#_finding_export_dict]] includes `merged_into_id`, `merge_rationale`, and `validation_status`.
+
+### Markdown export lists sources and merge
+
+[[attestra/reports/markdown_export.py#export_engagement_markdown]] retains Sources for merged groups and prints merge rationales.
+
+### Context key buckets
+
+[[attestra/finding_normalize.py#security_context_key]] and [[attestra/finding_normalize.py#path_context_bucket]] classify app, cdn-cgi, challenge, and static locations.
+
+### Same concept different context not merged
+
+Concept matches on the same host but different security contexts (app vs challenge/cdn-cgi) stay separate and appear in [[attestra/crossmerge.py#explain_near_misses]].
+
+### Same concept same context merged
+
+Same concept on app paths from different tools links with `map:{concept}@app` rationale.
+
+### CVE across path context still merges
+
+Shared CVE on the same host still merges even when path buckets differ; rationale stays `cve:{id}` without a context suffix.
+
 ## World-class Phase 3 safe probes
 
 Safe non-destructive injection/XSS/file/header helpers and run modules (`tests/automated_vapt/test_phase3_safe_probes.py`).

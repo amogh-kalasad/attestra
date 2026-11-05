@@ -39,11 +39,13 @@ def _json_value(value: object) -> Any:
 
 def _finding_export_dict(f: Finding) -> dict[str, Any]:
     """Finding fields aligned with the API shape (self-contained; no api import)."""
+    tools = list(f.tools or [])
     return {
         "id": f.id,
         "title": f.title,
         "severity": f.severity,
         "status": f.status,
+        "validation_status": getattr(f, "validation_status", None) or "unvalidated",
         "risk_score": f.risk_score,
         "cvss_score": f.cvss_score,
         "cvss_vector": f.cvss_vector or "",
@@ -58,8 +60,11 @@ def _finding_export_dict(f: Finding) -> dict[str, Any]:
         "impact": f.impact or "",
         "affected_urls": list(f.affected_urls or []),
         "references": list(f.references or []),
-        "tools": list(f.tools or []),
+        "tools": tools,
+        "tools_count": len(tools),
         "detected_by": detected_by_label(f.tools),
+        "merged_into_id": getattr(f, "merged_into_id", None),
+        "merge_rationale": getattr(f, "merge_rationale", "") or "",
         "dedup_confidence": f.dedup_confidence,
         "dedup_rationale": f.dedup_rationale or "",
         "occurrences": f.occurrences,

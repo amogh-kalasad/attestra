@@ -36,26 +36,42 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
     # Cross-tool merge: one entry per issue; related rows are listed under Sources.
     findings = [f for f in collapse(s, list_findings(s, engagement_id)) if f.status != "false_positive"]
     finding_ids = [f.id for f in findings]
+    # Include related member ids so scanner observations on linked rows stay visible.
+    member_owner: dict[int, int] = {}
+    for f in findings:
+        member_owner[f.id] = f.id
+        for rel in getattr(f, "cross_related", None) or []:
+            rid = getattr(rel, "id", None)
+            if rid is not None:
+                member_owner.setdefault(int(rid), f.id)
+    lookup_ids = list(member_owner) or finding_ids
 
     evidence_rows: list[Evidence] = []
     observations: list[FindingObservation] = []
-    if finding_ids:
+    if lookup_ids:
         evidence_rows = list(
-            s.scalars(select(Evidence).where(Evidence.finding_id.in_(finding_ids)).order_by(Evidence.id))
+            s.scalars(select(Evidence).where(Evidence.finding_id.in_(lookup_ids)).order_by(Evidence.id))
         )
         observations = list(
             s.scalars(
                 select(FindingObservation)
-                .where(FindingObservation.finding_id.in_(finding_ids))
+                .where(FindingObservation.finding_id.in_(lookup_ids))
                 .order_by(FindingObservation.id)
             )
         )
     evidence_by_finding: dict[int, list[Evidence]] = {}
     for ev in evidence_rows:
-        evidence_by_finding.setdefault(ev.finding_id, []).append(ev)
+        key = member_owner.get(ev.finding_id, ev.finding_id)
+        evidence_by_finding.setdefault(key, []).append(ev)
     obs_by_finding: dict[int, list[FindingObservation]] = {}
+    seen_obs: set[tuple] = set()
     for o in observations:
-        obs_by_finding.setdefault(o.finding_id, []).append(o)
+        key = member_owner.get(o.finding_id, o.finding_id)
+        sig = (key, (o.tool or "").lower(), o.original_id or "", o.location or "")
+        if sig in seen_obs:
+            continue
+        seen_obs.add(sig)
+        obs_by_finding.setdefault(key, []).append(o)
 
     lines: list[str] = [
         f"# {eng.name} — consolidated findings",
@@ -106,6 +122,13 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
         if f.dedup_rationale:
             conf = f" ({f.dedup_confidence:.2f})" if f.dedup_confidence is not None else ""
             lines.append(f"- Dedup: {f.dedup_rationale}{conf}")
+        merge_reasons = []
+        for src in sources:
+            why = (src.get("rationale") or "").strip()
+            if why and why not in merge_reasons:
+                merge_reasons.append(why)
+        if merge_reasons:
+            lines.append(f"- Merge: {'; '.join(merge_reasons)}")
         lines.append("")
         if f.description:
             lines.extend(["### Description", "", f.description.strip(), ""])

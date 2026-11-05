@@ -12,8 +12,14 @@ different tools, sit on the same host (and the same target when both have one), 
 1. share a CVE id; or
 2. map to the same well-known issue in :data:`CONCEPT_RULES` (missing security headers
    between ZAP, webcheck and nuclei; TLS/certificate issues between testssl and nuclei),
-   with exactly one candidate per tool for that issue on that host; or
-3. share a specific (non-generic) CWE and an overlapping URL path.
+   with exactly one candidate per tool for that issue on that host **and the same
+   security context** (app vs cdn-cgi/challenge/static); or
+3. share a specific (non-generic) CWE and an overlapping URL path in the same security
+   context.
+
+CVE matches stay host-level (path context not required). Rows are linked, never deleted;
+each related row keeps its own severity, evidence, and triage. ``merge_rationale`` records
+why (``map:{concept}@{bucket}``, ``cve:{id}``, ``cwe:CWE-N+path@{bucket}``).
 
 A group never holds two rows from the same tool, so two distinct ZAP rules can never be
 chained together through a third tool.
@@ -31,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra.fingerprint import caa_host, normalize_location
+from attestra.finding_normalize import path_context_bucket, security_context_key
 
 SEV_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 FALSE_POSITIVE = "false_positive"
@@ -97,6 +104,41 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
         "zap": [(r"^90004$", r"cross-origin-resource-policy header missing")],
         "nuclei": [(rf"^{_H}:cross-origin-resource-policy$", r"")],
     },
+    # Permissions-Policy missing (ZAP 10063-1); Feature-Policy-deprecated stays out.
+    "header:permissions-policy-missing": {
+        "zap": [(r"^10063$", r"permissions policy header not set")],
+        "nuclei": [(rf"^{_H}:permissions-policy$", r"")],
+    },
+    # Referrer-Policy missing / not strict (nuclei matcher + webcheck / Observatory).
+    "header:referrer-policy-missing": {
+        "nuclei": [(rf"^{_H}:referrer-policy$", r"")],
+        "webcheck": [(r"^webcheck/referrer-policy$", r"")],
+        "observatory": [(r"^observatory/referrer-policy$", r"")],
+    },
+    # Deprecated X-XSS-Protection hardening — not reflected XSS / CWE-79.
+    "header:xss-protection-deprecated": {
+        "zap": [(r"^10016$", r"")],
+        "nuclei": [(r"^xss-deprecated-header(:.*)?$", r"")],
+        "webcheck": [(r"^webcheck/x-xss-protection$", r"")],
+        "observatory": [(r"^observatory/x-xss-protection$", r"")],
+    },
+    # --- CORS / cross-domain (ZAP 10098; Observatory CORS test) ---
+    "cors:misconfiguration": {
+        "zap": [(r"^10098$", r"")],
+        "observatory": [(r"^observatory/cross-origin-resource-sharing$", r"")],
+    },
+    # ACAO wildcard templates (title-gated); ZAP 10098 stays under cors:misconfiguration only.
+    "cors:acao-wildcard": {
+        "nuclei": [(r"^cors([_-]|$)[a-z0-9_-]*$", r"\*|\bwildcard\b|allow-origin")],
+    },
+    # --- Cookie SameSite (ZAP 10054; webcheck cookie:*:samesite) ---
+    "cookie:samesite-none": {
+        "zap": [(r"^10054$", r"cookie with samesite attribute none")],
+    },
+    "cookie:samesite": {
+        "zap": [(r"^10054$", r"cookie without samesite attribute")],
+        "webcheck": [(r"^webcheck/cookie:.+:samesite$", r"")],
+    },
     # --- TLS / certificate (testssl / nuclei) ---
     "tls:sslv3-offered": {
         "testssl": [(r"^SSLv3$", r"")],
@@ -109,6 +151,10 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
     "tls:tls1.1-offered": {
         "testssl": [(r"^TLS1_1$", r"")],
         "nuclei": [(r"^deprecated-tls:tls_1\.1$", r"")],
+    },
+    "tls:weak-cipher": {
+        "nuclei": [(r"^weak-cipher-suites(:.*)?$", r"")],
+        "testssl": [(r"^cipher", r"weak cipher")],
     },
     "tls:cert-expired": {
         "testssl": [(r"^cert_(notAfter|expirationStatus)$", r"^tls: certificate expired$")],
@@ -129,17 +175,47 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
     },
 }
 # CSP weaknesses with identical semantics in ZAP 10055 and webcheck C10 titles.
+# Kept distinct from header:csp-missing (10038 / nuclei content-security-policy).
 _CSP_WEAK_TITLE = re.compile(r"^csp: ([a-z-]+) (unsafe-inline|unsafe-eval)$", re.IGNORECASE)
 _CSP_WEAK_TOOLS = frozenset({"zap", "webcheck"})
 
-_COMPILED = {
-    concept: {
-        tool: [(re.compile(r, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for r, t in pairs]
-        for tool, pairs in per_tool.items()
+
+def _compile_concept_rules(
+    rules: dict[str, dict[str, list[tuple[str, str]]]],
+) -> dict[str, dict[str, list[tuple[re.Pattern[str], re.Pattern[str]]]]]:
+    return {
+        concept: {
+            tool: [(re.compile(r, re.IGNORECASE), re.compile(t, re.IGNORECASE)) for r, t in pairs]
+            for tool, pairs in per_tool.items()
+        }
+        for concept, per_tool in rules.items()
     }
-    for concept, per_tool in CONCEPT_RULES.items()
-}
+
+
+_COMPILED = _compile_concept_rules(CONCEPT_RULES)
+
+
+def list_concept_keys() -> list[str]:
+    """Sorted concept keys from :data:`CONCEPT_RULES` (docs and unit tests)."""
+    return sorted(CONCEPT_RULES)
+
+
 _HOSTPORT = re.compile(r"^[a-z0-9.-]+(:\d{1,5})?$", re.IGNORECASE)
+
+
+def _merged_compiled_rules() -> dict[str, dict[str, list[tuple[re.Pattern[str], re.Pattern[str]]]]]:
+    """Base CONCEPT_RULES plus optional sibling EXTRA_CONCEPT_RULES (getattr/try)."""
+    compiled = dict(_COMPILED)
+    try:
+        from attestra import finding_normalize as fn
+
+        extra = getattr(fn, "EXTRA_CONCEPT_RULES", None) or getattr(fn, "CONCEPT_RULES", None)
+        if isinstance(extra, dict) and extra:
+            for concept, per_tool in _compile_concept_rules(extra).items():
+                compiled.setdefault(concept, per_tool)
+    except Exception:  # noqa: BLE001 — sibling may be mid-edit; never block merge
+        pass
+    return compiled
 
 
 # ----------------------------------------------------------------- small helpers
@@ -225,8 +301,9 @@ def _rule_keys(f: Any, obs: list[Any]) -> list[tuple[str, str, str]]:
 def concepts_for(f: Any, obs: list[Any]) -> frozenset[str]:
     """Well-known issue keys this finding maps to (empty when it maps to none)."""
     found: set[str] = set()
+    compiled = _merged_compiled_rules()
     for tool, rid, title in _rule_keys(f, obs):
-        for concept, per_tool in _COMPILED.items():
+        for concept, per_tool in compiled.items():
             for rx_rule, rx_title in per_tool.get(tool, []):
                 if rx_rule.search(rid) and rx_title.search(title.strip()):
                     found.add(concept)
@@ -254,23 +331,27 @@ def _obs_by_finding(s: Session, ids: list[int]) -> dict[int, list[Any]]:
 
 # ----------------------------------------------------------------- matching
 class _Info:
-    __slots__ = ("f", "tools", "site", "loc", "cves", "cwe", "paths", "concepts")
+    __slots__ = ("f", "tools", "site", "loc", "ctx", "bucket", "cves", "cwe", "paths", "concepts")
 
     def __init__(self, f: Any, obs: list[Any]):
         self.f = f
         self.tools = frozenset(str(t).lower() for t in (f.tools or []) if t)
         self.site = site_key(f.location or "")
         self.loc = normalize_location(_bare(f.location or "")).lower()
+        title = getattr(f, "title", "") or ""
+        self.ctx = security_context_key(f.location or "", title)
+        self.bucket = path_context_bucket(f.location or "", title)
         self.cves = frozenset(str(c).upper() for c in (f.cves or []) if c)
         self.cwe = f.cwe
         self.paths = _url_path_keys(f)
         self.concepts = concepts_for(f, obs)
 
 
-def match_reason(a: _Info, b: _Info, ambiguous: set[tuple[str, str, str]] | None = None) -> tuple[int, str] | None:
+def match_reason(a: _Info, b: _Info, ambiguous: set[tuple[str, str, str, str]] | None = None) -> tuple[int, str] | None:
     """(strength, rationale) when ``a`` and ``b`` are the same issue; None otherwise.
 
     Lower strength is stronger: 0 = CVE, 1 = mapping table, 2 = CWE + path.
+    Concept and CWE+path matches require the same security_context_key; CVE stays host-level.
     """
     if not a.tools or not b.tools or (a.tools & b.tools):
         return None  # same tool: separate rules by design
@@ -285,31 +366,33 @@ def match_reason(a: _Info, b: _Info, ambiguous: set[tuple[str, str, str]] | None
     shared_cve = sorted(a.cves & b.cves)
     if shared_cve:
         return 0, f"cve:{shared_cve[0]}"
+    if a.ctx != b.ctx:
+        return None  # same host, different security context (e.g. app vs cdn-cgi)
     if a.concepts and b.concepts:
         if len(a.concepts) == 1 and a.concepts == b.concepts:
             concept = next(iter(a.concepts))
             amb = ambiguous or set()
-            if any((a.site, concept, t) in amb for t in a.tools | b.tools):
+            if any((a.site, a.bucket, concept, t) in amb for t in a.tools | b.tools):
                 return None
-            return 1, f"map:{concept}"
+            return 1, f"map:{concept}@{a.bucket}"
         return None  # mapped to different (or several) known issues: keep apart
     if a.cwe and a.cwe == b.cwe and a.cwe not in GENERIC_CWES:
         if a.paths and b.paths and (a.paths & b.paths):
-            return 2, f"cwe:CWE-{a.cwe}+path"
+            return 2, f"cwe:CWE-{a.cwe}+path@{a.bucket}"
         if not a.site and a.loc and a.loc == b.loc:
-            return 2, f"cwe:CWE-{a.cwe}+location"
+            return 2, f"cwe:CWE-{a.cwe}+location@{a.bucket}"
     return None
 
 
-def _ambiguous_concepts(infos: list[_Info]) -> set[tuple[str, str, str]]:
-    """(site, concept, tool) with more than one candidate row: never auto-link those."""
-    count: dict[tuple[str, str, str], int] = defaultdict(int)
+def _ambiguous_concepts(infos: list[_Info]) -> set[tuple[str, str, str, str]]:
+    """(site, bucket, concept, tool) with more than one candidate: never auto-link those."""
+    count: dict[tuple[str, str, str, str], int] = defaultdict(int)
     for i in infos:
         if len(i.concepts) != 1:
             continue
         concept = next(iter(i.concepts))
         for t in i.tools:
-            count[(i.site, concept, t)] += 1
+            count[(i.site, i.bucket, concept, t)] += 1
     return {k for k, n in count.items() if n > 1}
 
 
@@ -407,6 +490,53 @@ def recompute_safely(s: Session, engagement_id: int, *, actor: str = "system") -
             return recompute(s, engagement_id, actor=actor)
     except Exception:  # noqa: BLE001
         return None
+
+
+def explain_near_misses(s: Session, engagement_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
+    """Pairs that share host + concept but differ in security context (not auto-merged).
+
+    Small debug/API helper for related-not-merged reporting. Does not change rows.
+    """
+    from attestra.models import Finding
+
+    rows = list(s.scalars(select(Finding).where(Finding.engagement_id == engagement_id).order_by(Finding.id)))
+    obs_by = _obs_by_finding(s, [f.id for f in rows])
+    infos = [_Info(f, obs_by.get(f.id, [])) for f in rows]
+    by_site_concept: dict[tuple[str, str], list[_Info]] = defaultdict(list)
+    for i in infos:
+        if len(i.concepts) != 1 or not i.site:
+            continue
+        concept = next(iter(i.concepts))
+        by_site_concept[(i.site, concept)].append(i)
+    out: list[dict[str, Any]] = []
+    for (site, concept), bucket in by_site_concept.items():
+        for x in range(len(bucket)):
+            for y in range(x + 1, len(bucket)):
+                a, b = bucket[x], bucket[y]
+                if a.ctx == b.ctx:
+                    continue
+                if a.tools & b.tools:
+                    continue
+                out.append(
+                    {
+                        "site": site,
+                        "concept": concept,
+                        "left_id": a.f.id,
+                        "right_id": b.f.id,
+                        "left_context": a.ctx,
+                        "right_context": b.ctx,
+                        "left_bucket": a.bucket,
+                        "right_bucket": b.bucket,
+                        "left_location": a.f.location or "",
+                        "right_location": b.f.location or "",
+                        "left_tools": sorted(a.tools),
+                        "right_tools": sorted(b.tools),
+                        "reason": "same_host_concept_different_security_context",
+                    }
+                )
+                if len(out) >= limit:
+                    return out
+    return out
 
 
 # ----------------------------------------------------------------- display

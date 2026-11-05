@@ -252,6 +252,9 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         getattr(f, "business_risk", None)
         or scoring.business_risk_band(f.risk_score)
     )
+    tools = list(f.tools or [])
+    # observations_count only when already loaded — avoid N+1 lazy loads on list endpoints.
+    obs_loaded = getattr(f, "__dict__", {}).get("observations")
     out = {
         "id": f.id,
         "title": f.title,
@@ -275,7 +278,9 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         "merged_into_id": getattr(f, "merged_into_id", None),
         "merge_rationale": getattr(f, "merge_rationale", "") or "",
         "references": list(f.references or []),
-        "tools": f.tools,
+        "tools": tools,
+        "tools_count": len(tools),
+        "observations_count": len(obs_loaded) if obs_loaded is not None else None,
         "detected_by": _detected_by(f),
         "dedup_confidence": f.dedup_confidence,
         "dedup_rationale": f.dedup_rationale or "",

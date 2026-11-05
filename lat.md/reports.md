@@ -122,13 +122,13 @@ Body chrome: ~9.25pt body / cells ~8.5pt / headers 8pt with navy-on-surface head
 
 Full engagement JSON via [[attestra/reports/engagement_export.py#export_engagement_json]]: findings, observations, controls, evidence metadata, and report metadata only (no sealed HTML, evidence bodies, or secrets); audited as `engagement.exported`.
 
-Payload includes `version` ([[attestra/__init__.py#__version__]]), `export_schema_version` ([[attestra/reports/engagement_export.py#EXPORT_SCHEMA_VERSION]], currently 2), engagement metadata (`id`, `name`, `type`, `type_label` via [[attestra/models.py#engagement_type_label]] so `vapt` shows as `VA + PT`, `frameworks`, window dates, tenant name), findings (API-aligned fields including `detected_by`, dedup fields, impact, remediation — self-contained, no import from `api.py`), `observations` from [[attestra/models.py#FindingObservation]], `controls` keyed by framework from [[attestra/services.py#compliance]], evidence metadata (kind/role/source/capture status/parent — never path or body), and report metadata (`id`, `kind`, `framework`, `version`, `status`, `sha256`, `generated_at`, `generated_by`). Audited as `engagement.exported` with `format=json`.
+Payload includes `version` ([[attestra/__init__.py#__version__]]), `export_schema_version` ([[attestra/reports/engagement_export.py#EXPORT_SCHEMA_VERSION]], currently 2), engagement metadata (`id`, `name`, `type`, `type_label` via [[attestra/models.py#engagement_type_label]] so `vapt` shows as `VA + PT`, `frameworks`, window dates, tenant name), findings (API-aligned fields including `detected_by`, `merged_into_id`, `merge_rationale`, `validation_status`, dedup fields, impact, remediation — self-contained, no import from `api.py`), `observations` from [[attestra/models.py#FindingObservation]], `controls` keyed by framework from [[attestra/services.py#compliance]], evidence metadata (kind/role/source/capture status/parent — never path or body), and report metadata (`id`, `kind`, `framework`, `version`, `status`, `sha256`, `generated_at`, `generated_by`). Audited as `engagement.exported` with `format=json`.
 
 ### Markdown engagement export
 
 Readable Markdown of the same consolidated finding set via [[attestra/reports/markdown_export.py#export_engagement_markdown]].
 
-Includes detecting tools, scanner observations, remediation, and evidence references by id/sha256/role (authenticated download only; no public URLs). Audited as `engagement.exported` with `format=markdown`.
+Includes detecting tools, scanner observations (folded from cross-merge members onto the primary), Sources with merge rationales, remediation, and evidence references by id/sha256/role (authenticated download only; no public URLs). Audited as `engagement.exported` with `format=markdown`.
 
 ## Framework packs
 

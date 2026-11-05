@@ -141,6 +141,14 @@ Keeps CVSS as technical severity of record and treats priority/`business_risk` a
 
 [[attestra/scoring.py#validate_cvss_vector]] soft-accepts CVSS 3.x and 4.0 vectors; [[attestra/scoring.py#cvss_version_from_vector]] / `Finding.cvss_version` label the version; v4 scores are never invented. [[attestra/scoring.py#explain_risk_modifiers]] documents reproducible modifiers; [[attestra/services.py#rescore]] sets `business_risk`. [[attestra/grade.py#score_from_findings]] skips the HSTS-missing fail when `validation_status` is not_reproducible / informational / validation FP, or when in-memory HTTP evidence shows HSTS with max-age ([[attestra/finding_validation/headers.py#hsts_present_in_evidence]]). Technical risk legend (and PDF/DOCX injections) separates CVSS technical severity from priority / business risk. [[attestra/reports/render.py#_context]] open-vuln KPIs exclude informational and not-reproducible validation classes. See [[findings#Site grade]], [[findings#CVSS vector]], [[findings#Risk score]]. Delivery: \docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md\.
 
+## World-class finding normalization (Phase 6)
+
+Conservative cross-tool consolidation with retained scanner observations and explicit merge/dedup honesty fields.
+
+Import soft-merges only at high confidence via [[attestra/dedup.py#find_best_soft_match]] / [[attestra/dedup.py#MERGE_THRESHOLD]], always writing a [[attestra/models.py#FindingObservation]] under the canonical finding ([[attestra/services.py#import_results]]). Post-import [[attestra/crossmerge.py#recompute]] links related rows with `merged_into_id` / `merge_rationale` and never deletes findings or observations; [[attestra/crossmerge.py#collapse]] annotates Sources for UI and Markdown. [[attestra/api.py#_finding_dict]] exposes `merged_into_id`, `merge_rationale`, `dedup_confidence`, `dedup_rationale`, `validation_status`, `tools_count`, and loaded-only `observations_count`. JSON export adds the same merge/validation keys on each finding; Markdown lists Sources plus merge rationales and folds member observations onto the primary.
+
+Security context guards: [[attestra/finding_normalize.py#security_context_key]] / [[attestra/finding_normalize.py#path_context_bucket]] (`app`, `cdn-cgi`, `challenge`, `static`). Concept and CWE+path merges in [[attestra/crossmerge.py#match_reason]] require the same context; CVE stays host-level. Rationales include `@{bucket}` for concept/CWE links. [[attestra/crossmerge.py#explain_near_misses]] reports same-host+concept pairs that differ in context. Sibling expansions may populate [[attestra/finding_normalize.py#EXTRA_CONCEPT_RULES]]. See [[findings#Deduplication#Cross-tool deduplication]], [[findings#Deduplication#Cross-tool merge]]; doc `docs/WORLDCLASS_VAPT_PHASE6_NORMALIZE_DEDUP.md`.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
