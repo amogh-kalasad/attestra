@@ -98,6 +98,12 @@ Allowed transitions: [[attestra/models.py#TRANSITIONS]]. Applied by [[attestra/s
 
 Open statuses for compliance roll-up: [[attestra/models.py#OPEN_STATUSES]].
 
+### Validation class vs workflow status
+
+Finding workflow status and Elite evidence validation class are separate models today.
+
+[[attestra/models.py#TRANSITIONS]] covers triage/validation/fix/FP/risk acceptance. Elite [[attestra/automated_vapt/validation/vulnerability_validator.py#validate_result]] emits CONFIRMED/POTENTIAL/NOT_VULNERABLE/INCONCLUSIVE/NEEDS_MANUAL_REVIEW and [[attestra/automated_vapt/integrations/attestra_findings.py#create_finding_from_validation]] still creates rows as `new`. Prompt labels such as Not Reproducible are not first-class statuses yet. Gap analysis: `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md` and [[architecture#World-class security testing audit (Phase 1)]].
+
 ## Enrichment
 
 Offline KEV and EPSS application from operator-supplied files.

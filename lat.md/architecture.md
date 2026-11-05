@@ -99,6 +99,12 @@ Capabilities intentionally left for later phases (see `docs/GAP_ANALYSIS_CURRENT
 - Client portal polish, ticket sync, extra scanners (Phase 7)
 - External pentest / GA (Phase 8)
 
+## World-class security testing audit (Phase 1)
+
+Phase 1 of the world-class VA + PT improvement prompt is an audit-only gap analysis against ENG1 technical report v21; no product code changed in that pass.
+
+Full scorecard, ENG1 issue register (CORS/cdn-cgi, Cloudflare cookies, HSTS evidence contradiction, weak-cipher evidence, XSS-Protection mapping, wrong Permissions-Policy remediation), and prioritized backlog for Phases 2–10 live in `docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md`. Highest-priority follow-on is a unified finding validation engine that does not treat scanner alerts as confirmed without evidence.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
