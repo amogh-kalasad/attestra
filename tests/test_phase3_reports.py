@@ -196,7 +196,7 @@ def test_logo_on_technical_cover(loaded):
 
     assert 'id="cover"' in body
     assert "data:image/png;base64," in body
-    assert "Branded tech report" in body
+    assert "Branded Tech Report" in body  # cover title display via words_title
 
 
 # @lat: [[tests#Phase 3 reports#Disclaimer branding override]]

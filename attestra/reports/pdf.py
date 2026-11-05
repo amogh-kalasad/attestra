@@ -102,10 +102,18 @@ def _legend_html() -> str:
 
 
 _PRE = re.compile(r"(?is)(<pre[^>]*>)(.*?)(</pre>)")
+# Skip verbatim evidence when rewriting display text (times, breakable, frameworks).
+_EVIDENCE_SKIP = re.compile(
+    r"(?is)(<(?:pre|code|samp)\b[^>]*>.*?</(?:pre|code|samp)>|"
+    r"<span\b[^>]*class=\"[^\"]*\bmono\b[^\"]*\"[^>]*>.*?</span>)"
+)
 
 
 def _wrap_pre(html: str, width: int = 90) -> str:
-    """Code snippets keep their lines but wrap at the page width instead of running off the page."""
+    """Code snippets keep their lines but wrap at the page width instead of running off the page.
+
+    Preserves quotes and angle brackets from the stored evidence (escape with quote=False).
+    """
     import textwrap
     from html import unescape
 
@@ -114,7 +122,8 @@ def _wrap_pre(html: str, width: int = 90) -> str:
         for line in unescape(m.group(2)).splitlines() or [""]:
             lines.extend(textwrap.wrap(line, width, break_long_words=True, break_on_hyphens=False,
                                        drop_whitespace=False, replace_whitespace=False) or [""])
-        return m.group(1) + escape("\n".join(lines)) + m.group(3)
+        # quote=False keeps lang="en" and header values intact; only & < > are escaped.
+        return m.group(1) + escape("\n".join(lines), quote=False) + m.group(3)
 
     return _PRE.sub(wrap, html)
 
@@ -124,13 +133,16 @@ _LONG = re.compile(r"[^\s<>&]{40,}")
 
 
 def _breakable(html: str) -> str:
-    """Let long unbroken strings (hashes, URLs, vectors) wrap instead of being clipped in table cells."""
+    """Let long unbroken strings (hashes, URLs, vectors) wrap instead of being clipped in table cells.
+
+    Evidence ``<pre>`` / ``<code>`` / ``.mono`` blocks are left byte-identical (modulo outer HTML).
+    """
 
     def chunk(m: re.Match) -> str:
         w = m.group(0)
-        if re.fullmatch(r"[0-9a-fA-F]+", w):  # hashes: groups of 16
+        if re.fullmatch(r"[0-9a-fA-F]+", w):  # hashes: groups of 16 (spaces OK for digests)
             return " ".join(w[i : i + 16] for i in range(0, len(w), 16))
-        # URLs, paths, CVSS vectors: break after separators, keeping lines up to ~28 characters.
+        # URLs / CVSS: insert <wbr> after separators so PDF can wrap without real spaces.
         parts = re.findall(r"[^/?&=:,;]*[/?&=:,;]?", w)
         lines, cur = [], ""
         for part in filter(None, parts):
@@ -146,7 +158,7 @@ def _breakable(html: str) -> str:
             cur += part
         if cur:
             lines.append(cur)
-        return " ".join(lines)
+        return "<wbr>".join(lines)
 
     def fix(m: re.Match) -> str:
         if m.group(1):
@@ -154,7 +166,13 @@ def _breakable(html: str) -> str:
         return _LONG.sub(chunk, m.group(2))
 
     head, sep, body = html.partition("<body")
-    return head + sep + _TAG_OR_TEXT.sub(fix, body) if sep else html
+    if not sep:
+        return html
+    parts = _EVIDENCE_SKIP.split(body)
+    out = []
+    for i, part in enumerate(parts):
+        out.append(part if i % 2 == 1 else _TAG_OR_TEXT.sub(fix, part))
+    return head + sep + "".join(out)
 
 
 _KPIS = re.compile(r'(?is)<div class="kpis">\s*((?:<div class="kpi">.*?</div>\s*)+)</div>')
@@ -345,15 +363,21 @@ def _watermark(pdf: bytes) -> bytes:
     return out.getvalue()
 
 
-_SMALL = {"a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "per", "the", "to", "vs", "via", "with"}
+# Keep mid-sentence words lowercase in Title Case (prevents "for All cookies" regressions).
+_SMALL = {
+    "a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "per", "the", "to", "vs", "via", "with",
+    "all", "always", "any", "only", "each", "every", "both", "from", "into", "over", "under", "than",
+}
 # Exact cell / label values that are enum keys rendered as text; shown in Title Case.
 _ENUM_TEXT = {
     "proposed", "confirmed", "process control", "new", "triaged", "validated", "fixed", "verified", "reopened",
     "accepted", "risk accepted", "false positive", "not tested", "passed", "failed", "pass", "fail", "draft",
     "submitted", "signed", "rejected", "met", "no exceptions", "partial", "not met", "not assessed",
     "not applicable", "full", "partial mapping", "requested", "open", "closed", "yes", "no", "internet",
-    "internal", "production", "staging", "development", "controls", "open findings", "excluded",
+    "internal", "production", "staging", "development", "demo", "uat", "dev", "qa", "test",
+    "controls", "open findings", "excluded",
     "warn", "warning", "error", "skipped", "info", "not scanned", "in progress", "web app", "repo", "image",
+    "not started", "completed", "blocked",
 }
 
 
@@ -461,24 +485,38 @@ def _framework_names(html: str) -> str:
     if not names:
         return html
     pat = re.compile(r"(?<![\w/=\-\"'])(" + "|".join(map(re.escape, sorted(names, key=len, reverse=True))) + r")(?![\w\-\"'])")
-    parts = re.split(r"(<[^>]+>)", html)
-    in_skip = False
+
+    def rewrite(chunk: str) -> str:
+        parts = re.split(r"(<[^>]+>)", chunk)
+        in_skip = False
+        for i, part in enumerate(parts):
+            if part.startswith("<"):
+                low = part[:8].lower()
+                if low.startswith(("<style", "<script", "<title", "<pre", "<code")):
+                    in_skip = True
+                elif low.startswith(("</style", "</script", "</title", "</pre", "</code")):
+                    in_skip = False
+                continue
+            if not in_skip and part:
+                parts[i] = pat.sub(lambda m: names[m.group(1)], part)
+        return "".join(parts)
+
+    head, sep, body = html.partition("<body")
+    if not sep:
+        return rewrite(html)
+    parts = _EVIDENCE_SKIP.split(body)
+    out = []
     for i, part in enumerate(parts):
-        if part.startswith("<"):
-            low = part[:8].lower()
-            if low.startswith(("<style", "<script", "<title")):
-                in_skip = True
-            elif low.startswith(("</style", "</script", "</title")):
-                in_skip = False
-            continue
-        if not in_skip and part:
-            parts[i] = pat.sub(lambda m: names[m.group(1)], part)
-    return "".join(parts)
+        out.append(part if i % 2 == 1 else rewrite(part))
+    return head + sep + "".join(out)
 
 
-_TS = re.compile(r"\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?(?:\s*UTC)?")
-
-
+# Only convert timestamps that declare UTC / an offset / trailing UTC.
+# Skip already-localized values ("… 16:08 IST") so format_datetime is never reapplied.
+_TS = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:(Z)|([+-]\d{2}:?\d{2})|\s*(UTC))"
+    r"(?!\s*(?:IST|GMT|[A-Z]{2,5})\b)"
+)
 def _display_tz():
     """Same display zone as the web UI ([[attestra/web/ui.py#_display_tz]])."""
     name = os.environ.get("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
@@ -493,25 +531,34 @@ def _display_tz():
 
 
 def _human_times(html: str) -> str:
-    """Render ISO timestamps as '21 Oct 2026, 11:06 IST' in ATTESTRA_DISPLAY_TZ."""
+    """Convert UTC ISO timestamps once to '2026-11-04 16:08 IST'. Never touch evidence blocks."""
     display = _display_tz()
 
     def fix(m: re.Match) -> str:
         try:
-            dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}")
-            tz = m.group(4)
-            if tz in (None, "Z") or tz.replace(":", "") in ("+0000", "-0000"):
-                dt = dt.replace(tzinfo=UTC)
+            z, offset, utc_lit = m.group(4), m.group(5), m.group(6)
+            if z or utc_lit or (offset and offset.replace(":", "") in ("+0000", "-0000")):
+                dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}").replace(tzinfo=UTC)
+            elif offset:
+                dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}{offset}")
             else:
-                dt = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}{tz}")
+                return m.group(0)
             local = dt.astimezone(display)
-            label = local.strftime("%Z") or "UTC"
-            return f"{local.strftime('%d %b %Y, %H:%M').lstrip('0')} {label}"
+            label = local.tzname() or "UTC"
+            if "India" in (label or "") or label == "India Standard Time":
+                label = "IST"
+            return f"{local.strftime('%Y-%m-%d %H:%M')} {label}"
         except Exception:
             return m.group(0)
 
     head, sep, body = html.partition("<body")
-    return head + sep + _TS.sub(fix, body) if sep else html
+    if not sep:
+        return html
+    parts = _EVIDENCE_SKIP.split(body)
+    out = []
+    for i, part in enumerate(parts):
+        out.append(part if i % 2 == 1 else _TS.sub(fix, part))
+    return head + sep + "".join(out)
 
 
 def _svg_to_img(m: re.Match) -> str:
@@ -898,7 +945,7 @@ _COVER_SPACER_HTML = (
     '<table class="cover-spacer" width="100%" cellpadding="0" cellspacing="0" aria-hidden="true">'
     '<tr><td class="cover-spacer-cell">'
     '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" '
-    'width="1" height="420" alt=""/></td></tr></table>'
+    'width="1" height="280" alt=""/></td></tr></table>'
 )
 
 
@@ -1020,37 +1067,93 @@ def _weasyprint(html: str, base_url: str) -> bytes | None:
         return None
 
 
+def _relax_pdf_keep_together(html: str) -> str:
+    """Strip keep-together hints so xhtml2pdf can split oversized finding/cover blocks.
+
+    reportlab raises LayoutError ("Splitting error") when a KeepInFrame (from
+    ``-pdf-keep-with-next`` / ``page-break-inside: avoid``) is taller than the page.
+    """
+    out = re.sub(r"-pdf-keep-with-next:\s*true", "-pdf-keep-with-next: false", html, flags=re.I)
+    out = re.sub(r"page-break-inside:\s*avoid", "page-break-inside: auto", out, flags=re.I)
+    out = re.sub(r"page-break-after:\s*avoid", "page-break-after: auto", out, flags=re.I)
+    # Drop bordered boxes that xhtml2pdf wraps in KeepInFrame / BlockBox.
+    out = re.sub(r"\.finding\s*\{[^}]*\}", ".finding { margin: 6pt 0; }", out, count=1)
+    out = re.sub(r"\.finding-head\s*\{[^}]*\}", ".finding-head { margin: 0 0 2pt 0; }", out, count=1)
+    out = re.sub(r"\.finding h3\s*\{[^}]*\}", ".finding h3 { margin-top: 0; margin-bottom: 3pt; }", out, count=1)
+    out = re.sub(
+        r"\.summary-posture\s*\{[^}]*\}",
+        ".summary-posture { margin: 2pt 0 6pt 0; }",
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"pre\.http-pair\s*\{[^}]*\}",
+        "pre.http-pair { background-color: #f4f6f9; padding: 6pt 8pt; }",
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"\.note\s*\{[^}]*\}",
+        ".note { padding: 7pt 9pt; font-size: 9pt; }",
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"\.finding-facts\s*\{[^}]*\}",
+        ".finding-facts { margin: 2pt 0 3pt 0; background-color: #f4f6f9; }",
+        out,
+        count=1,
+    )
+    # Cap cover spacer so band + meta + spacer + foot never exceed one page frame (~740pt).
+    out = re.sub(
+        r'(cover-spacer[\s\S]{0,400}?<img\b[^>]*\bheight=")(\d+)(")',
+        lambda m: m.group(1) + str(min(int(m.group(2)), 280)) + m.group(3),
+        out,
+        count=1,
+        flags=re.I,
+    )
+    # Tall evidence images can also trap a KeepInFrame with the caption.
+    out = re.sub(
+        r"\.evidence-img\s*\{[^}]*\}",
+        ".evidence-img { width: 14.5cm; margin: 6pt 0 2pt 0; }",
+        out,
+        count=1,
+    )
+    # Cap explicit image heights that would overflow a page frame.
+    out = re.sub(
+        r'(\bheight=")(\d+)(")',
+        lambda m: m.group(1) + str(min(int(m.group(2)), 500)) + m.group(3),
+        out,
+        flags=re.I,
+    )
+    return out
+
+
 def _xhtml2pdf(html: str) -> bytes | None:
     try:
         from xhtml2pdf import pisa
     except Exception:
         return None
+
+    def _try(payload: str):
+        buf = BytesIO()
+        result = pisa.CreatePDF(payload, dest=buf, encoding="utf-8")
+        if result.err:
+            return None
+        return buf.getvalue() or None
+
     try:
-        buf = BytesIO()
-        result = pisa.CreatePDF(html, dest=buf, encoding="utf-8")
-    except Exception:  # reportlab LayoutError ("Splitting error") on an oversized boxed block
-        # Retry with plain flowing blocks: no keep-with-next and no bordered finding box, so long
-        # content breaks across pages instead of failing the whole export.
-        relaxed = html.replace("-pdf-keep-with-next: true", "-pdf-keep-with-next: false")
-        # Drop bordered finding boxes so oversized cards can split across pages.
-        relaxed = re.sub(
-            r"\.finding\s*\{[^}]*\}",
-            ".finding { margin: 6pt 0; }",
-            relaxed,
-            count=1,
-        )
-        # Title/header keep-together is fine for short heads; neutralize if it still traps a split.
-        relaxed = re.sub(
-            r"\.finding-head\s*\{[^}]*\}",
-            ".finding-head { margin: 0 0 2pt 0; }",
-            relaxed,
-            count=1,
-        )
-        buf = BytesIO()
-        result = pisa.CreatePDF(relaxed, dest=buf, encoding="utf-8")
-    if result.err:
+        data = _try(html)
+        if data:
+            return data
+    except Exception:
+        data = None
+    # Retry with plain flowing blocks so long findings/evidence split across pages.
+    try:
+        return _try(_relax_pdf_keep_together(html))
+    except Exception:
+        # Caller falls back to the minimal text PDF — never 500 the export route.
         return None
-    return buf.getvalue() or None
 
 
 def pdf_engine_status() -> dict:

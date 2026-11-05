@@ -115,7 +115,7 @@ tr.row-alt td {{ background-color: {SURFACE}; }}
 pre {{ font-family: {mono}, Courier; font-size: 7.5pt; }}
 pre.http-pair {{ background-color: {SURFACE_ALT}; border: 0.4pt solid {RULE}; padding: 6pt 8pt; }}
 .note {{ background-color: {NOTE_BG}; border-left: 2.5pt solid {ACCENT}; padding: 7pt 9pt; font-size: 9pt; }}
-.cover {{ padding-top: 6pt; padding-bottom: 0; border-bottom: none; }}
+.cover {{ padding-top: 6pt; padding-bottom: 0; border-bottom: none; page-break-after: always; }}
 .cover-band {{ width: 100%; margin: 0 0 12pt 0; }}
 .cover-band td, .cover-band-cell {{ border: none; background-color: {NAVY}; color: #ffffff; padding: 9pt 12pt; vertical-align: middle; }}
 .cover-band-brand {{ font-size: 9pt; font-weight: bold; letter-spacing: 0.06em; color: #ffffff; }}
@@ -136,14 +136,16 @@ pre.http-pair {{ background-color: {SURFACE_ALT}; border: 0.4pt solid {RULE}; pa
 .cover-spacer img {{ border: none; }}
 .cover-foot {{ width: 100%; margin: 0; }}
 .cover-foot td, .cover-foot-cell {{ border: none; background-color: {NAVY}; color: #ffffff; padding: 8pt 12pt; font-size: 8pt; }}
-.toc-title {{ font-size: 13pt; font-weight: bold; color: {NAVY}; margin-bottom: 10pt; -pdf-outline: false; }}
-.evidence-img {{ width: 14.5cm; border: 0.4pt solid {RULE}; margin: 6pt 0 2pt 0; -pdf-keep-with-next: true; }}
+.toc-title {{ font-size: 13pt; font-weight: bold; color: {NAVY}; margin-bottom: 6pt; -pdf-outline: false; }}
+.toc {{ font-size: 9pt; }}
+.toc li {{ margin: 1pt 0; }}
+.evidence-img {{ width: 14.5cm; border: 0.4pt solid {RULE}; margin: 6pt 0 2pt 0; }}
 .fig-caption {{ color: {QUIET}; font-size: 8pt; margin: 0 0 10pt 0; }}
 footer {{ margin-top: 18pt; color: {QUIET}; font-size: 8pt; line-height: 1.5; border-top: 0.4pt solid {RULE}; padding-top: 6pt; }}
 #pdf-header {{ color: {QUIET}; font-size: 6.5pt; font-weight: normal; text-align: left;
               border-bottom: 0.3pt solid {RULE}; padding-bottom: 1pt; letter-spacing: 0; }}
 #pdf-footer {{ color: {QUIET}; font-size: 7pt; text-align: center; }}
-.summary-posture {{ margin: 2pt 0 6pt 0; page-break-inside: avoid; }}
+.summary-posture {{ margin: 2pt 0 6pt 0; }}
 .overview-sev-summary {{ width: 100%; margin: 4pt 0 8pt 0; }}
 .overview-sev-summary th, .overview-sev-summary td {{ text-align: center; padding: 4pt 3pt; font-size: 8pt; border-bottom: 0.4pt solid {RULE}; }}
 .overview-sev-summary th {{ background-color: {SURFACE}; }}
@@ -256,8 +258,10 @@ def base_html_css() -> str:
   .evidence-figure {{ margin: 4px 0 8px; }}
   .mono {{ font-family: ui-monospace, Menlo, monospace; font-size: 12px; word-break: break-all; }}
   .note {{ background: var(--surface); border-left: 4px solid var(--accent); padding: 12px 16px; font-size: 13px; }}
-  .cover {{ min-height: 72vh; display:flex; flex-direction:column; justify-content:flex-start;
-           border-bottom: none; margin: 0 0 28px; padding: 0; page-break-after: always; }}
+  .cover {{ min-height: calc(100vh - 3rem); min-height: calc(100dvh - 3rem);
+           display:flex; flex-direction:column; justify-content:flex-start;
+           border-bottom: none; margin: 0 0 28px; padding: 0;
+           page-break-after: always; break-after: page; }}
   .cover-band {{ width: 100%; border-collapse: collapse; margin: 0 0 20px; background: var(--navy); }}
   .cover-band td {{ border: none; padding: 14px 18px; vertical-align: middle; background: var(--navy); color: #fff; }}
   .cover-band-brand {{ font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; }}
@@ -274,13 +278,16 @@ def base_html_css() -> str:
                    letter-spacing: .04em; background: var(--surface); }}
   .cover-meta td {{ width: 36%; color: var(--ink); background: #fff; }}
   .cover-prepared {{ margin: 4px 0 0; }}
-  .cover-spacer {{ width: 100%; border-collapse: collapse; flex: 1 1 auto; margin: 0; }}
-  .cover-spacer td {{ border: none; background: transparent; height: 48px; padding: 0; font-size: 1px; color: transparent; }}
-  .cover-foot {{ width: 100%; border-collapse: collapse; margin: 0; background: var(--navy); }}
+  .cover-spacer {{ width: 100%; border-collapse: collapse; flex: 1 1 auto; margin: 0; min-height: 1.5rem; }}
+  .cover-spacer td {{ border: none; background: transparent; height: auto; padding: 0; font-size: 1px; color: transparent; }}
+  .cover-spacer img {{ display: block; width: 1px; height: 0; max-height: 0; opacity: 0; }}
+  .cover-foot {{ width: 100%; border-collapse: collapse; margin-top: auto; background: var(--navy); }}
   .cover-foot td {{ border: none; padding: 12px 18px; background: var(--navy); color: rgba(255,255,255,.9);
                    font-size: 12px; letter-spacing: .03em; }}
+  .toc {{ columns: 2; column-gap: 1.5rem; }}
+  .toc ol {{ margin: 0; padding-left: 1.2rem; }}
   .toc a {{ color: var(--ink); text-decoration: none; }}
-  .toc li {{ margin: 5px 0; }}
+  .toc li {{ margin: 2px 0; break-inside: avoid; }}
   .evidence-img {{ max-width: 100%; max-height: 360px; height: auto; width: auto; object-fit: contain;
                    border: 1px solid var(--rule); margin: 8px 0 4px; }}
   .fig-caption {{ color: var(--quiet); font-size: 12px; margin: 0 0 14px; }}

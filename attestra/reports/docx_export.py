@@ -51,7 +51,11 @@ ACRONYMS = {
     "cde", "pan", "soa", "ui", "pdf", "csv", "sarif", "oscal", "json", "hsts", "ocsp", "tsc", "dast", "sast",
     "pii", "mfa", "sso", "ca", "eng", "it", "f",
 }
-SMALL = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "per", "the", "to", "vs", "via", "with"}
+# Keep mid-sentence words lowercase (avoids "for All cookies" / "Always" regressions).
+SMALL = {
+    "a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "per", "the", "to", "vs", "via", "with",
+    "all", "always", "any", "only", "each", "every", "both", "from", "into", "over", "under", "than",
+}
 
 BLOCK = {"p", "div", "section", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "li", "nav", "footer",
          "header", "figure", "pre", "blockquote", "hr", "main", "article", "svg"}

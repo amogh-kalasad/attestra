@@ -830,6 +830,54 @@ Technical HTML includes document control, environment, test types/standards, CVS
 
 [[attestra/reports/template_config.py#load_template_config]] lists all five assessment types and nine frameworks and defines the `retest` kind sections.
 
+## Report display labels
+
+Unit and hygiene checks for the central report display-label layer ([[tests/test_report_display_labels.py]], [[reports#Display labels]]).
+
+### Tool and status maps
+
+[[attestra/reports/labels.py#tool_label]] and [[attestra/reports/labels.py#status_label]] map zap → Zap, automated_vapt → Automated VAPT, PASSED → Passed, and related enums.
+
+### Humanize and plural
+
+[[attestra/reports/labels.py#humanize]] turns fingerprint/CSP/TLS keys into readable text; [[attestra/reports/labels.py#plural]] never emits `(s)`.
+
+### Date formats
+
+[[attestra/reports/labels.py#format_date]] / [[attestra/reports/labels.py#format_datetime]] use ISO dates and short zone labels without “IST India Standard Time”.
+
+### Detail and checklist sentences
+
+[[attestra/reports/labels.py#format_detail_sentence]] and [[attestra/reports/labels.py#format_checklist_note]] rewrite page-capture, auth-bypass, and `auto:` checklist notes into readable sentences without arrows or bracketed tool ids.
+
+### Consolidate and param labels
+
+[[attestra/reports/labels.py#consolidate_sentence]], [[attestra/reports/labels.py#param_label]], [[attestra/reports/labels.py#automated_run_header]], and [[attestra/reports/labels.py#test_name_label]] cover Consolidated rows, `[param:]`, automated-run headers, and T19-style test names.
+
+### Title case keeps small words
+
+[[attestra/reports/pdf.py#title_case]] keeps mid-sentence `all` / `always` lowercase so body text does not regress to “for All cookies”.
+
+### Dedup Zap label
+
+[[attestra/dedup.py#tool_display_name]] / [[attestra/dedup.py#detected_by_label]] show `Zap` for tool id `zap`.
+
+### Generated technical hygiene
+
+A generated technical report (excluding evidence/mono blocks) fails the scanner on snake_case enum keys, `(s)`, ALL-CAPS statuses, `->`, verbose IST, mid-sentence All/Always, and bracketed tool tags.
+
+### Recommendation bullets
+
+[[attestra/reports/labels.py#recommendation_to_bullets]] splits numbered remediation into an HTML list and leaves short single sentences alone.
+
+### Evidence stays verbatim
+
+HTTP pair evidence in sealed HTML and [[attestra/reports/pdf.py#prepare_html]] output keeps header values, quotes, `OS X`, and em dashes; timestamps inside `<pre>` are not rewritten.
+
+### No double timezone conversion
+
+[[attestra/reports/pdf.py#_human_times]] converts UTC stamps once to `YYYY-MM-DD HH:MM IST`, leaves already-localized `… IST` alone, and skips evidence blocks (no `IST IST`).
+
 ## Phase 3 reports
 
 Template, evidence, branding, and Word/PDF gaps for technical and related report kinds ([[tests/test_phase3_reports.py]]).
@@ -841,6 +889,10 @@ Document-control tables on technical and retest reports include a Change column 
 ### Screenshots end-to-end
 
 Attaching a tiny PNG screenshot embeds Fig. captions and data:image in technical HTML; DOCX contains a drawing/image part; PDF export completes without crash (text assert soft when pypdf missing).
+
+### PDF LayoutError keep-together retry
+
+[[attestra/reports/pdf.py#_relax_pdf_keep_together]] strips keep-with-next / page-break avoid / bordered finding and http-pair boxes and caps the cover spacer; [[attestra/reports/pdf.py#_xhtml2pdf]] returns None on LayoutError so export uses the minimal PDF instead of 500.
 
 ### List of figures
 
@@ -2185,7 +2237,7 @@ Master Phase 6: confidence-based cross-tool consolidation and observation retent
 
 ### Detected by labels
 
-[[attestra/dedup.py#detected_by_label]] maps tool ids such as `zap` to readable names like `OWASP ZAP`.
+[[attestra/dedup.py#detected_by_label]] maps tool ids such as `zap` to readable names like `Zap` (aligned with [[attestra/reports/labels.py#TOOL_LABELS]]).
 
 ### Soft match zap nuclei
 

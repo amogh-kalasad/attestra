@@ -114,7 +114,11 @@ def trend_svg(current: Counter, previous: Counter | None) -> str:
                 f'<rect x="{x0 + bar_w}" y="{height - h0}" width="{bar_w}" height="{h0}" '
                 f'fill="{colors[sev]}" opacity="0.45" />'
             )
-        parts.append(f'<text x="{x0}" y="{height + 14}" font-size="9" fill="#334155">{sev[:4]}</text>')
+        # Full severity words (Critical/High/Medium/Low/Info) — never truncate to "medi".
+        label = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low", "info": "Info"}.get(
+            sev, sev[:1].upper() + sev[1:]
+        )
+        parts.append(f'<text x="{x0}" y="{height + 14}" font-size="9" fill="#334155">{label}</text>')
     parts.append("</svg>")
     return "".join(parts)
 

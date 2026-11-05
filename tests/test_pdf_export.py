@@ -179,8 +179,49 @@ def test_pdf_display_fixes(monkeypatch):
     monkeypatch.setenv("ATTESTRA_DISPLAY_TZ", "Asia/Kolkata")
     out = _human_times("<html><body>on 2026-10-22 07:35:54.475008+00:00.</body></html>")
     expected = datetime(2026, 10, 22, 7, 35, 54, tzinfo=UTC).astimezone(_display_tz())
-    label = expected.strftime("%Z") or "UTC"
-    assert f"{expected.strftime('%d %b %Y, %H:%M').lstrip('0')} {label}" in out
+    label = expected.tzname() or "UTC"
+    if "India" in (label or ""):
+        label = "IST"
+    # Single display format shared with labels.format_datetime
+    assert f"{expected.strftime('%Y-%m-%d %H:%M')} {label}" in out
+    assert "IST IST" not in out
     assert _register_badge_font() == "Inter-Bold"
     html = '<html><head><style></style></head><body><h1>x</h1><svg width="100" height="40"><rect width="10" height="10"/></svg></body></html>'
     assert "data:image/svg+xml" in prepare_html(html, kind="executive", draft=False)
+
+
+def test_relax_pdf_keep_together_strips_unsplittable_hints(monkeypatch):
+    # @lat: [[tests#Phase 3 reports#PDF LayoutError keep-together retry]]
+    from attestra.reports.pdf import _relax_pdf_keep_together, _xhtml2pdf
+
+    raw = (
+        "<html><head><style>"
+        ".finding { border: 1pt solid #000; -pdf-keep-with-next: true; }"
+        ".finding-head { page-break-inside: avoid; page-break-after: avoid; -pdf-keep-with-next: true; }"
+        ".finding h3 { -pdf-keep-with-next: true; }"
+        ".summary-posture { page-break-inside: avoid; }"
+        "pre.http-pair { background-color: #eee; border: 0.4pt solid #000; padding: 6pt 8pt; }"
+        ".evidence-img { width: 14.5cm; -pdf-keep-with-next: true; }"
+        "</style></head><body>"
+        '<table class="cover-spacer"><tr><td>'
+        '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" '
+        'width="1" height="520" alt=""/></td></tr></table>'
+        "<p>ok</p></body></html>"
+    )
+    out = _relax_pdf_keep_together(raw)
+    assert "-pdf-keep-with-next: true" not in out
+    assert "page-break-inside: avoid" not in out
+    assert "page-break-after: avoid" not in out
+    assert 'height="280"' in out
+    assert ".finding { margin: 6pt 0; }" in out
+    assert "pre.http-pair { background-color: #f4f6f9; padding: 6pt 8pt; }" in out
+    assert ".evidence-img { width: 14.5cm; margin: 6pt 0 2pt 0; }" in out
+
+    # LayoutError on both attempts must return None (export falls back to minimal PDF), never raise.
+    import xhtml2pdf.pisa as pisa_mod
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("Splitting error(n==1) on page 18")
+
+    monkeypatch.setattr(pisa_mod, "CreatePDF", _boom)
+    assert _xhtml2pdf("<html><body><p>x</p></body></html>") is None

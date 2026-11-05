@@ -14,17 +14,18 @@ from urllib.parse import urlsplit
 from attestra.fingerprint import normalize_location, normalize_title
 
 # Display names for "Detected by" (keys stay stored as importer tool ids).
+# Keep in sync with [[attestra/reports/labels.py#TOOL_LABELS]] (zap → Zap).
 TOOL_DISPLAY_NAMES = {
-    "zap": "OWASP ZAP",
+    "zap": "Zap",
     "nuclei": "Nuclei",
     "trivy": "Trivy",
     "semgrep": "Semgrep",
     "sarif": "SARIF",
     "testssl": "testssl.sh",
-    "webcheck": "webcheck",
+    "webcheck": "Webcheck",
     "gitleaks": "Gitleaks",
     "checkov": "Checkov",
-    "naabu": "naabu",
+    "naabu": "Naabu",
     "prowler": "Prowler",
     "kube_bench": "kube-bench",
     "burp": "Burp",
@@ -33,6 +34,7 @@ TOOL_DISPLAY_NAMES = {
     "ssllabs": "SSL Labs",
     "cyclonedx": "CycloneDX",
     "dependency_track": "Dependency-Track",
+    "automated_vapt": "Automated VAPT",
 }
 
 MERGE_THRESHOLD = 0.85

@@ -42,9 +42,9 @@ GENERIC_CWES = frozenset(
 
 # Tool labels: title case, acronyms and product spellings kept.
 _TOOL_LABELS = {
-    "zap": "ZAP",
+    "zap": "Zap",
     "nuclei": "Nuclei",
-    "testssl": "Testssl",
+    "testssl": "testssl.sh",
     "naabu": "Naabu",
     "webcheck": "Webcheck",
     "trivy": "Trivy",
@@ -53,11 +53,12 @@ _TOOL_LABELS = {
     "sarif": "SARIF",
     "checkov": "Checkov",
     "prowler": "Prowler",
-    "kube_bench": "Kube-bench",
+    "kube_bench": "kube-bench",
     "burp": "Burp",
     "nessus": "Nessus",
     "observatory": "Observatory",
     "ssllabs": "SSL Labs",
+    "automated_vapt": "Automated VAPT",
 }
 
 # Explicit equivalents. Each entry: concept key -> {tool: [(rule-id regex, title regex)]}.
