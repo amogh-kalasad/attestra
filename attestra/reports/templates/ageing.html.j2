@@ -2,9 +2,9 @@
 {% block title %}Finding ageing and SLA breaches{% endblock %}
 {% block body %}
 <h1>Ageing and SLA breaches</h1>
-<div class="meta">{{ eng.name }} · {{ tenant }} · generated {{ generated_at }} by {{ generated_by }}</div>
+<div class="meta">{{ eng.name|words_title }} · {{ tenant }} · generated {{ generated_at|format_date }} by {{ generated_by }}</div>
 
-<p class="note">Open findings past their severity SLA due date (critical 30d, high 60d, medium 90d, low 180d).</p>
+<p class="note">Open findings past their severity SLA due date (Critical 30d, High 60d, Medium 90d, Low 180d).</p>
 
 {% if sla_breaches %}
 <table>
@@ -12,11 +12,11 @@
   {% for f in sla_breaches %}
   <tr>
     <td>{{ flabel(f) }}</td>
-    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td>
     <td>{{ f.title }}</td>
-    <td>{{ f.status }}</td>
-    <td>{{ f.sla_due }}</td>
-    <td>{{ f.first_seen.strftime('%Y-%m-%d') if f.first_seen else "" }}</td>
+    <td>{{ f.status|status_label }}</td>
+    <td>{{ f.sla_due|format_date if f.sla_due else "" }}</td>
+    <td>{{ f.first_seen|format_date if f.first_seen else "" }}</td>
   </tr>
   {% endfor %}
 </table>

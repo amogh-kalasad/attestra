@@ -31,6 +31,7 @@ from attestra.models import (
     utcnow,
 )
 from attestra.reports import signing
+from attestra.reports.labels import register_jinja_filters
 from attestra.reports.template_config import (
     cvss_legend,
     disclaimer_text,
@@ -56,13 +57,19 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+register_jinja_filters(_env)  # @lat: [[reports#Display labels]]
 
 
 def _trend_svg(current: Counter, previous: Counter | None) -> str:
     """Inline SVG bar chart comparing open findings by severity (shared with C11 target history)."""
     from attestra.history import trend_svg
+    from attestra.reports.labels import severity_label
 
-    return trend_svg(current, previous)
+    svg = trend_svg(current, previous)
+    # history.trend_svg truncates keys to 4 chars ("medi"); expand to display labels.
+    for sev in ("critical", "high", "medium", "low", "info"):
+        svg = svg.replace(f">{sev[:4]}</text>", f">{severity_label(sev)}</text>")
+    return svg
 
 
 def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
@@ -249,7 +256,7 @@ def _filter_automated_vapt_evidence(finding, items: list) -> list:
     if not loc or not items:
         return items
     try:
-        from urllib.parse import urlsplit, unquote
+        from urllib.parse import unquote, urlsplit
 
         needle = unquote(urlsplit(loc).path or loc).rstrip("/")
     except Exception:  # noqa: BLE001
@@ -878,6 +885,31 @@ def render_html(
     # Generated files are always draft until the separate sign-off workflow completes.
     ctx.update(kind=kind, version=version, generated_by=actor,
                generated_at=generated_at if generated_at is not None else utcnow(), is_draft=True)
+    from attestra.reports import labels as report_labels
+
+    ctx.setdefault("tool_label", report_labels.tool_label)
+    ctx.setdefault("status_label", report_labels.status_label)
+    ctx.setdefault("severity_label", report_labels.severity_label)
+    ctx.setdefault("environment_label", report_labels.environment_label)
+    ctx.setdefault("exposure_label", report_labels.exposure_label)
+    ctx.setdefault("framework_label", report_labels.framework_label)
+    ctx.setdefault("frameworks_label", report_labels.frameworks_label)
+    ctx.setdefault("humanize", report_labels.humanize)
+    ctx.setdefault("check_label", report_labels.check_label)
+    ctx.setdefault("evidence_kind_label", report_labels.evidence_kind_label)
+    ctx.setdefault("evidence_note_label", report_labels.evidence_note_label)
+    ctx.setdefault("format_date", report_labels.format_date)
+    ctx.setdefault("format_datetime", report_labels.format_datetime)
+    ctx.setdefault("words_title", report_labels.words_title)
+    ctx.setdefault("param_label", report_labels.param_label)
+    ctx.setdefault("dedup_label", report_labels.dedup_label)
+    ctx.setdefault("consolidate_sentence", report_labels.consolidate_sentence)
+    ctx.setdefault("format_detail_sentence", report_labels.format_detail_sentence)
+    ctx.setdefault("format_checklist_note", report_labels.format_checklist_note)
+    ctx.setdefault("test_name_label", report_labels.test_name_label)
+    ctx.setdefault("automated_run_header", report_labels.automated_run_header)
+    ctx.setdefault("plural", report_labels.plural)
+    ctx.setdefault("recommendation_to_bullets", report_labels.recommendation_to_bullets)
     from attestra.library.templates import render_custom  # tenant template, else built-in
 
     custom = render_custom(s, eng.tenant_id, kind, ctx)

@@ -2,7 +2,7 @@
 {% block title %}OWASP Top 10{% endblock %}
 {% block body %}
 <h1>OWASP Top 10</h1>
-<div class="meta">{{ eng.name }} · {{ type_label }} · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+<div class="meta">{{ eng.name|words_title }} · {{ type_label }} · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
 
 <p class="note">Findings from this security testing engagement grouped by
 <a href="https://owasp.org/Top10/">OWASP Top 10 2021</a> categories (via CWE mapping).
@@ -10,7 +10,7 @@ Category labels are evidence aids for remediation prioritisation; they are not a
 against the full Top 10. Unmapped findings appear in a separate section.</p>
 
 <div class="kpis">
-  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s|severity_label }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
 </div>
 
 {% for g in top10_groups %}
@@ -21,11 +21,11 @@ against the full Top 10. Unmapped findings appear in a separate section.</p>
   {% for f in g.findings %}
   <tr>
     <td>{{ flabel(f) }} {{ f.title }}</td>
-    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
-    <td>{{ f.status }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td>
+    <td>{{ f.status|status_label }}</td>
     <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>
     <td class="mono">{{ f.asvs_ref or "—" }}</td>
-    <td class="mono">{{ (f.location or "")[:90] }}</td>
+    <td class="mono">{{ (f.location or "")[:90]|param_label }}</td>
   </tr>
   {% endfor %}
 </table>
@@ -48,10 +48,10 @@ matching evidence in this engagement.</p>
   {% for f in g.findings %}
   <tr>
     <td>{{ flabel(f) }} {{ f.title }}</td>
-    <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
-    <td>{{ f.status }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td>
+    <td>{{ f.status|status_label }}</td>
     <td class="mono">{% if f.cwe %}CWE-{{ f.cwe }}{% else %}—{% endif %}</td>
-    <td class="mono">{{ (f.location or "")[:90] }}</td>
+    <td class="mono">{{ (f.location or "")[:90]|param_label }}</td>
   </tr>
   {% endfor %}
 </table>

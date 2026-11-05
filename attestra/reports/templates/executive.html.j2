@@ -2,14 +2,14 @@
 {% block title %}Executive summary{% endblock %}
 {% block body %}
 <h2>Executive summary</h2>
-<p class="meta"><b>{{ eng.name }}</b> · {{ type_label }} · Window {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
+<p class="meta"><b>{{ eng.name|words_title }}</b> · {{ type_label }} · Window {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
 
 {% set crit_high = by_sev.get("critical", 0) + by_sev.get("high", 0) %}
 <p class="note">
 {% if crit_high == 0 %}
-  No critical or high-severity issues remain open. {{ open_findings|length }} lower-severity item(s) are tracked for remediation.
+  No Critical or High-severity issues remain open. {{ plural(open_findings|length, "lower-severity item") }} {{ "is" if open_findings|length == 1 else "are" }} tracked for remediation.
 {% else %}
-  {{ crit_high }} critical or high-severity issue(s) remain open{% if kev_open %}, including {{ kev_open|length }} listed in CISA KEV (known exploited){% endif %}.
+  {{ plural(crit_high, "Critical or High-severity issue") }} {{ "remains" if crit_high == 1 else "remain" }} open{% if kev_open %}, including {{ plural(kev_open|length, "item") }} listed in CISA KEV (known exploited){% endif %}.
   Remediate these before the next audit window.
 {% endif %}
 </p>
@@ -21,7 +21,7 @@
 <div class="summary-posture">
 <div class="kpis">
   {% for s in severities %}
-  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|capitalize }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
+  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|severity_label }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
   {% endfor %}
 </div>
 {% if trend_svg %}
@@ -36,7 +36,7 @@
 <table>
   <tr><th>Finding</th><th>Severity</th><th>Asset / location</th><th>Fix by</th></tr>
   {% for f in top %}
-  <tr><td>{{ flabel(f) }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td><td class="mono">{{ f.location[:90] }}</td><td>{{ f.sla_due or "" }}</td></tr>
+  <tr><td>{{ flabel(f) }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td><td class="mono">{{ f.location[:90]|param_label }}</td><td>{{ f.sla_due|format_date if f.sla_due else "" }}</td></tr>
   {% else %}<tr><td colspan="4">No open findings.</td></tr>{% endfor %}
 </table>
 

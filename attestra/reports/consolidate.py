@@ -174,7 +174,21 @@ def _url_list(rows: list[Any]) -> list[str]:
 
 
 def _status_label(status: str) -> str:
-    return " ".join(crossmerge.title_case(w) for w in (status or "").split("_"))
+    from attestra.reports.labels import status_label
+
+    return status_label(status)
+
+
+def _severity_label(sev: str) -> str:
+    from attestra.reports.labels import severity_label
+
+    return severity_label(sev)
+
+
+def _tool_label(tool: str) -> str:
+    from attestra.reports.labels import tool_label
+
+    return tool_label(tool)
 
 
 def _sources(rows: list[Any], obs_by: dict[int, list[Any]]) -> list[dict]:
@@ -204,9 +218,9 @@ def _sources(rows: list[Any], obs_by: dict[int, list[Any]]) -> list[dict]:
         out.append(
             {
                 "tool": tool,
-                "tool_label": crossmerge.tool_label(tool) if tool else "Unknown",
+                "tool_label": _tool_label(tool) if tool else "Unknown",
                 "severity": sev,
-                "severity_label": crossmerge.title_case(sev),
+                "severity_label": _severity_label(sev),
                 "finding_id": members[0].id,
                 "finding_ids": [m.id for m in members],
                 "finding_refs": ", ".join(f"F-{m.id}" for m in members),
@@ -228,10 +242,10 @@ def _tool_severity_label(effective: str, sources: list[dict]) -> str:
         cur = per_tool.get(src["tool_label"])
         if cur is None or crossmerge.sev_rank(src["severity"]) > crossmerge.sev_rank(cur):
             per_tool[src["tool_label"]] = src["severity"]
-    head = crossmerge.title_case(effective)
+    head = _severity_label(effective)
     if len(per_tool) < 2:
         return head
-    return f"{head} ({', '.join(f'{t}: {crossmerge.title_case(s)}' for t, s in per_tool.items())})"
+    return f"{head} ({', '.join(f'{t}: {_severity_label(s)}' for t, s in per_tool.items())})"
 
 
 def _build(rows: list[Any], obs_by: dict[int, list[Any]], *, title: str | None = None, rationale: str = "") -> Any:

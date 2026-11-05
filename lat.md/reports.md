@@ -33,6 +33,12 @@ How a report row and frozen HTML file are created.
 5. Create [[attestra/models.py#Report]] as `draft` with version and sha256.
 6. Audit the write.
 
+## Display labels
+
+Central display-only maps and helpers so report HTML/PDF/DOCX never print raw enum keys, `(s)` plurals, or machine log notes.
+
+[[attestra/reports/labels.py]] owns `TOOL_LABELS` (zap → Zap), `STATUS_LABELS`, `CHECK_LABELS` / site-grade maps, `humanize`, `plural`, `format_date` / `format_datetime` (day-month IST once, never “IST India Standard Time”), checklist/detail sentences, consolidate/dedup wording, evidence kind/note labels, recommendation bullets, and cover `words_title`. [[attestra/reports/render.py]] registers filters via [[attestra/reports/labels.py#register_jinja_filters]] and expands trend chart axis labels via [[attestra/reports/render.py#_trend_svg]]. [[attestra/reports/consolidate.py]] uses the same status/severity/tool label helpers for Sources rows. Stored findings and evidence bytes are never rewritten.
+
 ## Titles
 
 Names shown at the top of each report and in OSCAL output.
