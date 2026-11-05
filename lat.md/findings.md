@@ -6,7 +6,7 @@ One normalized finding schema, keyed for dedup and ranked for work order. Report
 
 SQLAlchemy finding entity and related engagement constants.
 
-[[attestra/models.py#Finding]] holds title, description, recommendation, impact, affected_urls, references, tools, rule_ids, CWE/CVEs, location, severity, CVSS (score + vector), EPSS, KEV, risk_score, SLA due, lifecycle status, and fingerprint. Impact, affected_urls (JSON list of URL strings), and references (JSON list of strings) default empty (migration `0021_finding_fields_disclaimer`). API [[attestra/api.py#_finding_dict]] exposes them. [[attestra/library/service.py#apply_to_finding]] fills empty impact and references from a library entry while still composing description/recommendation for older consumers. [[attestra/scoring.py#validate_cvss_vector]] accepts empty or CVSS 3.x vectors (`CVSS:3.…/…`); [[attestra/scoring.py#soft_cvss_vector]] clears garbage on import so a bad vector does not abort the run.
+[[attestra/models.py#Finding]] holds title, description, recommendation, impact, affected_urls, references, tools, rule_ids, CWE/CVEs, location, severity, CVSS (score + vector + version), EPSS, KEV, risk_score, business_risk, SLA due, lifecycle status, and fingerprint. Impact, affected_urls (JSON list of URL strings), and references (JSON list of strings) default empty (migration `0021_finding_fields_disclaimer`). API [[attestra/api.py#_finding_dict]] exposes them including `cvss_version`, `business_risk`, and `risk_modifiers`. [[attestra/library/service.py#apply_to_finding]] fills empty impact and references from a library entry while still composing description/recommendation for older consumers. [[attestra/scoring.py#validate_cvss_vector]] accepts empty, CVSS 3.x, or CVSS 4.0 vectors; [[attestra/scoring.py#soft_cvss_vector]] clears garbage on import so a bad vector does not abort the run.
 
 Engagement types, frameworks, asset kinds, test types, and allowed status transitions live as module constants in [[attestra/models.py]] (`ENGAGEMENT_TYPES`, `NEW_ENGAGEMENT_TYPES`, `ENGAGEMENT_TYPE_LABELS`, `FRAMEWORKS`, `ASSET_KINDS`, `TEST_TYPES`, `TRANSITIONS`). New creates accept only [[attestra/models.py#NEW_ENGAGEMENT_TYPES]] (`va`, `pt`, `vapt`) via [[attestra/services.py#create_engagement]], the new-engagement UI ([[attestra/models.py#new_engagement_type_labels]]), and `/api/catalog`. Historical `retest` / `continuous` rows remain readable. The stored type key `vapt` stays; its display label is `VA + PT` via [[attestra/models.py#engagement_type_label]]. Legacy label `vapt (va + pt)` maps to key `vapt` through [[attestra/models.py#normalize_engagement_type]] on create and on display.
 
@@ -59,13 +59,13 @@ Lists every check that ran as passed, failed, or skipped — not only the failur
 
 Overall A–F letter grade per target with an Observatory-style score breakdown.
 
-[[attestra/grade.py#score_from_findings]] starts at 100 and applies [[attestra/grade.py#MODIFIERS]] (penalties and bonuses). Not-tested checks leave the score alone. Bonuses apply only when the score is already 90 or more. Suppressed and false-positive findings do not take points off; accepted-risk findings still count. An expired or invalid certificate sets `cap_f` so [[attestra/grade.py#grade_from_score]] returns F. Modifier `http_no_https_redirect` (−20) applies when findings show HTTP does not upgrade to HTTPS on the same host (including first hop to another host); a temporary 302/307 to https:// on the same host does not take that penalty. [[attestra/services.py#asset_site_grade]] loads the target’s findings for the UI and `GET /api/engagements/{eid}/assets/{aid}/grade`. The target page shows the letter, score, and breakdown table; C11 scan history keeps its per-scan severity letter separately. The sites dashboard ([[interfaces#Web dashboard#Sites dashboard]]) reuses the same grade helpers via [[attestra/services.py#list_tenant_sites]] and sorts with [[attestra/grade.py#grade_rank]].
+[[attestra/grade.py#score_from_findings]] starts at 100 and applies [[attestra/grade.py#MODIFIERS]] (penalties and bonuses). Not-tested checks leave the score alone. Bonuses apply only when the score is already 90 or more. Suppressed and false-positive findings do not take points off; accepted-risk findings still count. An expired or invalid certificate sets `cap_f` so [[attestra/grade.py#grade_from_score]] returns F. Modifier `http_no_https_redirect` (−20) applies when findings show HTTP does not upgrade to HTTPS on the same host (including first hop to another host); a temporary 302/307 to https:// on the same host does not take that penalty. HSTS-missing (−20) is skipped when the claiming finding’s `validation_status` is not_reproducible / informational / validation FP, or when any in-scope finding’s description/evidence text shows HSTS with max-age ([[attestra/finding_validation/headers.py#hsts_present_in_evidence]]); the check still counts as tested so the row is pass, not not_tested. [[attestra/services.py#asset_site_grade]] loads the target’s findings for the UI and `GET /api/engagements/{eid}/assets/{aid}/grade`. The target page shows the letter, score, and breakdown table; C11 scan history keeps its per-scan severity letter separately. The sites dashboard ([[interfaces#Web dashboard#Sites dashboard]]) reuses the same grade helpers via [[attestra/services.py#list_tenant_sites]] and sorts with [[attestra/grade.py#grade_rank]]. Phase 5 honesty: [[architecture#World-class risk scoring (Phase 5)]].
 
 ## CVSS vector
 
-Stored vector string validated as empty or CVSS 3.x before keep.
+Stored vector string validated as empty, CVSS 3.x, or CVSS 4.0 before keep; version stored for reports.
 
-[[attestra/scoring.py#validate_cvss_vector]] returns `""` for blank input and otherwise requires a string starting with `CVSS:3.` that contains `/` metrics; garbage raises `ValueError`. Import merge uses [[attestra/scoring.py#soft_cvss_vector]] so invalid importer data is cleared and the rest of the import continues.
+[[attestra/scoring.py#validate_cvss_vector]] returns `""` for blank input and otherwise requires `CVSS:3.x/…` or `CVSS:4.0/…` with metrics; garbage (including CVSS 2.x) raises `ValueError`. [[attestra/scoring.py#soft_cvss_vector]] clears invalid importer data so the rest of the import continues. [[attestra/scoring.py#cvss_version_from_vector]] parses the prefix into `Finding.cvss_version` (`""` | `3.0` | `3.1` | `4.0`). CVSS 4.0 is soft-accepted for storage/display only — scores are never invented from a v4 vector without an official calculator; missing score stays `None` and severity comes from the scanner or info. Import sets version from the vector and never clears an existing `cvss_score` when merging an observation that lacks one. When a score is present, [[attestra/scoring.py#align_severity_with_cvss]] syncs severity to CVSS bands unless explicitly overridden. UI, API, and technical reports show score, full vector, and version.
 
 ## Risk score
 
@@ -74,15 +74,16 @@ Prioritization formula used to rank work; does not replace CVSS in reports.
 Formula in [[attestra/scoring.py#risk_score]]:
 
 ```
-risk = CVSS × (1 + EPSS) × w_KEV × w_asset × w_exposure
+risk = base × (1 + EPSS) × kev_factor × asset_weight × exposure_weight
 ```
 
-- `w_KEV` = 1.5 if on CISA KEV, else 1.0
-- `w_asset` = 0.6…1.4 from criticality ([[attestra/scoring.py#asset_weight]])
-- `w_exposure` = 1.3 for internet or CDE ([[attestra/scoring.py#exposure_weight]])
+- `base` = real `cvss_score` when present; otherwise a documented severity default ([[attestra/scoring.py#DEFAULT_CVSS]]) used only for ranking — never written into `cvss_score`
+- `kev_factor` = 1.5 if on CISA KEV, else 1.0 ([[attestra/scoring.py#KEV_FACTOR]])
+- `asset_weight` = 0.6…1.4 from criticality ([[attestra/scoring.py#asset_weight]])
+- `exposure_weight` = 1.3 for internet or CDE ([[attestra/scoring.py#exposure_weight]])
 - Info with no CVSS stays base 0 on internal assets; on internet-facing or CDE assets the base is [[attestra/scoring.py#INFO_INTERNET_BASE]] (1.0) so risk is never 0 after exposure weight (about 1.3 at criticality 3).
 
-Applied via [[attestra/services.py#rescore]]. Severity bands from CVSS: [[attestra/scoring.py#severity_from_cvss]]. Findings on internet-facing assets show an "Internet-facing" tag in the engagement list and technical report.
+[[attestra/scoring.py#explain_risk_modifiers]] returns documented modifiers (`base`, `base_source`, `epss`, `kev_factor`, `asset_weight`, `exposure_weight`, `formula`, `risk_score`, plus `business_risk` band) so scoring stays reproducible; informational validation caps priority to the info base. [[attestra/scoring.py#business_risk_band]] labels priority separately from technical CVSS severity; [[attestra/services.py#rescore]] stores `Finding.business_risk` and never rewrites `cvss_score`. Report open-vuln KPIs exclude informational / not-reproducible validation classes ([[architecture#World-class risk scoring (Phase 5)]]). Severity bands from CVSS: [[attestra/scoring.py#severity_from_cvss]]. Findings on internet-facing assets show an "Internet-facing" tag in the engagement list and technical report.
 
 ## SLA
 

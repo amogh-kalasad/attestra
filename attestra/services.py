@@ -1475,6 +1475,9 @@ def import_results(
                 dedup_confidence=match_confidence,
                 dedup_rationale=(match_rationale or "new")[:500],
             )
+            f.cvss_version = scoring.cvss_version_from_vector(f.cvss_vector) or ""
+            # CVSS score is source of truth for severity bands unless analyst overrides later.
+            scoring.align_severity_with_cvss(f)
             f.asset = asset
             _apply_owasp(f)
             _apply_import_validation(f, nf)
@@ -1517,14 +1520,23 @@ def import_results(
                     f.description = nf.description
                 if nf.recommendation:
                     f.recommendation = nf.recommendation
-            elif _rank(nf.severity) > _rank(f.severity):
+            elif f.cvss_score is None and _rank(nf.severity) > _rank(f.severity):
+                # Without a CVSS score, keep the higher scanner severity.
                 f.severity = nf.severity
+            # Never clear a real cvss_score when the incoming observation lacks one.
             if f.cvss_score is None and nf.cvss_score is not None:
                 f.cvss_score = nf.cvss_score
                 if not (f.cvss_vector or "").strip():
                     f.cvss_vector = scoring.soft_cvss_vector(nf.cvss_vector)
+                    f.cvss_version = scoring.cvss_version_from_vector(f.cvss_vector) or ""
+                scoring.align_severity_with_cvss(f)
             elif not (f.cvss_vector or "").strip() and nf.cvss_vector:
                 f.cvss_vector = scoring.soft_cvss_vector(nf.cvss_vector)
+                if f.cvss_vector and not (getattr(f, "cvss_version", None) or "").strip():
+                    f.cvss_version = scoring.cvss_version_from_vector(f.cvss_vector) or ""
+            elif f.cvss_score is not None:
+                # Score already present: keep severity aligned to CVSS bands.
+                scoring.align_severity_with_cvss(f)
             if not f.cwe and nf.cwe:
                 f.cwe = nf.cwe
                 _apply_owasp(f)
@@ -1694,10 +1706,16 @@ def _apply_import_validation(f: Finding, nf, *, only_if_stronger: bool = False) 
 
 def _tenant_weights(f: Finding):
     from sqlalchemy.orm import object_session
+    from sqlalchemy.orm.exc import UnmappedInstanceError
 
     from attestra import tuning
 
-    s = getattr(f, "_sess", None) or object_session(f)  # MongoRecord carries its MongoSession
+    s = getattr(f, "_sess", None)
+    if s is None:
+        try:
+            s = object_session(f)  # MongoRecord carries its MongoSession
+        except UnmappedInstanceError:
+            s = None
     if s is None or f.engagement_id is None:
         return None
     eng = s.get(Engagement, f.engagement_id)
@@ -1705,12 +1723,28 @@ def _tenant_weights(f: Finding):
 
 
 def rescore(f: Finding) -> None:
+    """Recompute priority/business risk. Never mutates ``cvss_score``."""
     a = f.asset
+    cvss = f.cvss_score  # preserved; never rewritten below
+    validation = (getattr(f, "validation_status", None) or "").lower()
+    informational = validation == "informational"
+    if informational:
+        # Technical severity: stay info unless a real CVSS score maps a band.
+        if cvss is not None:
+            f.severity = scoring.severity_from_cvss(float(cvss))
+        else:
+            f.severity = "info"
+        # Business risk uses info base — do not treat as a confirmed vuln.
+        cvss_for_risk, sev_for_risk = None, "info"
+    else:
+        cvss_for_risk, sev_for_risk = cvss, f.severity
     f.risk_score = scoring.risk_score(
-        f.cvss_score, f.severity, f.epss, f.kev,
+        cvss_for_risk, sev_for_risk, f.epss, f.kev,
         a.criticality if a else None, a.exposure if a else None, a.in_cde if a else False,
         weights=_tenant_weights(f),
     )
+    f.business_risk = scoring.business_risk_band(f.risk_score)
+    # cvss_score intentionally untouched (technical severity of record)
     if f.sla_due is None:
         f.sla_due = scoring.sla_due(f.severity, (f.first_seen or utcnow()).date())
 

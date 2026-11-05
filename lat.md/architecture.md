@@ -135,6 +135,12 @@ Surfaces security-testing coverage separately from vulnerability counts via API 
 
 `GET /api/engagements/{eid}/coverage` ([[attestra/api.py#engagement_coverage]]) requires `engagement.read`, returns [[attestra/services.py#engagement_coverage_snapshot]], and with `?ledger=1` includes the Phase 4 ledger list. Technical report context key `security_testing_coverage` from [[attestra/reports/render.py#_security_testing_coverage_context]] drives the **Security testing coverage** subsection in `technical.html.j2` (endpoints discovered/tested/untested, checklist passed/failed/blocked/not_started, automated successful/failed/skipped, exclusions note). PDF uses the same HTML path. Scan completion must never be presented as 100% security testing coverage; skipped/blocked ≠ passed.
 
+## World-class risk scoring (Phase 5)
+
+Keeps CVSS as technical severity of record and treats priority/`business_risk` as a separate ranking signal.
+
+[[attestra/scoring.py#validate_cvss_vector]] soft-accepts CVSS 3.x and 4.0 vectors; [[attestra/scoring.py#cvss_version_from_vector]] / `Finding.cvss_version` label the version; v4 scores are never invented. [[attestra/scoring.py#explain_risk_modifiers]] documents reproducible modifiers; [[attestra/services.py#rescore]] sets `business_risk`. [[attestra/grade.py#score_from_findings]] skips the HSTS-missing fail when `validation_status` is not_reproducible / informational / validation FP, or when in-memory HTTP evidence shows HSTS with max-age ([[attestra/finding_validation/headers.py#hsts_present_in_evidence]]). Technical risk legend (and PDF/DOCX injections) separates CVSS technical severity from priority / business risk. [[attestra/reports/render.py#_context]] open-vuln KPIs exclude informational and not-reproducible validation classes. See [[findings#Site grade]], [[findings#CVSS vector]], [[findings#Risk score]]. Delivery: \docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md\.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.

@@ -17,6 +17,12 @@ from sqlalchemy.orm import Session
 from attestra import __version__, config, services
 from attestra.compliance import load_library, objectives_for
 from attestra.dedup import detected_by_label
+from attestra.finding_validation.statuses import (
+    ACCEPTED_RISK,
+    FALSE_POSITIVE,
+    INFORMATIONAL,
+    NOT_REPRODUCIBLE,
+)
 from attestra.models import (
     ASSET_KINDS,
     DISPLAY_LABELS,
@@ -30,6 +36,35 @@ from attestra.models import (
     engagement_type_label,
     utcnow,
 )
+
+# Validation classes that are not open confirmed vulnerabilities in summary KPIs.
+_NON_VULN_VALIDATION = frozenset(
+    {
+        INFORMATIONAL,
+        NOT_REPRODUCIBLE,
+        FALSE_POSITIVE,
+        ACCEPTED_RISK,
+    }
+)
+
+
+def _validation_status_of(f) -> str:
+    return (getattr(f, "validation_status", None) or "unvalidated").strip().lower()
+
+
+def _counts_as_open_vuln(f) -> bool:
+    """Informational / contradicted validation classes are not confirmed vulns."""
+    return _validation_status_of(f) not in _NON_VULN_VALIDATION
+
+
+def _finding_cvss_version(f) -> str:
+    """Sibling Phase 5 field; empty when column not merged yet."""
+    return str(getattr(f, "cvss_version", None) or "").strip()
+
+
+def _finding_business_risk(f):
+    """Sibling Phase 5 field; None when column not merged yet."""
+    return getattr(f, "business_risk", None)
 from attestra.reports import signing
 from attestra.reports.labels import register_jinja_filters
 from attestra.reports.template_config import (
@@ -78,7 +113,11 @@ def _previous_open_by_sev(s: Session, eng: Engagement) -> Counter | None:
     prev = report_reads.previous_engagement(eng.tenant_id, eng.id)
     if not prev:
         return None
-    open_f = [f for f in services.list_findings(s, prev.id) if f.status in OPEN_STATUSES]
+    open_f = [
+        f
+        for f in services.list_findings(s, prev.id)
+        if f.status in OPEN_STATUSES and _counts_as_open_vuln(f)
+    ]
     return Counter(f.severity for f in open_f)
 
 
@@ -694,6 +733,9 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
 
     reportable = consolidate(s, [f for f in findings if f.status != "false_positive"])
     open_f = [f for f in reportable if f.status in OPEN_STATUSES]
+    # Summary / KPI open-vuln counts exclude informational and contradicted validation classes.
+    vuln_open = [f for f in open_f if _counts_as_open_vuln(f)]
+    informational_open = sum(1 for f in open_f if not _counts_as_open_vuln(f))
     # Report-only labels: F-1, F-2 ... in the order findings appear in the report. DB ids stay
     # internal (anchors); every merged/member row maps to its report entry's number.
     fnum: dict[int, int] = {}
@@ -709,7 +751,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
             n = None
         return f"F-{n}" if n else f"#{rid}"
 
-    by_sev = Counter(f.severity for f in open_f)
+    by_sev = Counter(f.severity for f in vuln_open)
     prev_by_sev = _previous_open_by_sev(s, eng)
     imports = report_reads.import_runs(engagement_id, eng.tenant_id)
     lib = load_library()
@@ -742,7 +784,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
     branding = _branding(s, eng.tenant_id, kind or "technical")
     tmpl_cfg = load_template_config()
     embeds = _evidence_embeds(reportable)
-    open_critical_high = sum(1 for f in open_f if f.severity in ("critical", "high"))
+    open_critical_high = sum(1 for f in vuln_open if f.severity in ("critical", "high"))
     tls_all = services.tls_summaries(s, engagement_id)
     tls_scanned = [t for t in tls_all if t.get("scanned")]
     return {
@@ -761,13 +803,15 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "test_type_label": _test_type_label,
         "asset_kind_label": _asset_kind_label,
         "site_grades": site_grades,
-        "open_findings": open_f,
+        "open_findings": vuln_open,
+        "open_findings_all": open_f,
         "by_sev": by_sev,
         "prev_by_sev": prev_by_sev,
         "trend_svg": _trend_svg(by_sev, prev_by_sev),
         "severities": SEVERITIES,
         "status_counts": Counter(f.status for f in reportable),
         "false_positives": sum(1 for f in all_findings if f.status == "false_positive"),
+        "informational_open": informational_open,
         "imports": imports,
         "authorizations": eng.authorizations,
         "frameworks": frameworks,
@@ -777,11 +821,13 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
             or k.replace("_", " ").strip().title()
             for k in objectives_for(f, lib)
         ],
-        "top": sorted(open_f, key=lambda f: -f.risk_score)[:5],
-        "kev_open": [f for f in open_f if f.kev],
+        "top": sorted(vuln_open, key=lambda f: -(getattr(f, "risk_score", 0) or 0))[:5],
+        "kev_open": [f for f in vuln_open if f.kev],
         "today": date.today(),
         "version_str": __version__,
         "open_critical_high": open_critical_high,
+        "finding_cvss_version": _finding_cvss_version,
+        "finding_business_risk": _finding_business_risk,
         "feed_catalog": _feed_catalog(),
         "include_comments": include_comments,
         "comments_by_finding": comments_by_finding,

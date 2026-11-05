@@ -454,9 +454,13 @@ class Finding(Base):
     severity: Mapped[str] = mapped_column(String(10))
     cvss_score: Mapped[float | None] = mapped_column(Float)
     cvss_vector: Mapped[str] = mapped_column(String(200), default="")
+    # Parsed from vector prefix (e.g. "3.1", "4.0"); empty when unknown.
+    cvss_version: Mapped[str] = mapped_column(String(10), default="")
     epss: Mapped[float | None] = mapped_column(Float)
     kev: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Priority / business ranking (not a second CVSS). Band set by services.rescore.
     risk_score: Mapped[float] = mapped_column(Float, default=0.0)
+    business_risk: Mapped[str] = mapped_column(String(10), default="")  # critical|high|medium|low|info
     status: Mapped[str] = mapped_column(String(20), default="new")
     # Evidence validation class (separate from workflow status). See finding_validation.
     validation_status: Mapped[str] = mapped_column(String(40), default="unvalidated")

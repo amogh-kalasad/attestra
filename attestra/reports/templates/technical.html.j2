@@ -168,8 +168,9 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 {% endif %}
 
 {% set sec.n = sec.n + 1 %}<h2 id="risk-legend">{{ sec.n }}. Risk Rating Legend</h2>
+<p class="meta"><b>Technical severity</b> (Critical–Info) follows CVSS score bands. It is the technical severity of record for each finding.</p>
 <table>
-  <tr><th>Severity</th><th>CVSS range</th><th>Open count</th></tr>
+  <tr><th>Severity</th><th>CVSS range</th><th>Open vuln count</th></tr>
   {% for s in severities %}
   <tr>
     <td><span class="sev sev-{{ s }}">{{ s|severity_label }}</span></td>
@@ -178,19 +179,23 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   </tr>
   {% endfor %}
 </table>
-<p class="meta">Risk score also factors EPSS, CISA KEV, asset criticality and exposure. CVSS vector strings appear on individual findings when available.</p>
+<p class="meta"><b>Priority / business risk score</b> ranks remediation work
+(CVSS × (1 + EPSS) × KEV × asset criticality × exposure). It is <em>not</em> a second CVSS score and does not replace technical severity.
+Open counts above exclude informational and not-reproducible validation observations{% if informational_open %}; {{ informational_open }} such observation{{ "s" if informational_open != 1 else "" }} remain listed in detailed findings where present{% endif %}.
+CVSS vector and version appear on individual findings when available.</p>
 
 {% set sec.n = sec.n + 1 %}<h2 id="summary">{{ sec.n }}. Summary</h2>
 <div class="summary-posture">
 <div class="kpis">
   {% for s in severities %}
-  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|severity_label }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
+  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|severity_label }}</span><b>{{ by_sev.get(s, 0) }}</b>open vulns</div>
   {% endfor %}
   <div class="kpi">False positives<b>{{ false_positives }}</b>excluded</div>
+  {% if informational_open %}<div class="kpi">Informational / N/R<b>{{ informational_open }}</b>not confirmed vulns</div>{% endif %}
 </div>
 {% if trend_svg %}
 <div class="chart-block">
-  <p class="meta chart-caption">Open findings by severity (this engagement vs prior when available).{% if prev_by_sev is none %} No prior engagement for this client — chart shows current open counts only.{% endif %}</p>
+  <p class="meta chart-caption">Open vulnerabilities by severity (informational and not-reproducible validation classes excluded).{% if prev_by_sev is none %} No prior engagement for this client — chart shows current open counts only.{% endif %}</p>
   {{ trend_svg|safe }}
 </div>
 {% endif %}
@@ -341,14 +346,16 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     <div class="finding-header">
       <span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span>
       · Status: <b>{{ f.status|status_label }}</b>
-      · Risk {{ "%.1f"|format(f.risk_score) }}
+      · Priority / Business risk {{ "%.1f"|format(f.risk_score) }}{% if f.business_risk %} ({{ f.business_risk|severity_label }}){% endif %}
       · Fix by {% if f.sla_due %}{{ f.sla_due|format_date }}{% else %}—{% endif %}
       {% if f.asset and f.asset.exposure == "internet" %} · <span class="sev chip-internet">Internet-facing</span>{% endif %}
     </div>
-    {% if f.cvss_score is not none or f.cvss_vector or f.epss is not none or f.kev %}
+    {% if f.cvss_score is not none or f.cvss_vector or f.epss is not none or f.kev or f.business_risk %}
     <table class="finding-meta">
-      {% if f.cvss_score is not none %}<tr><th>CVSS</th><td>{{ f.cvss_score }}</td></tr>{% endif %}
-      {% if f.cvss_vector %}<tr><th>CVSS vector</th><td><span class="mono">{{ f.cvss_vector }}</span></td></tr>{% endif %}
+      {% set cvss_ver = f.cvss_version if f.cvss_version else (f.cvss_vector.split('/')[0].split(':')[1] if f.cvss_vector and f.cvss_vector.startswith('CVSS:') else '') %}
+      {% if f.cvss_score is not none %}<tr><th>CVSS score{% if cvss_ver %} (v{{ cvss_ver }}){% endif %}</th><td>{{ f.cvss_score }}</td></tr>{% elif cvss_ver %}<tr><th>CVSS version</th><td>v{{ cvss_ver }}</td></tr>{% endif %}
+      {% if f.cvss_vector %}<tr><th>CVSS version / vector</th><td>{% if cvss_ver %}v{{ cvss_ver }} · {% endif %}<span class="mono">{{ f.cvss_vector }}</span></td></tr>{% endif %}
+      {% if f.business_risk %}<tr><th>Priority / Business risk</th><td>{{ f.business_risk|severity_label }} (score {{ "%.1f"|format(f.risk_score) }})</td></tr>{% endif %}
       {% if f.epss is not none %}<tr><th>EPSS</th><td>{{ "%.3f"|format(f.epss) }}</td></tr>{% endif %}
       {% if f.kev %}<tr><th>KEV</th><td><b>CISA KEV</b></td></tr>{% endif %}
     </table>
@@ -501,8 +508,8 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 
 {% set sec.n = sec.n + 1 %}<h2 id="conclusion">{{ sec.n }}. Conclusion</h2>
 <p>This {{ type_label }} engagement identified {{ plural(findings|length, "reportable finding") }}
-({% for s in severities %}{{ by_sev.get(s, 0) }} {{ s|severity_label }}{% if not loop.last %}, {% endif %}{% endfor %} open at generation time; {{ plural(false_positives, "false positive") }} excluded).
-Remediate Critical and High issues first, then retest. Control statuses in any compliance pack remain proposals until a named assessor confirms them.</p>
+({% for s in severities %}{{ by_sev.get(s, 0) }} {{ s|severity_label }}{% if not loop.last %}, {% endif %}{% endfor %} open vulnerabilities at generation time; {{ plural(false_positives, "false positive") }} excluded{% if informational_open %}; {{ informational_open }} informational or not-reproducible observation{{ "s" if informational_open != 1 else "" }} excluded from open-vuln counts{% endif %}).
+Remediate Critical and High issues first, then retest. Control statuses in any compliance pack remain proposals until a named assessor confirms them. Informational validation observations are not confirmed vulnerabilities.</p>
 
 {% set sec.n = sec.n + 1 %}<h2 id="sign-off">{{ sec.n }}. Sign-off</h2>
 <p class="meta">Draft generations leave QA and approval blank. Live status, hash check and signature validity appear in the Attestra sign-off record when you open the report in the product; the sealed file below stays unchanged.</p>

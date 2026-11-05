@@ -377,7 +377,9 @@ class FindingRepository(BaseRepository):
             "rule_ids": list(fields.get("rule_ids") or []),
             "cvss_score": fields.get("cvss_score"),
             "cvss_vector": fields.get("cvss_vector", ""),
+            "cvss_version": fields.get("cvss_version", ""),
             "risk_score": fields.get("risk_score"),
+            "business_risk": fields.get("business_risk", ""),
             "created_at": utcnow(),
             "updated_at": utcnow(),
         }

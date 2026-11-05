@@ -233,17 +233,38 @@ def _observation_dict(o) -> dict:
 
 def _finding_dict(f, fix: dict | None = None) -> dict:
     from attestra.library.fix_snippets import empty_fix_fields
+    from attestra import scoring
 
+    a = getattr(f, "asset", None)
+    validation = getattr(f, "validation_status", None) or "unvalidated"
+    stored_ver = (getattr(f, "cvss_version", None) or "").strip()
+    risk_modifiers = scoring.explain_risk_modifiers(
+        f.cvss_score,
+        f.severity,
+        f.epss,
+        f.kev,
+        a.criticality if a else None,
+        a.exposure if a else None,
+        a.in_cde if a else False,
+        validation_status=validation,
+    )
+    business_risk = (
+        getattr(f, "business_risk", None)
+        or scoring.business_risk_band(f.risk_score)
+    )
     out = {
         "id": f.id,
         "title": f.title,
-        "severity": f.severity,
+        "severity": f.severity,  # technical severity of record
         "status": f.status,
-        "validation_status": getattr(f, "validation_status", None) or "unvalidated",
+        "validation_status": validation,
         "validation_reasons": list(getattr(f, "validation_reasons", None) or []),
-        "risk_score": f.risk_score,
+        "risk_score": f.risk_score,  # priority / business ranking
+        "business_risk": business_risk,
+        "risk_modifiers": risk_modifiers,
         "cvss_score": f.cvss_score,
         "cvss_vector": f.cvss_vector,
+        "cvss_version": stored_ver or scoring.cvss_version_from_vector(f.cvss_vector),
         "epss": f.epss,
         "kev": f.kev,
         "cwe": f.cwe,

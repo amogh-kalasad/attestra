@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from attestra import __version__, audit
 from attestra.dedup import detected_by_label, tool_display_name
 from attestra.models import Evidence, Finding, FindingObservation, Report, engagement_type_label
+from attestra.scoring import cvss_version_from_vector
 from attestra.services import compliance, get_engagement, list_findings
 
 EXPORT_SCHEMA_VERSION = 2
@@ -46,6 +47,9 @@ def _finding_export_dict(f: Finding) -> dict[str, Any]:
         "risk_score": f.risk_score,
         "cvss_score": f.cvss_score,
         "cvss_vector": f.cvss_vector or "",
+        "cvss_version": (getattr(f, "cvss_version", None) or "").strip()
+        or cvss_version_from_vector(f.cvss_vector),
+        "business_risk": getattr(f, "business_risk", None) or "",
         "epss": f.epss,
         "kev": f.kev,
         "cwe": f.cwe,

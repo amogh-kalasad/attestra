@@ -924,7 +924,7 @@ Library apply fills empty impact and references; affected_urls round-trip throug
 
 ### CVSS vector validation
 
-[[attestra/scoring.py#validate_cvss_vector]] accepts empty and CVSS 3.x vectors and rejects garbage; [[attestra/scoring.py#soft_cvss_vector]] clears bad import values.
+[[attestra/scoring.py#validate_cvss_vector]] accepts empty, CVSS 3.x, and CVSS 4.0 vectors and rejects garbage; [[attestra/scoring.py#soft_cvss_vector]] clears bad import values.
 
 ### History change key
 
@@ -2762,6 +2762,66 @@ DEFERRED and SKIPPED ledger rows always include a limitation explaining incomple
 ### Merge and engagement collect
 
 [[attestra/automated_vapt/coverage/ledger.py#merge_ledger]] dedupes by execution/test/endpoint/method/auth; [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]] aggregates COMPLETED/FAILED `coverage_ledger` blobs.
+
+## World-class Phase 5 risk scoring
+
+CVSS storage/versioning plus grade and report honesty for HSTS and informational validation (`tests/test_risk_scoring_phase5.py`, `tests/test_risk_scoring_phase5_grade.py`).
+
+### Soft-accepts CVSS 4.0 vectors
+
+[[attestra/scoring.py#validate_cvss_vector]] and [[attestra/scoring.py#soft_cvss_vector]] accept `CVSS:4.0/…` for storage while still rejecting garbage and CVSS 2.x.
+
+### Version from vector prefix
+
+[[attestra/scoring.py#cvss_version_from_vector]] returns `3.0` / `3.1` / `4.0` from the vector prefix and `""` when absent.
+
+### Align severity with CVSS score
+
+[[attestra/scoring.py#align_severity_with_cvss]] sets severity from CVSS bands when a score is present, and skips when `severity_overridden` or score is missing.
+
+### Preserve score without inventing v4
+
+Import keeps an existing `cvss_score` when a later observation has only a v4 vector; v4-only imports leave score `None` and do not invent a recalculated score.
+
+### Explain risk modifiers
+
+[[attestra/scoring.py#explain_risk_modifiers]] documents base, EPSS, KEV factor, asset/exposure weights, and the formula text used by [[attestra/scoring.py#risk_score]].
+
+### Business risk bands
+
+[[attestra/scoring.py#business_risk_band]] maps priority `risk_score` thresholds to critical/high/medium/low/info (not CVSS bands).
+
+### Rescore sets band without touching CVSS
+
+[[attestra/services.py#rescore]] sets `business_risk` from the priority score and never rewrites `cvss_score`.
+
+### Rescore informational uses info base
+
+When `validation_status` is informational, [[attestra/services.py#rescore]] keeps technical severity from CVSS when present but ranks priority with the info base.
+
+### Finding dict exposes split fields
+
+[[attestra/api.py#_finding_dict]] exposes technical `severity`, `cvss_version`, `business_risk`, and `risk_modifiers` as separate fields.
+
+### HSTS not_reproducible skips penalty
+
+HSTS-missing findings with `validation_status=not_reproducible` do not take the site-grade −20 fail in [[attestra/grade.py#score_from_findings]].
+
+### HSTS evidence elsewhere skips penalty
+
+Cross-finding HTTP evidence showing Strict-Transport-Security with max-age clears the HSTS-missing fail without ENG1-specific IDs.
+
+### HSTS missing still penalizes when unvalidated
+
+Unvalidated HSTS-missing claims still apply the −20 modifier when no contradicting evidence is present.
+
+### Informational not open vuln
+
+[[attestra/reports/render.py#_counts_as_open_vuln]] returns false for informational validation classes so summary KPIs do not treat them as confirmed vulnerabilities.
+
+### getattr defaults mid-merge
+
+[[attestra/reports/render.py#_finding_cvss_version]] and [[attestra/reports/render.py#_finding_business_risk]] return empty/None when sibling fields are absent.
 
 ## World-class Phase 3 safe probes
 

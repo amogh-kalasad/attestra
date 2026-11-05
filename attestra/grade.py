@@ -5,14 +5,25 @@ Bonuses apply only when the running score is already >= 90.
 Not-tested checks (no data) do not change the score.
 Suppressed / false-positive findings do not take points off.
 Accepted-risk findings still count. Expired/invalid certificate caps the grade at F.
+HSTS-missing fail is skipped when validation_status is not_reproducible /
+informational / validation FP, or when HTTP evidence shows HSTS present.
 """
 # @lat: [[findings#Site grade]]
+# @lat: [[architecture#World-class risk scoring (Phase 5)]]
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+
+from attestra.finding_validation.headers import hsts_present_in_evidence
+from attestra.finding_validation.statuses import (
+    ACCEPTED_RISK,
+    FALSE_POSITIVE,
+    INFORMATIONAL,
+    NOT_REPRODUCIBLE,
+)
 
 # Points and short reasons. Easy to read and change.
 # kind: penalty | bonus | cap_f
@@ -129,6 +140,16 @@ GRADE_BANDS: list[tuple[int, str]] = [
 # Statuses that must not take points off.
 _IGNORE_STATUSES = frozenset({"false_positive", "suppressed", "fp"})
 
+# Validation classes that must not drive header-missing fail penalties.
+_IGNORE_VALIDATION = frozenset(
+    {
+        NOT_REPRODUCIBLE,
+        INFORMATIONAL,
+        FALSE_POSITIVE,
+        ACCEPTED_RISK,
+    }
+)
+
 
 @dataclass(frozen=True)
 class BreakdownRow:
@@ -199,12 +220,48 @@ def _status_of(f: Any) -> str:
     return _norm(str(getattr(f, "status", "") or ""))
 
 
+def _validation_of(f: Any) -> str:
+    if isinstance(f, dict):
+        return _norm(str(f.get("validation_status") or ""))
+    return _norm(str(getattr(f, "validation_status", "") or ""))
+
+
 def _is_ignored(f: Any) -> bool:
     return _status_of(f) in _IGNORE_STATUSES
 
 
+def _evidence_blobs(f: Any) -> list[str]:
+    """In-memory evidence/description text for header contradiction checks."""
+    out: list[str] = []
+    if isinstance(f, dict):
+        for key in ("description", "recommendation", "evidence_text", "raw"):
+            v = f.get(key)
+            if v:
+                out.append(str(v))
+        for item in f.get("evidence_texts") or []:
+            if item:
+                out.append(str(item))
+        for item in f.get("evidence_refs") or []:
+            if item:
+                out.append(str(item))
+        return out
+    for key in ("description", "recommendation"):
+        v = getattr(f, key, None)
+        if v:
+            out.append(str(v))
+    for ev in getattr(f, "evidence", None) or []:
+        note = getattr(ev, "note", None)
+        if note:
+            out.append(str(note))
+        body = getattr(ev, "body", None) or getattr(ev, "text", None)
+        if body:
+            out.append(body if isinstance(body, str) else body.decode("utf-8", "replace"))
+    return out
+
+
 def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
     """Detect which grade-relevant conditions are present in findings."""
+    findings_list = list(findings)
     flags = {k: False for k in MODIFIERS}
     saw = {
         "csp_any": False,
@@ -223,7 +280,13 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
         "hsts_preload_ok": False,
     }
 
-    for f in findings:
+    # Cross-finding HTTP/header evidence (general; not engagement-ID specific).
+    all_evidence: list[str] = []
+    for f in findings_list:
+        all_evidence.extend(_evidence_blobs(f))
+    hsts_in_evidence = hsts_present_in_evidence(all_evidence)
+
+    for f in findings_list:
         if _is_ignored(f):
             continue
         blob = _finding_blob(f)
@@ -242,11 +305,14 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
             if "unsafe-eval" in blob or "wildcard" in blob or "http://" in blob:
                 saw["csp_any"] = True
 
-        # HSTS
+        # HSTS — skip fail when contradicted by validation_status or evidence
         if "strict-transport-security" in blob or "hsts" in blob:
             saw["hsts_tested"] = True
-            if "missing" in blob or "not set" in blob or "no hsts" in blob:
-                flags["hsts_missing"] = True
+            missing_claim = "missing" in blob or "not set" in blob or "no hsts" in blob
+            if missing_claim:
+                vs = _validation_of(f)
+                if vs not in _IGNORE_VALIDATION and not hsts_in_evidence:
+                    flags["hsts_missing"] = True
             if "max-age" in blob and ("short" in blob or "under" in blob or "low" in blob):
                 flags["hsts_short"] = True
             if "preload" in blob and "includesubdomains" in blob.replace(" ", ""):
@@ -316,6 +382,14 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
                 or "other host" in blob
             ):
                 flags["http_no_https_redirect"] = True
+
+    # Evidence showing HSTS present overrides any missing-claim fail.
+    if hsts_in_evidence:
+        saw["hsts_tested"] = True
+        flags["hsts_missing"] = False
+        joined = "\n".join(all_evidence).lower().replace(" ", "")
+        if "preload" in joined and "includesubdomains" in joined:
+            saw["hsts_preload_ok"] = True
 
     # Bonuses when we saw the topic tested and no related penalty
     if saw["csp_tested"] and not flags["csp_missing"] and not flags["csp_unsafe_inline"] and not saw["csp_any"]:

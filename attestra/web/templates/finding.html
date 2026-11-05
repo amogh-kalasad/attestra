@@ -224,7 +224,11 @@
     <h2>Finding</h2>
     <div class="kv">
       <div><span class="k">Status</span><span class="v"><span class="fs fs-{{ f.status }}">{{ f.status|label }}</span></span></div>
-      <div><span class="k">Severity</span><span class="v"><span class="pill {{ f.severity }}">{{ f.severity }}</span> <b style="margin-left:6px">Risk {{ "%.1f"|format(f.risk_score) }}</b></span></div>
+      <div><span class="k">Technical severity</span><span class="v"><span class="pill {{ f.severity }}">{{ f.severity }}</span></span></div>
+      <div><span class="k">Priority / business risk</span><span class="v">{% if f.business_risk %}<span class="pill {{ f.business_risk }}">{{ f.business_risk }}</span> {% endif %}<b>{{ "%.1f"|format(f.risk_score) }}</b></span></div>
+      {% if f.cvss_score is not none or f.cvss_vector %}
+      <div><span class="k">CVSS{% if f.cvss_version %} {{ f.cvss_version }}{% elif f.cvss_vector and f.cvss_vector.startswith('CVSS:') %} {{ f.cvss_vector.split('/')[0].split(':')[1] }}{% endif %}</span><span class="v">{% if f.cvss_score is not none %}{{ f.cvss_score }}{% else %}—{% endif %}{% if f.cvss_vector %} <span class="mono">{{ f.cvss_vector }}</span>{% endif %}</span></div>
+      {% endif %}
       <div><span class="k">Location</span><span class="v mono">{{ f.location or "-" }}</span></div>
       <div><span class="k">Detected by</span><span class="v">{{ detected_by(f.tools) }}</span></div>
       {% if f.dedup_rationale %}<div><span class="k">Dedup</span><span class="v meta">{{ f.dedup_rationale }}{% if f.dedup_confidence is not none %} ({{ '%.2f'|format(f.dedup_confidence) }}){% endif %}</span></div>{% endif %}

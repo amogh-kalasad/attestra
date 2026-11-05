@@ -96,6 +96,8 @@ def _legend_html() -> str:
     )
     return (
         '<h2 id="pdf-severity-legend">Severity Legend</h2>'
+        "<p><b>Technical severity</b> follows CVSS bands (severity of record). "
+        "<b>Priority / business risk score</b> ranks remediation and is not a second CVSS.</p>"
         "<table><tr><th>Severity</th><th>CVSS v3 Range</th><th>Meaning</th></tr>"
         f"{rows}</table>"
     )
