@@ -1,16 +1,16 @@
 {% extends "_base.html.j2" %}
 {% block title %}Executive summary{% endblock %}
 {% block body %}
-<h1>Executive summary: {{ eng.name }}</h1>
-<div class="meta">{{ type_label }} engagement · {{ eng.window_start or "" }} to {{ eng.window_end or "" }}</div>
+<h2>Executive summary</h2>
+<p class="meta"><b>{{ eng.name }}</b> · {{ type_label }} · Window {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
 
 {% set crit_high = by_sev.get("critical", 0) + by_sev.get("high", 0) %}
 <p class="note">
 {% if crit_high == 0 %}
   No critical or high-severity issues remain open. {{ open_findings|length }} lower-severity item(s) are tracked for remediation.
 {% else %}
-  {{ crit_high }} critical/high-severity issue(s) remain open{% if kev_open %}, including {{ kev_open|length }} known to be exploited in the wild (CISA KEV){% endif %}.
-  These should be fixed before the next audit window.
+  {{ crit_high }} critical or high-severity issue(s) remain open{% if kev_open %}, including {{ kev_open|length }} listed in CISA KEV (known exploited){% endif %}.
+  Remediate these before the next audit window.
 {% endif %}
 </p>
 {% if ai_summary %}
@@ -18,18 +18,19 @@
 <div class="meta">AI-assisted narrative, reviewed and approved by {{ ai_summary.approved_by }}.</div>
 {% endif %}
 
+<div class="summary-posture">
 <div class="kpis">
-  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+  {% for s in severities %}
+  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|capitalize }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
+  {% endfor %}
 </div>
-
-<h2>Trend vs prior engagement</h2>
-{% if prev_by_sev is not none %}
-<p class="meta">Solid bars: this engagement. Faded bars: previous engagement for the same client.</p>
-<div>{{ trend_svg|safe }}</div>
-{% else %}
-<p class="meta">No prior engagement for this client — trend chart shows current open counts only.</p>
-<div>{{ trend_svg|safe }}</div>
+{% if trend_svg %}
+<div class="chart-block">
+  <p class="meta chart-caption">Open findings by severity (this engagement vs prior when available).{% if prev_by_sev is not none %} Solid bars: this engagement. Faded bars: previous engagement for the same client.{% else %} No prior engagement for this client — chart shows current open counts only.{% endif %}</p>
+  {{ trend_svg|safe }}
+</div>
 {% endif %}
+</div>
 
 <h2>Top risks</h2>
 <table>

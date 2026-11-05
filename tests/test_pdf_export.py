@@ -56,7 +56,8 @@ def test_pdf_is_styled_and_marked_draft_until_signed(loaded):
     with db.session() as s:
         r = generate_report(s, loaded, kind="technical", actor="author@x")
         draft = _pdf_text(Path(export_report_formats(r)["pdf_path"]).read_bytes())
-        approve_report(s, r.id, actor="approver@x")
+        # Use the returned row: Mongo sign returns a new object; the prior instance may stay draft.
+        r = approve_report(s, r.id, actor="approver@x")
         signed = _pdf_text(Path(export_report_formats(r)["pdf_path"]).read_bytes())
     assert "Contents" in draft and "Risk Rating Legend" in draft
     assert re.search(r"Page 1 of \d+", draft)
@@ -165,7 +166,7 @@ def test_docx_is_styled_word_document(loaded):
         assert "DRAFT" in z.read("word/header1.xml").decode()
         assert "NUMPAGES" in z.read("word/footer1.xml").decode()
         z.close()  # Windows: an open handle blocks re-export of the same file
-        approve_report(s, r.id, actor="approver@x")
+        r = approve_report(s, r.id, actor="approver@x")
         z = zipfile.ZipFile(export_report_formats(r)["docx_path"])
         assert "DRAFT" not in z.read("word/header1.xml").decode()
 

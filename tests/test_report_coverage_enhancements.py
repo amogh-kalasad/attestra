@@ -72,7 +72,7 @@ def test_technical_renders_stored_fields(loaded):
 
     assert "Document control" in body
     assert "Contents" in body
-    assert "Risk rating legend" in body
+    assert "Risk Rating Legend" in body
     assert "Findings overview" in body
     assert "Standards and test types" in body
     assert "OWASP Top 10" in body or "A03:2021" in body

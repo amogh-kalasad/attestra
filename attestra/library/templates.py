@@ -33,7 +33,7 @@ DEFAULT_SOURCE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>{{ cover_title or eng.name }}</title>
 <style>
 body{font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;color:#16181d;max-width:900px;margin:0 auto;padding:24px}
-.cover{min-height:60vh;display:flex;flex-direction:column;justify-content:center;border-bottom:2px solid #2457d6;margin-bottom:32px}
+.cover{min-height:60vh;display:flex;flex-direction:column;justify-content:center;border-bottom:2px solid #1b3a6b;margin-bottom:32px}
 .cover img{max-height:90px;max-width:260px;margin-bottom:24px}
 table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e3e5ea;padding:6px;text-align:left;vertical-align:top}
 .sev{font-weight:700;text-transform:capitalize}.f{page-break-inside:avoid;margin-bottom:20px}

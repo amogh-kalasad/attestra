@@ -17,12 +17,12 @@ from io import BytesIO
 from xml.sax.saxutils import escape
 
 from attestra.reports.pdf import LETTER_KINDS, _title_of, prepare_html
+from attestra.reports.presentation_tokens import SEV_HEX_DOCX as SEV_COLOURS
+from attestra.reports.presentation_tokens import STATUS
 
 PAGE_W = 9638  # A4 text width in twips with 2 cm margins
 
-SEV_COLOURS = {"critical": "A1161B", "high": "D0461B", "medium": "B7791F", "low": "3B7D4F", "info": "6B7280"}
-ST_COLOURS = {"met": "3B7D4F", "no_exceptions": "2F7F8A", "partial": "B7791F", "not_met": "A1161B",
-              "not_assessed": "6B7280", "not_applicable": "6B7280"}
+ST_COLOURS = {k: v.lstrip("#").upper() for k, v in STATUS.items()}
 
 BLOCK = {"p", "div", "section", "h1", "h2", "h3", "h4", "h5", "h6", "table", "ul", "ol", "li", "nav",
          "footer", "header", "figure", "pre", "blockquote", "hr", "tr", "td", "th", "thead", "tbody", "main", "article"}

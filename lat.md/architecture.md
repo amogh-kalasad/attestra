@@ -65,7 +65,7 @@ Document schema migrations run on Mongo init; SQL/Alembic is archived (migrate-s
 
 [[attestra/persistence/mongo/client.py#init_mongo]] applies pending revisions under `attestra/persistence/mongo/migrations` (baseline indexes, identity/webhook indexes, partial unique credit idempotency keys). [[attestra/db.py#init]] / [[attestra/db.py#upgrade]] open Mongo only. Legacy SQL trees and the one-shot SQL→Mongo importer live under `.migration_backups/sql_removal/`.
 
-## MongoDB persistence
+## MongoDB migration (in progress)
 
 Runtime persistence is MongoDB only; `db.session()` yields a MongoSession.
 

@@ -58,9 +58,9 @@
 {% if all_retests %}
 {% for rt in all_retests %}
 {% set f = findings_by_id.get(rt.finding_id) %}
-<div class="finding">
+<div class="finding{% if f %} finding-{{ f.severity }}{% endif %}">
   <h3>Retest #{{ rt.id }} · Finding {{ flabel(rt.finding_id) }}{% if f %} · {{ f.title }}{% endif %}</h3>
-  <table>
+  <table class="finding-meta">
     <tr><th style="width:160px">Result</th><td><b>{{ rt.result or "requested" }}</b></td></tr>
     <tr><th>Requested by</th><td>{{ rt.requested_by }}</td></tr>
     <tr><th>Finalized by</th><td>{{ rt.finalized_by or "—" }}</td></tr>
@@ -72,10 +72,12 @@
   {% if f %}
   <p class="meta">Original status retained in finding history. Current status: {{ f.status|replace("_", " ") }}. Historical evidence is not overwritten by retest.</p>
   {% set embeds = evidence_embeds.get(f.id, []) %}
+  {% if embeds or f.evidence %}
+  <div class="finding-evidence">
   {% if embeds %}
   <p><b>Evidence linked to finding.</b></p>
   {% for e in embeds %}
-  <figure>
+  <figure class="evidence-figure">
     {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
     <figcaption class="fig-caption">{{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}</figcaption>
   </figure>
@@ -83,6 +85,8 @@
   {% endif %}
   {% if f.evidence %}
   <ul>{% for e in f.evidence %}<li>{{ e.kind }}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span></li>{% endfor %}</ul>
+  {% endif %}
+  </div>
   {% endif %}
   {% endif %}
 </div>

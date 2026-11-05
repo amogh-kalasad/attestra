@@ -85,11 +85,11 @@ def trend_svg(current: Counter, previous: Counter | None) -> str:
     """Inline SVG bar chart comparing finding counts by severity (reuse of report chart)."""
     sevs = list(SEVERITIES)
     colors = {
-        "critical": "#b91c1c",
-        "high": "#c2410c",
-        "medium": "#a16207",
-        "low": "#15803d",
-        "info": "#475569",
+        "critical": "#a1161b",
+        "high": "#d0461b",
+        "medium": "#b7791f",
+        "low": "#1d5f8a",
+        "info": "#6b7280",
     }
     width, height, gap = 320, 120, 8
     bar_w = (width - gap * (len(sevs) + 1)) // (len(sevs) * (2 if previous is not None else 1))
@@ -112,7 +112,7 @@ def trend_svg(current: Counter, previous: Counter | None) -> str:
             h0 = int((previous.get(sev, 0) / max_v) * height)
             parts.append(
                 f'<rect x="{x0 + bar_w}" y="{height - h0}" width="{bar_w}" height="{h0}" '
-                f'fill="{colors[sev]}" opacity="0.35" />'
+                f'fill="{colors[sev]}" opacity="0.45" />'
             )
         parts.append(f'<text x="{x0}" y="{height + 14}" font-size="9" fill="#334155">{sev[:4]}</text>')
     parts.append("</svg>")

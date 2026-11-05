@@ -24,6 +24,9 @@ from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 
+from attestra.reports.presentation_tokens import SEV_HEX_DOCX as SEV_COLOURS
+from attestra.reports.presentation_tokens import STATUS
+
 FONT = "Calibri"
 MONO = "Consolas"
 NAVY = "1F3A5F"
@@ -34,10 +37,10 @@ HEAD_FILL = "1F3A5F"
 KEY_FILL = "EEF2F7"
 ZEBRA = "F7F9FC"
 
-SEV_COLOURS = {"critical": "A1161B", "high": "C2410C", "medium": "A16207", "low": "15803D", "info": "475569"}
 ST_COLOURS = {
-    "met": "15803D", "no_exceptions": "0F766E", "partial": "A16207", "not_met": "A1161B",
-    "not_assessed": "64748B", "not_applicable": "64748B", "fixed": "15803D", "still_open": "A1161B",
+    **{k: v.lstrip("#").upper() for k, v in STATUS.items()},
+    "fixed": "1D5F8A",
+    "still_open": "A1161B",
 }
 LETTER_KINDS = {"closure_letter", "attestation_letter"}
 
@@ -696,7 +699,9 @@ class Builder:
 
     def finding(self, n):
         for c in n.children:
-            if isinstance(c, Node) and c.tag == "div" and any(badge_of(x) for x in c.children):
+            if isinstance(c, Node) and c.tag == "div" and "finding-head" in c.classes:
+                self._finding_head(c)
+            elif isinstance(c, Node) and c.tag == "div" and any(badge_of(x) for x in c.children):
                 self.badge_line(c)
             elif isinstance(c, Node):
                 self.block(c)
@@ -704,6 +709,19 @@ class Builder:
                 p = self.para()
                 self.runs(p, c)
         self.spacer(8)
+
+    def _finding_head(self, n):
+        """Keep title + prose header chips together for Word (mirrors PDF .finding-head)."""
+        for c in n.children:
+            if isinstance(c, Node) and c.tag == "div" and (
+                "finding-header" in c.classes or any(badge_of(x) for x in c.children)
+            ):
+                self.badge_line(c)
+            elif isinstance(c, Node):
+                self.block(c)
+            elif c.strip():
+                p = self.para()
+                self.runs(p, c)
 
     def badge_line(self, n):
         """Finding header: badges as shaded cells, then the status text, in one aligned row."""

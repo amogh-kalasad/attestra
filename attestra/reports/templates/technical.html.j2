@@ -180,26 +180,48 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 <p class="meta">Risk score also factors EPSS, CISA KEV, asset criticality and exposure. CVSS vector strings appear on individual findings when available.</p>
 
 {% set sec.n = sec.n + 1 %}<h2 id="summary">{{ sec.n }}. Summary</h2>
+<div class="summary-posture">
 <div class="kpis">
-  {% for s in severities %}<div class="kpi"><span class="sev sev-{{ s }}">{{ s }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>{% endfor %}
+  {% for s in severities %}
+  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|capitalize }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
+  {% endfor %}
   <div class="kpi">False positives<b>{{ false_positives }}</b>excluded</div>
 </div>
 {% if trend_svg %}
-<div>{{ trend_svg|safe }}</div>
+<div class="chart-block">
+  <p class="meta chart-caption">Open findings by severity (this engagement vs prior when available).{% if prev_by_sev is none %} No prior engagement for this client — chart shows current open counts only.{% endif %}</p>
+  {{ trend_svg|safe }}
+</div>
 {% endif %}
+</div>
 
 {% set sec.n = sec.n + 1 %}<h2 id="findings-overview">{{ sec.n }}. Findings overview</h2>
-<table>
+<table class="overview-sev-summary">
+  <tr>
+    {% for s in severities %}
+    <th><span class="sev sev-{{ s }}">{{ s|capitalize }}</span></th>
+    {% endfor %}
+  </tr>
+  <tr>
+    {% for s in severities %}
+    <td>{{ by_sev.get(s, 0) }}</td>
+    {% endfor %}
+  </tr>
+</table>
+{% if findings|length >= 25 %}
+<p class="meta">{{ findings|length }} findings listed below; details in Detailed findings.</p>
+{% endif %}
+<table class="overview-table">
   <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Retest result</th><th>Asset</th></tr>
   {% for f in findings %}
   {% set rt = latest_retest(f.id) %}
   <tr>
     <td class="mono">{{ flabel(f) }}</td>
-    <td>{{ f.title }}</td>
+    <td>{{ f.title|truncate(90, True, '…') }}</td>
     <td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
     <td>{{ f.status|replace("_", " ") }}</td>
     <td>{% if rt %}{{ rt.result or "requested" }}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }}){% endif %}{% else %}—{% endif %}</td>
-    <td class="mono">{% if f.asset %}{{ f.asset.identifier }}{% else %}—{% endif %}</td>
+    <td class="mono">{% if f.asset %}{{ f.asset.identifier|truncate(40, True, '…') }}{% else %}—{% endif %}</td>
   </tr>
   {% else %}<tr><td colspan="6">No findings.</td></tr>{% endfor %}
 </table>
@@ -207,12 +229,12 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 {% if passed_checks %}
 {% set sec.n = sec.n + 1 %}<h2 id="status-checks">{{ sec.n }}. Status checks</h2>
 <p class="meta">Checks that ran clean (green) sit next to checks that failed. Skipped means the check was not run for this target.</p>
-<table>
+<table class="status-checks-table">
   <tr><th>Check</th><th>Result</th><th>Source</th><th>Evidence</th></tr>
   {% for c in passed_checks %}
   <tr>
     <td>{{ c.name }}</td>
-    <td>{% if c.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif c.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
+    <td>{% if c.status == "passed" %}<span class="status-passed">Passed</span>{% elif c.status == "failed" %}<span class="status-failed">Failed</span>{% else %}<span class="meta">Skipped</span>{% endif %}</td>
     <td>{{ c.source }}</td>
     <td class="mono">{{ c.evidence or "—" }}</td>
   </tr>
@@ -232,7 +254,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   <tr>
     <td class="mono">{{ item.ref }}</td>
     <td>{{ item.title }}</td>
-    <td>{% if item.status == "passed" %}<span style="color:#15803d;font-weight:600">Passed</span>{% elif item.status == "failed" %}<span style="color:#b91c1c;font-weight:600">Failed</span>{% else %}<span class="meta">{{ item.status|replace("_", " ") }}</span>{% endif %}</td>
+    <td>{% if item.status == "passed" %}<span class="status-passed">Passed</span>{% elif item.status == "failed" %}<span class="status-failed">Failed</span>{% else %}<span class="meta">{{ item.status|replace("_", " ") }}</span>{% endif %}</td>
     <td>{{ item.notes or "—" }}</td>
   </tr>
   {% endfor %}
@@ -244,12 +266,12 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 <p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>
 {% for g in site_grades %}
   <h3>{{ g.identifier }} — <b>{{ g.grade }}</b> (score {{ g.score }})</h3>
-  <table>
+  <table class="site-grades">
     <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
     {% for row in g.breakdown if row.result != "not_tested" %}
     <tr>
       <td class="mono">{{ row.check }}</td>
-      <td>{{ row.result }}</td>
+      <td>{% if row.result in ("pass", "passed") %}<span class="status-passed">Passed</span>{% elif row.result in ("fail", "failed") %}<span class="status-failed">Failed</span>{% else %}{{ row.result }}{% endif %}</td>
       <td>{% if row.points > 0 %}+{{ row.points }}{% else %}{{ row.points }}{% endif %}</td>
       <td>{{ row.reason }}</td>
     </tr>
@@ -278,24 +300,76 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 
 {% set sec.n = sec.n + 1 %}<h2 id="findings">{{ sec.n }}. Detailed findings</h2>
 {% for f in findings %}
-<div class="finding" id="finding-{{ f.id }}">
-  <h3><a name="finding-{{ f.id }}"></a>{{ flabel(f) }} · {{ f.title }}</h3>
-  <div><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
-    {% if f.asset and f.asset.exposure == "internet" %}&nbsp;<span class="sev" style="background:#e0f2fe;color:#075985">Internet-facing</span>{% endif %}
-    &nbsp;Status: <b>{{ f.status|replace("_", " ") }}</b>
-    &nbsp;· Risk {{ "%.1f"|format(f.risk_score) }}
-    {% if f.cvss_score is not none %}&nbsp;· CVSS {{ f.cvss_score }}{% endif %}
-    {% if f.cvss_vector %}&nbsp;· <span class="mono">{{ f.cvss_vector }}</span>{% endif %}
-    {% if f.epss is not none %}&nbsp;· EPSS {{ "%.3f"|format(f.epss) }}{% endif %}
-    {% if f.kev %}&nbsp;· <b>CISA KEV</b>{% endif %}
-    {% if f.sla_due %}&nbsp;· Fix by {{ f.sla_due }}{% endif %}
+<div class="finding finding-{{ f.severity }}" id="finding-{{ f.id }}">
+  <div class="finding-head">
+    <h3><a name="finding-{{ f.id }}"></a>{{ flabel(f) }} · {{ f.title }}</h3>
+    <div class="finding-header">
+      <span class="sev sev-{{ f.severity }}">{{ f.severity }}</span>
+      · Status: <b>{{ f.status|replace("_", " ") }}</b>
+      · Risk {{ "%.1f"|format(f.risk_score) }}
+      · Fix by {% if f.sla_due %}{{ f.sla_due }}{% else %}—{% endif %}
+      {% if f.asset and f.asset.exposure == "internet" %}&nbsp;<span class="sev chip-internet">Internet-facing</span>{% endif %}
+    </div>
+    {% if f.cvss_score is not none or f.cvss_vector or f.epss is not none or f.kev %}
+    <table class="finding-meta">
+      {% if f.cvss_score is not none %}<tr><th>CVSS</th><td>{{ f.cvss_score }}</td></tr>{% endif %}
+      {% if f.cvss_vector %}<tr><th>CVSS vector</th><td><span class="mono">{{ f.cvss_vector }}</span></td></tr>{% endif %}
+      {% if f.epss is not none %}<tr><th>EPSS</th><td>{{ "%.3f"|format(f.epss) }}</td></tr>{% endif %}
+      {% if f.kev %}<tr><th>KEV</th><td><b>CISA KEV</b></td></tr>{% endif %}
+    </table>
+    {% endif %}
+    {% set rt = latest_retest(f.id) %}
+    {% if rt %}
+    <p class="meta">Latest retest: {{ rt.result or "requested" }}{% if rt.note %} — {{ rt.note }}{% endif %}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }} by {{ rt.finalized_by }}){% endif %}</p>
+    {% endif %}
   </div>
-  {% set rt = latest_retest(f.id) %}
-  {% if rt %}
-  <p class="meta">Latest retest: {{ rt.result or "requested" }}{% if rt.note %} — {{ rt.note }}{% endif %}{% if rt.finalized_at %} ({{ rt.finalized_at.strftime('%Y-%m-%d') }} by {{ rt.finalized_by }}){% endif %}</p>
+  {% if f.description %}<div class="finding-section"><p><b>Description.</b> {{ f.description }}</p></div>{% endif %}
+  {% if f.impact %}<div class="finding-section"><p><b>Impact.</b> {{ f.impact }}</p></div>{% endif %}
+  {% if f.affected_urls %}
+  <div class="finding-section">
+  <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
+  <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u }}</li>{% endfor %}{% endif %}</ul>
+  </div>
   {% endif %}
-  <table>
-    <tr><th style="width:150px">Location</th><td class="mono">{{ f.location }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed below){% endif %}</td></tr>
+  {% if f.references %}
+  <div class="finding-section">
+  <p><b>References.</b></p>
+  <ul>{% if f.references is string %}<li>{{ f.references }}</li>{% else %}{% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}{% endif %}</ul>
+  </div>
+  {% endif %}
+  {% if f.recommendation %}<div class="finding-section"><p><b>Recommendation.</b> {{ f.recommendation }}</p></div>{% endif %}
+  {% set fix = fix_by_id.get(f.id) if fix_by_id is defined else none %}
+  {% if fix %}
+  <div class="finding-section">
+  <p><b>How to fix.</b>
+    {% if fix.importance %}Importance: {{ fix.importance }}.{% endif %}
+    {% if fix.effort %} Effort: {{ fix.effort }}.{% endif %}
+  </p>
+  {% if fix.fix_steps %}<p style="white-space:pre-wrap">{{ fix.fix_steps }}</p>{% endif %}
+  {% set snips = report_snippets_by_id.get(f.id, []) if report_snippets_by_id is defined else [] %}
+  {% for name, text in snips %}
+  <p><b>{{ name }} config.</b></p>
+  <pre class="mono" style="white-space:pre-wrap">{{ text }}</pre>
+  {% endfor %}
+  </div>
+  {% endif %}
+  {% if ai_narratives and ai_narratives.get(f.id) %}<div class="finding-section"><p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p></div>{% endif %}
+  {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
+  {% if obs %}
+  <div class="finding-section">
+  <p><b>Scanner observations.</b></p>
+  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.evidence_refs %} &middot; <span class="mono">{{ o.evidence_refs|join(" | ")|truncate(300) }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if f.cross_sources is defined and f.cross_sources|length > 1 %}
+  <div class="finding-section">
+  <p><b>Sources.</b> ({{ f.cross_sources|length }})</p>
+  <ul>{% for src in f.cross_sources %}<li>{{ src.tool_label }}: {{ src.severity_label }} &middot; {{ src.title }} &middot; {{ src.status_label }}{% if src.location %} &middot; <span class="mono">{{ src.location }}</span>{% endif %}{% if src.evidence %} &middot; <span class="mono">{{ src.evidence|join(" | ")|truncate(300) }}</span>{% endif %}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  <p class="finding-refs-label">Technical details</p>
+  <table class="finding-refs">
+    <tr><th>Location</th><td class="mono">{{ f.location }}{% if f.affected_urls and f.affected_urls is not string and f.affected_urls|length > 1 %} ({{ f.affected_urls|length }} affected URLs, listed below){% endif %}</td></tr>
     {% if f.cwe %}<tr><th>CWE</th><td>CWE-{{ f.cwe }}</td></tr>{% endif %}
     {% if f.cves %}<tr><th>CVE</th><td>{{ f.cves|join(", ") }}</td></tr>{% endif %}
     {% if f.owasp_top10 %}<tr><th>OWASP Top 10</th><td>{{ f.owasp_top10 }}</td></tr>{% endif %}
@@ -309,51 +383,20 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
     {% if f.validated_by %}<tr><th>Validated by</th><td>{{ f.validated_by }}</td></tr>{% endif %}
     <tr><th>Control objectives</th><td>{{ objectives_for(f)|join(", ") }}</td></tr>
   </table>
-  {% if f.description %}<p><b>Description.</b> {{ f.description }}</p>{% endif %}
-  {% if f.impact %}<p><b>Impact.</b> {{ f.impact }}</p>{% endif %}
-  {% if f.affected_urls %}
-  <p><b>Affected URLs.</b>{% if f.affected_urls is not string %} ({{ f.affected_urls|length }}){% endif %}</p>
-  <ul class="mono">{% if f.affected_urls is string %}<li>{{ f.affected_urls }}</li>{% else %}{% for u in f.affected_urls %}<li>{{ u }}</li>{% endfor %}{% endif %}</ul>
-  {% endif %}
-  {% if f.references %}
-  <p><b>References.</b></p>
-  <ul>{% if f.references is string %}<li>{{ f.references }}</li>{% else %}{% for ref in f.references %}<li>{{ ref }}</li>{% endfor %}{% endif %}</ul>
-  {% endif %}
-  {% if f.recommendation %}<p><b>Recommendation.</b> {{ f.recommendation }}</p>{% endif %}
-  {% set fix = fix_by_id.get(f.id) if fix_by_id is defined else none %}
-  {% if fix %}
-  <p><b>How to fix.</b>
-    {% if fix.importance %}Importance: {{ fix.importance }}.{% endif %}
-    {% if fix.effort %} Effort: {{ fix.effort }}.{% endif %}
-  </p>
-  {% if fix.fix_steps %}<p style="white-space:pre-wrap">{{ fix.fix_steps }}</p>{% endif %}
-  {% set snips = report_snippets_by_id.get(f.id, []) if report_snippets_by_id is defined else [] %}
-  {% for name, text in snips %}
-  <p><b>{{ name }} config.</b></p>
-  <pre class="mono" style="white-space:pre-wrap">{{ text }}</pre>
-  {% endfor %}
-  {% endif %}
-  {% if ai_narratives and ai_narratives.get(f.id) %}<p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>{% endif %}
-  {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
-  {% if obs %}
-  <p><b>Scanner observations.</b></p>
-  <ul>{% for o in obs %}<li>{{ detected_by([o.tool]) }}{% if o.original_id %} · {{ o.original_id }}{% endif %}{% if o.location %} · <span class="mono">{{ o.location }}</span>{% endif %}{% if o.evidence_refs %} &middot; <span class="mono">{{ o.evidence_refs|join(" | ")|truncate(300) }}</span>{% endif %}{% if o.match_rationale %} · {{ o.match_rationale }}{% endif %}</li>{% endfor %}</ul>
-  {% endif %}
-  {% if f.cross_sources is defined and f.cross_sources|length > 1 %}
-  <p><b>Sources.</b> ({{ f.cross_sources|length }})</p>
-  <ul>{% for src in f.cross_sources %}<li>{{ src.tool_label }}: {{ src.severity_label }} &middot; {{ src.title }} &middot; {{ src.status_label }}{% if src.location %} &middot; <span class="mono">{{ src.location }}</span>{% endif %}{% if src.evidence %} &middot; <span class="mono">{{ src.evidence|join(" | ")|truncate(300) }}</span>{% endif %}</li>{% endfor %}</ul>
-  {% endif %}
   {% set embeds = evidence_embeds.get(f.id, []) %}
+  {% set pairs = http_pairs.get(f.id, []) if http_pairs is defined else [] %}
+  {% set limits = evidence_limitations.get(f.id, []) if evidence_limitations is defined else [] %}
+  {% if embeds or pairs or limits or f.evidence %}
+  <div class="finding-evidence">
   {% if embeds %}
   <p><b>Evidence (screenshots).</b></p>
   {% for e in embeds %}
-  <figure id="fig-F-{{ f.id }}-{{ loop.index }}"><a name="fig-F-{{ f.id }}-{{ loop.index }}"></a>
+  <figure class="evidence-figure" id="fig-F-{{ f.id }}-{{ loop.index }}"><a name="fig-F-{{ f.id }}-{{ loop.index }}"></a>
     {% if e.data_uri %}<img class="evidence-img" src="{{ e.data_uri }}" alt="{{ e.caption or e.filename }}">{% endif %}
     <figcaption class="fig-caption">Fig. {{ flabel(f) }}-{{ loop.index }}: {{ e.caption or e.note or e.filename }} · sha256 {{ e.sha256 }}{% if e.missing %} (file missing){% endif %}</figcaption>
   </figure>
   {% endfor %}
   {% endif %}
-  {% set pairs = http_pairs.get(f.id, []) if http_pairs is defined else [] %}
   {% if pairs %}
   <p><b>Evidence (HTTP request/response).</b></p>
   {# Consolidated findings carry one pair per merged scanner row; show two representative
@@ -363,13 +406,14 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   {% endfor %}
   {% if pairs|length > 2 %}<p class="meta">{{ pairs|length - 2 }} more HTTP request/response pair{{ "s" if pairs|length - 2 != 1 }} for this issue are listed (with SHA-256) in the evidence register below.</p>{% endif %}
   {% endif %}
-  {% set limits = evidence_limitations.get(f.id, []) if evidence_limitations is defined else [] %}
   {% if limits %}
   <p><b>Evidence capture limitations.</b></p>
   <ul>{% for note in limits %}<li>{{ note }}</li>{% endfor %}</ul>
   <p class="meta">No screenshot was fabricated. Other available evidence is listed below.</p>
   {% endif %}
   {% if f.evidence %}<p><b>Evidence register.</b></p><ul>{% for e in f.evidence %}<li>{{ e.kind }}{% if e.role and e.role != "original" %} ({{ e.role }}){% endif %}: {{ e.filename }} <span class="mono">sha256 {{ e.sha256 }}</span>{% if e.source_tool %} · {{ e.source_tool }}{% endif %}{% if e.note %} · {{ e.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% endif %}
   {% if include_comments and comments_by_finding.get(f.id) %}
   <p><b>Comments.</b></p>
   <ul>{% for c in comments_by_finding[f.id] %}<li style="white-space:pre-wrap">{{ c.body }}</li>{% endfor %}</ul>
@@ -444,7 +488,7 @@ Remediate critical and high issues first, then retest. Control statuses in any c
 {% set sec.n = sec.n + 1 %}<h2 id="appendix">{{ sec.n }}. Appendix</h2>
 <p class="meta">Tool imports and scan runs that contributed evidence to this report. Failed or incomplete scans are not evidence of absence of vulnerabilities.</p>
 <h3>A. Tool imports</h3>
-<table>
+<table class="appendix-table">
   <tr><th>#</th><th>Tool</th><th>File</th><th>Imported</th><th>New / merged</th><th>SHA-256 (raw)</th></tr>
   {% for i in imports %}
   <tr><td>{{ i.id }}</td><td>{{ i.tool }}</td><td>{{ i.filename }}</td><td>{{ i.imported_at.strftime('%Y-%m-%d') }} by {{ i.imported_by }}</td><td>{{ i.new_findings }} / {{ i.updated_findings }}</td><td class="mono">{{ i.sha256 }}</td></tr>
@@ -452,7 +496,7 @@ Remediate critical and high issues first, then retest. Control statuses in any c
 </table>
 {% if scan_history %}
 <h3>B. Scan runs</h3>
-<table>
+<table class="appendix-table">
   <tr><th>Scan</th><th>Tool</th><th>Status</th><th>Started</th><th>Ended</th><th>Refuse reason</th></tr>
   {% for run in scan_history[:20] %}
   <tr>

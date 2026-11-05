@@ -22,6 +22,8 @@ from html import escape
 from io import BytesIO
 from pathlib import Path
 
+from attestra.reports.presentation_tokens import ACCENT, NAVY, QUIET, SEV, SEV_HEX, SURFACE, pdf_css
+
 LETTER_KINDS = ("closure_letter", "attestation_letter")
 
 FONT_DIR = Path(__file__).parent / "fonts"
@@ -66,8 +68,6 @@ def _register_badge_font() -> str:
         return "Helvetica-Bold"
 
 
-SEV_HEX = {"critical": "a1161b", "high": "d0461b", "medium": "b7791f", "low": "3b7d4f", "info": "6b7280"}
-
 SEVERITY_LEGEND = (
     ("critical", "9.0 – 10.0", "Exploitable now with severe impact. Fix immediately."),
     ("high", "7.0 – 8.9", "Serious weakness likely to be exploited. Fix within days."),
@@ -85,53 +85,8 @@ DISCLAIMER = (
 )
 
 # xhtml2pdf understands CSS 2.1 only (no custom properties, flexbox or transforms).
-PDF_CSS = """
-@page {
-  size: a4 portrait;
-  margin: 1.8cm 1.5cm 2.2cm 1.5cm;
-  @frame footer { -pdf-frame-content: pdf-footer; left: 1.5cm; width: 18cm; bottom: 0.7cm; height: 1cm; }
-}
-body { font-family: Inter, Helvetica; font-size: 9pt; line-height: 1.4; color: #16181d; }
-h1 { font-size: 22pt; margin: 6pt 0; -pdf-outline: false; }
-h2 { font-size: 14pt; margin-top: 14pt; margin-bottom: 6pt; padding-bottom: 3pt;
-     border-bottom: 0.5pt solid #c9ccd4; -pdf-keep-with-next: true; }
-h3 { font-size: 11pt; margin-top: 10pt; margin-bottom: 4pt; -pdf-keep-with-next: true; }
-p { margin: 0 0 5pt 0; }
-.meta { color: #5b6170; font-size: 8.5pt; }
-.brand { font-weight: bold; color: #2457d6; }
-table { width: 100%; margin: 4pt 0 10pt 0; }
-th, td { text-align: left; padding: 3pt 4pt; border-bottom: 0.5pt solid #e3e5ea; vertical-align: top; font-size: 8.5pt; }
-th { color: #5b6170; font-weight: bold; font-size: 8pt; }
-.sev { color: #ffffff; font-weight: bold; padding: 1pt 4pt; }
-.sev-critical { background-color: #a1161b; } .sev-high { background-color: #d0461b; }
-.sev-medium { background-color: #b7791f; } .sev-low { background-color: #3b7d4f; } .sev-info { background-color: #6b7280; }
-.st { font-weight: bold; }
-.st-met { color: #3b7d4f; } .st-partial { color: #b7791f; } .st-not_met { color: #a1161b; }
-.st-not_assessed, .st-not_applicable { color: #6b7280; } .st-no_exceptions { color: #2f7f8a; }
-.finding { border: 0.5pt solid #e3e5ea; padding: 6pt 8pt; margin: 8pt 0; }
-.mono { font-family: AttestraMono, Courier; font-size: 7.5pt; }
-pre { font-family: AttestraMono, Courier; font-size: 7.5pt; }
-.note { background-color: #f5f7fb; border-left: 2pt solid #2457d6; padding: 6pt 8pt; font-size: 9pt; }
-.cover { padding-top: 6cm; }
-.toc-title { font-size: 14pt; font-weight: bold; margin-bottom: 8pt; -pdf-outline: false; }
-.cover h1 { font-size: 26pt; }
-.cover img { height: 2cm; }
-.evidence-img { width: 15cm; border: 0.5pt solid #e3e5ea; margin: 4pt 0; }
-.fig-caption { color: #5b6170; font-size: 8pt; }
-footer { margin-top: 18pt; color: #5b6170; font-size: 8pt; line-height: 1.5; border-top: 0.5pt solid #e3e5ea; padding-top: 6pt; }
-#pdf-footer { color: #5b6170; font-size: 8pt; text-align: center; }
-table.kpis { width: 100%; margin: 6pt 0 12pt 0; }
-table.kpis td { border: 0.5pt solid #d5d8de; background-color: #fafbfc; padding: 8pt 4pt 7pt 4pt; text-align: center;
-                vertical-align: middle; font-size: 8pt; color: #5b6170; }
-.kpi-label { margin: 0 0 5pt 0; font-size: 8pt; line-height: 1.2; text-align: center; }
-.kpi-sub { margin: 4pt 0 0 0; font-size: 7.5pt; color: #5b6170; line-height: 1.2; text-align: center; }
-table.kpis td.gap { border: none; background-color: #ffffff; padding: 0; }
-.kpi-num { font-size: 18pt; font-weight: bold; color: #16181d; margin: 0; line-height: 1.1; text-align: center; }
-img.badge { vertical-align: middle; }
-pdftoc { color: #16181d; }
-pdftoc.pdftoclevel0 { font-weight: bold; margin-top: 4pt; }
-pdftoc.pdftoclevel1 { margin-left: 1em; }
-"""
+# Built from presentation_tokens so HTML/PDF/DOCX share one enterprise palette.
+PDF_CSS = pdf_css(font=FONT, mono=MONO)
 
 
 def _legend_html() -> str:
@@ -222,13 +177,30 @@ def _kpis_to_table(html: str) -> str:
     return _KPIS.sub(tiles, html)
 
 
-_TABLE = re.compile(r"(?is)<table(?![^>]*class=\"kpis\")([^>]*)>(.*?)</table>")
+_TABLE = re.compile(
+    r'(?is)<table(?![^>]*(?:class="(?:kpis|cover-band|cover-meta|cover-foot|cover-spacer|finding-meta|'
+    r'finding-facts|finding-refs|overview-sev-summary)"))([^>]*)>(.*?)</table>'
+)
 _ROW = re.compile(r"(?is)<tr[^>]*>(.*?)</tr>")
 _CELL = re.compile(r"(?is)<t([dh])([^>]*)>(.*?)</t[dh]>")
 
 
+def _hashish_cell(cell: str, text: str) -> bool:
+    """True when a cell looks like a SHA/hash (should wrap, not crush title columns)."""
+    stripped = text.strip().replace("…", "").replace("...", "")
+    compact = re.sub(r"[\s\-]", "", stripped)
+    if re.search(r"(?i)\bsha-?256\b|\bsha256\b", text):
+        return True
+    # After _breakable, digests may already contain spaces every 16 chars.
+    if re.search(r'(?i)class="mono"', cell) and re.fullmatch(r"[0-9a-fA-F]{32,}", compact):
+        return True
+    if len(compact) >= 40 and re.fullmatch(r"[0-9a-fA-F….\s-]+", text.strip()):
+        return True
+    return False
+
+
 def _size_columns(html: str) -> str:
-    """xhtml2pdf splits columns evenly; size them by content so long text gets room and short codes don't."""
+    """xhtml2pdf splits columns evenly; size them by content so long text gets room and hashes don't dominate."""
 
     def size(m: re.Match) -> str:
         attrs, body = m.group(1), m.group(2)
@@ -239,16 +211,58 @@ def _size_columns(html: str) -> str:
         if n < 2:
             return m.group(0)
         weight = [0.0] * n
+        hash_col = [False] * n
+        titleish = [False] * n
+        # Header labels such as SHA-256 mark hash columns even when truncated in body cells.
+        for i, (_, _, cell) in enumerate(rows[0]):
+            hdr = re.sub(r"<[^>]+>|&[#\w]+;", " ", cell).strip()
+            if re.search(r"(?i)\bsha-?256\b|\bhash\b", hdr):
+                hash_col[i] = True
+            if re.search(r"(?i)\b(title|file|name|check|reason|detail|notes?)\b", hdr):
+                titleish[i] = True
         for r in rows:
             for i, (_, _, cell) in enumerate(r):
                 text = re.sub(r"<[^>]+>|&[#\w]+;", " ", cell)
+                stripped = text.strip()
                 longest = max((len(w) for w in text.split()), default=0)
                 img_w = sum(int(x) for x in re.findall(r'<img[^>]*width="(\d+)"', cell))
-                weight[i] = max(weight[i], min(len(text.strip()), 120) ** 0.7, longest * 1.1, img_w / 5)
+                if hash_col[i] or _hashish_cell(cell, text):
+                    hash_col[i] = True
+                    # Cap hash weight so title/file columns keep room; .mono wraps the digest.
+                    weight[i] = max(weight[i], min(14.0, 7.0 + longest * 0.2))
+                    continue
+                weight[i] = max(weight[i], min(len(stripped), 120) ** 0.7, longest * 1.1, img_w / 5)
+                if len(stripped) > 40 and " " in stripped:
+                    weight[i] = max(weight[i], min(len(stripped), 160) ** 0.75)
+                if titleish[i] and len(stripped) > 20:
+                    weight[i] = max(weight[i], min(len(stripped), 140) ** 0.78)
         total = sum(weight) or 1.0
-        pct = [max(7.0, 100.0 * w / total) for w in weight]
+        # Slightly higher floors keep short code/ID columns readable without starving text cols.
+        pct = [max(8.5 if w < 10 else 8.0, 100.0 * w / total) for w in weight]
         scale = 100.0 / sum(pct)
-        pct = [round(p * scale, 1) for p in pct]
+        pct = [p * scale for p in pct]
+        # Soft-cap hash columns after scaling (~16%); prefer giving excess to title/text columns.
+        hash_cap = 16.0
+        excess = 0.0
+        for i, is_hash in enumerate(hash_col):
+            if is_hash and pct[i] > hash_cap:
+                excess += pct[i] - hash_cap
+                pct[i] = hash_cap
+        receivers = [i for i, is_hash in enumerate(hash_col) if not is_hash]
+        prefer = [i for i in receivers if titleish[i]] or receivers
+        if excess and prefer:
+            bump = excess / len(prefer)
+            for i in prefer:
+                pct[i] += bump
+        elif excess:
+            s = sum(pct) or 1.0
+            pct = [100.0 * p / s for p in pct]
+        pct = [round(p, 1) for p in pct]
+        drift = round(100.0 - sum(pct), 1)
+        if drift and prefer:
+            pct[prefer[0]] = round(pct[prefer[0]] + drift, 1)
+        elif drift and pct:
+            pct[0] = round(pct[0] + drift, 1)
         first = _ROW.search(body)
         cells = iter(pct)
 
@@ -313,8 +327,9 @@ def _watermark(pdf: bytes) -> bytes:
         if (w, h) not in stamps:
             buf = BytesIO()
             c = canvas.Canvas(buf, pagesize=(w, h))
-            c.setFillColorRGB(0.97, 0.86, 0.86)  # light tint, opaque: drawn under the text
-            size = min(w, h) * 0.22
+            # Subtle grey-blue DRAFT under content (extractable text; does not obscure body).
+            c.setFillColorRGB(0.96, 0.97, 0.98)
+            size = min(w, h) * 0.11
             c.setFont(_register_badge_font(), size)
             c.translate(w / 2, h / 2)
             c.rotate(45)
@@ -392,6 +407,42 @@ def _display_case(html: str) -> str:
 def _title_of(html: str) -> str:
     m = re.search(r"(?is)<title>(.*?)</title>", html)
     return re.sub(r"\s+", " ", m.group(1)).strip() if m else "Attestra report"
+
+
+def _running_header_label(html: str, title: str) -> str:
+    """Quiet running label: short engagement name from the cover (not a second title block)."""
+    cover = re.search(r'(?is)<section[^>]*id="cover"[^>]*>(.*?)</section>', html)
+    label = title
+    if cover:
+        # Cover order: brand meta, h1 title, then engagement <p> before Client meta.
+        paras = re.findall(r"(?is)<p(?![^>]*class=)[^>]*>(.*?)</p>", cover.group(1))
+        for raw in paras:
+            text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", raw)).strip()
+            if text and not text.lower().startswith("client:") and len(text) < 120:
+                label = text
+                break
+    # Keep the running header compact so it does not compete with section titles.
+    if len(label) > 72:
+        label = label[:69].rstrip() + "…"
+    return label
+
+
+
+_FINDING_BLOCK = re.compile(
+    r'(?is)(<div class="finding)(" id="finding-\d+">.*?<span class="sev sev-)(\w+)(">)'
+)
+
+
+def _annotate_finding_severity(html: str) -> str:
+    """Add finding-{severity} class for left-border accents without changing sealed source data."""
+
+    def add(m: re.Match) -> str:
+        sev = m.group(3).lower()
+        if sev not in SEV_HEX:
+            return m.group(0)
+        return f'{m.group(1)} finding-{sev}{m.group(2)}{m.group(3)}{m.group(4)}'
+
+    return _FINDING_BLOCK.sub(add, html)
 
 
 def _framework_display_names() -> dict[str, str]:
@@ -476,9 +527,399 @@ def _svg_to_img(m: re.Match) -> str:
     height = float(h.group(1)) if h else float(vb.group(2)) if vb else 160
     if not w:
         svg = svg.replace("<svg", f'<svg width="{width}" height="{height}"', 1)
-    scale = min(1.0, 480 / width)
+    # Cap width so trend/severity charts stay readable without dominating the page.
+    scale = min(1.0, 520 / width)
     data = base64.b64encode(svg.encode("utf-8")).decode()
     return f'<img src="data:image/svg+xml;base64,{data}" width="{int(width * scale)}" height="{int(height * scale)}">'
+
+
+_SEV_KPI = re.compile(
+    r'(?is)sev-(\w+)[^>]*>.*?</(?:span|p|img)>\s*</p>\s*<p class="kpi-num">\s*(\d+)\s*</p>'
+)
+_KPIS_TABLE = re.compile(r'(?is)<table class="kpis"[^>]*>.*?</table>')
+
+
+def _severity_bar_svg(counts: dict[str, int]) -> str:
+    """Horizontal bars from KPI severity counts already present in the HTML (display only)."""
+    order = [s for s in ("critical", "high", "medium", "low", "info") if s in counts]
+    if not order:
+        return ""
+    max_v = max(max(counts.values()), 1)
+    row_h, label_w, bar_max, pad = 16, 64, 280, 6
+    width = label_w + bar_max + 48
+    height = pad + len(order) * row_h + pad
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'role="img" aria-label="Open findings by severity">'
+    ]
+    for i, sev in enumerate(order):
+        y = pad + i * row_h
+        n = counts.get(sev, 0)
+        bw = int((n / max_v) * bar_max) if n else 0
+        fill = SEV.get(sev, "#6b7280")
+        parts.append(
+            f'<text x="0" y="{y + 11}" font-family="{_register_badge_font()}" font-size="9" '
+            f'fill="{QUIET}">{escape(sev.capitalize())}</text>'
+        )
+        if bw:
+            parts.append(
+                f'<rect x="{label_w}" y="{y + 2}" width="{bw}" height="10" rx="2" fill="{fill}"/>'
+            )
+        parts.append(
+            f'<text x="{label_w + bw + 6}" y="{y + 11}" font-family="{_register_badge_font()}" '
+            f'font-size="9" fill="{NAVY}">{n}</text>'
+        )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _post_kpi_window(after: str, limit: int = 2500) -> tuple[str, int]:
+    """Return (window, end_offset) after KPIs until the next real section heading.
+
+    A lone "Trend …" h2 between KPIs and the chart is treated as part of the posture unit
+    so caption+chart are not orphaned onto the next page/section.
+    """
+    scan = after[:limit]
+    stop = re.search(r"(?is)<h2\b", scan)
+    if not stop:
+        return scan, len(scan)
+    head = scan[stop.start() : stop.start() + 96]
+    if re.search(r"(?is)<h2[^>]*>\s*Trend\b", head):
+        stop2 = re.search(r"(?is)<h2\b", scan[stop.end() :])
+        end = stop.end() + stop2.start() if stop2 else len(scan)
+        return scan[:end], end
+    return scan[: stop.start()], stop.start()
+
+
+def _chart_block_html(counts: dict[str, int]) -> str:
+    svg = _severity_bar_svg(counts)
+    if not svg:
+        return ""
+    uri = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+    return (
+        f'<div class="chart-block">'
+        f'<p class="fig-caption chart-caption">Open findings by severity</p>'
+        f'<img src="{uri}" width="392" height="{6 + 16 * len(counts) + 6}" '
+        f'alt="Open findings by severity"/></div>'
+    )
+
+
+def _kpi_severity_counts(kpi_html: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for sev, num in _SEV_KPI.findall(kpi_html):
+        key = sev.lower()
+        if key in SEV_HEX:
+            counts[key] = int(num)
+    if not counts:
+        for sev, num in re.findall(
+            r'(?is)sev-(\w+)[^>]*>.*?kpi-num">\s*(\d+)\s*<', kpi_html
+        ):
+            if sev.lower() in SEV_HEX:
+                counts[sev.lower()] = int(num)
+    return counts
+
+
+def _inject_severity_bars(html: str) -> str:
+    """Keep Summary KPIs + severity caption/chart in one ``.summary-posture`` unit.
+
+    Prefers an existing trend chart; otherwise injects horizontal bars from KPI counts.
+    When sealed HTML already wraps the strip, chart markup stays inside that wrapper;
+    otherwise a cohesive ``.summary-posture`` block is built around KPIs + chart.
+    """
+    chunks: list[str] = []
+    pos = 0
+    for m in _KPIS_TABLE.finditer(html):
+        before = html[max(0, m.start() - 140) : m.start()]
+        in_posture = bool(re.search(r'(?is)<div\s+class="summary-posture"[^>]*>\s*$', before))
+        after = html[m.end() :]
+        window, win_end = _post_kpi_window(after)
+        has_chart = bool(
+            re.search(
+                r'(?is)class="chart-block"|<svg\b|data:image/svg\+xml|'
+                r"Findings by severity|Open findings by severity",
+                window,
+            )
+        )
+        needs_caption = has_chart and (
+            "Open findings by severity" not in window and "Findings by severity" not in window
+        )
+        caption = (
+            '<p class="fig-caption chart-caption">Open findings by severity '
+            "(this engagement vs prior when available).</p>"
+        )
+
+        if in_posture:
+            chunks.append(html[pos : m.end()])
+            if has_chart:
+                if needs_caption:
+                    chunks.append(caption)
+                pos = m.end()
+            else:
+                chart = _chart_block_html(_kpi_severity_counts(m.group(0)))
+                if chart:
+                    chunks.append(chart)
+                pos = m.end()
+            continue
+
+        # Sealed HTML without .summary-posture: wrap KPIs + chart as one unit.
+        chunks.append(html[pos : m.start()])
+        chunks.append('<div class="summary-posture">')
+        chunks.append(m.group(0))
+        if has_chart:
+            if needs_caption:
+                chunks.append(caption)
+            # Keep existing chart (and optional Trend heading) inside the wrapper.
+            chunks.append(after[:win_end])
+            chunks.append("</div>")
+            pos = m.end() + win_end
+        else:
+            chart = _chart_block_html(_kpi_severity_counts(m.group(0)))
+            if chart:
+                chunks.append(chart)
+            chunks.append("</div>")
+            pos = m.end()
+    chunks.append(html[pos:])
+    return "".join(chunks)
+
+
+_DATA_TABLE = re.compile(
+    r'(?is)<table(?![^>]*(?:class="(?:kpis|finding-meta|finding-facts|finding-refs|cover-band|cover-meta|cover-foot|cover-spacer|overview-sev-summary)"))([^>]*)>(.*?)</table>'
+)
+
+
+def _zebra_tables(html: str) -> str:
+    """Alternate row shading for data tables (xhtml2pdf has no reliable nth-child)."""
+
+    def zebra(m: re.Match) -> str:
+        attrs, body = m.group(1), m.group(2)
+        rows = list(_ROW.finditer(body))
+        if len(rows) < 2:
+            return m.group(0)
+        parts: list[str] = []
+        cursor = 0
+        data_i = 0
+        for i, row in enumerate(rows):
+            parts.append(body[cursor : row.start()])
+            row_html = row.group(0)
+            is_header = i == 0 and "<th" in row.group(1).lower()
+            if is_header:
+                parts.append(row_html)
+            else:
+                if data_i % 2 == 1 and "row-alt" not in row_html and "bgcolor" not in row_html.lower():
+                    # Subtle SURFACE tint; class kept for CSS engines that honour it.
+                    if re.match(r"(?is)<tr\s*>", row_html):
+                        row_html = re.sub(
+                            r"(?is)<tr\s*>",
+                            f'<tr class="row-alt" bgcolor="{SURFACE}">',
+                            row_html,
+                            count=1,
+                        )
+                    else:
+                        row_html = re.sub(
+                            r"(?is)<tr\b",
+                            f'<tr class="row-alt" bgcolor="{SURFACE}"',
+                            row_html,
+                            count=1,
+                        )
+                parts.append(row_html)
+                data_i += 1
+            cursor = row.end()
+        parts.append(body[cursor:])
+        return f"<table{attrs}>{''.join(parts)}</table>"
+
+    return _DATA_TABLE.sub(zebra, html)
+
+
+def _plain(html_frag: str) -> str:
+    from html import unescape
+
+    return re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", "", html_frag or ""))).strip()
+
+
+def _inject_overview_sev_summary(html: str) -> str:
+    """Add compact severity counts + densify overview table on the PDF copy (large lists)."""
+    if "overview-sev-summary" in html:
+        # Still ensure overview table class for denser CSS.
+        return re.sub(
+            r'(?is)(<h2[^>]*id="findings-overview"[^>]*>.*?</h2>\s*)<table(?![^>]*overview-table)',
+            r'\1<table class="overview-table"',
+            html,
+            count=1,
+        )
+
+    def inject(m: re.Match) -> str:
+        head, table = m.group(1), m.group(2)
+        counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for sev in re.findall(r'(?is)class="sev sev-(\w+)"', table):
+            key = sev.lower()
+            if key in counts:
+                counts[key] += 1
+        n = sum(counts.values())
+        if n == 0:
+            # Fallback: count data rows
+            n = max(0, len(re.findall(r"(?is)<tr\b", table)) - 1)
+        order = [s for s in ("critical", "high", "medium", "low", "info") if counts.get(s, 0) or True]
+        # Always show all five severities for a stable strip.
+        order = ["critical", "high", "medium", "low", "info"]
+        ths = "".join(
+            f'<th><span class="sev sev-{s}">{escape(s.capitalize())}</span></th>' for s in order
+        )
+        tds = "".join(f"<td>{counts[s]}</td>" for s in order)
+        strip = (
+            f'<table class="overview-sev-summary"><tr>{ths}</tr><tr>{tds}</tr></table>'
+        )
+        note = (
+            f'<p class="meta">{n} findings listed below; details in Detailed findings.</p>'
+            if n >= 25
+            else ""
+        )
+        tbl = table
+        if "overview-table" not in tbl[:80]:
+            tbl = re.sub(r"(?is)^<table\b", '<table class="overview-table"', tbl, count=1)
+        return f"{head}{strip}{note}{tbl}"
+
+    return re.sub(
+        r'(?is)(<h2[^>]*id="findings-overview"[^>]*>.*?</h2>\s*)(<table\b.*?</table>)',
+        inject,
+        html,
+        count=1,
+    )
+
+
+def _upgrade_cover(html: str) -> str:
+    """Rewrite legacy cover markup to the standard band/meta/foot layout (PDF copy only)."""
+    if 'class="cover-band"' in html or "class='cover-band'" in html:
+        return html
+
+    def rebuild(m: re.Match) -> str:
+        open_tag, inner, close = m.group(1), m.group(2), m.group(3)
+        try:
+            logo_m = re.search(r"(?is)(<img\b[^>]*>)", inner)
+            logo = ""
+            if logo_m:
+                tag = logo_m.group(1)
+                if "cover-logo" not in tag:
+                    tag = re.sub(r"(?i)<img\b", '<img class="cover-logo"', tag, count=1)
+                logo = tag + " "
+            brand_m = re.search(r'(?is)<span[^>]*class="[^"]*\bbrand\b[^"]*"[^>]*>(.*?)</span>', inner)
+            brand = _plain(brand_m.group(1)) if brand_m else "ATTESTRA"
+            tenant = ""
+            if brand_m:
+                tenant_m = re.search(r"(?is)\s*[·•|]\s*([^<]+)", inner[brand_m.end() :])
+                if tenant_m:
+                    tenant = _plain(tenant_m.group(1))
+            if not tenant:
+                meta_div = re.search(r'(?is)<div[^>]*class="[^"]*\bmeta\b[^"]*"[^>]*>(.*?)</div>', inner)
+                if meta_div:
+                    parts = re.split(r"\s*[·•|]\s*", _plain(meta_div.group(1)), maxsplit=1)
+                    if len(parts) == 2:
+                        tenant = parts[1].strip()
+            h1_m = re.search(r"(?is)<h1[^>]*>(.*?)</h1>", inner)
+            doc_title = _plain(h1_m.group(1)) if h1_m else "Security assessment report"
+            eng_name = ""
+            for raw in re.findall(r"(?is)<p(?![^>]*class=)[^>]*>(.*?)</p>", inner):
+                text = _plain(raw)
+                if text and not text.lower().startswith("client:"):
+                    eng_name = text
+                    break
+            metas = [
+                _plain(x)
+                for x in re.findall(r'(?is)<p[^>]*class="[^"]*\bmeta\b[^"]*"[^>]*>(.*?)</p>', inner)
+            ]
+            client = assessment = eng_no = window = version = date = "—"
+            for line in metas:
+                low = line.lower()
+                if low.startswith("client:"):
+                    client = line.split(":", 1)[1].strip() or client
+                if "assessment type:" in low:
+                    if "·" in line or "•" in line:
+                        for bit in re.split(r"\s*[·•]\s*", line):
+                            b = bit.strip()
+                            bl = b.lower()
+                            if bl.startswith("assessment type:"):
+                                assessment = b.split(":", 1)[1].strip() or assessment
+                            elif bl.startswith("date:"):
+                                date = b.split(":", 1)[1].strip() or date
+                            elif bl.startswith("document version"):
+                                version = b.split("version", 1)[-1].strip() or version
+                    else:
+                        assessment = line.split(":", 1)[1].strip() if ":" in line else assessment
+                elif re.search(r"(?i)\bdate:\s*", line):
+                    dm = re.search(r"(?i)\bdate:\s*([^·•]+)", line)
+                    if dm:
+                        date = dm.group(1).strip() or date
+                if re.search(r"(?i)document version\s*", line) and version == "—":
+                    vm = re.search(r"(?i)document version\s*([^\s·•]+)", line)
+                    if vm:
+                        version = vm.group(1).strip() or version
+                if "engagement #" in low:
+                    for b in re.split(r"\s*[·•]\s*", line):
+                        bl = b.strip().lower()
+                        if bl.startswith("engagement"):
+                            eng_no = b.split("#", 1)[-1].strip() if "#" in b else eng_no
+                        elif bl.startswith("window:"):
+                            window = b.split(":", 1)[1].strip() or window
+            return (
+                f"{open_tag}"
+                f'<table class="cover-band" width="100%" cellpadding="0" cellspacing="0"><tr>'
+                f'<td class="cover-band-cell">{logo}'
+                f'<span class="cover-band-brand">{escape(brand or "ATTESTRA")}</span></td>'
+                f'<td class="cover-band-cell cover-band-end">Confidential</td>'
+                f"</tr></table>"
+                f'<div class="meta cover-brand"><span class="brand">{escape(brand or "ATTESTRA")}</span>'
+                f'{(" · " + escape(tenant)) if tenant else ""}</div>'
+                f"<h1>{escape(doc_title)}</h1>"
+                f"<p>{escape(eng_name)}</p>"
+                f'<table class="cover-meta">'
+                f"<tr><th>Client</th><td>{escape(client)}</td>"
+                f"<th>Assessment type</th><td>{escape(assessment)}</td></tr>"
+                f"<tr><th>Engagement #</th><td>{escape(eng_no)}</td>"
+                f"<th>Window</th><td>{escape(window)}</td></tr>"
+                f"<tr><th>Version</th><td>{escape(version)}</td>"
+                f"<th>Date</th><td>{escape(date)}</td></tr>"
+                f"</table>"
+                f"{_COVER_SPACER_HTML}"
+                f'<table class="cover-foot" width="100%" cellpadding="0" cellspacing="0">'
+                f'<tr><td class="cover-foot-cell">{escape(brand or "ATTESTRA")} · Security assessment report</td></tr></table>'
+                f"{close}"
+            )
+        except Exception:
+            return m.group(0)
+
+    return re.sub(
+        r'(?is)(<section\b[^>]*\bid="cover"[^>]*>)(.*?)(</section>)',
+        rebuild,
+        html,
+        count=1,
+    )
+
+
+_COVER_SPACER_HTML = (
+    '<table class="cover-spacer" width="100%" cellpadding="0" cellspacing="0" aria-hidden="true">'
+    '<tr><td class="cover-spacer-cell">'
+    '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" '
+    'width="1" height="420" alt=""/></td></tr></table>'
+)
+
+
+def _ensure_cover_spacer(html: str) -> str:
+    """Ensure a PDF-sized cover spacer before the foot strip (PDF copy only)."""
+    if 'class="cover-foot"' not in html and "class='cover-foot'" not in html:
+        return html
+    # Normalize any existing spacer (screen template may use a short img) to the PDF height.
+    if 'class="cover-spacer"' in html or "class='cover-spacer'" in html:
+        return re.sub(
+            r'(?is)<table\b[^>]*class="[^"]*\bcover-spacer\b[^"]*"[^>]*>.*?</table>',
+            _COVER_SPACER_HTML,
+            html,
+            count=1,
+        )
+    return re.sub(
+        r'(?is)(<table\b[^>]*class="[^"]*\bcover-foot\b[^"]*"[^>]*>)',
+        _COVER_SPACER_HTML + r"\1",
+        html,
+        count=1,
+    )
 
 
 def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2pdf") -> str:
@@ -488,6 +929,10 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
     # Drop the screen-only watermark and hint; the PDF adds its own.
     out = re.sub(r'(?is)<div class="draft-mark"[^>]*>.*?</div>', "", out)
     out = re.sub(r"(?is)<br>\s*Page numbers appear when printed[^<]*", "", out)
+    # Legacy sealed covers get standard chrome on this copy only (disk HTML stays frozen).
+    out = _upgrade_cover(out)
+    out = _ensure_cover_spacer(out)
+    out = _inject_overview_sev_summary(out)
     head, sep, body = out.partition("<body")
     out = head + sep + _display_case(body) if sep else out
     if for_engine == "xhtml2pdf":
@@ -497,6 +942,8 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
         out = _wrap_pre(out)
         out = _breakable(out)
         out = _kpis_to_table(out)
+        # After KPI conversion, while sev spans remain (before _badges).
+        out = _inject_severity_bars(out)
     letter = kind in LETTER_KINDS
     extras = []
     if not letter:
@@ -527,24 +974,32 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
             "</body>", disc + "</body>"
         )
     if for_engine == "xhtml2pdf":
-        static = (
-            f'<div id="pdf-footer">{escape(title)} &#183; Confidential &#183; '
-            'Page <pdf:pagenumber> of <pdf:pagecount></div>'
+        header_label = _running_header_label(out, title)
+        # Quiet engagement header; Confidential + pages in footer. DRAFT is watermark only.
+        chrome = (
+            f'<div id="pdf-header">{escape(header_label)}</div>'
+            f'<div id="pdf-footer">Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></div>'
         )
-        out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + static, out, count=1)
-        # Last, so injected legend / disclaimer tables get the same badges and column sizing.
+        out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + chrome, out, count=1)
+        # Tag finding cards with severity accent classes when the sealed HTML only has .finding.
+        out = _annotate_finding_severity(out)
+        # Last, so injected legend / disclaimer tables get the same badges, zebra, and column sizing.
         out = _badges(out)
+        out = _zebra_tables(out)
         out = _size_columns(out)
     elif for_engine == "weasyprint":
         extra_css = (
-            "@page { size: A4; margin: 18mm 14mm 20mm; "
-            "@bottom-center { content: 'Page ' counter(page) ' of ' counter(pages); font-size: 9px; color: #5b6170; } }"
-            ".cover { page-break-after: always; }"
+            f"@page {{ size: A4; margin: 18mm 14mm 20mm; "
+            f"@top-center {{ content: string(report-title); font-size: 8px; color: {QUIET}; }} "
+            f"@bottom-center {{ content: 'Page ' counter(page) ' of ' counter(pages); font-size: 9px; color: {QUIET}; }} }}"
+            f".cover {{ page-break-after: always; border-bottom: none; }}"
+            f"h1, h2, h3 {{ color: {NAVY}; }}"
+            f".brand {{ color: {ACCENT}; }}"
         )
         if draft:
             extra_css += (
                 ".pdf-draft { position: fixed; top: 40%; left: 12%; font-size: 96px; font-weight: 800;"
-                " color: rgba(161,22,27,.12); transform: rotate(-30deg); }"
+                " color: rgba(15,39,68,.08); transform: rotate(-30deg); }"
             )
             out = re.sub(r"(?is)(<body[^>]*>)", r'\1<div class="pdf-draft">DRAFT</div>', out, count=1)
         out = out.replace("</head>", f"<style>{extra_css}</style></head>", 1)
@@ -576,9 +1031,20 @@ def _xhtml2pdf(html: str) -> bytes | None:
     except Exception:  # reportlab LayoutError ("Splitting error") on an oversized boxed block
         # Retry with plain flowing blocks: no keep-with-next and no bordered finding box, so long
         # content breaks across pages instead of failing the whole export.
-        relaxed = html.replace("-pdf-keep-with-next: true", "-pdf-keep-with-next: false").replace(
-            ".finding { border: 0.5pt solid #e3e5ea; padding: 6pt 8pt; margin: 8pt 0; }",
-            ".finding { margin: 8pt 0; }",
+        relaxed = html.replace("-pdf-keep-with-next: true", "-pdf-keep-with-next: false")
+        # Drop bordered finding boxes so oversized cards can split across pages.
+        relaxed = re.sub(
+            r"\.finding\s*\{[^}]*\}",
+            ".finding { margin: 6pt 0; }",
+            relaxed,
+            count=1,
+        )
+        # Title/header keep-together is fine for short heads; neutralize if it still traps a split.
+        relaxed = re.sub(
+            r"\.finding-head\s*\{[^}]*\}",
+            ".finding-head { margin: 0 0 2pt 0; }",
+            relaxed,
+            count=1,
         )
         buf = BytesIO()
         result = pisa.CreatePDF(relaxed, dest=buf, encoding="utf-8")

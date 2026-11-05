@@ -120,7 +120,7 @@ AÔÇôF grade follows critical/high/medium thresholds.
 
 ### Trend svg renders
 
-`trend_svg` returns an SVG comparing current and previous severity bars.
+`trend_svg` returns an SVG comparing current and previous severity bars using the enterprise report palette (critical `#a1161b`, high `#d0461b`, medium `#b7791f`, low `#1d5f8a`, info `#6b7280`; previous bars at 45% opacity).
 
 ## test_webcheck_dns.py
 
