@@ -73,9 +73,29 @@ def list_checklist(session: Session, engagement_id: int) -> list[AuthChecklistIt
     )
 
 
-def _notes_imply_skipped(notes: str | None) -> bool:
+# Notes that imply the check was skipped, blocked, limited, or not actually executed.
+# Matched case-insensitively as substrings anywhere in the notes.
+INCOMPLETE_COVERAGE_NOTE_MARKERS: tuple[str, ...] = (
+    "not covered",
+    "not tested",
+    "skipped",
+    "limited",
+    "forms not covered",
+    "blind",
+)
+
+
+def notes_imply_incomplete_coverage(notes: str | None) -> bool:
+    """True when notes admit the check was skipped, limited, or not fully executed."""
     text = (notes or "").strip().lower()
-    return text.startswith("skipped")
+    if not text:
+        return False
+    return any(marker in text for marker in INCOMPLETE_COVERAGE_NOTE_MARKERS)
+
+
+# Back-compat alias used by older call sites / docs.
+def _notes_imply_skipped(notes: str | None) -> bool:
+    return notes_imply_incomplete_coverage(notes)
 
 
 def update_checklist_item(
@@ -88,7 +108,7 @@ def update_checklist_item(
     finding_ids: list | None = None,
     actor: str = "",
 ) -> AuthChecklistItem:
-    """Update a checklist row. Rejects passed when the update looks like a skip."""
+    """Update a checklist row. Rejects passed when notes imply incomplete coverage."""
     item = session.get(AuthChecklistItem, item_id)
     if item is None:
         raise LookupError(f"checklist item {item_id} not found")
@@ -101,10 +121,13 @@ def update_checklist_item(
     if new_status not in CHECKLIST_STATUSES:
         raise ServiceError(f"invalid checklist status: {new_status}")
 
-    # Do not mark a check passed merely because it was skipped.
+    # Honesty: never mark passed when notes say skipped / limited / not covered / not executed.
     if new_status == "passed":
-        if _notes_imply_skipped(new_notes):
-            raise ServiceError("cannot mark checklist item passed when notes indicate it was skipped")
+        if notes_imply_incomplete_coverage(new_notes):
+            raise ServiceError(
+                "cannot mark checklist item passed when notes indicate incomplete coverage "
+                "(skipped, not covered, limited, blind, or not tested)"
+            )
         if item.status == "blocked" and not new_evidence:
             raise ServiceError("cannot mark blocked checklist item passed without evidence")
 

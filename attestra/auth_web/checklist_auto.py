@@ -88,6 +88,10 @@ AUTOMATED_MAP: dict[str, tuple[str, ...]] = {
     "T04": ("WSTG-ATHZ-04",),
     "T05": ("WSTG-ATHZ-02",),
     "T06": ("WSTG-ATHZ-02",),
+    "SESSION": ("WSTG-SESS-02",),
+    "INJ": ("WSTG-INPV-05",),
+    "XSS": ("WSTG-INPV-01",),
+    "FILE": ("WSTG-ATHZ-01",),
 }
 
 # Never set automatically (need a human / no tool coverage today).
@@ -303,7 +307,7 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
         label = f"automated run #{ex.id} {tid}"
         ev = [f"automated_run:{ex.id}:{tid}"]
         fids = _canonical_ids(s, [case["finding_id"]]) if case.get("finding_id") else []
-        real = tid in ("T19", "T20", "T21", "T22")
+        real = tid in ("T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "FILE")
         if status in ("SKIPPED", "FAILED"):
             if real and tid != "T22":
                 for ref in refs:
@@ -338,6 +342,31 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
                         ev,
                     )
                 )
+        elif tid == "SESSION":
+            out.append(
+                Verdict(
+                    refs[0],
+                    "passed",
+                    "automated_vapt",
+                    label,
+                    f"session cookie/JWT observation completed ({detail})",
+                    [],
+                    ev,
+                )
+            )
+        elif tid in ("INJ", "XSS", "FILE"):
+            # Limited common-path canaries are not full category coverage — stay blocked.
+            out.append(
+                Verdict(
+                    refs[0],
+                    "blocked",
+                    "automated_vapt",
+                    label,
+                    f"blocked: limited common-path canary probes only; full coverage not tested ({detail})",
+                    [],
+                    ev,
+                )
+            )
         # T22 PASSED alone never proves ATHZ-04 (it only replays one mutation).
     return out
 
@@ -379,13 +408,15 @@ def _t21_verdicts(s: Session, case: dict[str, Any], label: str, ev: list[str], f
             )
         )
     elif clean:
+        # Limited probe only — do not mark passed (honesty: blind/time-based not covered).
         out.append(
             Verdict(
                 "WSTG-INPV-05",
-                "passed",
+                "blocked",
                 "automated_vapt",
                 label,
-                f"no issues (error-based quote probes on {clean} endpoint param(s); blind/time-based SQLi not covered)",
+                f"limited coverage: error-based quote probes on {clean} endpoint param(s); "
+                "blind/time-based SQLi not covered",
                 [],
                 ev,
             )
@@ -403,13 +434,15 @@ def _t21_verdicts(s: Session, case: dict[str, Any], label: str, ev: list[str], f
             )
         )
     elif clean:
+        # Limited API reflection probe — HTML forms/DOM not covered; never auto-pass.
         out.append(
             Verdict(
                 "WSTG-INPV-01",
-                "passed",
+                "blocked",
                 "automated_vapt",
                 label,
-                f"no issues (<script> reflection probe on {clean} API endpoint param(s); HTML forms/DOM not covered)",
+                f"limited coverage: <script> reflection probe on {clean} API endpoint param(s); "
+                "HTML forms/DOM not covered",
                 [],
                 ev,
             )
@@ -503,7 +536,11 @@ def apply_verdicts(
 ) -> list[dict[str, Any]]:
     """Apply verdicts to the engagement checklist; returns a list of change/skip records."""
     from attestra import audit
-    from attestra.auth_web.checklists import ensure_checklist, update_checklist_item
+    from attestra.auth_web.checklists import (
+        ensure_checklist,
+        notes_imply_incomplete_coverage,
+        update_checklist_item,
+    )
     from attestra.models import Engagement
 
     verdicts = [v for v in verdicts if v.ref not in MANUAL_ONLY]
@@ -564,6 +601,11 @@ def apply_verdicts(
             continue
         evidence = list(item.evidence_ids or [])
         evidence += [e for e in v.evidence if e not in evidence]
+        # Never auto-upgrade blocked → passed without evidence refs.
+        if new_status == "passed" and cur == "blocked" and not evidence:
+            rec["action"] = "kept_blocked_no_evidence"
+            results.append(rec)
+            continue
         if (
             new_status == cur
             and lines == _lines(item.notes)
@@ -573,6 +615,11 @@ def apply_verdicts(
             results.append(rec)  # idempotent re-sync: nothing new
             continue
         notes = _compose(new_status, lines)
+        # Honesty gate: incomplete-coverage notes must not become passed via auto-apply.
+        if new_status == "passed" and notes_imply_incomplete_coverage(notes):
+            rec["action"] = "refused_incomplete_notes"
+            results.append(rec)
+            continue
         update_checklist_item(
             s,
             item.id,
@@ -724,6 +771,15 @@ def sync_engagement(s: Session, engagement_id: int, *, dry_run: bool = False) ->
             )
         s.flush()
         final = {i.ref: i.status for i in list_checklist(s, engagement_id)}
+        if dry_run:
+            # Mongo nested rollback is a no-op; restore snap so dry_run never persists.
+            for it in list_checklist(s, engagement_id):
+                old = snap.get(it.id)
+                if old is None:
+                    continue
+                for k, val in old.items():
+                    setattr(it, k, val)
+            s.flush()
     except Exception:
         sp.rollback()
         raise

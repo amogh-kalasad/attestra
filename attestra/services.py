@@ -532,6 +532,17 @@ def get_engagement(s: Session, engagement_id: int, principal=None) -> Engagement
     return e
 
 
+def engagement_coverage_snapshot(
+    s: Session, engagement_id: int, principal=None
+) -> dict:
+    """Lightweight PT coverage honesty snapshot (Phase 3), separate from vuln counts."""
+    # @lat: [[architecture#World-class PT coverage honesty (Phase 3)]]
+    eng = get_engagement(s, engagement_id, principal=principal)
+    from attestra.automated_vapt.coverage.snapshot import build_coverage_snapshot
+
+    return build_coverage_snapshot(s, eng.id)
+
+
 def add_authorization(
     s: Session,
     engagement_id: int,

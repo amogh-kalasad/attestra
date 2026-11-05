@@ -497,7 +497,7 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t01_http_capture(ctx, case.category)
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
-    if case.id in {"T03", "T04", "T05", "T06", "T07"}:
+    if case.id in {"T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE"}:
         return _run_authz_module(case.id, ctx, case.category)
     if case.id in {"T19", "T20", "T21", "T22"}:
         return _run_replay_check(case.id, ctx, case.category)
@@ -837,7 +837,7 @@ def _run_replay_check(test_id: str, ctx: TestContext, category: str) -> dict[str
 
 
 def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str, Any]:
-    """Dispatch T03–T07 testing modules against an injected HTTP client."""
+    """Dispatch T03–T07 / SESSION testing modules against an injected HTTP client."""
     client = ctx.extra.get("httpx_client")
     if client is None:
         return {
@@ -850,8 +850,12 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         api_security_tests,
         authentication_tests,
         authorization_tests,
+        file_security_tests,
         idor_bola_tests,
+        injection_tests,
+        session_security_tests,
         tenant_isolation_tests,
+        xss_tests,
     )
 
     runners = {
@@ -860,6 +864,10 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "T05": authorization_tests.run,
         "T06": tenant_isolation_tests.run,
         "T07": api_security_tests.run,
+        "SESSION": session_security_tests.run,
+        "INJ": injection_tests.run,
+        "XSS": xss_tests.run,
+        "FILE": file_security_tests.run,
     }
     try:
         result = runners[test_id](client, ctx.target_base_url)

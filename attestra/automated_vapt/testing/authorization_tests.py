@@ -5,11 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 from attestra.automated_vapt.testing._http import absolute, login, request_pair
+from attestra.automated_vapt.testing.privilege_escalation_tests import (
+    probe_horizontal_privilege,
+    probe_vertical_privilege,
+)
 
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
+# Horizontal / vertical helpers live in privilege_escalation_tests; re-exported here
+# so authorization callers can import from one module.
+__all__ = ["probe_horizontal_privilege", "probe_vertical_privilege", "run"]
+
 
 def run(client, base_url: str, **_kwargs) -> dict[str, Any]:
+    """Server-side role check (member vs admin on /admin)."""
     login(client, base_url, "account_a", "account-a-pass")
     member_pair = request_pair(
         client, "GET", absolute(base_url, "/admin"), follow_redirects=False

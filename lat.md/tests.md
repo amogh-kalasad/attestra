@@ -1487,7 +1487,7 @@ A profile with method `none` and no secret validates to status `valid` for unaut
 
 ### Checklist rejects skipped as passed
 
-[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `status=passed` when notes start with "skipped"; the row stays unchanged.
+[[attestra/auth_web/checklists.py#update_checklist_item]] refuses `status=passed` when notes imply incomplete coverage (including substrings skipped / not covered / limited / blind / not tested); the row stays unchanged.
 
 ### Checklist blocked needs evidence
 
@@ -2702,3 +2702,43 @@ Classification updates validation fields only; workflow status stays unchanged.
 ### Reconcile from http pair
 
 Engagement HTTP pair evidence reclassifies HSTS-missing findings as not_reproducible.
+
+## Phase 3 PT coverage honesty
+
+Checklist honesty gates and coverage snapshot separate from vuln counts (`tests/test_pt_coverage_phase3.py`).
+
+### Cannot pass with not covered notes
+
+[[attestra/auth_web/checklists.py#update_checklist_item]] raises when `status=passed` and notes contain incomplete-coverage markers such as not covered, limited, blind, or skipped.
+
+### Snapshot counts blocked and skipped
+
+[[attestra/automated_vapt/coverage/snapshot.py#build_coverage_snapshot]] and [[attestra/services.py#engagement_coverage_snapshot]] count blocked / not_tested (skipped bucket) / passed / failed checklist rows and automated case outcomes without folding skips into passed.
+
+### Reflection helper optional
+
+When the sibling [[attestra/automated_vapt/testing/_reflection.py]] module exists, unencoded vs escaped reflection detection is smoke-checked; otherwise the test is skipped.
+
+## World-class Phase 3 safe probes
+
+Safe non-destructive injection/XSS/file/header helpers and run modules (`tests/automated_vapt/test_phase3_safe_probes.py`).
+
+### Unencoded reflection helper
+
+Literal canary presence is unencoded; HTML-escaped-only reflection is not.
+
+### HTML context gate
+
+Alphanumeric canaries require an HTML body (or HTML Content-Type) before the HTML reflection gate passes.
+
+### Sensitive file markers
+
+Fake traversal findings require sensitive content markers; path strings alone do not count.
+
+### Header CORS observation only
+
+Security-header and CORS snapshots record present/missing values without forcing `finding_candidate`.
+
+### Reflecting mock finding
+
+A tiny reflecting HTML mock yields injection and XSS `finding_candidate` true; a secure non-reflecting page stays false.
