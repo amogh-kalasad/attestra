@@ -61,8 +61,8 @@ def pdf_css(*, font: str = "Inter", mono: str = "AttestraMono") -> str:
     return f"""
 @page {{
   size: a4 portrait;
-  margin: 1.6cm 1.4cm 2.0cm 1.4cm;
-  @frame header {{ -pdf-frame-content: pdf-header; left: 1.4cm; width: 18.2cm; top: 0.55cm; height: 0.7cm; }}
+  /* No running #pdf-header bar; cover uses body .cover-band on page 1 only. */
+  margin: 1.4cm 1.4cm 2.0cm 1.4cm;
   @frame footer {{ -pdf-frame-content: pdf-footer; left: 1.4cm; width: 18.2cm; bottom: 0.55cm; height: 0.85cm; }}
 }}
 body {{ font-family: {font}, Helvetica; font-size: 9.25pt; line-height: 1.48; color: {INK}; }}
@@ -87,8 +87,9 @@ tr.row-alt td {{ background-color: {SURFACE}; }}
 .status-passed {{ color: {PASSED}; font-weight: bold; }}
 .status-failed {{ color: {FAILED}; font-weight: bold; }}
 .chip-internet {{ background-color: {CHIP_INTERNET_BG}; color: {CHIP_INTERNET_FG}; }}
-.finding {{ border: 0.4pt solid {RULE}; border-left: 3pt solid {ACCENT}; padding: 5pt 7pt; margin: 5pt 0;
-            background-color: {WHITE}; }}
+/* Left accent only: full box border becomes KeepInFrame and LayoutError when taller than one page. */
+.finding {{ border: none; border-left: 3pt solid {ACCENT}; padding: 5pt 7pt; margin: 5pt 0;
+            background-color: {WHITE}; page-break-inside: auto; }}
 .finding-critical {{ border-left-color: {c}; }}
 .finding-high {{ border-left-color: {h}; }}
 .finding-medium {{ border-left-color: {m}; }}
@@ -110,10 +111,11 @@ tr.row-alt td {{ background-color: {SURFACE}; }}
 .finding-section {{ margin: 2pt 0 1pt 0; }}
 .finding-section p {{ margin: 0 0 2pt 0; }}
 .finding-evidence {{ margin-top: 3pt; padding-top: 3pt; border-top: 0.5pt solid {RULE_STRONG}; }}
-.evidence-figure {{ margin: 2pt 0 4pt 0; }}
+.evidence-figure {{ margin: 2pt 0 4pt 0; page-break-inside: auto; }}
 .mono {{ font-family: {mono}, Courier; font-size: 7pt; word-wrap: break-word; }}
 pre {{ font-family: {mono}, Courier; font-size: 7.5pt; }}
-pre.http-pair {{ background-color: {SURFACE_ALT}; border: 0.4pt solid {RULE}; padding: 6pt 8pt; }}
+/* No border: bordered pre.http-pair becomes unsplittable KeepInFrame in xhtml2pdf. */
+pre.http-pair {{ background-color: {SURFACE_ALT}; padding: 6pt 8pt; page-break-inside: auto; }}
 .note {{ background-color: {NOTE_BG}; border-left: 2.5pt solid {ACCENT}; padding: 7pt 9pt; font-size: 9pt; }}
 .cover {{ padding-top: 6pt; padding-bottom: 0; border-bottom: none; }}
 .cover-band {{ width: 100%; margin: 0 0 12pt 0; }}
@@ -136,30 +138,33 @@ pre.http-pair {{ background-color: {SURFACE_ALT}; border: 0.4pt solid {RULE}; pa
 .cover-spacer img {{ border: none; }}
 .cover-foot {{ width: 100%; margin: 0; }}
 .cover-foot td, .cover-foot-cell {{ border: none; background-color: {NAVY}; color: #ffffff; padding: 8pt 12pt; font-size: 8pt; }}
-.toc-title {{ font-size: 13pt; font-weight: bold; color: {NAVY}; margin-bottom: 10pt; -pdf-outline: false; }}
-.evidence-img {{ width: 14.5cm; border: 0.4pt solid {RULE}; margin: 6pt 0 2pt 0; -pdf-keep-with-next: true; }}
-.fig-caption {{ color: {QUIET}; font-size: 8pt; margin: 0 0 10pt 0; }}
+.toc-title {{ font-size: 13pt; font-weight: bold; color: {NAVY}; margin-bottom: 6pt; -pdf-outline: false;
+             page-break-after: avoid; }}
+.evidence-img {{ width: 14.5cm; max-height: 16cm; border: 0.4pt solid {RULE}; margin: 4pt 0 2pt 0; }}
+.fig-caption {{ color: {QUIET}; font-size: 8pt; margin: 0 0 8pt 0; page-break-before: avoid; }}
 footer {{ margin-top: 18pt; color: {QUIET}; font-size: 8pt; line-height: 1.5; border-top: 0.4pt solid {RULE}; padding-top: 6pt; }}
-#pdf-header {{ color: {QUIET}; font-size: 6.5pt; font-weight: normal; text-align: left;
-              border-bottom: 0.3pt solid {RULE}; padding-bottom: 1pt; letter-spacing: 0; }}
 #pdf-footer {{ color: {QUIET}; font-size: 7pt; text-align: center; }}
-.summary-posture {{ margin: 2pt 0 6pt 0; page-break-inside: avoid; }}
+/* Allow KPI+chart to split; page-break-inside avoid caused KeepInFrame LayoutError. */
+.summary-posture {{ margin: 2pt 0 6pt 0; page-break-inside: auto; }}
 .overview-sev-summary {{ width: 100%; margin: 4pt 0 8pt 0; }}
 .overview-sev-summary th, .overview-sev-summary td {{ text-align: center; padding: 4pt 3pt; font-size: 8pt; border-bottom: 0.4pt solid {RULE}; }}
 .overview-sev-summary th {{ background-color: {SURFACE}; }}
-.overview-table {{ margin: 4pt 0 10pt 0; }}
+.overview-table {{ margin: 4pt 0 10pt 0; page-break-inside: auto; }}
 .overview-table th, .overview-table td {{ padding: 3pt 4pt; font-size: 8pt; }}
 .overview-table th {{ font-size: 7.5pt; }}
 .overview-table .mono {{ font-size: 7pt; }}
-.status-checks-table {{ margin: 4pt 0 10pt 0; }}
+.status-checks-table {{ margin: 4pt 0 10pt 0; page-break-inside: auto; }}
 .status-checks-table th, .status-checks-table td {{ padding: 3pt 5pt; font-size: 8pt; }}
 .status-checks-table th {{ font-size: 7.5pt; }}
 .status-checks-table .mono {{ font-size: 7pt; word-wrap: break-word; }}
-.site-grades {{ margin: 3pt 0 8pt 0; }}
+.site-grades-intro {{ margin: 0 0 6pt 0; page-break-inside: avoid; }}
+.site-grades {{ margin: 3pt 0 8pt 0; page-break-inside: auto; }}
 .site-grades th, .site-grades td {{ padding: 3pt 5pt; font-size: 8pt; }}
 .site-grades th {{ font-size: 7.5pt; }}
 .site-grades .mono {{ font-size: 7pt; word-wrap: break-word; }}
-table.kpis {{ width: 100%; margin: 2pt 0 3pt 0; -pdf-keep-with-next: true; }}
+.site-grades thead {{ display: table-header-group; }}
+.site-grades tr {{ page-break-inside: avoid; }}
+table.kpis {{ width: 100%; margin: 2pt 0 3pt 0; }}
 table.kpis td {{ border: 0.4pt solid {RULE}; background-color: {SURFACE}; padding: 9pt 6pt 8pt 6pt; text-align: center;
                 vertical-align: middle; font-size: 8pt; color: {QUIET}; }}
 .kpi-label {{ margin: 0 0 5pt 0; font-size: 8pt; line-height: 1.2; text-align: center; color: {QUIET}; }}
@@ -167,7 +172,7 @@ table.kpis td {{ border: 0.4pt solid {RULE}; background-color: {SURFACE}; paddin
 table.kpis td.gap {{ border: none; background-color: {WHITE}; padding: 0; width: 6pt; }}
 .kpi-num {{ font-size: 18pt; font-weight: bold; color: {NAVY}; margin: 0; line-height: 1.1; text-align: center; }}
 .chart-block {{ margin: 0 0 6pt 0; }}
-.chart-caption {{ margin: 1pt 0 3pt 0; color: {QUIET}; font-size: 8pt; -pdf-keep-with-next: true; }}
+.chart-caption {{ margin: 1pt 0 3pt 0; color: {QUIET}; font-size: 8pt; }}
 .appendix-table {{ margin: 3pt 0 8pt 0; }}
 .appendix-table th, .appendix-table td {{ padding: 3pt 4pt; font-size: 7.5pt; }}
 .appendix-table th {{ font-size: 7pt; }}

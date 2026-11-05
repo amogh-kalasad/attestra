@@ -427,6 +427,28 @@ def _running_header_label(html: str, title: str) -> str:
     return label
 
 
+def _strip_cover_body_footer(html: str) -> str:
+    """Remove cover-spacer / cover-foot from the xhtml2pdf copy.
+
+    Those body tables pinned a second navy strip (“brand · Security assessment report”)
+    that xhtml2pdf left mid-cover under empty spacer space. Cover chrome is only the
+    page-1 `.cover-band` (brand left / Confidential right); no running header bar.
+    """
+    out = re.sub(
+        r'(?is)<table\b[^>]*class="[^"]*\bcover-spacer\b[^"]*"[^>]*>.*?</table>\s*',
+        "",
+        html,
+        count=1,
+    )
+    out = re.sub(
+        r'(?is)<table\b[^>]*class="[^"]*\bcover-foot\b[^"]*"[^>]*>.*?</table>\s*',
+        "",
+        out,
+        count=1,
+    )
+    return out
+
+
 
 _FINDING_BLOCK = re.compile(
     r'(?is)(<div class="finding)(" id="finding-\d+">.*?<span class="sev sev-)(\w+)(">)'
@@ -931,11 +953,14 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
     out = re.sub(r"(?is)<br>\s*Page numbers appear when printed[^<]*", "", out)
     # Legacy sealed covers get standard chrome on this copy only (disk HTML stays frozen).
     out = _upgrade_cover(out)
-    out = _ensure_cover_spacer(out)
+    # Spacer+foot only for engines that keep a body cover-foot; xhtml2pdf strips them.
+    if for_engine != "xhtml2pdf":
+        out = _ensure_cover_spacer(out)
     out = _inject_overview_sev_summary(out)
     head, sep, body = out.partition("<body")
     out = head + sep + _display_case(body) if sep else out
     if for_engine == "xhtml2pdf":
+        out = _strip_cover_body_footer(out)
         out = re.sub(r"(?is)<style.*?</style>", f"<style>{_font_css()}{PDF_CSS}</style>", out, count=1)
         # xhtml2pdf cannot draw inline SVG, but it renders SVG <img> data URIs via svglib.
         out = re.sub(r"(?is)<svg.*?</svg>", _svg_to_img, out)
@@ -951,8 +976,11 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
         out = re.sub(r'(?is)<nav class="toc"[^>]*>.*?</nav>', "", out)
         long_enough = len(re.findall(r"(?i)<h2", out)) >= 3
         if for_engine == "xhtml2pdf":
+            # One break after the cover, then Contents. Do NOT force a second break after
+            # <pdf:toc /> — that left an orphan nearly-blank page when the TOC only spilled
+            # one or two lines (e.g. "B. Scan runs") onto the next sheet.
             extras.append(
-                '<pdf:nextpage /><h2 class="toc-title">Contents</h2><div><pdf:toc /></div><pdf:nextpage />'
+                '<pdf:nextpage /><h2 class="toc-title">Contents</h2><div><pdf:toc /></div>'
                 if long_enough
                 else "<pdf:nextpage />"  # short reports: cover, then straight to the content
             )
@@ -974,11 +1002,10 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
             "</body>", disc + "</body>"
         )
     if for_engine == "xhtml2pdf":
-        header_label = _running_header_label(out, title)
-        # Quiet engagement header; Confidential + pages in footer. DRAFT is watermark only.
+        # Page footer only — no running “Security assessment report” header on any page.
+        # Cover navy bar is body `.cover-band` on page 1 (ATTESTRA | Confidential).
         chrome = (
-            f'<div id="pdf-header">{escape(header_label)}</div>'
-            f'<div id="pdf-footer">Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></div>'
+            '<div id="pdf-footer">Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></div>'
         )
         out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + chrome, out, count=1)
         # Tag finding cards with severity accent classes when the sealed HTML only has .finding.
@@ -1020,37 +1047,64 @@ def _weasyprint(html: str, base_url: str) -> bytes | None:
         return None
 
 
+def _relax_pdf_keep_together(html: str) -> str:
+    """Neutralize keep-together hints so xhtml2pdf can split oversized blocks across pages.
+
+    reportlab raises LayoutError when a KeepInFrame (from ``-pdf-keep-with-next``,
+    ``page-break-inside: avoid``, or a bordered finding/pre box) is taller than the
+    ~740pt body frame.
+    """
+    out = re.sub(r"-pdf-keep-with-next:\s*true", "-pdf-keep-with-next: false", html, flags=re.I)
+    out = re.sub(r"page-break-inside:\s*avoid", "page-break-inside: auto", out, flags=re.I)
+    out = re.sub(r"page-break-after:\s*avoid", "page-break-after: auto", out, flags=re.I)
+    out = re.sub(r"\.finding\s*\{[^}]*\}", ".finding { margin: 6pt 0; }", out, count=1)
+    out = re.sub(r"\.finding-head\s*\{[^}]*\}", ".finding-head { margin: 0 0 2pt 0; }", out, count=1)
+    out = re.sub(
+        r"\.summary-posture\s*\{[^}]*\}",
+        ".summary-posture { margin: 2pt 0 6pt 0; }",
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"pre\.http-pair\s*\{[^}]*\}",
+        "pre.http-pair { background-color: #f4f6f9; padding: 6pt 8pt; }",
+        out,
+        count=1,
+    )
+    out = re.sub(
+        r"\.site-grades-intro\s*\{[^}]*\}",
+        ".site-grades-intro { margin: 0 0 6pt 0; }",
+        out,
+        count=1,
+    )
+    return out
+
+
 def _xhtml2pdf(html: str) -> bytes | None:
     try:
         from xhtml2pdf import pisa
     except Exception:
         return None
+
+    def _try(payload: str) -> bytes | None:
+        buf = BytesIO()
+        result = pisa.CreatePDF(payload, dest=buf, encoding="utf-8")
+        if result.err:
+            return None
+        return buf.getvalue() or None
+
     try:
-        buf = BytesIO()
-        result = pisa.CreatePDF(html, dest=buf, encoding="utf-8")
-    except Exception:  # reportlab LayoutError ("Splitting error") on an oversized boxed block
-        # Retry with plain flowing blocks: no keep-with-next and no bordered finding box, so long
-        # content breaks across pages instead of failing the whole export.
-        relaxed = html.replace("-pdf-keep-with-next: true", "-pdf-keep-with-next: false")
-        # Drop bordered finding boxes so oversized cards can split across pages.
-        relaxed = re.sub(
-            r"\.finding\s*\{[^}]*\}",
-            ".finding { margin: 6pt 0; }",
-            relaxed,
-            count=1,
-        )
-        # Title/header keep-together is fine for short heads; neutralize if it still traps a split.
-        relaxed = re.sub(
-            r"\.finding-head\s*\{[^}]*\}",
-            ".finding-head { margin: 0 0 2pt 0; }",
-            relaxed,
-            count=1,
-        )
-        buf = BytesIO()
-        result = pisa.CreatePDF(relaxed, dest=buf, encoding="utf-8")
-    if result.err:
+        data = _try(html)
+        if data:
+            return data
+    except Exception:
+        data = None
+    # Retry with plain flowing blocks so long findings/tables split across pages.
+    try:
+        return _try(_relax_pdf_keep_together(html))
+    except Exception:
+        # Caller falls back to the minimal text PDF — never 500 the export route.
         return None
-    return buf.getvalue() or None
 
 
 def pdf_engine_status() -> dict:

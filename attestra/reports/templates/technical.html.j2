@@ -15,7 +15,7 @@
     <li><a href="#summary">Summary</a></li>
     <li><a href="#findings-overview">Findings overview</a></li>
     {% if passed_checks %}<li><a href="#status-checks">Status checks</a></li>{% endif %}
-    {% if auth_checklist %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
+    {% if auth_checklist_section %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
     <li><a href="#findings">Detailed findings</a></li>
@@ -242,32 +242,44 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
 </table>
 {% endif %}
 
-{% if auth_checklist %}
+{% if auth_checklist_section %}
 {% set sec.n = sec.n + 1 %}<h2 id="auth-checklist">{{ sec.n }}. Authenticated security testing checklist</h2>
-<p class="meta">WSTG/ASVS checks performed during authenticated security testing. Skipped and blocked items are not treated as passed.</p>
+<p class="meta">Only executed checklist items are listed (passed, failed, blocked). Skipped and blocked items are not treated as passed.</p>
 {% if auth_coverage and auth_coverage.exclusions_note %}
 <p class="meta">{{ auth_coverage.exclusions_note }}</p>
 {% endif %}
+{% if auth_checklist %}
 <table>
   <tr><th>Ref</th><th>Title</th><th>Status</th><th>Notes</th></tr>
   {% for item in auth_checklist %}
   <tr>
     <td class="mono">{{ item.ref }}</td>
     <td>{{ item.title }}</td>
-    <td>{% if item.status == "passed" %}<span class="status-passed">Passed</span>{% elif item.status == "failed" %}<span class="status-failed">Failed</span>{% else %}<span class="meta">{{ item.status|status_label }}</span>{% endif %}</td>
+    <td>{% if item.status in ("passed", "pass") %}<span class="status-passed">Passed</span>{% elif item.status in ("failed", "fail") %}<span class="status-failed">Failed</span>{% else %}<span class="meta">{{ item.status|status_label }}</span>{% endif %}</td>
     <td>{{ (item.notes or "—")|format_checklist_note if item.notes else "—" }}</td>
   </tr>
   {% endfor %}
 </table>
+{% else %}
+<p class="meta">No checklist items have been executed yet.</p>
+{% endif %}
 {% endif %}
 
 {% if site_grades %}
 {% set sec.n = sec.n + 1 %}<h2 id="site-grades">{{ sec.n }}. Site grades</h2>
-<p class="meta">Observatory-style score per target (starts at 100; bonuses only when score is already 90 or more).</p>
+{# Intro kept short and separate from the table so xhtml2pdf can split rows across pages. #}
+<div class="site-grades-intro">
+  <p class="meta">Each target starts at 100. Penalties subtract for missing or weak controls; bonuses apply only when the running score is already 90 or higher.</p>
+  <p class="meta">Not-tested checks leave the score unchanged. False positives are ignored; accepted-risk findings still count.</p>
+  <p class="meta">The final number maps to a letter grade (for example, score 50 → C). The table lists each check, result, points, and reason.</p>
+</div>
 {% for g in site_grades %}
   <h3>{{ g.identifier }} — <b>{{ g.grade }}</b> (score {{ g.score }})</h3>
   <table class="site-grades">
-    <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    <thead>
+      <tr><th>Check</th><th>Result</th><th>Points</th><th>Reason</th></tr>
+    </thead>
+    <tbody>
     {% for row in g.breakdown if row.result != "not_tested" %}
     <tr>
       <td>{{ row.check|check_label }}</td>
@@ -276,6 +288,7 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
       <td>{{ row.reason }}</td>
     </tr>
     {% endfor %}
+    </tbody>
   </table>
 {% endfor %}
 {% endif %}

@@ -532,6 +532,16 @@ def _scan_history(s: Session, engagement_id: int) -> list[ScanRun]:
     return report_reads.scan_runs(engagement_id, newest_first=True, limit=50)
 
 
+# Report display only: statuses that appear in the authenticated checklist table.
+# not_started / not_tested / not_applicable stay in the DB and show after a later update.
+_CHECKLIST_EXECUTED_STATUSES = frozenset({"passed", "pass", "failed", "fail", "blocked"})
+
+
+def _checklist_status_key(status: str | None) -> str:
+    """Normalize checklist status for report filtering (casing / spaces / hyphens)."""
+    return (status or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
     """WSTG/ASVS checklist (+ optional coverage) for reports; never includes secrets."""
     # @lat: [[reports#Generation]]
@@ -542,8 +552,13 @@ def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
     if not rows and config.AUTH_WEB_ENABLED:
         rows = ensure_checklist(s, eng.id, eng.tenant_id)
     if not rows:
-        return {"auth_checklist": [], "auth_coverage": None}
+        return {
+            "auth_checklist": [],
+            "auth_checklist_section": False,
+            "auth_coverage": None,
+        }
 
+    # Filter at render time only — never delete or rewrite AuthChecklistItem rows.
     auth_checklist = [
         {
             "ref": item.ref,
@@ -554,6 +569,7 @@ def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
             "executed_at": item.executed_at.isoformat() if item.executed_at else None,
         }
         for item in rows
+        if _checklist_status_key(item.status) in _CHECKLIST_EXECUTED_STATUSES
     ]
     try:
         from attestra.auth_web.coverage import coverage_summary
@@ -561,7 +577,11 @@ def _auth_web_report_context(s: Session, eng: Engagement) -> dict:
         auth_coverage = coverage_summary(s, eng.id)
     except Exception:
         auth_coverage = None
-    return {"auth_checklist": auth_checklist, "auth_coverage": auth_coverage}
+    return {
+        "auth_checklist": auth_checklist,
+        "auth_checklist_section": True,
+        "auth_coverage": auth_coverage,
+    }
 
 
 def _safe_to_host_context(eng: Engagement, open_critical_high: int) -> dict:

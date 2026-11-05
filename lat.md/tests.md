@@ -1579,7 +1579,7 @@ With a registered capture function, import-time capture attaches a screenshot fo
 
 ### Checklist refs in technical report
 
-When [[attestra/models.py#AuthChecklistItem]] rows exist, [[attestra/reports/render.py#generate_report]] technical HTML includes `#auth-checklist` with WSTG/ASVS refs and statuses.
+When [[attestra/models.py#AuthChecklistItem]] rows exist, [[attestra/reports/render.py#generate_report]] technical HTML includes `#auth-checklist`; only executed statuses (passed / failed / blocked and aliases) appear as table rows — `not_started` is omitted at render time.
 
 ### Blocked not labeled passed
 
@@ -1595,7 +1595,7 @@ Technical HTML with a checklist must not contain auth profile `secret_ref` value
 
 ### Auth web on seeds checklist for report
 
-When [[attestra/config.py#AUTH_WEB_ENABLED]] is on and the engagement has no checklist rows, report generation seeds defaults via [[attestra/auth_web/checklists.py#ensure_checklist]] and renders them.
+When [[attestra/config.py#AUTH_WEB_ENABLED]] is on and the engagement has no checklist rows, report generation seeds defaults via [[attestra/auth_web/checklists.py#ensure_checklist]] and still renders `#auth-checklist` (seeded rows are `not_started`, so the empty-executed note appears until items are run).
 
 ### CLI scan queues through request_scan
 
