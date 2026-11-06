@@ -44,6 +44,8 @@ Implemented in `attestra/reports/qa/checks.py` (`ALL_CHECKS`). Severities: **cri
 | `remediation_csp_mismatch` | critical | CSP-only remediation on Permissions-Policy / COEP / COOP / CORP / CORS / HSTS |
 | `coverage_honesty_flag` | critical | Coverage snapshot claims scan completion is security coverage |
 | `coverage_100_with_gaps` | warning | 100% endpoint coverage while skipped/blocked remain |
+| `coverage_zero_endpoints` | critical | Technical report presents security testing with `endpoints_tested=0` / empty coverage |
+| `all_findings_unvalidated` | critical | Every reportable finding is Unvalidated (client-facing final must not be all unvalidated) |
 | `checklist_passed_incomplete` | critical | Checklist `passed` but notes imply skipped/limited |
 | `site_grade_missing_letter` | warning | Site-grades section without letter |
 | `site_grade_hsts_contradiction` | warning | Grades say HSTS missing while evidence shows HSTS |

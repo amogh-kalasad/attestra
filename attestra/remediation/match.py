@@ -8,12 +8,18 @@ from attestra.remediation.packs import REMEDIATION_PACKS, Pack, pack_for_concept
 
 # @lat: [[findings#Remediation packs (Phase 7)]]
 
-_CSP_CONCEPTS = frozenset({"header:csp-missing", "header:csp-weak"})
+_CSP_CONCEPTS = frozenset(
+    {"header:csp-missing", "header:csp-weak", "csp:weak-or-incomplete"}
+)
 _PERMISSIONS_TITLE_MARKERS = (
     "permissions-policy",
     "permissions policy",
     "feature-policy",
     "feature policy",
+)
+_EXPECT_CT_TITLE_MARKERS = (
+    "expect-ct",
+    "expect ct",
 )
 
 _MARKDOWN_SECTIONS = (
@@ -34,6 +40,11 @@ def _title_of(finding: Any) -> str:
 def _title_looks_like_permissions_policy(title: str) -> bool:
     low = title.lower()
     return any(m in low for m in _PERMISSIONS_TITLE_MARKERS)
+
+
+def _title_looks_like_expect_ct(title: str) -> bool:
+    low = title.lower()
+    return any(m in low for m in _EXPECT_CT_TITLE_MARKERS)
 
 
 def _concepts_from_crossmerge(finding: Any) -> list[str]:
@@ -85,11 +96,16 @@ def resolve_concepts(finding: Any) -> list[str]:
         found = [c for c in found if c not in _CSP_CONCEPTS]
         if "header:permissions-policy-missing" not in found:
             found.insert(0, "header:permissions-policy-missing")
+    if _title_looks_like_expect_ct(title):
+        # Never attribute CSP concepts to obsolete Expect-CT findings.
+        found = [c for c in found if c not in _CSP_CONCEPTS]
+        if "header:expect-ct-deprecated" not in found:
+            found.insert(0, "header:expect-ct-deprecated")
     return found
 
 
-def _filter_csp_for_permissions(title: str, concepts: list[str]) -> list[str]:
-    if _title_looks_like_permissions_policy(title):
+def _filter_csp_for_non_csp_headers(title: str, concepts: list[str]) -> list[str]:
+    if _title_looks_like_permissions_policy(title) or _title_looks_like_expect_ct(title):
         return [c for c in concepts if c not in _CSP_CONCEPTS]
     return concepts
 
@@ -98,13 +114,17 @@ def pack_for_finding(finding: Any) -> Pack | None:
     """Pick the best remediation pack for a finding, or None.
 
     Prefers a single exact concept that has a pack. Never returns a CSP pack
-    for Permissions-Policy titles (ENG1 F-7 class mismatch).
+    for Permissions-Policy or Expect-CT titles (wrong-header remediation).
     """
     title = _title_of(finding)
-    concepts = _filter_csp_for_permissions(title, resolve_concepts(finding))
+    concepts = _filter_csp_for_non_csp_headers(title, resolve_concepts(finding))
 
     if _title_looks_like_permissions_policy(title):
         pack = pack_for_concept("header:permissions-policy-missing")
+        if pack is not None:
+            return pack
+    if _title_looks_like_expect_ct(title):
+        pack = pack_for_concept("header:expect-ct-deprecated")
         if pack is not None:
             return pack
 

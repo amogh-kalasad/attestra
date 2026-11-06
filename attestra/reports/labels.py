@@ -109,11 +109,23 @@ ENVIRONMENT_LABELS: dict[str, str] = {
 }
 
 EXPOSURE_LABELS: dict[str, str] = {
-    "internet": "Internet",
+    "internet": "External",
+    "external": "External",
     "internal": "Internal",
     "partner": "Partner",
     "restricted": "Restricted",
 }
+
+# Hostnames that must never be treated as public internet FQDNs for exposure honesty.
+_NON_PUBLIC_HOST_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".lan",
+    ".corp",
+    ".home",
+    ".localdomain",
+)
 
 # Explicit status-check display names (never auto Title Case these).
 CHECK_LABELS: dict[str, str] = {
@@ -283,6 +295,61 @@ def exposure_label(value: str | None) -> str:
     if not raw:
         return ""
     return EXPOSURE_LABELS.get(raw.lower(), humanize(raw))
+
+
+def looks_like_public_https_fqdn(identifier: str | None) -> bool:
+    """True when ``identifier`` is an https URL with a public-looking FQDN host.
+
+    Used for scope exposure honesty: public https FQDNs must not be labelled Internal.
+    Literal private/loopback IPs, localhost, and common internal suffixes stay non-public.
+    """
+    # @lat: [[reports#Display labels]]
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    raw = (identifier or "").strip()
+    if not raw:
+        return False
+    parts = urlsplit(raw)
+    if parts.scheme.lower() != "https" or not parts.hostname:
+        return False
+    host = parts.hostname.lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith(_NON_PUBLIC_HOST_SUFFIXES):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        return bool(ip.is_global)
+    # Require a dotted FQDN (not a bare single-label host).
+    return "." in host
+
+
+def effective_exposure(identifier: str | None, exposure: str | None = None) -> str:
+    """Stored exposure with public-https-FQDN honesty: never Internal for public https hosts."""
+    # @lat: [[reports#Display labels]]
+    stored = (exposure or "internal").strip().lower() or "internal"
+    if stored in ("internet", "external"):
+        return "internet"
+    if stored == "internal" and looks_like_public_https_fqdn(identifier):
+        return "internet"
+    return stored
+
+
+def effective_exposure_for_asset(asset: Any) -> str:
+    """[[effective_exposure]] for an asset-like object (``identifier`` + ``exposure``)."""
+    return effective_exposure(
+        getattr(asset, "identifier", None),
+        getattr(asset, "exposure", None),
+    )
+
+
+def effective_exposure_label(asset_or_value: Any = None, exposure: str | None = None) -> str:
+    """Report/UI Exposure cell: External for public https FQDNs, else mapped label."""
+    if asset_or_value is not None and not isinstance(asset_or_value, str):
+        return exposure_label(effective_exposure_for_asset(asset_or_value))
+    return exposure_label(effective_exposure(asset_or_value, exposure))
 
 
 def framework_label(value: str | None) -> str:
@@ -846,6 +913,7 @@ def register_jinja_filters(env: Any) -> None:
     env.filters["severity_label"] = severity_label
     env.filters["environment_label"] = environment_label
     env.filters["exposure_label"] = exposure_label
+    env.filters["effective_exposure_label"] = effective_exposure_label
     env.filters["framework_label"] = framework_label
     env.filters["frameworks_label"] = frameworks_label
     env.filters["humanize"] = humanize
@@ -867,4 +935,6 @@ def register_jinja_filters(env: Any) -> None:
     env.globals["plural"] = plural
     env.globals["automated_run_header"] = automated_run_header
     env.globals["recommendation_to_bullets"] = recommendation_to_bullets
+    env.globals["effective_exposure"] = effective_exposure_for_asset
+    env.globals["effective_exposure_label"] = effective_exposure_label
     env.globals["test_name_label"] = test_name_label

@@ -32,6 +32,46 @@ _XSS_PROTECTION_RE = re.compile(
     r"|xss_deprecated_header|(?:^|[\s,;])10016(?:$|[\s,;:])"
 )
 
+# Expect-CT header retired by browsers (Chrome 107+); never a Medium/Confirmed vuln.
+_EXPECT_CT_RE = re.compile(
+    r"(?i)expect[-_\s]?ct|expect\.?ct[.\-_]?header|(?:^|[\s,;/])expect-ct(?:$|[\s,;:])"
+)
+
+# SPF on a name without MX (often subdomain noise; apex may inherit/manage mail).
+_SPF_NO_MX_RE = re.compile(
+    r"(?i)(?:dns[/\s:_-]*spf|spf\s+record).{0,80}without\s+mx"
+    r"|no\s+spf\s+record\s+on\s+host\s+without\s+mx"
+    r"|(?:^|[\s,;/])dns-spf(?:$|[\s,;:])"
+)
+
+# DANE/TLSA missing — impractical without DNSSEC (e.g. Cloudflare proxy).
+_DANE_TLSA_RE = re.compile(
+    r"(?i)(?:no\s+)?dane(?:\s*\(?\s*tlsa\s*\)?)?"
+    r"|no\s+tlsa\s+record"
+    r"|(?:^|[\s,;/])dns-tlsa(?:$|[\s,;:])"
+    r"|tlsa\s*\(dane\)"
+)
+
+# HTTPS already enforced (redirect / HTTPS-only) — no SSL-strip PoC assumed.
+_HTTPS_ENFORCEMENT_RE = re.compile(
+    r"(?i)(?:\b(?:301|308)\b).{0,100}https://"
+    r"|location:\s*https://"
+    r"|redirect(?:s|ed|ing)?\s+(?:permanently\s+)?(?:to\s+)?https"
+    r"|http\s*(?:to|→|->)\s*https"
+    r"|upgrades?\s+to\s+https"
+    r"|https[-\s]?only"
+    r"|http\s+not\s+served"
+    r"|permanent\s+redirect.{0,60}https"
+)
+
+# Confirmed SSL-strip / MITM downgrade path — do not auto-cap HSTS severity.
+_SSL_STRIP_POC_RE = re.compile(
+    r"(?i)ssl[-\s]?strip|sslstrip"
+    r"|mitm\s+downgrade|downgrade\s+attack\s+confirm"
+    r"|confirmed\s+(?:ssl\s+)?stripp"
+    r"|exploit(?:ed|ation)?\s+path.{0,60}(?:hsts|https|ssl\s*strip)"
+)
+
 _WEAK_CIPHER_RE = re.compile(r"(?i)weak[-\s]?cipher|weak\s+cipher\s+suites|cipher\s+suite")
 
 # Suite tokens: IANA TLS_/SSL_ names, OpenSSL hyphenated suites, or algorithm markers.
@@ -100,6 +140,37 @@ def _has_cipher_suite_evidence(blobs: list[str]) -> bool:
     return False
 
 
+def _blob_has(pattern: re.Pattern[str], blobs: list[str]) -> bool:
+    for blob in blobs:
+        if blob and pattern.search(blob):
+            return True
+    return False
+
+
+def _has_ssl_strip_poc(blobs: list[str]) -> bool:
+    """True when evidence claims a confirmed SSL-strip / MITM downgrade path."""
+    return _blob_has(_SSL_STRIP_POC_RE, blobs)
+
+
+def _has_https_enforcement_evidence(blobs: list[str], location: str = "") -> bool:
+    """True when evidence shows HTTP→HTTPS redirect or HTTPS-only serving."""
+    if _blob_has(_HTTPS_ENFORCEMENT_RE, blobs):
+        return True
+    # Bare https:// location alone is not enough (HSTS checks already run on HTTPS).
+    _ = location
+    return False
+
+
+def _is_spf_without_mx(title: str, description: str, rule_blob: str) -> bool:
+    blob = f"{title}\n{description}\n{rule_blob}"
+    return bool(_SPF_NO_MX_RE.search(blob))
+
+
+def _is_dane_tlsa_missing(title: str, description: str, rule_blob: str) -> bool:
+    blob = f"{title}\n{description}\n{rule_blob}"
+    return bool(_DANE_TLSA_RE.search(blob))
+
+
 def classify_observation(
     *,
     title: str,
@@ -118,13 +189,19 @@ def classify_observation(
 
     Never hardcodes engagement finding IDs. Scanner alerts default to unvalidated.
     """
-    _ = (recommendation, severity, cwe, rule_ids, tools)  # reserved for future rules
+    _ = (recommendation, cwe, tools)  # reserved for future rules
     reasons: list[str] = []
     title_s = title or ""
     desc_s = description or ""
     loc = location or ""
     evidence_blobs = _joined_evidence(evidence_refs, evidence_texts)
     evidence_joined = "\n".join(evidence_blobs)
+    # Title/description count as context for HTTPS-enforcement / SSL-strip signals.
+    context_blobs = list(evidence_blobs)
+    if desc_s:
+        context_blobs.append(desc_s)
+    if title_s:
+        context_blobs.append(title_s)
 
     # 1. Infrastructure Cloudflare cookie SameSite / cookie findings.
     if is_infrastructure_cookie_finding(title_s, param or "", loc, evidence_joined):
@@ -159,6 +236,24 @@ def classify_observation(
             clear_injection_mapping=True,
         )
 
+    # 3b. Expect-CT obsolete (Chrome 107+); never Confirmed and never a Medium vuln.
+    expect_blob = f"{title_s}\n{desc_s}\n{rule_blob}"
+    if _EXPECT_CT_RE.search(expect_blob):
+        reasons.append(
+            "Expect-CT is deprecated and retired by browsers (Chrome 107+); "
+            "Certificate Transparency is enforced via CT logs, not this header"
+        )
+        return _empty_result(
+            INFORMATIONAL,
+            reasons,
+            severity="info",
+            cwe=693,
+            owasp_top10="A05:2021-Security Misconfiguration",
+            asvs_ref="V14.4.3",
+            wstg_ref="WSTG-CONF-12",
+            clear_injection_mapping=True,
+        )
+
     # 4. Header-missing claims on CDN/challenge URLs (not the application origin).
     claim = finding_claims_header_missing(title_s, desc_s)
     if claim and is_cdn_challenge_url(loc):
@@ -178,6 +273,38 @@ def classify_observation(
             "Evidence shows Permissions-Policy present; contradicts 'Permissions-Policy not set'"
         )
         return _empty_result(NOT_REPRODUCIBLE, reasons)
+
+    # 5b. HSTS-missing honesty: no Medium/CVSS-5 default without SSL-strip PoC.
+    # HTTPS redirect / HTTPS-only evidence → informational (grade −20 skipped via validation).
+    # Otherwise stay unvalidated at Low so site-grade −20 can still apply.
+    if claim == "hsts" and not _has_ssl_strip_poc(context_blobs):
+        if _has_https_enforcement_evidence(context_blobs, loc):
+            reasons.append(
+                "Missing HSTS on HTTPS-only / HTTP→HTTPS redirect target without SSL-strip PoC; "
+                "hardening observation (Low/informational), not a confirmed exploit path"
+            )
+            return _empty_result(INFORMATIONAL, reasons, severity="low")
+        reasons.append(
+            "Missing HSTS without SSL-strip PoC; severity capped to Low "
+            "(not Medium/CVSS 5.0 by default)"
+        )
+        return _empty_result(UNVALIDATED, reasons, severity="low")
+
+    # 5c. SPF on host without MX — subdomain noise; apex often owns mail posture.
+    if _is_spf_without_mx(title_s, desc_s, rule_blob):
+        reasons.append(
+            "No MX on this host; SPF is often inherited or managed at the apex/root domain — "
+            "informational unless this name sends mail"
+        )
+        return _empty_result(INFORMATIONAL, reasons, severity="info")
+
+    # 5d. DANE/TLSA missing — impractical without DNSSEC (e.g. Cloudflare).
+    if _is_dane_tlsa_missing(title_s, desc_s, rule_blob):
+        reasons.append(
+            "DANE/TLSA is impractical without DNSSEC (commonly unavailable on Cloudflare "
+            "proxy setups) — informational optional hardening"
+        )
+        return _empty_result(INFORMATIONAL, reasons, severity="info")
 
     # 6. Weak cipher without suite names in evidence (or description extractors).
     weak_blob = f"{title_s}\n{desc_s}\n{rule_blob}"

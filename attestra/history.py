@@ -159,35 +159,30 @@ def _fingerprints_and_sev(
         loc = nf.location or location_fallback
         param = nf.param
         variant = getattr(nf, "variant", "") or ""
-        # Same grouping as import (ZAP: one finding per rule per origin).
+        # Same grouping as import (ZAP origin + CSP directive unification).
+        from attestra.fingerprint import canonicalize_for_merge
+
+        merge_kwargs = canonicalize_for_merge(
+            location=loc,
+            cwe=nf.cwe,
+            cves=list(nf.cves or []),
+            title=nf.title or "",
+            param=param,
+            package=nf.package,
+            asset_id=asset_id,
+            variant=variant,
+            tool=nf.tool,
+            rule_key=nf.rule_id or "",
+        )
         grp = group_kwargs(tool=nf.tool, location=loc, param=param, variant=variant, rule_key=nf.rule_id or "")
-        if grp is not None:
-            loc, param, variant = grp
         try:
-            fp = fingerprint(
-                location=loc,
-                cwe=nf.cwe,
-                cves=nf.cves,
-                title=nf.title,
-                param=param,
-                package=nf.package,
-                asset_id=asset_id,
-                variant=variant,
-            )
+            fp = fingerprint(**merge_kwargs)
         except (ValueError, TypeError):
             # Masked/redacted locations in stored evidence can break URL parsing.
-            fp = fingerprint(
-                location=location_fallback or "unknown",
-                cwe=nf.cwe,
-                cves=nf.cves,
-                title=nf.title,
-                param=param,
-                package=nf.package,
-                asset_id=asset_id,
-                variant=variant,
-            )
-        if grp is not None and fp in fps:
-            continue  # another URL of an already-counted grouped finding
+            merge_kwargs = {**merge_kwargs, "location": location_fallback or "unknown"}
+            fp = fingerprint(**merge_kwargs)
+        if (grp is not None or merge_kwargs.get("variant") == "csp:weak-or-incomplete") and fp in fps:
+            continue  # another URL / CSP subtype of an already-counted finding
         fps.add(fp)
         by_sev[nf.severity] += 1
     return fps, by_sev

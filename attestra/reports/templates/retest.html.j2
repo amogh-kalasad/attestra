@@ -33,7 +33,7 @@
 <table>
   <tr><th>Environment URL</th><th>Type</th><th>Environment</th><th>Exposure</th></tr>
   {% for a in eng.assets %}
-  <tr><td class="mono">{{ a.identifier }}</td><td>{{ asset_kind_label(a.kind) if asset_kind_label is defined else a.kind }}</td><td>{{ a.environment|environment_label }}</td><td>{{ a.exposure|exposure_label }}</td></tr>
+  <tr><td class="mono">{{ a.identifier }}</td><td>{{ asset_kind_label(a.kind) if asset_kind_label is defined else a.kind }}</td><td>{{ a.environment|environment_label }}</td><td>{{ effective_exposure_label(a) if effective_exposure_label is defined else a.exposure|exposure_label }}</td></tr>
   {% else %}<tr><td colspan="4">No assets recorded.</td></tr>{% endfor %}
 </table>
 

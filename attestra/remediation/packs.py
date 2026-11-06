@@ -144,8 +144,110 @@ REMEDIATION_PACKS: dict[str, Pack] = {
         "importance": "High",
         "effort": "Hard",
     },
+    "csp:weak-or-incomplete": {
+        "concept": "csp:weak-or-incomplete",
+        "title_match": [
+            "weak or incomplete content security policy",
+            "csp: script-src unsafe-inline",
+            "csp: script-src unsafe-eval",
+            "csp: style-src unsafe-inline",
+            "csp: form-action",
+            "csp: object-src",
+            "csp: frame-ancestors",
+            "csp: default-src",
+            "csp: base-uri",
+            "unsafe-inline",
+            "unsafe-eval",
+            "weak content security policy",
+            "weak csp",
+            "incomplete content security policy",
+        ],
+        "root_cause": (
+            "The Content-Security-Policy is missing required directives and/or allows "
+            "weak sources (unsafe-inline, unsafe-eval, http:, wildcards). Treat these "
+            "as one incomplete policy, not separate Medium findings per directive."
+        ),
+        "recommended_fix": (
+            "Ship one tightened CSP (Report-Only first). Work the directive checklist "
+            "below; do not paste an identical default-src-only Cloudflare block for "
+            "every sub-issue. Allow-list only hosts the app actually needs "
+            "(for example Cloudflare Turnstile / challenges.cloudflare.com and other "
+            "CDN script hosts when those widgets are in use).\n\n"
+            "Directive checklist:\n"
+            "- default-src 'self' (or a tight fallback)\n"
+            "- script-src: remove 'unsafe-inline' and 'unsafe-eval'; prefer nonces/hashes; "
+            "add Turnstile/CDN hosts only when required\n"
+            "- style-src: prefer nonces/hashes over 'unsafe-inline'\n"
+            "- object-src 'none'\n"
+            "- base-uri 'self'\n"
+            "- frame-ancestors 'self' (or 'none')\n"
+            "- form-action 'self' (https only; never http:)\n"
+            "- img-src / font-src / connect-src: explicit allow-lists as needed"
+        ),
+        "config_examples": {
+            "nginx": (
+                "# Tune with Report-Only; add widget hosts only when required.\n"
+                'add_header Content-Security-Policy-Report-Only '
+                "\"default-src 'self'; script-src 'self' 'nonce-REPLACE' "
+                "https://challenges.cloudflare.com; style-src 'self' 'nonce-REPLACE'; "
+                "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; "
+                "form-action 'self'; img-src 'self' data:\" always;"
+            ),
+            "apache": (
+                "Header always set Content-Security-Policy-Report-Only "
+                "\"default-src 'self'; script-src 'self' 'nonce-REPLACE' "
+                "https://challenges.cloudflare.com; style-src 'self' 'nonce-REPLACE'; "
+                "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; "
+                "form-action 'self'; img-src 'self' data:\""
+            ),
+            "cloudflare": (
+                "Transform Rules → Modify Response Header: set a single "
+                "Content-Security-Policy-Report-Only covering the checklist above. "
+                "Include challenges.cloudflare.com (Turnstile) and any other CDN "
+                "script hosts only when evidence shows they are required; do not "
+                "reuse a bare default-src 'self' block as the only fix for every "
+                "directive finding."
+            ),
+            "app": (
+                "Generate a per-response nonce, attach it to script/style tags, and "
+                "put the same nonce in script-src/style-src. Do not fall back to "
+                "unsafe-inline. Keep form-action and frame-ancestors explicit."
+            ),
+        },
+        "code_example": (
+            "# Pseudocode: per-response nonce + Turnstile host when needed\n"
+            "nonce = secrets.token_urlsafe(16)\n"
+            "csp = (\n"
+            "    f\"default-src 'self'; script-src 'self' 'nonce-{nonce}' \"\n"
+            "    \"https://challenges.cloudflare.com; \"\n"
+            "    f\"style-src 'self' 'nonce-{nonce}'; object-src 'none'; \"\n"
+            "    \"base-uri 'self'; frame-ancestors 'self'; form-action 'self'\"\n"
+            ")\n"
+            "response.headers['Content-Security-Policy'] = csp\n"
+            '# Render: <script nonce="{nonce}">...</script>'
+        ),
+        "compatibility": (
+            "Strict CSP breaks inline handlers, style attributes, and third-party "
+            "widgets until nonces/hashes or allow-listed hosts are configured. "
+            "Turnstile and similar CDN challenges need their script hosts on "
+            "script-src (and often frame-src) or the widget fails."
+        ),
+        "verification_steps": (
+            "Confirm one CSP (or Report-Only) covers the checklist; no unsafe-inline/"
+            "unsafe-eval on scripts; object-src/base-uri/frame-ancestors/form-action "
+            "present; load critical UI including Turnstile/CDN widgets and check the "
+            "browser console for violations."
+        ),
+        "retest_instructions": (
+            "Re-scan; confirm fragmented CSP directive alerts fold into one "
+            "Weak or Incomplete CSP finding that clears, and UI flows still work."
+        ),
+        "importance": "High",
+        "effort": "Hard",
+    },
+    # Alias: older Phase 7 key resolves to the unified CSP pack.
     "header:csp-weak": {
-        "concept": "header:csp-weak",
+        "concept": "csp:weak-or-incomplete",
         "title_match": [
             "csp: script-src unsafe-inline",
             "csp: script-src unsafe-eval",
@@ -156,50 +258,37 @@ REMEDIATION_PACKS: dict[str, Pack] = {
             "weak csp",
         ],
         "root_cause": (
-            "A Content-Security-Policy is present but uses weak directives "
-            "(for example script-src 'unsafe-inline' or 'unsafe-eval'), which "
-            "largely defeats XSS containment."
+            "The Content-Security-Policy is missing required directives and/or allows "
+            "weak sources (unsafe-inline, unsafe-eval, http:, wildcards). Treat these "
+            "as one incomplete policy, not separate Medium findings per directive."
         ),
         "recommended_fix": (
-            "Remove 'unsafe-inline' and 'unsafe-eval' from script-src. Prefer "
-            "nonces or hashes; tighten object-src 'none' and base-uri 'self'. "
-            "Iterate with Report-Only before enforcing."
+            "Ship one tightened CSP (Report-Only first). Work the directive checklist "
+            "on the csp:weak-or-incomplete pack; allow-list Turnstile/CDN script hosts "
+            "only when required. Do not paste an identical default-src-only Cloudflare "
+            "block for every sub-issue."
         ),
         "config_examples": {
-            "nginx": (
-                'add_header Content-Security-Policy '
-                "\"default-src 'self'; script-src 'self' 'nonce-REPLACE'; "
-                "object-src 'none'; base-uri 'self'\" always;"
-            ),
-            "apache": (
-                "Header always set Content-Security-Policy "
-                "\"default-src 'self'; script-src 'self' 'nonce-REPLACE'; "
-                "object-src 'none'; base-uri 'self'\""
+            "cloudflare": (
+                "Use the unified CSP pack checklist (object-src, frame-ancestors, "
+                "form-action, nonces). Include challenges.cloudflare.com only when "
+                "Turnstile is in use."
             ),
             "app": (
-                "Generate a per-response nonce, attach it to script tags, and put "
-                "the same nonce in script-src. Do not fall back to unsafe-inline."
+                "Generate a per-response nonce; remove unsafe-inline/unsafe-eval; "
+                "set object-src 'none', base-uri 'self', frame-ancestors, form-action."
             ),
         },
-        "code_example": (
-            "# Pseudocode: per-response nonce\n"
-            "nonce = secrets.token_urlsafe(16)\n"
-            "response.headers['Content-Security-Policy'] = (\n"
-            "    f\"default-src 'self'; script-src 'self' 'nonce-{nonce}'\"\n"
-            ")\n"
-            '# Render: <script nonce="{nonce}">...</script>'
-        ),
         "compatibility": (
-            "Removing unsafe-inline breaks pages that still inject inline event "
-            "handlers or style attributes; migrate those to external files or nonces."
+            "Removing unsafe-inline breaks inline handlers until nonces/hashes land; "
+            "CDN widgets need explicit script hosts."
         ),
         "verification_steps": (
-            "Confirm CSP no longer contains unsafe-inline/unsafe-eval for scripts; "
-            "load the app and check the browser console for CSP violations."
+            "Confirm CSP no longer contains unsafe-inline/unsafe-eval for scripts and "
+            "required directives are present; check the browser console."
         ),
         "retest_instructions": (
-            "Re-run the CSP weakness check; confirm the weak directive finding is gone "
-            "and UI flows still work under the tightened policy."
+            "Re-run CSP checks; confirm one Weak or Incomplete CSP finding clears."
         ),
         "importance": "High",
         "effort": "Hard",
@@ -442,6 +531,61 @@ REMEDIATION_PACKS: dict[str, Pack] = {
         "retest_instructions": (
             "Re-check response headers for X-XSS-Protection. Separately retest any "
             "actual XSS findings after encoding/CSP fixes."
+        ),
+        "importance": "Low",
+        "effort": "Easy",
+    },
+    "header:expect-ct-deprecated": {
+        "concept": "header:expect-ct-deprecated",
+        "title_match": [
+            "expect-ct header not set",
+            "expect-ct header",
+            "expect ct header",
+            "expect-ct",
+            "expect ct",
+        ],
+        "root_cause": (
+            "Expect-CT is an obsolete HTTP header. Modern browsers (Chrome 107+) no "
+            "longer enforce it; Certificate Transparency is required through CT logs "
+            "and browser built-in policies, not this response header."
+        ),
+        "recommended_fix": (
+            "No action is required for a missing Expect-CT header. If the header is "
+            "still sent, remove it to reduce noise. Do not add Expect-CT, and do not "
+            "treat this finding as a Content-Security-Policy gap — CSP / "
+            "CSP-Report-Only and Cloudflare CSP transforms are unrelated."
+        ),
+        "config_examples": {
+            "nginx": (
+                "# Expect-CT is obsolete — prefer removing any leftover header.\n"
+                "# (Do not add Content-Security-Policy here for this finding.)\n"
+                "proxy_hide_header Expect-CT;"
+            ),
+            "apache": (
+                "# Expect-CT is obsolete — unset if inherited.\n"
+                "Header unset Expect-CT"
+            ),
+            "iis": (
+                "Remove any custom Expect-CT entry. Do not add CSP headers as a "
+                "substitute for this obsolete check."
+            ),
+            "cloudflare": (
+                "Transform Rules → Modify Response Header: remove Expect-CT if present. "
+                "Do not set Content-Security-Policy or CSP-Report-Only as remediation "
+                "for Expect-CT."
+            ),
+        },
+        "compatibility": (
+            "Removing or omitting Expect-CT has no impact on current browsers. CT "
+            "enforcement does not depend on this header."
+        ),
+        "verification_steps": (
+            "curl -sI https://example.com | grep -i expect-ct; absence is expected "
+            "and acceptable."
+        ),
+        "retest_instructions": (
+            "Confirm Expect-CT is absent (or intentionally removed). Do not open a "
+            "CSP remediation ticket from this finding alone."
         ),
         "importance": "Low",
         "effort": "Easy",
@@ -878,9 +1022,18 @@ REMEDIATION_PACKS: dict[str, Pack] = {
 }
 
 
+_CSP_PACK_ALIASES = {
+    "header:csp-weak": "csp:weak-or-incomplete",
+}
+
+
 def pack_for_concept(concept: str) -> Pack | None:
     """Return the remediation pack for an exact concept key, or None."""
     if not concept:
         return None
-    pack = REMEDIATION_PACKS.get(str(concept).strip())
+    key = str(concept).strip()
+    key = _CSP_PACK_ALIASES.get(key, key)
+    pack = REMEDIATION_PACKS.get(key)
+    if pack is None and key != concept:
+        pack = REMEDIATION_PACKS.get(str(concept).strip())
     return dict(pack) if pack else None

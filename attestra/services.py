@@ -708,6 +708,14 @@ def add_asset(
         raise ServiceError("criticality must be 1..5")
     if exposure not in ("internet", "internal"):
         raise ServiceError("exposure must be 'internet' or 'internal'")
+    # Public https FQDNs must not be stored as Internal (scope exposure honesty).
+    try:
+        from attestra.reports.labels import looks_like_public_https_fqdn
+
+        if exposure == "internal" and looks_like_public_https_fqdn(identifier):
+            exposure = "internet"
+    except Exception:  # noqa: BLE001 — labels optional during early import
+        pass
     allowed = allowed_test_types_for(eng.type)
     if test_types:
         tests = list(dict.fromkeys(test_types))
@@ -1355,20 +1363,40 @@ def import_results(
         )
         s.add(obs)
 
-    from attestra.finding_normalize import normalize_cwe_for_import
+    from attestra.finding_normalize import (
+        CSP_CANONICAL_TITLE,
+        append_csp_observation,
+        is_csp_weak_or_incomplete,
+        normalize_cwe_for_import,
+        normalize_severity_for_import,
+    )
 
     for nf, asset in matched:
         asset_id = asset.id if asset else None
         variant = getattr(nf, "variant", "") or ""
-        # Remap deprecated XSS-Protection CWE-79 → 693 before fingerprint/soft-match
-        # so Nuclei/ZAP hardening alerts do not collide with reflected XSS.
+        # Remap deprecated XSS-Protection / Expect-CT CWE-79 → 693 before fingerprint
+        # / soft-match so hardening alerts do not collide with reflected XSS or CSP.
         remapped = normalize_cwe_for_import(
             title=nf.title or "",
             rule_id=getattr(nf, "rule_id", "") or "",
             cwe=nf.cwe,
+            description=getattr(nf, "description", "") or "",
         )
         if remapped != nf.cwe:
             nf.cwe = remapped
+        sev_cap = normalize_severity_for_import(
+            title=nf.title or "",
+            rule_id=getattr(nf, "rule_id", "") or "",
+            description=getattr(nf, "description", "") or "",
+            severity=nf.severity,
+        )
+        if sev_cap and sev_cap != nf.severity:
+            nf.severity = sev_cap
+        csp_hit = is_csp_weak_or_incomplete(
+            title=nf.title or "",
+            rule_id=getattr(nf, "rule_id", "") or "",
+            variant=variant,
+        )
         raw_kwargs = dict(
             location=nf.location,
             cwe=nf.cwe,
@@ -1381,11 +1409,16 @@ def import_results(
         )
         # CAA: webcheck dns-caa and testssl DNS_CAArecord share one merge key (R15).
         # ZAP: one finding per rule per origin; each URL is an observation + affected URL.
+        # CSP directive subtypes share one fingerprint (csp:weak-or-incomplete).
         merge_kwargs = canonicalize_for_merge(**raw_kwargs, tool=nf.tool, rule_key=nf.rule_id or "")
         grp = group_kwargs(
             tool=nf.tool, location=nf.location, param=nf.param, variant=variant, rule_key=nf.rule_id or ""
         )
         group_origin = grp[0] if grp is not None else ""
+        if csp_hit and not group_origin:
+            from attestra.fingerprint import url_origin as _url_origin
+
+            group_origin = _url_origin(nf.location or "") or ""
         fp = fingerprint(**merge_kwargs)
         f = existing.get(fp)
         match_confidence = 1.0 if f is not None else None
@@ -1451,8 +1484,14 @@ def import_results(
                 match_confidence = soft.confidence
                 match_rationale = f"soft:{soft.rationale}"
                 # Align fingerprint to the canonical row's key so later exact matches stick.
+                if csp_hit and f.fingerprint != fp:
+                    old_fp = f.fingerprint
+                    if old_fp in existing and existing.get(old_fp) is f:
+                        del existing[old_fp]
+                    f.fingerprint = fp
                 if f.fingerprint not in existing:
                     existing[f.fingerprint] = f
+                existing[fp] = f
             elif kind == "ambiguous" and soft.finding is not None:
                 possible_dup = soft.finding.id
                 match_confidence = soft.confidence
@@ -1465,12 +1504,16 @@ def import_results(
             continue
         added_cross_tool = False
         if f is None:
+            create_title = CSP_CANONICAL_TITLE if csp_hit else (nf.title or "")[:500]
+            create_desc = nf.description or ""
+            if csp_hit:
+                create_desc = append_csp_observation(create_desc, nf.title or "")
             f = Finding(
                 engagement_id=engagement_id,
                 asset_id=asset.id if asset else None,
                 fingerprint=fp,
-                title=nf.title[:500],
-                description=nf.description,
+                title=create_title[:500],
+                description=create_desc,
                 recommendation=nf.recommendation,
                 tools=[nf.tool],
                 rule_ids=[nf.rule_id] if nf.rule_id else [],
@@ -1515,15 +1558,18 @@ def import_results(
             if group_origin:
                 urls = list(f.affected_urls or [])
                 zap_only = set(f.tools or []) <= GROUPED_TOOLS
-                if zap_only and not urls and f.location and f.location != group_origin:
+                if (zap_only or csp_hit) and not urls and f.location and f.location != group_origin:
                     # Adopted pre-grouping per-URL row: keep its URL in the list.
                     urls.append(f.location)
                 entry = affected_entry(nf.location, nf.param)[:1000]
                 if entry and entry not in urls and len(urls) < AFFECTED_URLS_CAP:
                     urls.append(entry)
                 f.affected_urls = urls
-                if zap_only:
+                if zap_only or csp_hit:
                     f.location = group_origin[:1000]
+            if csp_hit:
+                f.title = CSP_CANONICAL_TITLE[:500]
+                f.description = append_csp_observation(f.description or "", nf.title or "")
             if is_cert_expiry_variant(variant):
                 # Band change (30→14→7) updates the same row: title and severity in place.
                 f.title = nf.title[:500]

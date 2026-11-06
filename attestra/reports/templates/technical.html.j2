@@ -101,7 +101,7 @@
     <td>{{ asset_kind_label(a.kind) if asset_kind_label is defined else a.kind }}</td>
     <td>{{ a.environment|environment_label }}</td>
     <td>{{ a.criticality }}/5</td>
-    <td>{{ a.exposure|exposure_label }}</td>
+    <td>{{ effective_exposure_label(a) if effective_exposure_label is defined else a.exposure|exposure_label }}</td>
     <td>{{ "Yes" if a.in_cde else "No" }}</td>
     <td>{% if a.test_types %}{% if test_type_label is defined %}{% for k in a.test_types %}{{ test_type_label(k) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}{{ a.test_types|join(", ") }}{% endif %}{% else %}—{% endif %}</td>
   </tr>
@@ -368,7 +368,7 @@ CVSS vector and version appear on individual findings when available.</p>
       · Validation: <b>{{ vlabel }}</b>
       · Priority / Business risk {{ "%.1f"|format(f.risk_score) }}{% if f.business_risk %} ({{ f.business_risk|severity_label }}){% endif %}
       · Fix by {% if f.sla_due %}{{ f.sla_due|format_date }}{% else %}—{% endif %}
-      {% if f.asset and f.asset.exposure == "internet" %} · <span class="sev chip-internet">Internet-facing</span>{% endif %}
+      {% if f.asset and (effective_exposure(f.asset) if effective_exposure is defined else f.asset.exposure) == "internet" %} · <span class="sev chip-internet">Internet-facing</span>{% endif %}
     </div>
     {% if f.cvss_score is not none or f.cvss_vector or f.epss is not none or f.kev or f.business_risk %}
     <table class="finding-meta">

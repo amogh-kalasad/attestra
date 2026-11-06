@@ -613,10 +613,10 @@ def _csp_source_key(token: str) -> str:
 
 
 def check_csp_policy(headers: dict[str, str], location: str) -> tuple[list[dict], list[dict]]:
-    """C10: one finding per CSP issue (unsafe-*, wildcard, http:, missing directives).
+    """C10: emit one observation per CSP issue (unsafe-*, wildcard, http:, missing directives).
 
-    Variants use ``csp:{directive}:{issue}`` so they merge with ZAP 10055 alerts that
-    use the same semantic variant. ``param`` is Content-Security-Policy (ZAP style).
+    Import canonicalize collapses these into one ``csp:weak-or-incomplete`` finding per
+    origin (with ZAP 10055). ``param`` is Content-Security-Policy (ZAP style).
     """
     from attestra.checks import FAILED, PASSED, SKIPPED, check_row
 
@@ -772,7 +772,7 @@ def check_hsts_present(headers: dict[str, str], location: str, *, scheme: str) -
     return _finding(
         "hsts-present",
         "HSTS header missing on HTTPS",
-        "medium",
+        "low",
         319,
         f"HTTPS response has no usable Strict-Transport-Security header. Evidence: {sts or '(missing)'}",
         location,
@@ -1026,15 +1026,20 @@ def check_http_no_redirect(
 
 
 def check_expect_ct(headers: dict[str, str], location: str) -> dict | None:
-    if _header(headers, "expect-ct"):
+    # Expect-CT is obsolete (Chrome 107+). Absence is correct — only flag leftovers.
+    val = _header(headers, "expect-ct")
+    if not val:
         return None
     return _finding(
         "expect-ct",
-        "Expect-CT header not set",
+        "Expect-CT header present (obsolete)",
         "info",
         693,
-        "Expect-CT header is not set on the primary response.",
+        "Expect-CT is deprecated and retired by browsers (Chrome 107+). "
+        "Certificate Transparency is enforced via CT logs, not this header. "
+        f"Evidence: Expect-CT: {val}",
         location,
+        "Remove the leftover Expect-CT header. Do not add CSP / CSP-Report-Only for this finding.",
     )
 
 
@@ -1188,7 +1193,7 @@ def evaluate_primary(
     named = (
         (check_server_disclosure, "server-disclosure", "Server header not disclosing software", False),
         (check_x_xss_protection, "x-xss-protection", "X-XSS-Protection not set (legacy)", False),
-        (check_expect_ct, "expect-ct", "Expect-CT header", False),
+        (check_expect_ct, "expect-ct", "Expect-CT absent (obsolete header)", False),
         (check_waf_none_seen, "waf-none-seen", "WAF or CDN signature seen", False),
     )
     for fn, cid, name, _only_when_csp in named:

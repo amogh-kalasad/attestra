@@ -81,6 +81,8 @@ Exposes: `cvss_version`, `cvss_vector`, `cvss_score`, `severity` (technical), `r
 
 `grade.py` does not apply the HSTS-missing penalty when the claiming finding is `not_reproducible` / `informational` (or related validation FP) or when engagement evidence shows `Strict-Transport-Security` with max-age. The check still counts as tested (pass), not `not_tested`.
 
+**Gemini grade choice:** missing-HSTS severity defaults to Low (not Medium/CVSS 5.0) without an SSL-strip PoC. HTTPS-redirect / HTTPS-only cases classify as `informational` and therefore skip −20. Unvalidated Low HSTS-missing still applies −20 — severity honesty first; grade softens only through `validation_status`.
+
 ## Report honesty
 
 Technical summary open-vuln KPIs exclude informational / not_reproducible validation observations. Risk legend distinguishes CVSS technical severity from priority/business risk.

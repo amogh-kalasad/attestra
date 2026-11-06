@@ -460,7 +460,7 @@ def check_evidence_integrity(ctx: QaContext) -> None:
 
 
 def check_remediation_relevance(ctx: QaContext) -> None:
-    """Permissions-Policy / COEP / COOP / CORP must not get CSP-only remediations."""
+    """Permissions-Policy / Expect-CT / COEP / COOP / CORP must not get CSP-only remediations."""
     from attestra.library.fix_snippets import rejects_csp_guidance_for_finding
 
     for f in ctx.reportable:
@@ -508,7 +508,7 @@ def check_remediation_relevance(ctx: QaContext) -> None:
             ctx.add(
                 "remediation_csp_mismatch",
                 "critical",
-                "Remediation text looks CSP-only for a Permissions-Policy / COEP / COOP / CORP / CORS / HSTS finding",
+                "Remediation text looks CSP-only for a Permissions-Policy / Expect-CT / COEP / COOP / CORP / CORS / HSTS finding",
                 finding_id=fid,
             )
 
@@ -542,6 +542,60 @@ def check_test_coverage(ctx: QaContext) -> None:
             f"Coverage claims {pct}% endpoints while skipped={skipped} blocked={blocked}",
             details={"coverage_pct_endpoints": pct, "skipped": skipped, "blocked": blocked},
         )
+
+
+def check_coverage_zero_endpoints(ctx: QaContext) -> None:
+    """Technical security-testing reports must not claim coverage with zero endpoints tested."""
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    if ctx.kind != "technical":
+        return
+    from attestra import services
+
+    snap = None
+    try:
+        snap = services.engagement_coverage_snapshot(ctx.s, ctx.engagement.id)
+    except Exception:  # noqa: BLE001
+        snap = None
+    tested = int((snap or {}).get("endpoints_tested") or 0)
+    discovered = int((snap or {}).get("endpoints_discovered") or 0)
+    if tested > 0:
+        return
+    # Sealed HTML that still presents a Security testing coverage chapter with zeros.
+    html_has_section = (
+        'id="security-testing-coverage"' in (ctx.html or "").lower()
+        or "id='security-testing-coverage'" in (ctx.html or "").lower()
+        or "security testing coverage" in (ctx.html or "").lower()
+    )
+    if not snap and not html_has_section:
+        return
+    ctx.add(
+        "coverage_zero_endpoints",
+        "critical",
+        "Technical security testing report has endpoints_tested=0 (coverage empty); "
+        "do not present empty coverage as completed security testing",
+        details={
+            "endpoints_tested": tested,
+            "endpoints_discovered": discovered,
+            "html_has_coverage_section": html_has_section,
+        },
+    )
+
+
+def check_all_findings_unvalidated(ctx: QaContext) -> None:
+    """Client-facing reports must not leave every reportable finding Unvalidated."""
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    if not ctx.reportable:
+        return
+    statuses = [_validation_status_of(f) for f in ctx.reportable]
+    if not all(s in ("", "unvalidated") for s in statuses):
+        return
+    ctx.add(
+        "all_findings_unvalidated",
+        "critical",
+        f"All {len(ctx.reportable)} reportable finding(s) are Unvalidated; "
+        "client-facing finals must not be entirely unvalidated",
+        details={"count": len(ctx.reportable)},
+    )
 
 
 def check_skipped_blocked(ctx: QaContext) -> None:
@@ -689,6 +743,8 @@ ALL_CHECKS: list[Callable[[QaContext], None]] = [
     check_evidence_integrity,
     check_remediation_relevance,
     check_test_coverage,
+    check_coverage_zero_endpoints,
+    check_all_findings_unvalidated,
     check_skipped_blocked,
     check_site_grade,
     check_missing_content,

@@ -2963,6 +2963,42 @@ When on-disk evidence bytes no longer match the stored sha256, QA raises critica
 
 A Permissions-Policy finding with CSP-only remediation text is flagged `remediation_csp_mismatch`.
 
+## Gemini review corrections
+
+QA gates, scope exposure honesty, and local tenant email typo fix from Gemini technical-report review (`tests/test_review_corrections.py`).
+
+### Public https FQDN not Internal
+
+[[attestra/reports/labels.py#looks_like_public_https_fqdn]] / [[attestra/reports/labels.py#effective_exposure]] map public https FQDNs to internet/External, never Internal.
+
+### Report scope shows External
+
+Technical sealed HTML scope table shows External (not Internal) when a public https asset was stored as internal.
+
+### add_asset coerces public https
+
+[[attestra/services.py#add_asset]] stores `internet` when exposure would be internal for a public https FQDN.
+
+### Zero endpoints critical
+
+Technical reports with `endpoints_tested=0` raise critical `coverage_zero_endpoints` from [[attestra/reports/qa/checks.py#check_coverage_zero_endpoints]].
+
+### All unvalidated critical
+
+When every reportable finding is Unvalidated, QA raises critical `all_findings_unvalidated`.
+
+### QA approve blocked
+
+`qa_approve` raises ServiceError and leaves status submitted when the new review criticals are present.
+
+### Prepared gate passes
+
+After seeding a visited endpoint and confirming findings, those two criticals are absent.
+
+### gamil email fix
+
+`scripts/fix_gemini_review_data.py` rewrites tenant `contact_email` `gamil.com` → `gmail.com` (and public-https assets marked internal → internet).
+
 ## World-class Phase 10 ENG1 V21
 
 ENG1 technical report v21 regression anchors for the final world-class VA + PT phase (`tests/test_eng1_v21_regression.py`; doc `docs/WORLDCLASS_VAPT_PHASE10_ENG1_V21.md`).
@@ -3194,3 +3230,67 @@ Finding normalize / CONCEPT_RULES keep deprecated XSS-Protection distinct from r
 ### Normalize Permissions-Policy not CSP
 
 Permissions-Policy missing normalizes to its own concept key, never CSP-missing/weak.
+
+## Review corrections (Expect-CT CSP HSTS)
+
+Gemini review corrections for obsolete Expect-CT, CSP unification, and HSTS/SPF/DANE honesty (`tests/test_review_corrections.py`).
+
+### Expect-CT obsolete informational
+
+Expect-CT missing/present titles classify as informational with deprecated/Chrome 107+ reasons, severity info, CWE-693, and never Confirmed.
+
+### Expect-CT remediation not CSP
+
+Expect-CT resolves to `header:expect-ct-deprecated` pack (obsolete; no CSP/CSP-Report-Only); `rejects_csp_guidance_for_finding` blocks CSP-only guidance.
+
+### CSP concepts unify
+
+Multiple CSP directive titles (unsafe-eval, unsafe-inline, form-action http, missing object-src/frame-ancestors) normalize to `csp:weak-or-incomplete`; header-not-set stays `header:csp-missing`.
+
+### CSP import merges
+
+Importing several CSP directive findings on one origin yields a single Weak or Incomplete CSP finding with observation bullets and no Confirmed validation invented.
+
+### CSP fingerprints collide
+
+[[attestra/fingerprint.py#canonicalize_for_merge]] forces shared `csp:weak-or-incomplete` variant so directive subtypes share one fingerprint per origin/asset.
+
+### CSP pack checklist
+
+Unified CSP remediation pack includes a directive checklist and Turnstile/CDN host guidance; `header:csp-weak` aliases to it.
+
+### HSTS missing caps to low
+
+Missing-HSTS without SSL-strip PoC classifies unvalidated at Low, never Medium/CVSS 5.0 by default.
+
+### HSTS HTTPS redirect informational
+
+Missing-HSTS with HTTP→HTTPS redirect / HTTPS-only evidence classifies informational at Low.
+
+### HSTS SSL-strip keeps medium
+
+Confirmed SSL-strip / MITM downgrade evidence leaves HSTS-missing uncapped (default unvalidated).
+
+### Normalize HSTS severity default
+
+[[attestra/finding_normalize.py#normalize_severity_for_import]] caps HSTS-missing Medium→Low unless SSL-strip PoC text is present.
+
+### Webcheck HSTS default low
+
+[[attestra/runner/scanners/webcheck.py#check_hsts_present]] emits severity Low (aligned with library seed).
+
+### SPF without MX informational
+
+SPF-missing on a host without MX classifies informational with apex/root-domain inheritance reason.
+
+### DANE TLSA informational
+
+Missing DANE/TLSA classifies informational (impractical without DNSSEC / Cloudflare).
+
+### Grade HSTS informational skips
+
+After classify marks HSTS informational, site-grade skips the HSTS-missing −20 via validation_status.
+
+### Grade unvalidated low still penalizes
+
+Unvalidated Low HSTS-missing (no redirect evidence) still applies grade −20; severity honesty first.

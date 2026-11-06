@@ -7,6 +7,9 @@ Suppressed / false-positive findings do not take points off.
 Accepted-risk findings still count. Expired/invalid certificate caps the grade at F.
 HSTS-missing fail is skipped when validation_status is not_reproducible /
 informational / validation FP, or when HTTP evidence shows HSTS present.
+Classify marks HTTPS-only / HTTP→HTTPS HSTS-missing (no SSL-strip PoC) as
+informational so −20 is skipped; plain unvalidated Low HSTS-missing still
+takes −20 (severity honesty first; grade softens only via validation_status).
 tls_weak_cipher fail is skipped when validation_status is informational /
 not_reproducible / validation FP / accepted_risk, or needs_manual_validation
 without cipher-suite names in evidence (ENG1 F-10 honesty).

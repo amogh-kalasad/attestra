@@ -5,7 +5,7 @@
 <h1>{{ asset.name or asset.identifier }}</h1>
 <p class="meta mono">{{ asset.identifier }} · {{ asset.kind }} · {{ asset.environment or "production" }} ·
   Criticality {{ asset.criticality }}/5 ·
-  {{ "Internet-facing" if asset.exposure == "internet" else "Internal" if asset.exposure == "internal" else asset.exposure }}
+  {% set exp = effective_exposure(asset) if effective_exposure is defined else asset.exposure %}{{ "Internet-facing" if exp == "internet" else "Internal" if exp == "internal" else exp }}
 </p>
 
 {% set prole = principal.role if principal else "" %}

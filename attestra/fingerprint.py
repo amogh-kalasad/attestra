@@ -152,6 +152,22 @@ def canonicalize_for_merge(
             "asset_id": asset_id,
             "variant": CERT_EXPIRY_VARIANT,
         }
+    # CSP directive / incomplete-policy subtypes share one key (Gemini review).
+    try:
+        from attestra.finding_normalize import csp_fingerprint_kwargs, is_csp_weak_or_incomplete
+
+        if is_csp_weak_or_incomplete(title=title, rule_id=rule_key, variant=variant):
+            return csp_fingerprint_kwargs(
+                location=location,
+                cwe=cwe,
+                cves=cves,
+                title=title,
+                param=param,
+                package=package,
+                asset_id=asset_id,
+            )
+    except Exception:  # noqa: BLE001 — sibling may be mid-edit; never block import
+        pass
     grp = group_kwargs(tool=tool, location=location, param=param, variant=variant, rule_key=rule_key)
     if grp is not None:
         location, param, variant = grp

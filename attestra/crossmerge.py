@@ -83,6 +83,15 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
         "zap": [(r"^10038$", r"content security policy \(csp\) header not set")],
         "nuclei": [(rf"^{_H}:content-security-policy$", r"")],
     },
+    # Fragmented CSP directive / incomplete-policy alerts → one concept (Gemini review).
+    "csp:weak-or-incomplete": {
+        "zap": [(r"^10055$", r"")],
+        "webcheck": [(r"^(?:webcheck/)?csp:", r""), (r"^csp:", r"")],
+        "nuclei": [
+            (r"^(?:weak-csp-detect|csp-[a-z0-9_-]*(?:wildcard|unsafe)[a-z0-9_-]*)(?::.*)?$", r""),
+        ],
+        "observatory": [(r"^content-security-policy$", r"^csp:")],
+    },
     "header:x-frame-options-missing": {
         "zap": [(r"^10020$", r"missing anti-clickjacking header")],
         "nuclei": [(rf"^{_H}:x-frame-options$", r"")],
@@ -121,6 +130,11 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
         "nuclei": [(r"^xss-deprecated-header(:.*)?$", r"")],
         "webcheck": [(r"^webcheck/x-xss-protection$", r"")],
         "observatory": [(r"^observatory/x-xss-protection$", r"")],
+    },
+    # Obsolete Expect-CT (Chrome 107+) — not CSP-missing / CSP Injection.
+    "header:expect-ct-deprecated": {
+        "webcheck": [(r"^webcheck/expect-ct$", r"")],
+        "nuclei": [(r"^expect[-_]?ct(:.*)?$", r"expect[-_]?ct")],
     },
     # --- CORS / cross-domain (ZAP 10098; Observatory CORS test) ---
     "cors:misconfiguration": {
@@ -174,10 +188,15 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
         "nuclei": [(r"^revoked-ssl-certificate$", r"")],
     },
 }
-# CSP weaknesses with identical semantics in ZAP 10055 and webcheck C10 titles.
-# Kept distinct from header:csp-missing (10038 / nuclei content-security-policy).
-_CSP_WEAK_TITLE = re.compile(r"^csp: ([a-z-]+) (unsafe-inline|unsafe-eval)$", re.IGNORECASE)
-_CSP_WEAK_TOOLS = frozenset({"zap", "webcheck"})
+# CSP directive / incomplete-policy alerts (ZAP 10055, webcheck csp:*, nuclei weak-csp).
+# Unified under csp:weak-or-incomplete; kept distinct from header:csp-missing (10038).
+_CSP_WEAK_TITLE = re.compile(
+    r"(?i)^csp:\s|"
+    r"weak (?:or incomplete )?content security policy|"
+    r"incomplete content security policy"
+)
+_CSP_WEAK_TOOLS = frozenset({"zap", "webcheck", "nuclei", "observatory"})
+_CSP_UNIFIED = "csp:weak-or-incomplete"
 
 
 def _compile_concept_rules(
@@ -307,10 +326,20 @@ def concepts_for(f: Any, obs: list[Any]) -> frozenset[str]:
             for rx_rule, rx_title in per_tool.get(tool, []):
                 if rx_rule.search(rid) and rx_title.search(title.strip()):
                     found.add(concept)
-        if tool in _CSP_WEAK_TOOLS:
-            m = _CSP_WEAK_TITLE.match(title.strip())
-            if m:
-                found.add(f"csp:{m.group(1).lower()}:{m.group(2).lower()}")
+        if tool in _CSP_WEAK_TOOLS and _CSP_WEAK_TITLE.search(title.strip()):
+            found.add(_CSP_UNIFIED)
+        # Rule-id path for webcheck csp:* / ZAP 10055 when title is nonstandard.
+        if not any(c == _CSP_UNIFIED for c in found):
+            try:
+                from attestra.finding_normalize import (
+                    CSP_WEAK_OR_INCOMPLETE,
+                    is_csp_weak_or_incomplete,
+                )
+
+                if is_csp_weak_or_incomplete(title=title, rule_id=rid):
+                    found.add(CSP_WEAK_OR_INCOMPLETE)
+            except Exception:  # noqa: BLE001
+                pass
     return frozenset(found)
 
 

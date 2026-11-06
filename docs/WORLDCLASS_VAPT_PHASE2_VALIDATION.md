@@ -39,8 +39,16 @@ Workflow `status` (`new` / `triaged` / `validated` / …) is unchanged by classi
 | SameSite on `cf_clearance` / CF cookies | informational |
 | Permissions-Policy missing on cdn-cgi | informational |
 | HSTS missing vs evidence with max-age | not_reproducible (classify + reconcile) |
+| HSTS missing, no SSL-strip PoC | severity Low (not Medium/CVSS 5.0); unvalidated |
+| HSTS missing + HTTP→HTTPS / HTTPS-only evidence, no SSL-strip PoC | informational, severity Low (grade −20 skipped via validation_status) |
+| SPF on host without MX (subdomain) | informational (apex/root often owns mail posture) |
+| DANE/TLSA missing | informational (impractical without DNSSEC / Cloudflare) |
 | Weak ciphers without suite names | needs_manual_validation |
 | XSS-Protection → CWE-79 / Injection | informational, CWE 693, A05, severity info |
+
+### Grade choice (HSTS −20)
+
+Severity/risk honesty first. Classify + `normalize_severity_for_import` / webcheck+Observatory defaults keep missing-HSTS at **Low**. When classify marks the finding **informational** (HTTPS redirect / HTTPS-only without SSL-strip PoC), existing grade rules skip the HSTS-missing −20. Plain **unvalidated** Low HSTS-missing still takes −20.
 
 ---
 

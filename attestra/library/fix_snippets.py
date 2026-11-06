@@ -24,7 +24,7 @@ FIX_FIELD_KEYS = (
     "snippet_cloudflare",
 )
 
-# Header concepts that must never receive CSP-only library guidance (ENG1 F-7).
+# Header concepts that must never receive CSP-only library guidance (ENG1 F-7 / Expect-CT).
 NON_CSP_HEADER_CONCEPTS = frozenset({
     "permissions-policy",
     "coep",
@@ -32,6 +32,7 @@ NON_CSP_HEADER_CONCEPTS = frozenset({
     "corp",
     "cors",
     "hsts",
+    "expect-ct",
 })
 _CSP_ONLY_MARKERS = (
     "content-security-policy",
@@ -53,6 +54,7 @@ _HEADER_OWN_MARKERS: dict[str, tuple[str, ...]] = {
         "cross-domain",
     ),
     "hsts": ("strict-transport-security", "hsts", "includeSubDomains", "max-age="),
+    "expect-ct": ("expect-ct", "expect ct"),
 }
 
 # Built-in fix text keyed by seed title. Merged into SEED on load / seed_defaults.
@@ -762,9 +764,10 @@ def header_concept_for_text(*texts: str) -> str | None:
     blob = " ".join(t for t in texts if t).lower()
     if not blob:
         return None
-    # Order matters: more specific cross-origin headers before generic "cors".
+    # Order matters: more specific headers (incl. Expect-CT) before generic CSP/cors.
     checks: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("permissions-policy", _HEADER_OWN_MARKERS["permissions-policy"]),
+        ("expect-ct", _HEADER_OWN_MARKERS["expect-ct"]),
         ("coep", ("cross-origin-embedder-policy", "coep")),
         ("coop", ("cross-origin-opener-policy", "coop")),
         ("corp", ("cross-origin-resource-policy", "corp")),
@@ -808,6 +811,7 @@ def guidance_looks_csp_only(
     # Own-header markers mean it is not CSP-only (e.g. CSP + frame-ancestors for clickjacking).
     own = (
         "permissions-policy",
+        "expect-ct",
         "cross-origin-embedder-policy",
         "cross-origin-opener-policy",
         "cross-origin-resource-policy",
@@ -820,7 +824,7 @@ def guidance_looks_csp_only(
 
 
 def rejects_csp_guidance_for_finding(finding: Any, guidance: dict[str, Any] | None) -> bool:
-    """Reject library/seed guidance that is CSP-only for PP/COEP/COOP/CORP/CORS/HSTS."""
+    """Reject library/seed guidance that is CSP-only for PP/Expect-CT/COEP/COOP/CORP/CORS/HSTS."""
     if not guidance:
         return False
     concept = header_concept_for_text(
@@ -989,8 +993,8 @@ def iis_xml_ok(text: str) -> bool:
 def match_seed_guidance(finding: Any) -> dict[str, Any] | None:
     """Best built-in SEED guidance for a finding (rule id, then CWE, then title).
 
-    Skips CSP-only seed rows when the finding is Permissions-Policy / COEP / COOP /
-    CORP / CORS / HSTS so CWE collisions cannot attach the wrong header fix.
+    Skips CSP-only seed rows when the finding is Permissions-Policy / Expect-CT /
+    COEP / COOP / CORP / CORS / HSTS so CWE collisions cannot attach the wrong header fix.
     """
     from attestra.library.seed import SEED
 

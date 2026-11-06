@@ -27,7 +27,7 @@ _TEST_MAP: dict[str, tuple[str, str, str, int, str]] = {
     "strict-transport-security": (
         "hsts-present",
         "HSTS header missing or weak (Observatory)",
-        "medium",
+        "low",
         319,
         "Send Strict-Transport-Security with a positive max-age on HTTPS responses.",
     ),

@@ -159,12 +159,20 @@ templates.env.filters["dt"] = format_dt
 templates.env.filters["label"] = label
 templates.env.filters["fw_name"] = fw_name
 templates.env.filters["type_label"] = engagement_type_label
+from attestra.reports.labels import (  # noqa: E402 - exposure honesty helpers for scope UI
+    effective_exposure_for_asset as _effective_exposure,
+    effective_exposure_label as _effective_exposure_label,
+)
+
+templates.env.filters["effective_exposure_label"] = _effective_exposure_label
 templates.env.globals.update(
     type_labels=ENGAGEMENT_TYPE_LABELS,
     role_labels=ROLE_LABELS,
     can=has_permission,
     tz_label=TZ_LABEL,
     detected_by=detected_by_label,
+    effective_exposure=_effective_exposure,
+    effective_exposure_label=_effective_exposure_label,
 )
 from attestra.runner import crawl as _crawl  # noqa: E402 - crawl settings helpers for templates
 

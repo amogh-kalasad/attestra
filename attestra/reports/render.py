@@ -830,6 +830,47 @@ def _security_testing_coverage_context(s: Session, eng: Engagement) -> dict:
     return {"security_testing_coverage": snap}
 
 
+def _annotate_scope_exposure(assets) -> list:
+    """Wrap assets so public https FQDNs never render Exposure as Internal."""
+    # @lat: [[reports#Display labels]]
+    from attestra.persistence.mongo import report_reads
+    from attestra.reports import labels as report_labels
+
+    out: list = []
+    for a in assets or []:
+        wrapped = report_reads.Annotatable(a)
+        wrapped.exposure = report_labels.effective_exposure(
+            getattr(a, "identifier", None),
+            getattr(a, "exposure", None),
+        )
+        out.append(wrapped)
+    return out
+
+
+def _apply_exposure_honesty(eng: Engagement, findings: list) -> Engagement:
+    """Annotate engagement assets and finding.asset exposure for report templates."""
+    # @lat: [[reports#Display labels]]
+    from attestra.persistence.mongo import report_reads
+    from attestra.reports import labels as report_labels
+
+    eng_view = report_reads.Annotatable(eng)
+    eng_view.assets = _annotate_scope_exposure(getattr(eng, "assets", None) or [])
+    for f in findings or []:
+        asset = getattr(f, "asset", None)
+        if asset is None:
+            continue
+        wrapped = report_reads.Annotatable(asset)
+        wrapped.exposure = report_labels.effective_exposure(
+            getattr(asset, "identifier", None),
+            getattr(asset, "exposure", None),
+        )
+        try:
+            f.asset = wrapped
+        except Exception:  # noqa: BLE001 — read-only proxies
+            pass
+    return eng_view
+
+
 def _safe_to_host_context(eng: Engagement, open_critical_high: int) -> dict:
     """Safe-to-Host letter fields for attestation; never claims compliance certification."""
     # @lat: [[reports#Safe-to-Host attestation]]
@@ -946,6 +987,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         reportable, observations_by_finding, imports, scan_history
     )
     retest_requests = _retest_request_rows(retests_by_finding, flabel)
+    eng = _apply_exposure_honesty(eng, reportable)
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -1225,6 +1267,8 @@ def render_html(
     ctx.setdefault("severity_label", report_labels.severity_label)
     ctx.setdefault("environment_label", report_labels.environment_label)
     ctx.setdefault("exposure_label", report_labels.exposure_label)
+    ctx.setdefault("effective_exposure", report_labels.effective_exposure_for_asset)
+    ctx.setdefault("effective_exposure_label", report_labels.effective_exposure_label)
     ctx.setdefault("framework_label", report_labels.framework_label)
     ctx.setdefault("frameworks_label", report_labels.frameworks_label)
     ctx.setdefault("humanize", report_labels.humanize)

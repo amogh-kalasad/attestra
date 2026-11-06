@@ -163,6 +163,27 @@ def score_observation_against_finding(
         score += 0.05
         reasons.append("same_title_host")
 
+    # CSP directive subtypes (unsafe-inline / missing object-src / …) share one concept.
+    try:
+        from attestra.finding_normalize import (
+            is_csp_weak_or_incomplete,
+            security_context_key,
+        )
+
+        obs_csp = is_csp_weak_or_incomplete(title=title)
+        find_csp = is_csp_weak_or_incomplete(
+            title=finding.title or "",
+            rule_ids=list(finding.rule_ids or []),
+        )
+        if obs_csp and find_csp:
+            o_ctx = security_context_key(location or "", title)
+            f_ctx = security_context_key(finding.location or "", finding.title or "")
+            if o_ctx and o_ctx == f_ctx:
+                score = max(score, MERGE_THRESHOLD)
+                reasons.append("csp_concept_context")
+    except Exception:  # noqa: BLE001 — never block soft-match
+        pass
+
     score = max(0.0, min(1.0, score))
     rationale = "+".join(reasons) if reasons else "no_signals"
     return MatchResult(score, rationale, finding)

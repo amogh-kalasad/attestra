@@ -35,11 +35,17 @@ _NO_URL_GROUPING = frozenset({"", "automated_vapt", "manual", "evidence"})
 # concept -> (canonical title, {tool: [(rule/original-id regex, title regex)]})
 _REPORT_CONCEPTS: dict[str, tuple[str, dict[str, list[tuple[str, str]]]]] = {
     "report:csp-weak": (
-        "Weak Content Security Policy (CSP)",
+        "Weak or Incomplete Content Security Policy (CSP)",
         {
             "zap": [(r"^10055(-\d+)?$", r"")],
             "nuclei": [(r"^(weak-csp-detect|csp-[a-z0-9-]*(wildcard|unsafe)[a-z0-9-]*)(:.*)?$", r"")],
-            "webcheck": [(r"", r"^csp: .*(unsafe-inline|unsafe-eval|wildcard)")],
+            "webcheck": [
+                (
+                    r"",
+                    r"^csp: .*(unsafe-inline|unsafe-eval|wildcard|http:|directive missing)|"
+                    r"^weak or incomplete content security policy",
+                )
+            ],
         },
     ),
     "report:hsts-weak": (
@@ -339,7 +345,7 @@ def _report_concept(rows: list[Any], obs_by: dict[int, list[Any]]) -> str | None
     concepts: set[str] = set()
     for f in rows:
         concepts |= set(crossmerge.concepts_for(f, obs_by.get(f.id, [])))
-    csp = {c for c in concepts if c.startswith("csp:")}
+    csp = {c for c in concepts if c.startswith("csp:") or c in {"header:csp-weak"}}
     if csp and csp == concepts:
         return "report:csp-weak"
     if len(concepts) == 1:
@@ -411,9 +417,8 @@ def consolidate(s: Any, findings: list[Any], obs_by: dict[int, list[Any]] | None
         for i in idxs:
             all_members.extend(entries[i][1])
         tools = {t for m in all_members for t in _tools(m)}
-        if len(tools) < 2:
-            # One scanner's distinct rules (e.g. ZAP 10055 unsafe-eval vs unsafe-inline) stay
-            # separate; this pass only removes overlap *between* tools.
+        # Same-tool CSP directive fragments also fold into one Weak/Incomplete CSP entry.
+        if len(tools) < 2 and concept != "report:csp-weak":
             continue
         canon = _REPORT_COMPILED.get(concept, (None,))[0]
         title = canon
