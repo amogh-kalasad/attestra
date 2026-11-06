@@ -147,7 +147,11 @@ pre.http-pair {{ background-color: {SURFACE_ALT}; padding: 6pt 8pt; page-break-i
 .evidence-img {{ width: 14.5cm; max-height: 16cm; border: 0.4pt solid {RULE}; margin: 4pt 0 2pt 0; }}
 .fig-caption {{ color: {QUIET}; font-size: 8pt; margin: 0 0 8pt 0; page-break-before: avoid; }}
 footer {{ margin-top: 18pt; color: {QUIET}; font-size: 8pt; line-height: 1.5; border-top: 0.4pt solid {RULE}; padding-top: 6pt; }}
-#pdf-footer {{ color: {QUIET}; font-size: 7pt; text-align: center; }}
+#pdf-footer {{ color: {QUIET}; font-size: 7pt; }}
+#pdf-footer .pdf-footer-table {{ width: 100%; border-collapse: collapse; border: none !important; margin: 0; padding: 0; }}
+#pdf-footer .pdf-footer-table td {{ border: none !important; background-color: transparent !important; padding: 0; vertical-align: middle; color: {QUIET}; font-size: 7pt; }}
+#pdf-footer .pdf-footer-left {{ text-align: left; }}
+#pdf-footer .pdf-footer-right {{ text-align: right; }}
 /* Allow KPI+chart to split; page-break-inside avoid caused KeepInFrame LayoutError. */
 .summary-posture {{ margin: 2pt 0 6pt 0; page-break-inside: auto; }}
 .overview-sev-summary {{ width: 100%; margin: 4pt 0 8pt 0; }}

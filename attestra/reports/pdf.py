@@ -180,7 +180,7 @@ def _kpis_to_table(html: str) -> str:
 
 
 _TABLE = re.compile(
-    r'(?is)<table(?![^>]*(?:class="(?:kpis|cover-band|cover-meta|cover-foot|cover-spacer|finding-meta|'
+    r'(?is)<table(?![^>]*(?:class="(?:kpis|cover-band|cover-meta|cover-foot|cover-spacer|pdf-footer-table|finding-meta|'
     r'finding-facts|finding-refs|overview-sev-summary)"))([^>]*)>(.*?)</table>'
 )
 _ROW = re.compile(r"(?is)<tr[^>]*>(.*?)</tr>")
@@ -707,7 +707,7 @@ def _inject_severity_bars(html: str) -> str:
 
 
 _DATA_TABLE = re.compile(
-    r'(?is)<table(?![^>]*(?:class="(?:kpis|finding-meta|finding-facts|finding-refs|cover-band|cover-meta|cover-foot|cover-spacer|overview-sev-summary)"))([^>]*)>(.*?)</table>'
+    r'(?is)<table(?![^>]*(?:class="(?:kpis|finding-meta|finding-facts|finding-refs|cover-band|cover-meta|cover-foot|cover-spacer|pdf-footer-table|overview-sev-summary)"))([^>]*)>(.*?)</table>'
 )
 
 
@@ -850,11 +850,20 @@ def _upgrade_cover(html: str) -> str:
                 _plain(x)
                 for x in re.findall(r'(?is)<p[^>]*class="[^"]*\bmeta\b[^"]*"[^>]*>(.*?)</p>', inner)
             ]
-            client = assessment = eng_no = window = version = date = "—"
+            client = expert = assessment = eng_no = window = version = date = "—"
             for line in metas:
                 low = line.lower()
-                if low.startswith("client:"):
-                    client = line.split(":", 1)[1].strip() or client
+                if low.startswith("client:") or low.startswith("client name:"):
+                    raw_client = line.split(":", 1)[1].strip() or client
+                    # Legacy mashed "Client name · Expert <email>" → two fields.
+                    if "·" in raw_client or "•" in raw_client:
+                        left, right = re.split(r"\s*[·•]\s*", raw_client, maxsplit=1)
+                        client = left.strip() or client
+                        expert = right.strip() or expert
+                    else:
+                        client = raw_client
+                if low.startswith("vapt expert:"):
+                    expert = line.split(":", 1)[1].strip() or expert
                 if "assessment type:" in low:
                     if "·" in line or "•" in line:
                         for bit in re.split(r"\s*[·•]\s*", line):
@@ -895,12 +904,13 @@ def _upgrade_cover(html: str) -> str:
                 f"<h1>{escape(doc_title)}</h1>"
                 f"<p>{escape(eng_name)}</p>"
                 f'<table class="cover-meta">'
-                f"<tr><th>Client</th><td>{escape(client)}</td>"
+                f"<tr><th>Client name</th><td>{escape(client)}</td>"
                 f"<th>Assessment type</th><td>{escape(assessment)}</td></tr>"
-                f"<tr><th>Engagement #</th><td>{escape(eng_no)}</td>"
-                f"<th>Window</th><td>{escape(window)}</td></tr>"
-                f"<tr><th>Version</th><td>{escape(version)}</td>"
-                f"<th>Date</th><td>{escape(date)}</td></tr>"
+                f"<tr><th>VAPT Expert</th><td>{escape(expert)}</td>"
+                f"<th>Engagement #</th><td>{escape(eng_no)}</td></tr>"
+                f"<tr><th>Window</th><td>{escape(window)}</td>"
+                f"<th>Version</th><td>{escape(version)}</td></tr>"
+                f"<tr><th>Date</th><td colspan=\"3\">{escape(date)}</td></tr>"
                 f"</table>"
                 f"{_COVER_SPACER_HTML}"
                 f'<table class="cover-foot" width="100%" cellpadding="0" cellspacing="0">'
@@ -946,6 +956,43 @@ def _ensure_cover_spacer(html: str) -> str:
     )
 
 
+def _split_mashed_cover_client(html: str) -> str:
+    """Split legacy cover-meta Client cell ``Name · Expert <email>`` into two rows.
+
+    No-op when the cover already has a VAPT Expert row (new template).
+    """
+    if re.search(r"(?is)<th[^>]*>\s*VAPT Expert\s*</th>", html):
+        return html
+
+    def repl(m: re.Match) -> str:
+        td_html = m.group(1)
+        rest = m.group(2) or ""
+        plain = re.sub(r"(?is)<[^>]+>", " ", td_html)
+        plain = (
+            re.sub(r"\s+", " ", plain)
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&#183;", "·")
+            .strip()
+        )
+        if not re.search(r"[·•]", plain):
+            return f"<th>Client name</th><td>{td_html}</td>{rest}"
+        left, right = re.split(r"\s*[·•]\s*", plain, maxsplit=1)
+        return (
+            f"<th>Client name</th><td>{escape(left.strip())}</td>{rest}"
+            f"<tr><th>VAPT Expert</th><td>{escape(right.strip())}</td>"
+            f"<th></th><td></td></tr>"
+        )
+
+    return re.sub(
+        r"(?is)<th[^>]*>\s*Client\s*</th>\s*<td[^>]*>(.*?)</td>"
+        r"(\s*<th[^>]*>.*?</th>\s*<td[^>]*>.*?</td>)?",
+        repl,
+        html,
+        count=1,
+    )
+
+
 def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2pdf") -> str:
     """Return a print-ready copy of the sealed report HTML (the input is not modified)."""
     title = title_case(_title_of(html))
@@ -955,6 +1002,7 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
     out = re.sub(r"(?is)<br>\s*Page numbers appear when printed[^<]*", "", out)
     # Legacy sealed covers get standard chrome on this copy only (disk HTML stays frozen).
     out = _upgrade_cover(out)
+    out = _split_mashed_cover_client(out)
     # Spacer+foot only for engines that keep a body cover-foot; xhtml2pdf strips them.
     if for_engine != "xhtml2pdf":
         out = _ensure_cover_spacer(out)
@@ -1006,16 +1054,24 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
     if for_engine == "xhtml2pdf":
         # Page footer only — no running “Security assessment report” header on any page.
         # Cover navy bar is body `.cover-band` on page 1 (ATTESTRA | Confidential).
-        chrome = (
-            '<div id="pdf-footer">Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></div>'
-        )
-        out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + chrome, out, count=1)
         # Tag finding cards with severity accent classes when the sealed HTML only has .finding.
         out = _annotate_finding_severity(out)
-        # Last, so injected legend / disclaimer tables get the same badges, zebra, and column sizing.
+        # Legend / disclaimer tables get badges, zebra, and column sizing.
         out = _badges(out)
         out = _zebra_tables(out)
         out = _size_columns(out)
+        # Footer chrome last so zebra/size_columns never touch the split footer table.
+        # Left: Confidential · Page X of Y; right: Powered by Attestra (xhtml2pdf align=).
+        chrome = (
+            '<div id="pdf-footer">'
+            '<table class="pdf-footer-table" width="100%" cellpadding="0" cellspacing="0">'
+            "<tr>"
+            '<td class="pdf-footer-left" align="left" width="68%">'
+            "Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></td>"
+            '<td class="pdf-footer-right" align="right" width="32%">Powered by Attestra</td>'
+            "</tr></table></div>"
+        )
+        out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + chrome, out, count=1)
     elif for_engine == "weasyprint":
         extra_css = (
             f"@page {{ size: A4; margin: 18mm 14mm 20mm; "

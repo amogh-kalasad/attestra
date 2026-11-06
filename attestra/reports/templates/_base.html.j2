@@ -140,22 +140,26 @@
   <h1>{{ (cover_title or (kind_meta.label if kind_meta and kind_meta.label else (kind|replace("_", " ") ~ " report")))|words_title }}</h1>
   <table class="cover-meta">
     <tr>
-      <th>Client</th>
-      <td>{{ tenant }}{% if contact_name %} · {{ contact_name }}{% endif %}{% if contact_email %} &lt;{{ contact_email }}&gt;{% endif %}</td>
+      <th>Client name</th>
+      <td>{{ (cover_client or tenant)|words_title }}</td>
       <th>Assessment type</th>
       <td>{{ type_label }}</td>
     </tr>
     <tr>
+      <th>VAPT Expert</th>
+      <td>{% if contact_name %}{{ contact_name }}{% else %}—{% endif %}{% if contact_email %} &lt;{{ contact_email }}&gt;{% endif %}</td>
       <th>Engagement #</th>
       <td>{{ eng.id }}</td>
-      <th>Window</th>
-      <td>{{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</td>
     </tr>
     <tr>
+      <th>Window</th>
+      <td>{{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</td>
       <th>Version</th>
       <td>{{ version }}</td>
+    </tr>
+    <tr>
       <th>Date</th>
-      <td>{{ today }}</td>
+      <td colspan="3">{{ today }}</td>
     </tr>
   </table>
 </section>
