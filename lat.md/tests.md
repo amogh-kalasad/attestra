@@ -3231,6 +3231,34 @@ Finding normalize / CONCEPT_RULES keep deprecated XSS-Protection distinct from r
 
 Permissions-Policy missing normalizes to its own concept key, never CSP-missing/weak.
 
+## v21 review gaps (header remediation)
+
+Regression coverage so COEP/COOP/CORP/PP/XPCD never share identical CSP nginx remediation (`tests/test_v21_review_gaps.py`).
+
+### Own pack per header
+
+Each of Permissions-Policy, COEP, COOP, CORP, and X-Permitted-Cross-Domain-Policies resolves to its own pack concept with matching nginx text and no CSP markers.
+
+### Seed BY_TITLE not CSP
+
+[[attestra/library/fix_snippets.py#BY_TITLE]] / [[attestra/library/fix_snippets.py#match_seed_guidance]] snippets for those titles name the matching header, not Content-Security-Policy.
+
+### Rejects CSP-only guidance
+
+[[attestra/library/fix_snippets.py#rejects_csp_guidance_for_finding]] returns true when CSP-only seed text is offered for those finding titles.
+
+### Guidance never CSP-only
+
+[[attestra/library/service.py#guidance_for_finding]] returns own-header nginx/fix steps for those titles and never CSP-only guidance.
+
+### Nginx snippets distinct
+
+Pack nginx examples for the five headers are pairwise distinct (no shared CSP block).
+
+### XPCD not CORS concept
+
+X-Permitted-Cross-Domain-Policies maps to `header:x-permitted-cross-domain-missing` / concept `x-permitted-cross-domain`, never CORS.
+
 ## Review corrections (Expect-CT CSP HSTS)
 
 Gemini review corrections for obsolete Expect-CT, CSP unification, and HSTS/SPF/DANE honesty (`tests/test_review_corrections.py`).
@@ -3294,3 +3322,135 @@ After classify marks HSTS informational, site-grade skips the HSTS-missing −20
 ### Grade unvalidated low still penalizes
 
 Unvalidated Low HSTS-missing (no redirect evidence) still applies grade −20; severity honesty first.
+
+## Review corrections (ZAP notices and static cache)
+
+Gemini v21: ZAP SPA/session-mgmt notices and static/CDN cache alerts must not count as open Medium vulns (`tests/test_review_corrections_zap_noise.py`).
+
+### ZAP 10109 Modern Web informational
+
+ZAP rule 10109 / Modern Web Application titles classify informational at severity info.
+
+### ZAP 10112 Session Management informational
+
+ZAP rule 10112 / Session Management Response Identified classifies informational (scanner debug hook).
+
+### Cache on Next static informational
+
+Non-Storable / cache alerts on `/_next/static` webpack chunks classify informational.
+
+### Cache-Control on css informational
+
+Cache-control directive alerts on Next.js CSS assets classify informational.
+
+### Retrieved from Cache robots informational
+
+Retrieved-from-cache on `robots.txt` classifies informational.
+
+### Cache on cdn-cgi informational
+
+Storable/cacheable alerts on cdn-cgi / challenge-platform URLs classify informational.
+
+### App HTML cache stays unvalidated
+
+Cache-control on non-static app pages stays unvalidated for analyst triage.
+
+### CF cookie still informational
+
+SameSite on `cf_clearance` remains informational (CDN harden regression).
+
+### ZAP parse forces info severity
+
+[[attestra/importers/zap.py#_force_informational_severity]] caps 10109/10112 and static-cache plugins to info on parse.
+
+### Normalize severity caps notices
+
+[[attestra/finding_normalize.py#normalize_severity_for_import]] caps ZAP notices and static/CDN cache to info.
+
+### Informational excluded from open vuln
+
+[[attestra/reports/render.py#_counts_as_open_vuln]] returns false for informational validation so notices never inflate open-vuln KPIs.
+
+## v21 review gaps
+
+Gemini v21 HSTS/clickjacking honesty: cross-finding evidence → not_reproducible and grade −20 skips (`tests/test_v21_hsts_clickjack.py`).
+
+### HSTS cross-finding evidence not_reproducible
+
+HSTS-not-set claims with Strict-Transport-Security max-age in supplied (cross-finding) evidence classify as not_reproducible via [[attestra/finding_validation/classify.py#classify_observation]].
+
+### HSTS missing without evidence stays open
+
+HSTS-missing claims without contradicting evidence remain unvalidated at Low rather than auto-closed.
+
+### Clickjacking XFO evidence not_reproducible
+
+Missing anti-clickjacking with `X-Frame-Options: SAMEORIGIN` evidence classifies as not_reproducible via [[attestra/finding_validation/headers.py#clickjacking_protection_present_in_evidence]].
+
+### Clickjacking frame-ancestors evidence not_reproducible
+
+Missing anti-clickjacking with CSP `frame-ancestors 'self'` (or `'none'` / non-empty value) evidence classifies as not_reproducible.
+
+### Clickjacking DENY evidence not_reproducible
+
+`X-Frame-Options: DENY` in evidence contradicts XFO-not-set / anti-clickjacking missing claims.
+
+### Clickjacking missing without evidence stays open
+
+Anti-clickjacking missing without XFO or frame-ancestors evidence stays unvalidated.
+
+### Grade HSTS evidence elsewhere skips penalty
+
+Site grade skips HSTS-missing −20 when another finding’s description/evidence shows STS max-age ([[attestra/grade.py#score_from_findings]]).
+
+### Grade HSTS not_reproducible skips penalty
+
+HSTS-missing with `validation_status=not_reproducible` does not take the site-grade −20 fail.
+
+### Grade clickjacking evidence skips penalty
+
+Site grade skips clickjacking −20 when cross-finding evidence shows XFO SAMEORIGIN/DENY or CSP frame-ancestors ([[attestra/grade.py#_clickjacking_pass_reason]]).
+
+### Grade clickjacking not_reproducible skips penalty
+
+Anti-clickjacking findings with `validation_status=not_reproducible` skip the clickjacking −20 modifier.
+
+### Grade clickjacking unvalidated still penalizes
+
+Unvalidated anti-clickjacking missing without contradicting evidence still applies grade −20.
+
+### Reconcile alias and cross-finding descriptions
+
+[[attestra/finding_validation/reconcile.py#reconcile_engagement_validation]] aliases [[attestra/finding_validation/reconcile.py#reconcile_validation_from_evidence]] and reclassifies HSTS-missing ORM findings from another finding’s description text (no http_pair required).
+
+### Reconcile clickjacking from evidence note
+
+Batch reconcile marks anti-clickjacking missing as not_reproducible when an evidence note shows `X-Frame-Options: DENY`.
+
+## v21 review gaps (header remediation)
+
+COEP/COOP/CORP/Permissions-Policy/XPCD must keep own-header packs and seeds, never CSP-only nginx (`tests/test_v21_review_gaps.py`).
+
+### Own pack per header
+
+Each header title resolves to its own remediation pack with matching nginx text and never CSP markers.
+
+### Seed BY_TITLE not CSP
+
+Library BY_TITLE / match_seed_guidance snippets name the claimed header, not Content-Security-Policy.
+
+### Rejects CSP-only guidance
+
+`rejects_csp_guidance_for_finding` is true when CSP-only seed text is offered for these header titles.
+
+### Guidance never CSP-only
+
+`guidance_for_finding` returns own-header nginx/fix steps and is not rejected as CSP-only.
+
+### Nginx snippets distinct
+
+COEP/COOP/CORP/PP/XPCD nginx examples are pairwise distinct (no shared CSP paste block).
+
+### XPCD not CORS concept
+
+X-Permitted-Cross-Domain-Policies maps to `header:x-permitted-cross-domain-missing`, never the CORS concept.

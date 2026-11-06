@@ -485,6 +485,56 @@ REMEDIATION_PACKS: dict[str, Pack] = {
         "importance": "Medium",
         "effort": "Easy",
     },
+    "header:x-permitted-cross-domain-missing": {
+        "concept": "header:x-permitted-cross-domain-missing",
+        "title_match": [
+            "x-permitted-cross-domain-policies header missing",
+            "x-permitted-cross-domain-policies header not set",
+            "missing x-permitted-cross-domain-policies",
+            "x-permitted-cross-domain-policies",
+            "permitted-cross-domain-policies",
+        ],
+        "root_cause": (
+            "X-Permitted-Cross-Domain-Policies is not set, so Adobe Flash/PDF clients "
+            "may honor a permissive crossdomain.xml (including uploaded rogue policy "
+            "files) and load cross-domain data from this origin."
+        ),
+        "recommended_fix": (
+            "Send X-Permitted-Cross-Domain-Policies: none unless documented Adobe "
+            "clients must load data via a root crossdomain.xml (then prefer "
+            "master-only). Do not substitute Content-Security-Policy or CORS headers."
+        ),
+        "config_examples": {
+            "nginx": 'add_header X-Permitted-Cross-Domain-Policies "none" always;',
+            "apache": 'Header always set X-Permitted-Cross-Domain-Policies "none"',
+            "iis": (
+                '<add name="X-Permitted-Cross-Domain-Policies" value="none" />'
+            ),
+            "cloudflare": (
+                "Transform Rules → Modify Response Header: set "
+                "X-Permitted-Cross-Domain-Policies to none."
+            ),
+            "app": (
+                "Set X-Permitted-Cross-Domain-Policies: none in application middleware "
+                "unless a documented Flash/PDF cross-domain need requires master-only."
+            ),
+        },
+        "compatibility": (
+            "none blocks all crossdomain.xml policy files, including the master file. "
+            "Sites that still need Adobe cross-domain loading should use master-only "
+            "and lock down the root policy file."
+        ),
+        "verification_steps": (
+            "curl -sI https://example.com | grep -i x-permitted-cross-domain-policies; "
+            "confirm value is none (or intentional master-only)."
+        ),
+        "retest_instructions": (
+            "Confirm X-Permitted-Cross-Domain-Policies is present with the intended "
+            "value and that any required Adobe client flows still succeed."
+        ),
+        "importance": "Low",
+        "effort": "Easy",
+    },
     "header:xss-protection-deprecated": {
         "concept": "header:xss-protection-deprecated",
         "title_match": [

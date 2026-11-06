@@ -460,7 +460,7 @@ def check_evidence_integrity(ctx: QaContext) -> None:
 
 
 def check_remediation_relevance(ctx: QaContext) -> None:
-    """Permissions-Policy / Expect-CT / COEP / COOP / CORP must not get CSP-only remediations."""
+    """PP / Expect-CT / COEP / COOP / CORP / XPCD must not get CSP-only remediations."""
     from attestra.library.fix_snippets import rejects_csp_guidance_for_finding
 
     for f in ctx.reportable:
@@ -508,7 +508,7 @@ def check_remediation_relevance(ctx: QaContext) -> None:
             ctx.add(
                 "remediation_csp_mismatch",
                 "critical",
-                "Remediation text looks CSP-only for a Permissions-Policy / Expect-CT / COEP / COOP / CORP / CORS / HSTS finding",
+                "Remediation text looks CSP-only for a Permissions-Policy / Expect-CT / COEP / COOP / CORP / XPCD / CORS / HSTS finding",
                 finding_id=fid,
             )
 

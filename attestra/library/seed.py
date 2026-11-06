@@ -573,6 +573,34 @@ SEED: list[dict] = [
         ],
     },
     {
+        "title": "X-Permitted-Cross-Domain-Policies Header Missing",
+        "cwe": 693,
+        "default_severity": "info",
+        "tags": ["headers", "x-permitted-cross-domain"],
+        "rule_ids": [
+            "webcheck/x-permitted-cross-domain-policies",
+            "http-missing-security-headers:x-permitted-cross-domain-policies",
+        ],
+        "description": (
+            "Responses omit X-Permitted-Cross-Domain-Policies, so Adobe Flash/PDF "
+            "clients may honor a permissive crossdomain.xml (including uploaded "
+            "rogue policy files)."
+        ),
+        "impact": (
+            "Cross-domain policy files can grant Adobe clients unintended access to "
+            "data on this origin."
+        ),
+        "remediation": (
+            "Send X-Permitted-Cross-Domain-Policies: none unless documented Adobe "
+            "clients need a root crossdomain.xml (then prefer master-only). "
+            "Do not substitute a CSP or CORS header for this finding."
+        ),
+        "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Permitted-Cross-Domain-Policies",
+            "https://owasp.org/www-project-secure-headers/#x-permitted-cross-domain-policies",
+        ],
+    },
+    {
         "title": "Verbose error messages",
         "cwe": 209,
         "default_severity": "low",

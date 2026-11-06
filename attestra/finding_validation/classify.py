@@ -7,14 +7,17 @@ import re
 from typing import Any
 
 from attestra.finding_validation.headers import (
+    clickjacking_protection_present_in_evidence,
     finding_claims_header_missing,
     hsts_present_in_evidence,
     permissions_policy_present_in_evidence,
 )
 from attestra.finding_validation.infrastructure import (
+    is_cache_related_finding,
     is_cdn_challenge_url,
     is_cdn_cors_finding,
     is_infrastructure_cookie_finding,
+    is_static_asset_url,
 )
 from attestra.finding_validation.statuses import (
     CONFIRMED,
@@ -35,6 +38,18 @@ _XSS_PROTECTION_RE = re.compile(
 # Expect-CT header retired by browsers (Chrome 107+); never a Medium/Confirmed vuln.
 _EXPECT_CT_RE = re.compile(
     r"(?i)expect[-_\s]?ct|expect\.?ct[.\-_]?header|(?:^|[\s,;/])expect-ct(?:$|[\s,;:])"
+)
+
+# ZAP scanner notices (not vulnerabilities): Modern Web App / SPA and session-mgmt debug.
+_ZAP_NOTICE_RULE_RE = re.compile(
+    r"(?:^|[\s,;/])(?:10109|10112)(?:$|[\s,;:])"
+)
+_ZAP_MODERN_WEB_RE = re.compile(
+    r"(?i)modern\s+web\s+application|single[-_\s]?page\s+app(?:lication)?|\bSPA\b.{0,40}detect"
+)
+_ZAP_SESSION_MGMT_NOTICE_RE = re.compile(
+    r"(?i)session\s+management\s+response\s+identified"
+    r"|session\s+management\s+token.{0,40}identif"
 )
 
 # SPF on a name without MX (often subdomain noise; apex may inherit/manage mail).
@@ -203,6 +218,37 @@ def classify_observation(
     if title_s:
         context_blobs.append(title_s)
 
+    rule_blob = " ".join(str(r) for r in (rule_ids or []))
+
+    # 0. ZAP informational notices (SPA / session-mgmt debug) — never open Medium vulns.
+    if (
+        _ZAP_NOTICE_RULE_RE.search(rule_blob)
+        or _ZAP_MODERN_WEB_RE.search(title_s)
+        or _ZAP_SESSION_MGMT_NOTICE_RE.search(title_s)
+        or _ZAP_MODERN_WEB_RE.search(desc_s)
+        or _ZAP_SESSION_MGMT_NOTICE_RE.search(desc_s)
+    ):
+        reasons.append(
+            "ZAP scanner notice (Modern Web Application / Session Management Response "
+            "Identified); informational, not a vulnerability"
+        )
+        return _empty_result(INFORMATIONAL, reasons, severity="info")
+
+    # 0b. Cache-control / storable / retrieved-from-cache on CDN or static assets.
+    if is_cache_related_finding(title_s, rule_ids, desc_s):
+        # Prefer CDN/challenge reason when both match (e.g. cdn-cgi/*.js).
+        if is_cdn_challenge_url(loc):
+            reasons.append(
+                "Cache finding on CDN/challenge resource; infrastructure noise, not app-owned"
+            )
+            return _empty_result(INFORMATIONAL, reasons, severity="info")
+        if is_static_asset_url(loc):
+            reasons.append(
+                "Cache-control / storable / retrieved-from-cache on static asset "
+                "(_next/static, JS/CSS/chunks, robots.txt); expected caching, not an open vuln"
+            )
+            return _empty_result(INFORMATIONAL, reasons, severity="info")
+
     # 1. Infrastructure Cloudflare cookie SameSite / cookie findings.
     if is_infrastructure_cookie_finding(title_s, param or "", loc, evidence_joined):
         reasons.append(
@@ -219,7 +265,6 @@ def classify_observation(
         return _empty_result(NEEDS_MANUAL_VALIDATION, reasons)
 
     # 3. Deprecated X-XSS-Protection header (not an XSS vulnerability).
-    rule_blob = " ".join(str(r) for r in (rule_ids or []))
     if _XSS_PROTECTION_RE.search(title_s) or _XSS_PROTECTION_RE.search(rule_blob):
         reasons.append(
             "Deprecated X-XSS-Protection hardening observation; not an active XSS vulnerability"
@@ -271,6 +316,12 @@ def classify_observation(
     if claim == "permissions_policy" and permissions_policy_present_in_evidence(evidence_blobs):
         reasons.append(
             "Evidence shows Permissions-Policy present; contradicts 'Permissions-Policy not set'"
+        )
+        return _empty_result(NOT_REPRODUCIBLE, reasons)
+    if claim == "clickjacking" and clickjacking_protection_present_in_evidence(evidence_blobs):
+        reasons.append(
+            "Evidence shows X-Frame-Options SAMEORIGIN/DENY or CSP frame-ancestors; "
+            "contradicts missing anti-clickjacking"
         )
         return _empty_result(NOT_REPRODUCIBLE, reasons)
 

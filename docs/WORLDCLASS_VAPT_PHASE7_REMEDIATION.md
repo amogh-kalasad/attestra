@@ -39,6 +39,7 @@ Product wording: **security testing** / **VA + PT**. Remediation text must match
 | `header:coop-missing` | Cross-Origin-Opener-Policy |
 | `header:corp-missing` | Cross-Origin-Resource-Policy |
 | `header:permissions-policy-missing` | **Permissions-Policy only** (no CSP header text) |
+| `header:x-permitted-cross-domain-missing` | **X-Permitted-Cross-Domain-Policies** (`none`; not CORS/CSP) |
 | `header:xss-protection-deprecated` | Remove or set `0`; not an XSS fix |
 | `cors:misconfiguration` | Origin allow-list; no `*` + credentials |
 | `cors:acao-wildcard` | Replace ACAO `*` on sensitive responses |
@@ -55,7 +56,7 @@ Product wording: **security testing** / **VA + PT**. Remediation text must match
 
 1. Prefer `crossmerge.concepts_for(finding, obs)` when tools/rule ids are present.
 2. Fall back to pack `title_match` substrings (longest match wins among title hits).
-3. **Never** return a CSP pack for Permissions-Policy / Feature-Policy titles.
+3. **Never** return a CSP pack for Permissions-Policy / Feature-Policy / Expect-CT / COEP / COOP / CORP / X-Permitted-Cross-Domain-Policies titles.
 4. `format_remediation_markdown` always emits the seven sections (code example may be `_None_`).
 
 ---

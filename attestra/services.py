@@ -1389,6 +1389,7 @@ def import_results(
             rule_id=getattr(nf, "rule_id", "") or "",
             description=getattr(nf, "description", "") or "",
             severity=nf.severity,
+            location=getattr(nf, "location", "") or "",
         )
         if sev_cap and sev_cap != nf.severity:
             nf.severity = sev_cap

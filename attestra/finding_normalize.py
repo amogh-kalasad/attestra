@@ -16,6 +16,11 @@ import re
 from urllib.parse import urlsplit
 
 from attestra.fingerprint import caa_host, normalize_location, url_origin
+from attestra.finding_validation.infrastructure import (
+    is_cache_related_finding,
+    is_cdn_challenge_url,
+    is_static_asset_url,
+)
 
 # Optional sibling expansions (CORS / Permissions-Policy / SameSite / weak-cipher).
 # crossmerge merges these with try/getattr so either side can land first.
@@ -159,6 +164,12 @@ def is_hsts_missing_claim(
     return bool(_HSTS_MISSING_RE.search(blob))
 
 
+_ZAP_NOTICE_RULE_RE = re.compile(r"(?:^|[\s,;/])(?:10109|10112)(?:$|[\s,;:])")
+_ZAP_NOTICE_TITLE_RE = re.compile(
+    r"(?i)modern\s+web\s+application|session\s+management\s+response\s+identified"
+)
+
+
 def normalize_severity_for_import(
     *,
     title: str = "",
@@ -166,11 +177,13 @@ def normalize_severity_for_import(
     rule_ids: list[str] | None = None,
     description: str = "",
     severity: str | None = None,
+    location: str = "",
 ) -> str | None:
     """Cap misleading scanner severities before fingerprint / soft-match.
 
-    Expect-CT → info. HSTS-missing without SSL-strip PoC → low (never Medium/CVSS 5.0
-    by default; aligns with library seed default_severity).
+    Expect-CT → info. ZAP 10109/10112 notices → info. Cache on static/CDN → info.
+    HSTS-missing without SSL-strip PoC → low (never Medium/CVSS 5.0 by default;
+    aligns with library seed default_severity).
     """
     if is_expect_ct_deprecated(
         title=title, rule_id=rule_id, rule_ids=rule_ids, description=description
@@ -179,6 +192,16 @@ def normalize_severity_for_import(
         if sev in ("critical", "high", "medium", "moderate"):
             return "info"
         return severity or "info"
+
+    rule_blob = " ".join([rule_id or "", *(str(r) for r in (rule_ids or []))])
+    notice_blob = f"{title or ''}\n{description or ''}"
+    if _ZAP_NOTICE_RULE_RE.search(rule_blob) or _ZAP_NOTICE_TITLE_RE.search(notice_blob):
+        return "info"
+
+    # Cache contradictions on static Next.js / CDN assets — never Medium open vulns.
+    if is_cache_related_finding(title, [rule_id, *(rule_ids or [])], description):
+        if is_static_asset_url(location) or is_cdn_challenge_url(location):
+            return "info"
 
     if is_hsts_missing_claim(
         title=title, rule_id=rule_id, rule_ids=rule_ids, description=description

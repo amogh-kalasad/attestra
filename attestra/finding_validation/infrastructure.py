@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit, unquote
 
 _CDN_CHALLENGE_MARKERS = (
     "/cdn-cgi/",
@@ -25,6 +26,30 @@ _CF_COOKIE_EXACT = frozenset(
 _COOKIE_TITLE_RE = re.compile(
     r"samesite|set-cookie|cookie\b|secure\s+flag|httponly",
     re.IGNORECASE,
+)
+
+# Next.js / bundler / common static asset paths (cache findings here are noise).
+_STATIC_PATH_MARKERS = (
+    "/_next/static",
+    "/_next/",
+    "/__nextjs",
+    "/_vercel/",
+    "/static/",
+    "/assets/",
+    "/webpack",
+    "/chunks/",
+)
+_STATIC_EXT_RE = re.compile(
+    r"(?i)\.(?:js|mjs|cjs|css|map|woff2?|ttf|otf|eot|ico|svg|png|jpe?g|gif|webp|avif)(?:$|[?#])"
+)
+_ROBOTS_RE = re.compile(r"(?i)(?:^|/)robots\.txt(?:$|[?#])")
+_CACHE_RULE_RE = re.compile(
+    r"(?:^|[\s,;/])(?:10015|10049(?:-\d+)?|10050(?:-\d+)?)(?:$|[\s,;:])"
+)
+_CACHE_TITLE_RE = re.compile(
+    r"(?i)cache[-_\s]?control|non[-_\s]?storable|storable\s+and\s+cacheable|"
+    r"storable\s+but\s+non[-_\s]?cacheable|retrieved\s+from\s+cache|"
+    r"content\s+cacheability|re-examine\s+cache"
 )
 
 
@@ -88,6 +113,9 @@ def is_cdn_cors_finding(title: str, location: str, evidence_text: str = "") -> b
     if not is_cdn_challenge_url(location or ""):
         return False
     blob = f"{title or ''}\n{evidence_text or ''}".lower()
+    # X-Permitted-Cross-Domain-Policies is Adobe policy-file gating, not CORS.
+    if "x-permitted-cross-domain" in blob or "permitted-cross-domain-policies" in blob:
+        return False
     markers = (
         "cors",
         "cross-origin",
@@ -100,3 +128,42 @@ def is_cdn_cors_finding(title: str, location: str, evidence_text: str = "") -> b
         "crossdomain",
     )
     return any(m in blob for m in markers)
+
+
+def _url_path(location: str) -> str:
+    loc = (location or "").strip()
+    if not loc:
+        return ""
+    if "://" in loc:
+        try:
+            return unquote(urlsplit(loc).path or "")
+        except ValueError:
+            return loc
+    return unquote(loc.split("?", 1)[0].split("#", 1)[0])
+
+
+def is_static_asset_url(location: str) -> bool:
+    """True for Next.js/static/bundler assets and robots.txt (cache noise targets)."""
+    path = _url_path(location).lower()
+    if not path:
+        return False
+    if _ROBOTS_RE.search(path):
+        return True
+    if any(m in path for m in _STATIC_PATH_MARKERS):
+        return True
+    if _STATIC_EXT_RE.search(path):
+        return True
+    return False
+
+
+def is_cache_related_finding(
+    title: str,
+    rule_ids: list[str] | None = None,
+    description: str = "",
+) -> bool:
+    """True for ZAP cache-control / storable / retrieved-from-cache family alerts."""
+    rule_blob = " ".join(str(r) for r in (rule_ids or []))
+    if _CACHE_RULE_RE.search(rule_blob):
+        return True
+    blob = f"{title or ''}\n{description or ''}"
+    return bool(_CACHE_TITLE_RE.search(blob))

@@ -6,7 +6,10 @@ from attestra.finding_validation.classify import (
     elite_status_to_validation,
     should_create_elite_finding,
 )
-from attestra.finding_validation.reconcile import reconcile_validation_from_evidence
+from attestra.finding_validation.reconcile import (
+    reconcile_engagement_validation,
+    reconcile_validation_from_evidence,
+)
 from attestra.finding_validation.statuses import (
     ACCEPTED_RISK,
     CONFIRMED,
@@ -36,4 +39,5 @@ __all__ = [
     "elite_status_to_validation",
     "should_create_elite_finding",
     "reconcile_validation_from_evidence",
+    "reconcile_engagement_validation",
 ]

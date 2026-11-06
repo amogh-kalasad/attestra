@@ -5,14 +5,15 @@ Bonuses apply only when the running score is already >= 90.
 Not-tested checks (no data) do not change the score.
 Suppressed / false-positive findings do not take points off.
 Accepted-risk findings still count. Expired/invalid certificate caps the grade at F.
-HSTS-missing fail is skipped when validation_status is not_reproducible /
-informational / validation FP, or when HTTP evidence shows HSTS present.
-Classify marks HTTPS-only / HTTP→HTTPS HSTS-missing (no SSL-strip PoC) as
-informational so −20 is skipped; plain unvalidated Low HSTS-missing still
-takes −20 (severity honesty first; grade softens only via validation_status).
-tls_weak_cipher fail is skipped when validation_status is informational /
-not_reproducible / validation FP / accepted_risk, or needs_manual_validation
-without cipher-suite names in evidence (ENG1 F-10 honesty).
+HSTS-missing and clickjacking fails are skipped when validation_status is
+not_reproducible / informational / validation FP, or when HTTP evidence shows
+the claimed header present (HSTS max-age; XFO SAMEORIGIN/DENY or CSP
+frame-ancestors). Classify marks HTTPS-only / HTTP→HTTPS HSTS-missing (no
+SSL-strip PoC) as informational so −20 is skipped; plain unvalidated Low
+HSTS-missing still takes −20 (severity honesty first; grade softens only via
+validation_status). tls_weak_cipher fail is skipped when validation_status is
+informational / not_reproducible / validation FP / accepted_risk, or
+needs_manual_validation without cipher-suite names in evidence (ENG1 F-10 honesty).
 """
 # @lat: [[findings#Site grade]]
 # @lat: [[architecture#World-class risk scoring (Phase 5)]]
@@ -24,7 +25,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from attestra.finding_validation.classify import _has_cipher_suite_evidence
-from attestra.finding_validation.headers import hsts_present_in_evidence
+from attestra.finding_validation.headers import (
+    clickjacking_protection_present_in_evidence,
+    hsts_present_in_evidence,
+)
 from attestra.finding_validation.statuses import (
     ACCEPTED_RISK,
     FALSE_POSITIVE,
@@ -279,6 +283,8 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
         "hsts_skip_validation": False,
         "xcto_tested": False,
         "clickjack_tested": False,
+        "clickjack_missing_claim": False,
+        "clickjack_skip_validation": False,
         "referrer_tested": False,
         "cookie_tested": False,
         "tls_tested": False,
@@ -295,6 +301,7 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
     for f in findings_list:
         all_evidence.extend(_evidence_blobs(f))
     hsts_in_evidence = hsts_present_in_evidence(all_evidence)
+    clickjack_in_evidence = clickjacking_protection_present_in_evidence(all_evidence)
 
     for f in findings_list:
         if _is_ignored(f):
@@ -339,11 +346,17 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
             if "missing" in blob:
                 flags["xcto_missing"] = True
 
-        # Clickjacking / frame
+        # Clickjacking / frame — skip fail when contradicted by validation or evidence
         if "x-frame-options" in blob or "frame-ancestors" in blob or "clickjack" in blob:
             saw["clickjack_tested"] = True
-            if "missing" in blob:
-                flags["clickjacking"] = True
+            missing_claim = "missing" in blob or "not set" in blob or "not present" in blob
+            if missing_claim:
+                saw["clickjack_missing_claim"] = True
+                vs = _validation_of(f)
+                if vs in _IGNORE_VALIDATION:
+                    saw["clickjack_skip_validation"] = True
+                elif not clickjack_in_evidence:
+                    flags["clickjacking"] = True
 
         # Referrer-Policy
         if "referrer-policy" in blob or "referrer policy" in blob:
@@ -416,6 +429,12 @@ def _match_flags(findings: Iterable[Any]) -> dict[str, bool]:
         if "preload" in joined and "includesubdomains" in joined:
             saw["hsts_preload_ok"] = True
 
+    # Evidence showing XFO / frame-ancestors overrides clickjacking missing-claim fail.
+    saw["clickjack_in_evidence"] = bool(clickjack_in_evidence)
+    if clickjack_in_evidence:
+        saw["clickjack_tested"] = True
+        flags["clickjacking"] = False
+
     # Bonuses when we saw the topic tested and no related penalty
     if saw["csp_tested"] and not flags["csp_missing"] and not flags["csp_unsafe_inline"] and not saw["csp_any"]:
         flags["csp_strong"] = True
@@ -441,6 +460,17 @@ def _hsts_missing_pass_reason(saw: dict[str, bool]) -> str:
         # Claim seen but cleared without evidence/validation path above.
         return "Has Strict-Transport-Security"
     return "Has Strict-Transport-Security"
+
+
+def _clickjacking_pass_reason(saw: dict[str, bool]) -> str:
+    """Honest pass reason when the clickjacking modifier is not active."""
+    if saw.get("clickjack_in_evidence"):
+        return "Has X-Frame-Options or CSP frame-ancestors (evidence)"
+    if saw.get("clickjack_skip_validation") and saw.get("clickjack_missing_claim"):
+        return "Clickjacking-missing claim skipped (validation_status)"
+    if saw.get("clickjack_missing_claim"):
+        return "Has X-Frame-Options or CSP frame-ancestors"
+    return "Has X-Frame-Options or CSP frame-ancestors"
 
 
 # Which saw-* key means this modifier was in scope of the scan data.
@@ -511,6 +541,8 @@ def score_from_findings(findings: Iterable[Any]) -> dict[str, Any]:
         else:
             if key == "hsts_missing":
                 pass_reason = _hsts_missing_pass_reason(saw)
+            elif key == "clickjacking":
+                pass_reason = _clickjacking_pass_reason(saw)
             else:
                 pass_reason = reason.replace("Missing ", "Has ").replace("without", "with")
             breakdown.append(BreakdownRow(key, "pass", 0, pass_reason))

@@ -118,6 +118,11 @@ CONCEPT_RULES: dict[str, dict[str, list[tuple[str, str]]]] = {
         "zap": [(r"^10063$", r"permissions policy header not set")],
         "nuclei": [(rf"^{_H}:permissions-policy$", r"")],
     },
+    # Adobe Flash/PDF crossdomain.xml gate — not CORS and not CSP.
+    "header:x-permitted-cross-domain-missing": {
+        "nuclei": [(rf"^{_H}:x-permitted-cross-domain-policies$", r"")],
+        "webcheck": [(r"^webcheck/x-permitted-cross-domain-policies$", r"")],
+    },
     # Referrer-Policy missing / not strict (nuclei matcher + webcheck / Observatory).
     "header:referrer-policy-missing": {
         "nuclei": [(rf"^{_H}:referrer-policy$", r"")],

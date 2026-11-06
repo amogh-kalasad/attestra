@@ -319,8 +319,8 @@ def _guidance_from_remediation_pack(pack: dict) -> dict | None:
 def _library_guidance_mismatched(f: Finding, entry: LibraryEntry, g: dict) -> bool:
     """True when library guidance targets a different header than the finding.
 
-    Covers ENG1 F-7 (CSP on Permissions-Policy), Expect-CT, and COEP/COOP/CORP/CORS/HSTS
-    swaps when several header writeups share a tool rule id.
+    Covers ENG1 F-7 (CSP on Permissions-Policy), Expect-CT, XPCD, and
+    COEP/COOP/CORP/CORS/HSTS swaps when several header writeups share a tool rule id.
     """
     finding_concept = header_concept_for_text(f.title or "", f.description or "")
     if finding_concept not in NON_CSP_HEADER_CONCEPTS:
@@ -362,7 +362,7 @@ def guidance_for_finding(s: Session, f: Finding) -> dict | None:
 
     Prefers a tenant library match, then seed. When the library/seed title match is
     missing, or the match would be a CSP-only writeup for Permissions-Policy /
-    Expect-CT / COEP / COOP / CORP / CORS / HSTS, prefer the Phase 7 remediation pack.
+    Expect-CT / COEP / COOP / CORP / XPCD / CORS / HSTS, prefer the Phase 7 pack.
     """
     pack = _safe_remediation_for_finding(f)
     pack_guidance = _guidance_from_remediation_pack(pack) if pack else None

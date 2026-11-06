@@ -11,15 +11,33 @@ from attestra.remediation.packs import REMEDIATION_PACKS, Pack, pack_for_concept
 _CSP_CONCEPTS = frozenset(
     {"header:csp-missing", "header:csp-weak", "csp:weak-or-incomplete"}
 )
-_PERMISSIONS_TITLE_MARKERS = (
-    "permissions-policy",
-    "permissions policy",
-    "feature-policy",
-    "feature policy",
-)
-_EXPECT_CT_TITLE_MARKERS = (
-    "expect-ct",
-    "expect ct",
+# Own-header packs that must never resolve to CSP (v21 review gap).
+_OWN_HEADER_PACK_BY_MARKERS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("permissions-policy", "permissions policy", "feature-policy", "feature policy"),
+        "header:permissions-policy-missing",
+    ),
+    (("expect-ct", "expect ct"), "header:expect-ct-deprecated"),
+    (
+        (
+            "x-permitted-cross-domain-policies",
+            "x-permitted-cross-domain",
+            "permitted-cross-domain-policies",
+        ),
+        "header:x-permitted-cross-domain-missing",
+    ),
+    (
+        ("cross-origin-embedder-policy", "coep header", "missing coep", "coep missing"),
+        "header:coep-missing",
+    ),
+    (
+        ("cross-origin-opener-policy", "coop header", "missing coop", "coop missing"),
+        "header:coop-missing",
+    ),
+    (
+        ("cross-origin-resource-policy", "corp header", "missing corp", "corp missing"),
+        "header:corp-missing",
+    ),
 )
 
 _MARKDOWN_SECTIONS = (
@@ -37,14 +55,13 @@ def _title_of(finding: Any) -> str:
     return str(getattr(finding, "title", None) or "").strip()
 
 
-def _title_looks_like_permissions_policy(title: str) -> bool:
+def _own_header_pack_for_title(title: str) -> str | None:
+    """Return the forced pack concept for known non-CSP header titles, if any."""
     low = title.lower()
-    return any(m in low for m in _PERMISSIONS_TITLE_MARKERS)
-
-
-def _title_looks_like_expect_ct(title: str) -> bool:
-    low = title.lower()
-    return any(m in low for m in _EXPECT_CT_TITLE_MARKERS)
+    for markers, concept in _OWN_HEADER_PACK_BY_MARKERS:
+        if any(m in low for m in markers):
+            return concept
+    return None
 
 
 def _concepts_from_crossmerge(finding: Any) -> list[str]:
@@ -91,21 +108,17 @@ def resolve_concepts(finding: Any) -> list[str]:
             seen.add(key)
             found.append(key)
     title = _title_of(finding)
-    if _title_looks_like_permissions_policy(title):
-        # Never attribute CSP concepts to Permissions-Policy findings.
+    own = _own_header_pack_for_title(title)
+    if own:
+        # Never attribute CSP concepts to PP / Expect-CT / COEP / COOP / CORP / XPCD.
         found = [c for c in found if c not in _CSP_CONCEPTS]
-        if "header:permissions-policy-missing" not in found:
-            found.insert(0, "header:permissions-policy-missing")
-    if _title_looks_like_expect_ct(title):
-        # Never attribute CSP concepts to obsolete Expect-CT findings.
-        found = [c for c in found if c not in _CSP_CONCEPTS]
-        if "header:expect-ct-deprecated" not in found:
-            found.insert(0, "header:expect-ct-deprecated")
+        if own not in found:
+            found.insert(0, own)
     return found
 
 
 def _filter_csp_for_non_csp_headers(title: str, concepts: list[str]) -> list[str]:
-    if _title_looks_like_permissions_policy(title) or _title_looks_like_expect_ct(title):
+    if _own_header_pack_for_title(title):
         return [c for c in concepts if c not in _CSP_CONCEPTS]
     return concepts
 
@@ -114,17 +127,14 @@ def pack_for_finding(finding: Any) -> Pack | None:
     """Pick the best remediation pack for a finding, or None.
 
     Prefers a single exact concept that has a pack. Never returns a CSP pack
-    for Permissions-Policy or Expect-CT titles (wrong-header remediation).
+    for Permissions-Policy, Expect-CT, COEP, COOP, CORP, or XPCD titles.
     """
     title = _title_of(finding)
     concepts = _filter_csp_for_non_csp_headers(title, resolve_concepts(finding))
 
-    if _title_looks_like_permissions_policy(title):
-        pack = pack_for_concept("header:permissions-policy-missing")
-        if pack is not None:
-            return pack
-    if _title_looks_like_expect_ct(title):
-        pack = pack_for_concept("header:expect-ct-deprecated")
+    own = _own_header_pack_for_title(title)
+    if own:
+        pack = pack_for_concept(own)
         if pack is not None:
             return pack
 

@@ -38,6 +38,8 @@ from attestra.models import (
 )
 
 # Validation classes that are not open confirmed vulnerabilities in summary KPIs.
+# Includes ZAP notices (10109/10112) and static-asset cache alerts once classify
+# marks them informational — never count as open Medium vulns.
 _NON_VULN_VALIDATION = frozenset(
     {
         INFORMATIONAL,

@@ -1,5 +1,5 @@
 # @lat: [[findings#Lifecycle#Validation class vs workflow status]]
-"""Re-apply validation using HTTP pair evidence after import capture."""
+"""Re-apply validation using engagement HTTP and cross-finding evidence after import."""
 
 from __future__ import annotations
 
@@ -70,8 +70,37 @@ def _load_http_pair_texts(s: Session, findings: list[Finding], *, tenant_id: int
     return out
 
 
+def _finding_description_texts(findings: list[Finding]) -> list[str]:
+    """Cross-finding description/recommendation blobs (ORM findings already in session)."""
+    out: list[str] = []
+    for f in findings:
+        for attr in ("description", "recommendation"):
+            v = getattr(f, attr, None)
+            if v:
+                out.append(str(v))
+    return out
+
+
+def _load_evidence_note_texts(s: Session, findings: list[Finding]) -> list[str]:
+    """Evidence.note text from any kind (headers often pasted into notes)."""
+    ids = [f.id for f in findings if f.id is not None]
+    if not ids:
+        return []
+    rows = list(s.scalars(select(Evidence).where(Evidence.finding_id.in_(ids))))
+    out: list[str] = []
+    for ev in rows:
+        note = getattr(ev, "note", None) or ""
+        if note.strip():
+            out.append(str(note))
+    return out
+
+
 def reconcile_validation_from_evidence(s: Session, engagement_id: int) -> int:
-    """Reclassify findings that claim missing headers using engagement HTTP evidence.
+    """Reclassify findings that claim missing headers using engagement evidence.
+
+    Uses http_pair bodies, evidence notes, and cross-finding description text so
+    existing ORM findings are corrected when *any* engagement evidence shows the
+    claimed header (HSTS max-age, XFO/frame-ancestors, Permissions-Policy).
 
     Returns the number of findings whose validation_status changed.
     """
@@ -81,16 +110,22 @@ def reconcile_validation_from_evidence(s: Session, engagement_id: int) -> int:
     findings = list(s.scalars(select(Finding).where(Finding.engagement_id == engagement_id)))
     if not findings:
         return 0
+
     pair_texts = _load_http_pair_texts(s, findings, tenant_id=eng.tenant_id)
-    if not pair_texts:
+    desc_texts = _finding_description_texts(findings)
+    note_texts = _load_evidence_note_texts(s, findings)
+    if not pair_texts and not desc_texts and not note_texts:
         return 0
 
     by_origin: dict[str, list[str]] = {}
-    all_texts: list[str] = []
+    all_pair_texts: list[str] = []
     for origin, text in pair_texts:
-        all_texts.append(text)
+        all_pair_texts.append(text)
         if origin:
             by_origin.setdefault(origin, []).append(text)
+
+    # Shared cross-finding evidence available to every header-missing claim.
+    cross_texts = list(desc_texts) + list(note_texts)
 
     changed = 0
     for f in findings:
@@ -107,7 +142,10 @@ def reconcile_validation_from_evidence(s: Session, engagement_id: int) -> int:
             if o and o in by_origin:
                 texts.extend(by_origin[o])
         if not texts:
-            texts = list(all_texts)
+            texts = list(all_pair_texts)
+        texts.extend(cross_texts)
+        if not texts:
+            continue
         result = classify_observation(
             title=f.title or "",
             description=f.description or "",
@@ -128,3 +166,7 @@ def reconcile_validation_from_evidence(s: Session, engagement_id: int) -> int:
                 f.validation_status,
             )
     return changed
+
+
+# Alias for callers / docs that name the engagement-scoped batch reconcile.
+reconcile_engagement_validation = reconcile_validation_from_evidence

@@ -33,6 +33,7 @@ NON_CSP_HEADER_CONCEPTS = frozenset({
     "cors",
     "hsts",
     "expect-ct",
+    "x-permitted-cross-domain",
 })
 _CSP_ONLY_MARKERS = (
     "content-security-policy",
@@ -46,12 +47,18 @@ _HEADER_OWN_MARKERS: dict[str, tuple[str, ...]] = {
     "coep": ("cross-origin-embedder-policy", "coep"),
     "coop": ("cross-origin-opener-policy", "coop"),
     "corp": ("cross-origin-resource-policy", "corp"),
+    # XPCD before generic "cross-domain" CORS titles (ZAP 10098).
+    "x-permitted-cross-domain": (
+        "x-permitted-cross-domain-policies",
+        "x-permitted-cross-domain",
+        "permitted-cross-domain-policies",
+    ),
     "cors": (
         "access-control-allow-origin",
         "access-control-allow-credentials",
         "cors",
         "cross-origin resource sharing",
-        "cross-domain",
+        "cross-domain misconfiguration",
     ),
     "hsts": ("strict-transport-security", "hsts", "includeSubDomains", "max-age="),
     "expect-ct": ("expect-ct", "expect ct"),
@@ -722,6 +729,33 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "Cross-Origin-Resource-Policy to same-origin (or cross-origin for public assets)."
         ),
     },
+    "X-Permitted-Cross-Domain-Policies Header Missing": {
+        "importance": "Low",
+        "effort": "Easy",
+        "fix_steps": (
+            "Send X-Permitted-Cross-Domain-Policies: none unless Adobe Flash/PDF "
+            "clients must load data via crossdomain.xml.\n"
+            "Prefer none so uploaded rogue policy files cannot grant cross-domain access.\n"
+            "Do not substitute a CSP or CORS header for X-Permitted-Cross-Domain-Policies."
+        ),
+        "snippet_nginx": 'add_header X-Permitted-Cross-Domain-Policies "none" always;',
+        "snippet_apache": 'Header always set X-Permitted-Cross-Domain-Policies "none"',
+        "snippet_iis": (
+            "<configuration>\n"
+            "  <system.webServer>\n"
+            "    <httpProtocol>\n"
+            "      <customHeaders>\n"
+            "        <add name=\"X-Permitted-Cross-Domain-Policies\" value=\"none\" />\n"
+            "      </customHeaders>\n"
+            "    </httpProtocol>\n"
+            "  </system.webServer>\n"
+            "</configuration>"
+        ),
+        "snippet_cloudflare": (
+            "Transform Rules → Modify Response Header: set "
+            "X-Permitted-Cross-Domain-Policies to none."
+        ),
+    },
     "Overly permissive CORS policy": {
         "importance": "High",
         "effort": "Medium",
@@ -764,10 +798,11 @@ def header_concept_for_text(*texts: str) -> str | None:
     blob = " ".join(t for t in texts if t).lower()
     if not blob:
         return None
-    # Order matters: more specific headers (incl. Expect-CT) before generic CSP/cors.
+    # Order matters: XPCD / Expect-CT / COEP before generic CSP/cors ("cross-domain").
     checks: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("permissions-policy", _HEADER_OWN_MARKERS["permissions-policy"]),
         ("expect-ct", _HEADER_OWN_MARKERS["expect-ct"]),
+        ("x-permitted-cross-domain", _HEADER_OWN_MARKERS["x-permitted-cross-domain"]),
         ("coep", ("cross-origin-embedder-policy", "coep")),
         ("coop", ("cross-origin-opener-policy", "coop")),
         ("corp", ("cross-origin-resource-policy", "corp")),
@@ -812,6 +847,7 @@ def guidance_looks_csp_only(
     own = (
         "permissions-policy",
         "expect-ct",
+        "x-permitted-cross-domain",
         "cross-origin-embedder-policy",
         "cross-origin-opener-policy",
         "cross-origin-resource-policy",
@@ -824,7 +860,7 @@ def guidance_looks_csp_only(
 
 
 def rejects_csp_guidance_for_finding(finding: Any, guidance: dict[str, Any] | None) -> bool:
-    """Reject library/seed guidance that is CSP-only for PP/Expect-CT/COEP/COOP/CORP/CORS/HSTS."""
+    """Reject CSP-only guidance for PP/Expect-CT/COEP/COOP/CORP/XPCD/CORS/HSTS."""
     if not guidance:
         return False
     concept = header_concept_for_text(
@@ -866,8 +902,9 @@ def is_fix_target(tags: list[str] | None, title: str = "") -> bool:
             "cross-origin-embedder",
             "cross-origin-opener",
             "cross-origin-resource",
+            "x-permitted-cross-domain",
             "cors",
-            "cross-domain",
+            "cross-domain misconfiguration",
         )
     )
 
@@ -994,7 +1031,7 @@ def match_seed_guidance(finding: Any) -> dict[str, Any] | None:
     """Best built-in SEED guidance for a finding (rule id, then CWE, then title).
 
     Skips CSP-only seed rows when the finding is Permissions-Policy / Expect-CT /
-    COEP / COOP / CORP / CORS / HSTS so CWE collisions cannot attach the wrong header fix.
+    COEP / COOP / CORP / XPCD / CORS / HSTS so CWE collisions cannot attach the wrong header fix.
     """
     from attestra.library.seed import SEED
 
