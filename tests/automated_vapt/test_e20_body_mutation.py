@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -221,6 +222,50 @@ def test_t22_skips_without_auth(monkeypatch, patch_capture):
     result = bm.run_object_mutation(ctx, clock_sleep=lambda _s: None)
     assert result["status"] == "SKIPPED"
     assert "not ready" in result["detail"].lower()
+    assert result["skip_reason"] == bm.SKIP_NO_AUTH_SESSION
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#T22 skip reason codes]]
+def test_t22_skip_reason_codes(monkeypatch, patch_capture):
+    from attestra.automated_vapt.core.replay_checks import (
+        SKIP_MUTATION_DISABLED,
+        SKIP_NO_WRITE_TEMPLATES,
+    )
+
+    monkeypatch.setattr(bm, "mutation_flag_enabled", lambda: False)
+    monkeypatch.setattr(bm, "mutation_sends_allowed", lambda: False)
+    ctx = _ctx(write_captures=[])
+    patch_capture(ctx)
+    empty = bm.run_object_mutation(ctx, clock_sleep=lambda _s: None)
+    assert empty["status"] == "SKIPPED"
+    assert empty["skip_reason"] in {SKIP_NO_WRITE_TEMPLATES, SKIP_MUTATION_DISABLED}
+
+    captures = [
+        {"method": "POST", "url": ROOT + "api/projects/update", "body": '{"projectId": 10, "title": "a"}'}
+    ]
+    ctx2 = _ctx(write_captures=captures)
+    patch_capture(ctx2)
+    planned = bm.run_object_mutation(ctx2, clock_sleep=lambda _s: None)
+    assert planned["status"] == "SKIPPED"
+    assert planned["skip_reason"] == SKIP_MUTATION_DISABLED
+    assert planned["mutation"]["planned"]
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#Lab JSON list harvest]]
+def test_lab_style_json_list_harvest_shape():
+    """Lab vulnerable app returns items[].projectId — harvest must pick them up."""
+    from attestra.automated_vapt.core.replay_checks import harvest_ids
+
+    body = json.dumps(
+        {
+            "items": [
+                {"projectId": "proj-a", "name": "A", "owner": "account_a"},
+                {"projectId": "proj-b", "name": "B", "owner": "account_b"},
+            ]
+        }
+    )
+    got = harvest_ids(body)
+    assert got["project_id"] == {"proj-a", "proj-b"}
 
 
 def test_find_body_id_fields_project_name():

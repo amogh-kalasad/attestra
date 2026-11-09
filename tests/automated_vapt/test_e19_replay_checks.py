@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -299,3 +300,70 @@ def test_t21_skips_without_auth(patch_capture):
     patch_capture(ctx)
     out = rc.run_input_validation(ctx, sleep_s=0)
     assert out["status"] == "SKIPPED"
+    assert out["skip_reason"] == rc.SKIP_NO_AUTH_SESSION
+
+
+# ------------------------------------------------------------------ Phase 2 harvest / skip reasons
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#Nested JSON and UUID harvest]]
+def test_harvest_ids_nested_items_and_uuid():
+    body = json.dumps(
+        {
+            "data": {"items": [{"id": "11111111-1111-4111-8111-111111111111", "name": "a"}]},
+            "token": "SUPERSECRET",
+        }
+    )
+    got = rc.harvest_ids(body)
+    assert "id" in got and "11111111-1111-4111-8111-111111111111" in got["id"]
+    assert "token" not in got
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#Shared inventory feeds T20]]
+def test_t20_uses_shared_harvested_inventory(patch_capture):
+    overview = ROOT + "api/projects"
+    ep = _ep("/api/projects/get-projects-risks", dynamic=True, path_param=True)
+    ctx = _ctx(
+        api_urls=[overview],
+        endpoints=[ep],
+        responses={
+            overview: [(200, '{"status":"ok"}')],
+            ROOT + "api/projects/get-projects-risks/10": [
+                (200, '{"status":"Success","data":[{"project_id":10}]}')
+            ],
+            ROOT + "api/projects/get-projects-risks/11": [
+                (200, '{"status":"Success","data":[{"project_id":11}]}')
+            ],
+        },
+    )
+    ctx.extra["_harvested_ids"] = {"project_id": {"10"}}
+    patch_capture(ctx)
+    out = rc.run_idor(ctx, sleep_s=0, cap=20)
+    assert out["harvested_count"] >= 1
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#T20 skip reasons are explicit]]
+def test_t20_skip_reasons_no_ids_and_no_auth(patch_capture):
+    ctx = _ctx(api_urls=[ROOT + "api/empty"], responses={ROOT + "api/empty": [(200, '{"ok":true}')]})
+    patch_capture(ctx)
+    out = rc.run_idor(ctx, sleep_s=0)
+    assert out["status"] == "SKIPPED"
+    assert out["skip_reason"] in {rc.SKIP_NO_OBJECT_IDS, rc.SKIP_NO_JSON_GET_BODIES}
+
+    ctx2 = _ctx(auth_status="failed", api_urls=[ROOT + "api/x"])
+    patch_capture(ctx2)
+    out2 = rc.run_auth_bypass(ctx2, sleep_s=0)
+    assert out2["skip_reason"] == rc.SKIP_NO_AUTH_SESSION
+
+
+# @lat: [[tests#Phase 2 ID harvest and write bodies#record_harvest_into_ctx]]
+def test_record_harvest_into_ctx_promotes_api_url():
+    ctx = SimpleNamespace(extra={})
+    n = rc.record_harvest_into_ctx(
+        ctx,
+        '{"items":[{"projectId":"proj-a"}]}',
+        url=ROOT + "api/projects",
+    )
+    assert n >= 1
+    assert "proj-a" in ctx.extra["_harvested_ids"]["project_id"]
+    assert ROOT + "api/projects" in ctx.extra["_capture_api_urls"]

@@ -19,6 +19,10 @@ from attestra.automated_vapt.core.replay_checks import (
     CaptureResult,
     EndpointOutcome,
     DEFAULT_SLEEP_S,
+    SKIP_APP_ENV_BLOCKED,
+    SKIP_MUTATION_DISABLED,
+    SKIP_NO_AUTH_SESSION,
+    SKIP_NO_WRITE_TEMPLATES,
     _build_scope,
     _endpoints_from_ctx,
     _origin,
@@ -307,6 +311,7 @@ def run_object_mutation(
             "test_id": "T22",
             "status": "SKIPPED",
             "detail": f"login profile not ready ({auth_info.get('status')}: {auth_info.get('note')})",
+            "skip_reason": SKIP_NO_AUTH_SESSION,
             "category": "authorization",
             "auth": auth_info,
             "mutation": base_meta,
@@ -333,10 +338,17 @@ def run_object_mutation(
                 "; ATTESTRA_AUTOMATED_VAPT_MUTATION is disabled (default) — "
                 "enable =1 with APP_ENV=local|test|development to allow sends"
             )
+            reason = SKIP_MUTATION_DISABLED if not write_eps else SKIP_NO_WRITE_TEMPLATES
+        elif not sends_ok:
+            detail += "; APP_ENV is not in local/test/development allowlist"
+            reason = SKIP_APP_ENV_BLOCKED
+        else:
+            reason = SKIP_NO_WRITE_TEMPLATES
         return {
             "test_id": "T22",
             "status": "SKIPPED",
             "detail": detail,
+            "skip_reason": reason,
             "category": "authorization",
             "auth": auth_info,
             "mutation": {
@@ -349,9 +361,11 @@ def run_object_mutation(
             "validation": {},
         }
 
-    # Harvest owned ids from any GET seed URLs / template bodies
+    # Harvest owned ids from shared T01 inventory, GET seed URLs, and template bodies
     owned: set[str] = set()
     harvested: dict[str, set[str]] = {}
+    for k, vals in (ctx.extra.get("_harvested_ids") or {}).items():
+        harvested.setdefault(str(k), set()).update(vals)
     for tmpl in templates:
         for _raw, canon, val in find_body_id_fields(tmpl["body"]):
             harvested.setdefault(canon, set()).add(val)
@@ -492,6 +506,7 @@ def run_object_mutation(
                 )
             )
 
+    skip_reason = ""
     if dry_run or not sends_ok:
         status = "SKIPPED"
         detail = (
@@ -503,8 +518,12 @@ def run_object_mutation(
                 ". ATTESTRA_AUTOMATED_VAPT_MUTATION is disabled — set to 1 with "
                 "APP_ENV=local|test|development and restart serve/worker to enable sends"
             )
+            skip_reason = SKIP_MUTATION_DISABLED
         elif not sends_ok:
             detail += ". mutation flag on but APP_ENV is not in local/test/development allowlist"
+            skip_reason = SKIP_APP_ENV_BLOCKED
+        else:
+            skip_reason = SKIP_MUTATION_DISABLED
         validation: dict[str, Any] = {}
     elif findings:
         status = "FINDING"
@@ -531,7 +550,7 @@ def run_object_mutation(
         validation = {}
 
     finding_pairs = [p for o in outcomes if o.finding for p in o.evidence_pairs]
-    return {
+    out: dict[str, Any] = {
         "test_id": "T22",
         "status": status,
         "detail": detail,
@@ -548,3 +567,6 @@ def run_object_mutation(
         "finding_cwe": 639,
         "finding_recommendation": validation.get("recommendation", ""),
     }
+    if status == "SKIPPED":
+        out["skip_reason"] = skip_reason if dry_run or not sends_ok else SKIP_NO_WRITE_TEMPLATES
+    return out

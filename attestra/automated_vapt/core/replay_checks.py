@@ -33,6 +33,19 @@ BODY_COMPARE_BYTES = 8_000
 BODY_EVIDENCE_BYTES = 20_000
 INVALID_BEARER = "Bearer INVALID_TOKEN_attestra_replay_check_do_not_use"
 
+# Structured skip/block reason codes surfaced in case results and reports so a SKIPPED
+# T19/T20/T21/T22 is never read as "tested and clean". Report rendering (Phase 5) and
+# checklist_auto turn these into visible limitations.
+SKIP_NO_AUTH_SESSION = "no_auth_session"
+SKIP_NO_CAPTURE_SAFE_API = "no_capture_safe_api"
+SKIP_NO_JSON_GET_BODIES = "no_json_get_bodies"
+SKIP_NO_OBJECT_IDS = "no_object_ids"
+SKIP_NO_IDOR_ENDPOINTS = "no_idor_endpoints"
+SKIP_NO_WRITE_TEMPLATES = "no_write_templates"
+SKIP_MUTATION_DISABLED = "mutation_disabled"
+SKIP_APP_ENV_BLOCKED = "app_env_blocked"
+SKIP_NO_PARAM_ENDPOINTS = "no_param_endpoints"
+
 # Response body signals that a protected JSON API answered with real data (not an SPA shell
 # or a blank/error envelope). Used for the auth-bypass and IDOR checks.
 _DATA_KEYS_RE = re.compile(
@@ -146,18 +159,124 @@ def _origin(url: str) -> tuple[str, str, int]:
     return scheme, (p.hostname or "").lower(), port
 
 
+_SECRET_KEY_RE = re.compile(
+    r"(?i)(password|passwd|secret|token|api[_-]?key|authorization|refresh|session|cookie|private)"
+)
+_UUID_RE = re.compile(
+    r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_ID_NAME_RE = re.compile(r"(?i)^(id|.+_id|.+Id)$")
+
+
+def _canon_id_key(raw: str) -> str:
+    return re.sub(r"([a-z])([A-Z])", r"\1_\2", raw or "").lower()
+
+
+def _is_harvestable_id_value(val: Any) -> bool:
+    if isinstance(val, bool) or val is None:
+        return False
+    if isinstance(val, int):
+        return True
+    if not isinstance(val, str):
+        return False
+    s = val.strip()
+    if not s or len(s) > 64:
+        return False
+    if _SECRET_KEY_RE.search(s):
+        return False
+    if s.isdigit() or _UUID_RE.match(s):
+        return True
+    # Short opaque object ids (alphanumeric / hyphen / underscore), not emails or URLs.
+    if "@" in s or "://" in s or "/" in s:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", s))
+
+
+def _walk_json_ids(node: Any, out: dict[str, set[str]], *, depth: int = 0) -> None:
+    """Collect nested ``id`` / ``*_id`` / ``*Id`` values from parsed JSON (cap depth)."""
+    if depth > 6:
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            key = str(k)
+            if _SECRET_KEY_RE.search(key):
+                continue
+            if _ID_NAME_RE.match(key) and _is_harvestable_id_value(v):
+                canon = _canon_id_key(key)
+                out.setdefault(canon, set()).add(str(v).strip() if not isinstance(v, int) else str(v))
+            elif isinstance(v, (dict, list)):
+                _walk_json_ids(v, out, depth=depth + 1)
+    elif isinstance(node, list):
+        for item in node[:200]:
+            _walk_json_ids(item, out, depth=depth + 1)
+
+
 def harvest_ids(text: str) -> dict[str, set[str]]:
-    """``{canonical_key: {id, ...}}`` from a JSON (or JSON-ish) body. Values are strings."""
+    """``{canonical_key: {id, ...}}`` from a JSON (or JSON-ish) body. Values are strings.
+
+    Combines a regex pass (fast, works on partial JSON) with a nested walk when the body
+    parses, so ``data.items[].id`` / ``projectId`` lists feed T20 even when keys nest.
+    Never harvests secret-looking keys or values.
+    """
     out: dict[str, set[str]] = {}
     for m in _ID_KEY_RE.finditer(text or ""):
         raw = m.group("k") or ""
-        # normalize projectId -> project_id before lowercasing
-        key = re.sub(r"([a-z])([A-Z])", r"\1_\2", raw).lower()
+        if _SECRET_KEY_RE.search(raw):
+            continue
+        key = _canon_id_key(raw)
         val = m.group("s") if m.group("s") is not None else m.group("n")
-        if not val:
+        if not val or not _is_harvestable_id_value(val):
             continue
         out.setdefault(key, set()).add(val)
+    try:
+        parsed = json.loads(text or "")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parsed = None
+    if parsed is not None:
+        _walk_json_ids(parsed, out)
     return out
+
+
+def merge_harvested_ids(store: dict[str, set[str]], text: str) -> dict[str, set[str]]:
+    """Merge [[harvest_ids]] into an existing inventory dict (mutates and returns ``store``)."""
+    for k, vals in harvest_ids(text).items():
+        store.setdefault(k, set()).update(vals)
+    return store
+
+
+def record_harvest_into_ctx(ctx: Any, text: str, *, url: str = "") -> int:
+    """Persist harvested ids on ``ctx.extra['_harvested_ids']`` for later T20/T22.
+
+    Also appends ``url`` to ``_capture_api_urls`` when the body looks like substantive JSON
+    API data so T20 has a shared inventory even if JS discovery missed the path.
+    Returns the count of newly seen id values.
+    """
+    extra = getattr(ctx, "extra", None)
+    if not isinstance(extra, dict):
+        return 0
+    before = sum(len(v) for v in (extra.get("_harvested_ids") or {}).values())
+    store: dict[str, set[str]] = {
+        str(k): set(v) if not isinstance(v, set) else v
+        for k, v in (extra.get("_harvested_ids") or {}).items()
+    }
+    merge_harvested_ids(store, text or "")
+    extra["_harvested_ids"] = store
+    after = sum(len(v) for v in store.values())
+    # Promote substantive JSON responses onto the capture-safe API list for T19/T20.
+    body = text or ""
+    if url and body and not _HTML_SHELL_RE.search(body[:200]):
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, (dict, list)) and (
+            _DATA_KEYS_RE.search(body) or (isinstance(parsed, list) and parsed) or store
+        ):
+            urls = list(extra.get("_capture_api_urls") or [])
+            if url not in urls:
+                urls.append(url)
+                extra["_capture_api_urls"] = urls
+    return max(0, after - before)
 
 
 def neighbour_ids(known: set[str], *, span: int = 3) -> list[str]:
@@ -337,6 +456,7 @@ def run_auth_bypass(
             "test_id": "T19",
             "status": "SKIPPED",
             "detail": f"login profile not ready ({auth_info.get('status')}: {auth_info.get('note')})",
+            "skip_reason": SKIP_NO_AUTH_SESSION,
             "category": "authentication",
             "auth": auth_info,
             "endpoints": [],
@@ -352,7 +472,8 @@ def run_auth_bypass(
         return {
             "test_id": "T19",
             "status": "SKIPPED",
-            "detail": "no capture-safe API endpoints discovered",
+            "detail": "no capture-safe API endpoints discovered (no authenticated JSON GET URLs from T01/T02/JS discovery)",
+            "skip_reason": SKIP_NO_CAPTURE_SAFE_API,
             "category": "authentication",
             "auth": auth_info,
             "endpoints": [],
@@ -506,13 +627,16 @@ def run_idor(
             "test_id": "T20",
             "status": "SKIPPED",
             "detail": f"login profile not ready ({auth_info.get('status')}: {auth_info.get('note')})",
+            "skip_reason": SKIP_NO_AUTH_SESSION,
             "category": "authorization",
             "auth": auth_info,
             "endpoints": [],
             "validation": {},
         }
 
-    # 1) authenticated baseline of capture-safe APIs → harvest ids
+    # 1) authenticated baseline of capture-safe APIs → harvest ids. Reuse ids already
+    # harvested by T01 (shared inventory in ctx.extra) so a GET that only appears once
+    # still contributes, then confirm with a fresh baseline fetch.
     safe_urls = list(ctx.extra.get("_capture_api_urls") or [])
     if not safe_urls:
         safe_urls = [_abs(ctx.target_base_url, e.path) for e in _endpoints_from_ctx(ctx) if e.capture_safe]
@@ -520,7 +644,10 @@ def run_idor(
     scope = _build_scope(ctx, safe_urls)
     client = ctx.extra.get("httpx_client")
     harvested: dict[str, set[str]] = {}
+    for k, vals in (ctx.extra.get("_harvested_ids") or {}).items():
+        harvested.setdefault(k, set()).update(vals)
     seed_pairs: list[Any] = []
+    json_get_bodies = 0
     for url in safe_urls:
         headers = auth.headers_for(url, ctx.target_base_url)
         cap_r = _do_get(
@@ -532,6 +659,7 @@ def run_idor(
             seed_pairs.append(cap_r.pair)
         if not cap_r.substantive:
             continue
+        json_get_bodies += 1
         for k, vals in harvest_ids(cap_r.body).items():
             harvested.setdefault(k, set()).update(vals)
 
@@ -539,10 +667,18 @@ def run_idor(
     for vals in harvested.values():
         owned |= vals
     if not owned:
+        if not json_get_bodies and not (ctx.extra.get("_harvested_ids")):
+            reason, detail = SKIP_NO_JSON_GET_BODIES, (
+                "no authenticated JSON GET responses to harvest object ids from "
+                f"({len(safe_urls)} capture-safe URL(s) returned no substantive JSON)"
+            )
+        else:
+            reason, detail = SKIP_NO_OBJECT_IDS, "no object ids harvested from authenticated API responses"
         return {
             "test_id": "T20",
             "status": "SKIPPED",
-            "detail": "no object ids harvested from authenticated API responses",
+            "detail": detail,
+            "skip_reason": reason,
             "category": "authorization",
             "auth": auth_info,
             "endpoints": [],
@@ -567,6 +703,7 @@ def run_idor(
             "test_id": "T20",
             "status": "SKIPPED",
             "detail": f"harvested {len(owned)} id(s) but no dynamic GET endpoints take an id",
+            "skip_reason": SKIP_NO_IDOR_ENDPOINTS,
             "category": "authorization",
             "auth": auth_info,
             "endpoints": [],
@@ -791,6 +928,7 @@ def run_input_validation(
             "test_id": "T21",
             "status": "SKIPPED",
             "detail": f"login profile not ready ({auth_info.get('status')}: {auth_info.get('note')})",
+            "skip_reason": SKIP_NO_AUTH_SESSION,
             "category": "validation",
             "auth": auth_info,
             "endpoints": [],
@@ -804,6 +942,7 @@ def run_input_validation(
             "test_id": "T21",
             "status": "SKIPPED",
             "detail": "no gettable API endpoints discovered",
+            "skip_reason": SKIP_NO_PARAM_ENDPOINTS,
             "category": "validation",
             "auth": auth_info,
             "endpoints": [],

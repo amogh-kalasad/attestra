@@ -3593,3 +3593,34 @@ Nuclei chunk loop re-verifies between batches, blocks remaining URLs on unrecove
 
 [[attestra/auth_web/checklist_auto.py#verdicts_for_automated]] maps BLOCKED cases to checklist blocked; ZAP imports with auth-loss notes do not stay passed.
 
+
+## Phase 2 ID harvest and write bodies
+
+Reliable authenticated ID harvest and JSON write-body capture so T20/T22 run when possible and emit explicit skip reason codes when not.
+
+T01 records ids via [[attestra/automated_vapt/core/replay_checks.py#record_harvest_into_ctx]] into `ctx.extra["_harvested_ids"]` and promotes substantive JSON URLs onto `_capture_api_urls`. [[attestra/automated_vapt/core/replay_checks.py#harvest_ids]] walks nested `items[].id` / UUID values and skips secret-looking keys. T19–T22 surface structured `skip_reason` codes (`no_auth_session`, `no_object_ids`, `no_write_templates`, `mutation_disabled`, …). Mutation stays off by default.
+
+### Nested JSON and UUID harvest
+
+Harvest picks nested list `id` / `projectId` values and UUID strings while ignoring `token` and other secret-looking keys.
+
+### Shared inventory feeds T20
+
+[[attestra/automated_vapt/core/replay_checks.py#run_idor]] merges `_harvested_ids` from T01 so a one-shot list response still contributes owned ids.
+
+### T20 skip reasons are explicit
+
+SKIPPED T20/T19 results include `skip_reason` codes such as `no_object_ids`, `no_json_get_bodies`, or `no_auth_session` — never silent PASS.
+
+### record_harvest_into_ctx
+
+[[attestra/automated_vapt/core/replay_checks.py#record_harvest_into_ctx]] updates the inventory and appends capture-safe API URLs for substantive JSON bodies.
+
+### T22 skip reason codes
+
+[[attestra/automated_vapt/core/body_mutation.py#run_object_mutation]] sets `skip_reason` for missing auth, empty templates, mutation-disabled dry-run, and APP_ENV blocks.
+
+### Lab JSON list harvest
+
+Lab-shaped `items[].projectId` JSON harvests into `project_id` for T20 positive controls.
+

@@ -753,6 +753,14 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
             report.response_headers = {k: auth.scrub(v) for k, v in report.response_headers.items()}
             tx.report_pair = report
         ctx.extra.setdefault("_http_pairs", []).append(report)
+        # Shared inventory for T20/T22: harvest object ids from authenticated JSON bodies
+        # and promote substantive API URLs onto `_capture_api_urls` when discovery missed them.
+        try:
+            from attestra.automated_vapt.core.replay_checks import record_harvest_into_ctx
+
+            record_harvest_into_ctx(ctx, report.response_body or "", url=url)
+        except Exception:  # noqa: BLE001 — harvest must never fail the capture case
+            pass
         req_n = parse_request(report)
         resp_n = parse_response(report)
         last_tx, last_req, last_resp = tx, req_n, resp_n
@@ -763,7 +771,9 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
             "status": "PASSED",
             "detail": "HTTP transaction captured",
             "http_status": code,
-            "kind": "api" if url.rstrip("/") in api_set else "page",
+            "kind": "api" if url.rstrip("/") in api_set or url.rstrip("/") in {
+                u.rstrip("/") for u in (ctx.extra.get("_capture_api_urls") or [])
+            } else "page",
             "authenticated": bool(headers),
         }
         pages.append(page_row)
