@@ -188,6 +188,13 @@ def verdicts_for_import(s: Session, run: Any) -> list[Verdict]:
         rows = checks.load_checks_json(getattr(scan, "checks_json", None))
     row_status = {str(r.get("id")): str(r.get("status") or "") for r in rows}
     out: list[Verdict] = []
+    # Authenticated scan whose session died mid-run (re-login failed): "no alerts" after the
+    # loss is unauthenticated coverage, so passed verdicts below are downgraded to blocked.
+    from attestra.auth_web.session_guard import note_has_auth_loss
+
+    auth_lost = scan is not None and bool(getattr(scan, "authenticated", False)) and note_has_auth_loss(
+        getattr(scan, "auth_note", "")
+    )
 
     if tool == "zap":
         for ref, spec in ZAP_MAP.items():
@@ -268,6 +275,14 @@ def verdicts_for_import(s: Session, run: Any) -> list[Verdict]:
                 out.append(
                     Verdict(ref, "passed", "webcheck", label, f"no issues (webcheck {', '.join(ids)} passed)", [], ev)
                 )
+    if auth_lost:
+        loss = str(getattr(scan, "auth_note", "") or "")[:200]
+        out = [
+            Verdict(v.ref, "blocked", v.source, v.label, f"blocked: authenticated session lost mid-scan ({loss})", v.finding_ids, v.evidence)
+            if v.status == "passed"
+            else v
+            for v in out
+        ]
     return out
 
 
@@ -307,9 +322,10 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
         label = f"automated run #{ex.id} {tid}"
         ev = [f"automated_run:{ex.id}:{tid}"]
         fids = _canonical_ids(s, [case["finding_id"]]) if case.get("finding_id") else []
-        real = tid in ("T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "FILE")
-        # SKIPPED / FAILED / DEFERRED never become checklist passed — record blocked with reason.
-        if status in ("SKIPPED", "FAILED", "DEFERRED"):
+        real = tid in ("T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "FILE", "BIZ", "ROLEDIFF", "SSRF", "UPLOAD")
+        # SKIPPED / FAILED / DEFERRED / BLOCKED (mid-scan auth loss) never become checklist
+        # passed — record blocked with reason.
+        if status in ("SKIPPED", "FAILED", "DEFERRED", "BLOCKED"):
             if real and tid != "T22":
                 prefix = "deferred" if status == "DEFERRED" else "blocked"
                 note = f"{prefix}: {detail}" if detail else f"{prefix}: {tid} {status.lower()} — not executed as full coverage"

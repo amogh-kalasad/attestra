@@ -3552,3 +3552,44 @@ Vulnerable app exposes JSON list `projectId` items and POST write bodies; secure
 
 Lab upload and URL-fetcher routes exist for later Phase 3b probes; secure twin refuses or scopes them safely.
 
+
+## test_session_guard.py
+
+Phase 1 mid-scan session guard: detect expiry, bounded re-login, BLOCKED-never-passed for ZAP/Nuclei/automated paths ([[attestra/auth_web/session_guard.py]]).
+
+### Expired-response detection
+
+[[attestra/auth_web/session_guard.py#looks_expired]] treats 401, login redirects, SESSION_EXPIRED bodies, and configured logged-out indicators as auth loss; ordinary 403/pages do not.
+
+### Guard re-login rotates material and notifies
+
+Successful recover rotates cookies/headers, fires on_renew, records auth-recovered notes, and never puts secret values in [[attestra/auth_web/session_guard.py#SessionGuard#public]].
+
+### Guard marks lost after budget and never passes
+
+When re-login budget is exhausted the guard stays lost, skips further checks, and notes start with auth-loss:; disabled guards always report alive.
+
+### Re-login paths per auth method
+
+Form re-login returns SessionMaterial with extras; verify/login failures return None; header/cookie need opt-in refresh_url; sso_bootstrap never auto-renews.
+
+### Lab fixture round-trip
+
+Against the session-expiry lab app, a valid password recovers after N requests; wrong credentials mark the guard lost without inventing a session.
+
+### Plan carries a guard that rewrites tool files
+
+[[attestra/auth_web/scan_auth.py#prepare_for_run]] attaches an enabled guard for Nuclei that rewrites the secret file on renew; `ATTESTRA_AUTH_MIDSCAN_ENABLED=0` disables the guard.
+
+### Nuclei chunks re-verify between runs
+
+Nuclei chunk loop re-verifies between batches, blocks remaining URLs on unrecovered loss, and continues after a successful mid-scan re-login.
+
+### Automated cases are BLOCKED on unrecovered loss
+
+[[attestra/automated_vapt/core/orchestrator.py#_ensure_session_for_case]] returns BLOCKED with skip_reason auth_lost for T19â€“T22/SESSION when the session cannot be recovered.
+
+### Checklist maps BLOCKED and auth-lost scans to blocked
+
+[[attestra/auth_web/checklist_auto.py#verdicts_for_automated]] maps BLOCKED cases to checklist blocked; ZAP imports with auth-loss notes do not stay passed.
+

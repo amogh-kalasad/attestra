@@ -247,6 +247,13 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
         if plan is not None:
             plan.cleanup()
 
+    # Mid-scan session guard outcome (auth-loss / re-login) → redacted ScanRun.auth_note so
+    # checklist and reports never present post-loss coverage as authenticated.
+    if plan is not None and isinstance(result.extra, dict) and result.extra.get("auth"):
+        from attestra.auth_web import session_guard as sg
+
+        run.auth_note = sg.auth_note_after_scan(run.auth_note, result.extra)
+
     if result.extra.get("cancelled") or job.cancel_requested:
         run.status = "cancelled"
         job.status = "cancelled"

@@ -105,25 +105,35 @@ class ScanAuthPlan:
     secret_dir: str | None = None
     # Secret values to mask in any scanner log we keep. Never rendered (repr=False).
     redact_values: tuple[str, ...] = field(default=(), repr=False)
+    # Mid-scan session guard (attestra.auth_web.session_guard.SessionGuard); closures hold
+    # the secret material, so the object itself is never persisted or rendered.
+    guard: Any = field(default=None, repr=False)
 
     def zap_kwargs(self) -> dict[str, Any]:
         if not self.authenticated:
             return {}
-        return {
+        out = {
             "auth_context_path": self.zap_auth_context_path,
             "auth_opts": dict(self.zap_auth_opts),
             "redact_values": tuple(self.redact_values),
         }
+        if self.guard is not None and getattr(self.guard, "enabled", False):
+            out["session_guard"] = self.guard
+        return out
 
     def nuclei_kwargs(self) -> dict[str, Any]:
         if not self.authenticated or not self.nuclei_secret_file:
             return {}
-        return {"auth_secret_file": self.nuclei_secret_file, "redact_values": tuple(self.redact_values)}
+        out = {"auth_secret_file": self.nuclei_secret_file, "redact_values": tuple(self.redact_values)}
+        if self.guard is not None and getattr(self.guard, "enabled", False):
+            out["session_guard"] = self.guard
+        return out
 
     def cleanup(self) -> bool:
         """Delete the per-scan secret directory. Idempotent; never raises."""
         path, self.secret_dir = self.secret_dir, None
         self.redact_values = ()
+        self.guard = None  # drop the closures holding session material
         if not path:
             return False
         return remove_secret_dir(path)
@@ -817,6 +827,20 @@ def prepare_for_run(
                     pass
         elif tool == "nuclei":
             plan.nuclei_secret_file = write_nuclei_secret_file(sdir, target_url, headers, cookies)
+        # Mid-scan guard: liveness via verify_url, bounded re-login, and a renew hook that
+        # rewrites the mounted tool file so the running scanner picks up the new session.
+        from attestra.auth_web import session_guard as sg
+
+        guard = sg.build_guard(
+            method=method, cfg=cfg, secret=secret, headers=headers, cookies=cookies,
+            http_post=http_post, login_probe=login_probe, imap_search=imap_search,
+            extra_headers=extra, extra_cookies=extra_cookies, redact_values=redact,
+        )
+        if tool == "zap":
+            guard.on_renew.append(lambda m: write_zap_hook(sdir, m.headers, m.cookies, target_url=target_url))
+        elif tool == "nuclei":
+            guard.on_renew.append(lambda m: write_nuclei_secret_file(sdir, target_url, m.headers, m.cookies))
+        plan.guard = guard
     except BaseException:
         if created:
             plan.cleanup()

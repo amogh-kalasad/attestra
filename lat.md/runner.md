@@ -127,6 +127,12 @@ Link a scan run to an auth credential profile and pass session material into ZAP
 
 Migrations `0031_scan_run_auth`, `0032_auth_profile_extra_headers`, and `0033_auth_profile_extra_cookies` add `auth_profile_id` / auth result fields on [[attestra/models.py#ScanRun]] plus optional non-secret headers and encrypted extra cookies on [[attestra/models.py#AuthCredentialProfile]]. [[attestra/auth_web/scan_auth.py]] loads the profile, resolves [[attestra/credentials/store.py#get_secret]], and builds scanner auth options. Worker paths pass those options into adapters; plaintext never enters SQL columns or ScanRun logs.
 
+### Mid-scan session guard
+
+Detect session loss during ZAP, Nuclei, and automated VAPT; bounded re-login from the auth profile; unrecovered work is blocked, never passed.
+
+[[attestra/auth_web/session_guard.py]] wraps verify/relogin with `ATTESTRA_AUTH_MIDSCAN_ENABLED` (default on), `ATTESTRA_AUTH_RELOGIN_MAX`, and heartbeat/chunk spacing. [[attestra/auth_web/scan_auth.py#prepare_for_run]] attaches a guard that can rewrite Nuclei `-sf` / ZAP hook data on renew. Nuclei chunks re-verify between batches; automated cases T19–T22/SESSION call [[attestra/automated_vapt/core/orchestrator.py#_ensure_session_for_case]]. Public notes use `auth-loss:` / `auth-recovered:` markers without secrets. Set `ATTESTRA_AUTH_MIDSCAN_ENABLED=0` for pre-flight-only behaviour.
+
 ## Email OTP login
 
 Best-effort form login that fetches an emailed one-time code so authenticated scanners can reuse the resulting session.

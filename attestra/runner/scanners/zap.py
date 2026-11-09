@@ -232,15 +232,32 @@ class ZapAdapter(ScannerAdapter):
     ) -> ScannerResult:
         if scope is not None and "deny_urls" not in opts:
             opts["deny_urls"] = tuple(scope.deny_urls)
-        sr = super().scan(
-            pin,
-            out_dir=out_dir,
-            cancel=cancel,
-            profile=profile,
-            auth_context_path=auth_context_path,
-            auth_opts=auth_opts,
-            **opts,
-        )
+        # Mid-scan session guard: a host-side watcher re-verifies the login every heartbeat;
+        # on loss it re-logs in and rewrites the hook data file (the in-container hook reloads
+        # it). When recovery fails the result carries a blocked auth note — never "passed".
+        guard = opts.pop("session_guard", None)
+        watcher = None
+        if guard is not None and getattr(guard, "enabled", False):
+            from attestra.auth_web import session_guard as sg
+
+            watcher = sg.ScanWatcher(guard, cancel=cancel)
+            watcher.start()
+        try:
+            sr = super().scan(
+                pin,
+                out_dir=out_dir,
+                cancel=cancel,
+                profile=profile,
+                auth_context_path=auth_context_path,
+                auth_opts=auth_opts,
+                **opts,
+            )
+        finally:
+            if watcher is not None:
+                watcher.stop()
+        if guard is not None and getattr(guard, "enabled", False):
+            sr.extra["auth"] = guard.public()
+            _reredact_tool_log(self, out_dir, getattr(guard, "redact_values", ()) or ())
         if scope is not None and sr.raw_path is not None and sr.raw_path.exists():
             reason = self.quarantine_if_out_of_scope(sr.raw_path.read_bytes(), scope)
             if reason:
@@ -288,7 +305,34 @@ def _record_crawl_summary(adapter, pin, out_dir: Path, crawl, profile: str, sr) 
         if fit_note:
             summary["notes"] = [*summary["notes"], fit_note]
         summary.update(zap_crawl.read_result(out_dir))
+        auth = sr.extra.get("auth") if isinstance(sr.extra, dict) else None
+        if isinstance(auth, dict):
+            summary["auth"] = auth
+            summary.update(zap_crawl.read_auth_status(out_dir))
+            notes = list(summary.get("notes") or [])
+            if auth.get("status") == "lost":
+                notes.append(
+                    "authenticated session lost mid-scan and re-login failed; coverage after the loss "
+                    f"is unauthenticated (blocked): {auth.get('lost_reason') or ''}"
+                )
+            elif int(auth.get("relogins") or 0) > 0:
+                notes.append(f"authenticated session re-established {auth.get('relogins')}x mid-scan")
+            summary["notes"] = notes
         (out_dir / crawl_settings.SUMMARY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
         sr.extra["crawl"] = summary
     except Exception:  # noqa: BLE001 - display data only
+        pass
+
+
+def _reredact_tool_log(adapter, out_dir: Path, redact_values) -> None:
+    """Re-apply redaction to the kept ZAP log with values rotated by a mid-scan re-login."""
+    if not redact_values or not adapter.tool_log_name:
+        return
+    try:
+        from attestra.runner.scanners.base import redact_text
+
+        path = out_dir / adapter.tool_log_name
+        if path.exists():
+            path.write_text(redact_text(path.read_text(encoding="utf-8", errors="replace"), redact_values), encoding="utf-8")
+    except OSError:
         pass

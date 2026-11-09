@@ -21,6 +21,10 @@ class SessionAuth:
     note: str = ""
     headers: dict[str, str] = field(default_factory=dict, repr=False)
     redact_values: tuple[str, ...] = field(default=(), repr=False)
+    # Mid-scan guard (attestra.auth_web.session_guard.SessionGuard) or None when no verify
+    # path exists. Holds secret closures; never serialised.
+    guard: Any = field(default=None, repr=False)
+    cfg: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def injected_names(self) -> list[str]:
@@ -28,12 +32,45 @@ class SessionAuth:
 
     def public(self) -> dict[str, Any]:
         """Value-free summary safe for result_json / reports."""
-        return {
+        out = {
             "profile_id": self.profile_id,
             "status": self.status,
             "note": self.note[:300],
             "injected": self.injected_names,
         }
+        if self.guard is not None and hasattr(self.guard, "public"):
+            g = self.guard.public()
+            out["midscan"] = {k: g.get(k) for k in ("enabled", "status", "checks", "relogins", "failed_relogins", "lost_reason")}
+        return out
+
+    def adopt_guard_material(self) -> None:
+        """Copy the guard's (possibly re-logged-in) session onto this object."""
+        if self.guard is None:
+            return
+        from attestra.auth_web import scan_auth as sa
+
+        self.headers = sa.all_request_headers(dict(self.guard.headers), dict(self.guard.cookies))
+        extra = tuple(getattr(self.guard, "redact_values", ()) or ())
+        self.redact_values = tuple(sorted(set(self.redact_values) | set(extra), key=len, reverse=True))
+
+    def ensure_alive(self) -> tuple[bool, str]:
+        """Liveness check + bounded re-login via the guard. ``(False, reason)`` → status ``lost``.
+
+        Without a guard (no verify path / mid-scan disabled) the session is assumed alive.
+        """
+        if self.status != "ready":
+            return self.status == "none", self.note
+        if self.guard is None or not getattr(self.guard, "enabled", False):
+            return True, "no mid-scan guard"
+        ok, note = self.guard.check_and_recover()
+        if ok:
+            if getattr(self.guard, "relogins", 0):
+                self.adopt_guard_material()
+            return True, note
+        self.status = "lost"
+        self.note = self.guard.note() or note
+        self.headers = {}
+        return False, self.note
 
     def headers_for(self, url: str, root: str) -> dict[str, str]:
         """Session headers only for the target origin (never another host)."""
@@ -124,6 +161,15 @@ def load_session_auth(
         out.headers = sa.all_request_headers(headers, cookies)
         out.status = "ready"
         out.note = note
+        out.cfg = {k: v for k, v in cfg.items() if k in ("verify_url", "success_url", "login_url", "logged_out_indicator", "logged_in_indicator")}
+        if verify:
+            from attestra.auth_web import session_guard as sg
+
+            out.guard = sg.build_guard(
+                method=method, cfg=cfg, secret=secret, headers=headers, cookies=cookies,
+                http_post=http_post, login_probe=login_probe,
+                extra_headers=extra, extra_cookies=extra_cookies, redact_values=out.redact_values,
+            )
         return out
     except Exception as exc:  # noqa: BLE001 - value-free reason only
         out.status = "failed"

@@ -304,7 +304,12 @@ def run_execution(
         for tid in ctx.test_case_ids:
             pairs_before = len(ctx.extra.get("_http_pairs") or [])
             shots_before = set((ctx.extra.get("_screenshots") or {}).keys())
-            case_result = _run_case(tid, ctx)
+            # Mid-scan auth guard: re-verify the login before session-dependent cases; on
+            # unrecoverable loss the case is BLOCKED with a reason (never run as "passed").
+            blocked = _ensure_session_for_case(tid, ctx)
+            case_result = blocked if blocked is not None else _run_case(tid, ctx)
+            if ctx.extra.get("_auth_events"):
+                case_result.setdefault("auth_events", list(ctx.extra["_auth_events"]))
             # Always keep proof of testing on disk, even when no finding is created.
             _persist_run_evidence(ex.id, case_result, ctx, pairs_before, shots_before)
             # E11: map CONFIRMED/POTENTIAL validation onto findings.
@@ -377,11 +382,14 @@ def run_execution(
             )
             s.flush()
 
-        ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
-        ex.result_json = json.dumps(
-            {"cases": results, "coverage_ledger": coverage_ledger},
-            sort_keys=True,
-        )
+        sess_final = ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
+        ctx.extra.pop("_secondary_session_auth", None)
+        summary: dict[str, Any] = {"cases": results, "coverage_ledger": coverage_ledger}
+        if sess_final is not None and hasattr(sess_final, "public"):
+            summary["auth"] = sess_final.public()
+            if ctx.extra.get("_auth_events"):
+                summary["auth"]["events"] = list(ctx.extra["_auth_events"])[-20:]
+        ex.result_json = json.dumps(summary, sort_keys=True)
         exec_mgr.transition(ex, "COMPLETED")
         audit.record(
             s,
@@ -511,6 +519,58 @@ def _normalize_test_ids(test_case_ids: list[str]) -> list[str]:
     if not out:
         raise ServiceError("at least one test case id is required")
     return out
+
+
+_SESSION_DEPENDENT = frozenset({"T19", "T20", "T21", "T22", "SESSION"})
+
+
+def _record_auth_event(ctx: TestContext, kind: str, note: str, *, test_id: str = "") -> None:
+    events = ctx.extra.setdefault("_auth_events", [])
+    events.append({"at": utcnow().isoformat(), "test_id": test_id, "kind": kind, "note": str(note)[:300]})
+    del events[:-30]
+
+
+def _ensure_session_for_case(test_id: str, ctx: TestContext) -> dict[str, Any] | None:
+    """Before a session-dependent case, confirm the login is alive (re-login once dead).
+
+    Returns a BLOCKED case result when the session was lost and could not be recovered,
+    else ``None`` (run the case). No-op without a ready session / guard or when
+    ``ATTESTRA_AUTH_MIDSCAN_ENABLED=0``.
+    """
+    if test_id not in _SESSION_DEPENDENT:
+        return None
+    auth = ctx.extra.get("_session_auth")
+    if auth is None or not hasattr(auth, "ensure_alive"):
+        return None
+    if getattr(auth, "status", "") == "lost":
+        reason = getattr(auth, "note", "") or "session lost earlier in this run"
+        return _blocked_case(test_id, reason, auth)
+    if getattr(auth, "status", "") != "ready":
+        return None
+    relogins_before = getattr(getattr(auth, "guard", None), "relogins", 0)
+    ok, note = auth.ensure_alive()
+    if ok:
+        if getattr(getattr(auth, "guard", None), "relogins", 0) > relogins_before:
+            _record_auth_event(ctx, "relogin_ok", note, test_id=test_id)
+        return None
+    _record_auth_event(ctx, "lost", note, test_id=test_id)
+    return _blocked_case(test_id, note, auth)
+
+
+def _blocked_case(test_id: str, reason: str, auth: Any) -> dict[str, Any]:
+    from attestra.auth_web.session_guard import SKIP_REASON_AUTH_LOST
+
+    case = get_test_case(test_id)
+    return {
+        "test_id": test_id,
+        "status": "BLOCKED",
+        "detail": f"blocked: authenticated session lost mid-run and re-login failed ({reason})"[:400],
+        "skip_reason": SKIP_REASON_AUTH_LOST,
+        "category": getattr(case, "category", "") if case is not None else "",
+        "auth": auth.public() if hasattr(auth, "public") else {"status": "lost"},
+        "endpoints": [],
+        "validation": {},
+    }
 
 
 def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
@@ -660,7 +720,13 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
     last_tx = None
     last_req: dict[str, Any] = {}
     last_resp: dict[str, Any] = {}
-    for url in urls:
+    auth_loss_note = ""
+    for idx, url in enumerate(urls):
+        if auth_loss_note:
+            # Session died earlier in this loop and could not be recovered: the remaining
+            # authenticated pages are blocked, not captured as if logged in.
+            pages.append({"url": url, "status": "BLOCKED", "detail": auth_loss_note, "skip_reason": "auth_lost"})
+            continue
         # GET only; session headers only for the target origin.
         headers = auth.headers_for(url, ctx.target_base_url) if auth is not None else {}
         try:
@@ -692,16 +758,31 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
         last_tx, last_req, last_resp = tx, req_n, resp_n
         code = report.status
         status_counts[str(code)] = status_counts.get(str(code), 0) + 1
-        pages.append(
-            {
-                "url": url,
-                "status": "PASSED",
-                "detail": "HTTP transaction captured",
-                "http_status": code,
-                "kind": "api" if url.rstrip("/") in api_set else "page",
-                "authenticated": bool(headers),
-            }
-        )
+        page_row = {
+            "url": url,
+            "status": "PASSED",
+            "detail": "HTTP transaction captured",
+            "http_status": code,
+            "kind": "api" if url.rstrip("/") in api_set else "page",
+            "authenticated": bool(headers),
+        }
+        pages.append(page_row)
+        # Periodic mid-scan check: an authenticated page answering like a dead session
+        # triggers verify → re-login; unrecovered loss blocks the rest of the list.
+        if headers and auth is not None and hasattr(auth, "ensure_alive") and getattr(auth, "guard", None) is not None:
+            from attestra.auth_web.session_guard import looks_expired
+
+            hint, why = looks_expired(code, body=report.response_body or "", headers=dict(report.response_headers or {}), cfg=getattr(auth, "cfg", None))
+            if hint:
+                relogins_before = getattr(auth.guard, "relogins", 0)
+                alive, note = auth.ensure_alive()
+                if alive and getattr(auth.guard, "relogins", 0) > relogins_before:
+                    page_row["detail"] = f"HTTP transaction captured; session re-established after: {why}"
+                    _record_auth_event(ctx, "relogin_ok", note, test_id="T01")
+                elif not alive:
+                    auth_loss_note = f"blocked: authenticated session lost mid-run ({note})"[:300]
+                    page_row["detail"] = f"captured, but session looked expired ({why}); {auth_loss_note}"
+                    _record_auth_event(ctx, "lost", note, test_id="T01")
     ok = [p for p in pages if p["status"] == "PASSED"]
     if not ok:
         first = pages[0]["detail"] if pages else "no URLs"
@@ -727,9 +808,14 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
         "pages": pages,
         "url_source": source,
         "status_counts": status_counts,
-        "auth": auth_info,
+        "auth": auth.public() if auth is not None else auth_info,
         "js_api": ctx.extra.get("_js_api"),
     }
+    if auth_loss_note:
+        blocked_n = sum(1 for p in pages if p["status"] == "BLOCKED")
+        out["auth_loss"] = auth_loss_note
+        out["skip_reason"] = "auth_lost"
+        out["detail"] += f"; {auth_loss_note}; {blocked_n} page(s) blocked"
     if last_tx is not None:
         out["capture"] = last_tx.to_dict()
         out["request_normalized"] = {k: v for k, v in last_req.items() if k != "original"}

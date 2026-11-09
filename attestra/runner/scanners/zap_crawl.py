@@ -31,6 +31,8 @@ AUTH_DATA_NAME = "attestra-zap-hook-data.json"
 CONFIG_NAME = "attestra-crawl.json"
 RESULT_NAME = "zap-crawl.json"
 URLS_NAME = "zap-urls.txt"
+AUTH_STATUS_NAME = "zap-auth-status.json"
+AUTH_RELOAD_POLL_S = 15  # hook thread: how often to look for rotated session headers
 AJAX_SEED_LIMIT = 2  # AJAX-crawl at most this many extra start URLs (each one is slow)
 SHM_SIZE = "--shm-size=1g"  # headless Firefox crashes with Docker's default 64 MB /dev/shm
 
@@ -66,7 +68,7 @@ def write_crawl_files(out_dir: Path, cfg: dict) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / HOOK_NAME).write_text(HOOK_SOURCE, encoding="utf-8")
     (out_dir / CONFIG_NAME).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    for stale in (RESULT_NAME, URLS_NAME):
+    for stale in (RESULT_NAME, URLS_NAME, AUTH_STATUS_NAME):
         try:
             (out_dir / stale).unlink()
         except FileNotFoundError:
@@ -90,6 +92,15 @@ def read_result(out_dir: Path) -> dict:
         return {}
 
 
+def read_auth_status(out_dir: Path) -> dict:
+    """``zap-auth-status.json`` written by the hook: header reload count + 401/403 tallies."""
+    try:
+        doc = json.loads((out_dir / AUTH_STATUS_NAME).read_text(encoding="utf-8"))
+        return {"hook_auth": doc} if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def parse_total_urls(stdout: bytes | str) -> int | None:
     """``Total of N URLs`` line printed by zap-baseline / zap-full-scan."""
     import re
@@ -103,11 +114,15 @@ def parse_total_urls(stdout: bytes | str) -> int | None:
 HOOK_SOURCE = r'''"""Attestra crawl hooks (generated; safe to delete)."""
 import json
 import logging
+import os
+import threading
 import time
 from urllib.parse import urlsplit
 
 _WRK = "/zap/wrk/"
 _AUTH_FILE = "/zap/attestra-secrets/attestra-zap-hook-data.json"
+_AUTH_STATUS = _WRK + "zap-auth-status.json"
+_AUTH_POLL_S = 15
 try:
     with open(_WRK + "attestra-crawl.json") as _f:
         CFG = json.load(_f)
@@ -115,6 +130,7 @@ except Exception:  # noqa: BLE001
     CFG = {}
 
 _state = {"zap": None, "spider_t0": None, "cleaned": False}
+_auth = {"mtime": None, "rules": [], "reloads": 0, "installed": 0, "lock": threading.Lock(), "thread": None}
 
 
 def _common():
@@ -145,9 +161,25 @@ def _other_host_regex():
     return "^https?://(?!" + esc + "(?:[:/?#]|$)).*"
 
 
-def _install_auth(zap):
-    """Session headers from the secrets mount -> Replacer rules (target host only)."""
+def _write_auth_status(extra=None):
+    doc = {"reloads": _auth["reloads"], "headers_installed": _auth["installed"], "ts": int(time.time())}
+    if extra:
+        doc.update(extra)
     try:
+        with open(_AUTH_STATUS, "w") as f:
+            json.dump(doc, f)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _install_auth(zap, reload=False):
+    """Session headers from the secrets mount -> Replacer rules (target host only).
+
+    On ``reload`` (the host rotated the file after a mid-scan re-login) the previous
+    attestra-auth-* rules are removed first so the new session replaces the dead one.
+    """
+    try:
+        st = os.stat(_AUTH_FILE)
         with open(_AUTH_FILE) as f:
             data = json.load(f)
     except FileNotFoundError:
@@ -155,29 +187,87 @@ def _install_auth(zap):
     except Exception as exc:  # noqa: BLE001 - never print the file content
         logging.warning("attestra: auth header file unreadable (%s)", type(exc).__name__)
         return
-    url_rx = data.get("url_regex") or ""
-    n = 0
-    for name, value in (data.get("headers") or {}).items():
+    with _auth["lock"]:
+        _auth["mtime"] = st.st_mtime
+        for desc in _auth["rules"]:
+            try:
+                zap.replacer.remove_rule(desc)
+            except Exception:  # noqa: BLE001
+                pass
+        _auth["rules"] = []
+        url_rx = data.get("url_regex") or ""
+        n = 0
+        for name, value in (data.get("headers") or {}).items():
+            desc = "attestra-auth-" + name
+            try:
+                zap.replacer.add_rule(
+                    description=desc,
+                    enabled="true",
+                    matchtype="REQ_HEADER",
+                    matchregex="false",
+                    matchstring=name,
+                    replacement=value,
+                    initiators="",
+                    url=url_rx,
+                )
+                _auth["rules"].append(desc)
+                n += 1
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("attestra: could not add auth header %s (%s)", name, type(exc).__name__)
+        _auth["installed"] = n
+        if reload:
+            _auth["reloads"] += 1
+            logging.info("attestra: session headers reloaded after re-login (%d header(s))", n)
+        else:
+            logging.info("attestra: authenticated scan, %d session header(s) injected", n)
+    _write_auth_status()
+
+
+def _auth_watch(zap):
+    """Daemon thread: re-install Replacer rules when the host rewrites the hook data file."""
+    while True:
+        time.sleep(_AUTH_POLL_S)
         try:
-            zap.replacer.add_rule(
-                description="attestra-auth-" + name,
-                enabled="true",
-                matchtype="REQ_HEADER",
-                matchregex="false",
-                matchstring=name,
-                replacement=value,
-                initiators="",
-                url=url_rx,
-            )
-            n += 1
-        except Exception as exc:  # noqa: BLE001
-            logging.warning("attestra: could not add auth header %s (%s)", name, type(exc).__name__)
-    logging.info("attestra: authenticated scan, %d session header(s) injected", n)
+            mtime = os.stat(_AUTH_FILE).st_mtime
+        except Exception:  # noqa: BLE001
+            continue
+        if _auth["mtime"] is not None and mtime != _auth["mtime"]:
+            _install_auth(zap, reload=True)
+
+
+def _start_auth_watch(zap):
+    if _auth["thread"] is not None or _auth["mtime"] is None:
+        return
+    t = threading.Thread(target=_auth_watch, args=(zap,), name="attestra-auth-watch", daemon=True)
+    t.start()
+    _auth["thread"] = t
+
+
+def _tally_auth_responses(zap):
+    """Count 401/403 responses to the target host (diagnostic for suspected session loss)."""
+    try:
+        total = unauth = 0
+        for msg in zap.core.messages(start=0, count=2000) or []:
+            url = ""
+            try:
+                url = (msg.get("requestHeader") or "").split(" ", 2)[1]
+            except Exception:  # noqa: BLE001
+                pass
+            if url and not _in_scope(url):
+                continue
+            total += 1
+            head = (msg.get("responseHeader") or "")[:40]
+            if " 401 " in head or " 403 " in head:
+                unauth += 1
+        _write_auth_status({"in_scope_messages_sampled": total, "unauthorized_responses": unauth})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def zap_started(zap, target):
     _state["zap"] = zap
     _install_auth(zap)
+    _start_auth_watch(zap)
     rx = _other_host_regex()
     excludes = ([rx] if rx else []) + list(CFG.get("deny_regexes") or [])
     for r in excludes:
@@ -306,6 +396,8 @@ def _cleanup_and_record(zap):
     if zap is None or _state["cleaned"]:
         return
     _state["cleaned"] = True
+    if _auth["mtime"] is not None:
+        _tally_auth_responses(zap)
     removed = []
     try:
         for site in zap.core.sites:

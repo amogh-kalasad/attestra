@@ -100,8 +100,10 @@ class NucleiAdapter(ScannerAdapter):
         intrusive_allowed: bool = False,
         crawl=None,
         auth_secret_file: str | None = None,
+        target_urls: list[str] | None = None,
+        **_,
     ) -> list[str]:
-        list_file = _write_targets(target, out_file.parent, crawl)
+        list_file = _write_targets(target, out_file.parent, crawl, urls=target_urls)
         return [
             "nuclei",
             *nuclei_flags(
@@ -130,9 +132,10 @@ class NucleiAdapter(ScannerAdapter):
         intrusive_allowed: bool = False,
         crawl=None,
         auth_secret_file: str | None = None,
+        target_urls: list[str] | None = None,
         **_,
     ):
-        list_file = _write_targets(target, out_file.parent, crawl)
+        list_file = _write_targets(target, out_file.parent, crawl, urls=target_urls)
         # The auth file lives in the per-scan secret dir, mounted read-only at CONTAINER_SECRETS.
         sf = f"{CONTAINER_SECRETS}/{Path(auth_secret_file).name}" if auth_secret_file else None
         return nuclei_flags(
@@ -159,29 +162,105 @@ class NucleiAdapter(ScannerAdapter):
             args=self.docker_args(target, out_file=out_file, profile=profile, **opts),
         )
 
-    def _scan_nuclei(self, pin, *, out_dir, cancel=None, profile="baseline", intrusive_allowed=False, crawl=None, auth_secret_file=None, redact_values=()):
+    def _scan_nuclei(self, pin, *, out_dir, cancel=None, profile="baseline", intrusive_allowed=False, crawl=None, auth_secret_file=None, redact_values=(), target_urls=None):
         opts = {"crawl": crawl} if crawl is not None else {}
         if auth_secret_file is not None:
             opts["auth_secret_file"] = auth_secret_file
         if redact_values:
             opts["redact_values"] = tuple(redact_values)
+        if target_urls:
+            opts["target_urls"] = list(target_urls)
         sr = super().scan(
             pin, out_dir=out_dir, cancel=cancel, profile=profile, intrusive_allowed=intrusive_allowed, **opts
         )
         _fail_on_fatal_empty(sr)
-        _record_nuclei_summary(pin, out_dir, crawl, sr)
         return sr
 
-    def scan(self, pin, *, out_dir, cancel=None, profile="baseline", intrusive_allowed=False, crawl=None, auth_secret_file=None, redact_values=()):  # type: ignore[override]
-        """Find more same-host URLs (ZAP list or a quick crawl), then run nuclei."""
+    def scan(self, pin, *, out_dir, cancel=None, profile="baseline", intrusive_allowed=False, crawl=None, auth_secret_file=None, redact_values=(), session_guard=None):  # type: ignore[override]
+        """Find more same-host URLs (ZAP list or a quick crawl), then run nuclei.
+
+        Authenticated scans with a live :class:`~attestra.auth_web.session_guard.SessionGuard`
+        run the URL list in chunks and re-verify the session between chunks (re-login and
+        rewrite the ``-sf`` file when it died; stop and report the rest as blocked when
+        recovery fails). Everything else is a single nuclei run.
+        """
         try:
             _discover_urls(pin, crawl, auth_secret_file, cancel)
         except Exception:  # noqa: BLE001 - discovery never stops the scan
             pass
-        return self._scan_nuclei(
-            pin, out_dir=out_dir, cancel=cancel, profile=profile, intrusive_allowed=intrusive_allowed,
-            crawl=crawl, auth_secret_file=auth_secret_file, redact_values=redact_values,
+        urls = _target_urls(pin, crawl) or [_url(pin)]
+        chunk = auth_chunk_size()
+        if session_guard is not None and getattr(session_guard, "enabled", False) and auth_secret_file and len(urls) > chunk:
+            sr = self._scan_chunked(
+                pin, urls, out_dir=out_dir, cancel=cancel, profile=profile, intrusive_allowed=intrusive_allowed,
+                crawl=crawl, auth_secret_file=auth_secret_file, redact_values=redact_values, guard=session_guard,
+                chunk=chunk,
+            )
+        else:
+            sr = self._scan_nuclei(
+                pin, out_dir=out_dir, cancel=cancel, profile=profile, intrusive_allowed=intrusive_allowed,
+                crawl=crawl, auth_secret_file=auth_secret_file, redact_values=redact_values,
+            )
+            if session_guard is not None and getattr(session_guard, "enabled", False) and auth_secret_file:
+                # Single run: one post-scan liveness check tells the report whether the session
+                # was still alive at the end (cannot re-run, so a loss is recorded, not fixed).
+                ok, note = session_guard.alive()
+                if not ok:
+                    session_guard.recover(note)
+                sr.extra["auth"] = session_guard.public()
+        _record_nuclei_summary(pin, out_dir, crawl, sr)
+        return sr
+
+    def _scan_chunked(self, pin, urls, *, out_dir, cancel, profile, intrusive_allowed, crawl, auth_secret_file, redact_values, guard, chunk):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        merged = out_dir / self.out_name
+        if merged.exists():
+            merged.unlink()
+        chunks = [urls[i:i + chunk] for i in range(0, len(urls), chunk)]
+        done: list[dict] = []
+        blocked: list[str] = []
+        last = None
+        redact = tuple(redact_values or ())
+        for idx, part in enumerate(chunks, 1):
+            if cancel is not None and cancel.is_set():
+                blocked.extend(u for rest in chunks[idx - 1:] for u in rest)
+                break
+            if idx > 1:
+                ok, note = guard.check_and_recover()
+                if not ok:
+                    blocked.extend(u for rest in chunks[idx - 1:] for u in rest)
+                    done.append({"chunk": idx, "urls": len(part), "status": "blocked", "note": note[:300]})
+                    break
+                redact = tuple(sorted(set(redact) | set(getattr(guard, "redact_values", ()) or ()), key=len, reverse=True))
+            sub = out_dir / f"chunk-{idx:02d}"
+            sr = self._scan_nuclei(
+                pin, out_dir=sub, cancel=cancel, profile=profile, intrusive_allowed=intrusive_allowed,
+                crawl=crawl, auth_secret_file=auth_secret_file, redact_values=redact, target_urls=part,
+            )
+            last = sr
+            _append_chunk_outputs(sub, out_dir, self)
+            done.append({"chunk": idx, "urls": len(part), "status": "error" if sr.error else "done", "returncode": sr.extra.get("returncode")})
+            if sr.error or sr.extra.get("cancelled") or sr.extra.get("timed_out"):
+                blocked.extend(u for rest in chunks[idx:] for u in rest)
+                break
+        from attestra.runner.scanners.base import ScannerResult
+
+        if last is None:
+            return ScannerResult(tool=self.name, tool_version=self.version(), error="nuclei did not run (cancelled before first chunk)")
+        out = ScannerResult(
+            tool=self.name, tool_version=last.tool_version, image_digest=last.image_digest,
+            import_tool=self.import_tool, extra=dict(last.extra), error=last.error,
         )
+        if not out.error and merged.exists():
+            out.raw_path = merged
+        elif not out.error:
+            merged.write_bytes(b"")
+            out.raw_path = merged
+        out.extra["chunks"] = done
+        out.extra["auth"] = guard.public()
+        if blocked:
+            out.extra["auth_blocked_urls"] = blocked
+        return out
 
 
 def _fail_on_fatal_empty(sr) -> None:
@@ -259,14 +338,48 @@ def _discover_urls(pin, crawl, auth_secret_file, cancel) -> None:
         crawl.url_source = "root-only"
 
 
-def _write_targets(target, out_dir: Path, crawl) -> Path | None:
-    urls = _target_urls(target, crawl)
-    if len(urls) < 2:
+def _write_targets(target, out_dir: Path, crawl, *, urls: list[str] | None = None) -> Path | None:
+    """Write the ``-list`` file. Explicit ``urls`` (chunked auth scans) are written as given."""
+    if urls is None:
+        urls = _target_urls(target, crawl)
+        if len(urls) < 2:
+            return None
+    elif not urls:
         return None
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / TARGETS_NAME
     path.write_text("\n".join(urls) + "\n", encoding="utf-8")
     return path
+
+
+def auth_chunk_size() -> int:
+    """URLs per nuclei run between session checks (``ATTESTRA_AUTH_NUCLEI_CHUNK``, default 25)."""
+    import os
+
+    try:
+        n = int(os.environ.get("ATTESTRA_AUTH_NUCLEI_CHUNK", "25"))
+    except ValueError:
+        n = 25
+    return max(1, n)
+
+
+def _append_chunk_outputs(sub: Path, out_dir: Path, adapter) -> None:
+    """Concatenate a chunk's JSONL report and stderr log onto the merged files in ``out_dir``."""
+    try:
+        part = sub / adapter.out_name
+        if part.exists():
+            data = part.read_bytes()
+            if data and not data.endswith(b"\n"):
+                data += b"\n"
+            with (out_dir / adapter.out_name).open("ab") as fh:
+                fh.write(data)
+        log = sub / adapter.tool_log_name
+        if log.exists():
+            with (out_dir / adapter.tool_log_name).open("a", encoding="utf-8") as fh:
+                fh.write(f"===== {sub.name} =====\n")
+                fh.write(log.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        pass
 
 
 def _record_nuclei_summary(target, out_dir: Path, crawl, sr) -> None:
@@ -297,6 +410,21 @@ def _record_nuclei_summary(target, out_dir: Path, crawl, sr) -> None:
             summary["notes"].append(
                 f"{skipped} URL(s) not sent to nuclei (limit ATTESTRA_NUCLEI_MAX_URLS={crawl_settings.nuclei_max_urls()})"
             )
+        auth = sr.extra.get("auth") if isinstance(sr.extra, dict) else None
+        if isinstance(auth, dict):
+            summary["auth"] = auth
+            if sr.extra.get("chunks"):
+                summary["auth_chunks"] = sr.extra["chunks"]
+            blocked = sr.extra.get("auth_blocked_urls") or []
+            if auth.get("status") == "lost":
+                summary["notes"].append(
+                    f"authenticated session lost mid-scan and re-login failed; "
+                    f"{len(blocked)} URL(s) not scanned authenticated (blocked): {auth.get('lost_reason') or ''}"
+                )
+                summary["auth_blocked_urls"] = list(blocked)[:200]
+                summary["urls_scanned"] = max(0, len(urls) - len(blocked))
+            elif int(auth.get("relogins") or 0) > 0:
+                summary["notes"].append(f"authenticated session re-established {auth.get('relogins')}x mid-scan")
         (out_dir / crawl_settings.SUMMARY_NAME).write_text(json.dumps(summary, indent=2), encoding="utf-8")
         sr.extra["crawl"] = summary
     except Exception:  # noqa: BLE001 - display data only
