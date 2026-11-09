@@ -175,6 +175,13 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "status": "deferred",
             "notes": "No destructive injection campaigns",
         },
+        {
+            "capability": "ssrf_canary",
+            "module": "ssrf_tests",
+            "test_ids": ["SSRF"],
+            "status": "partial",
+            "notes": "Scoped URL-fetcher canary; blocked metadata hosts; local/test/dev gated",
+        },
     ],
     "xss": [
         {
@@ -241,10 +248,10 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
         },
         {
             "capability": "upload_file_inclusion",
-            "module": None,
-            "test_ids": [],
-            "status": "deferred",
-            "notes": "No file-write probes in Phase 3",
+            "module": "file_upload_tests",
+            "test_ids": ["UPLOAD"],
+            "status": "partial",
+            "notes": "Safe HTML marker upload; local/test/dev or ATTESTRA_AUTOMATED_VAPT_UPLOAD=1",
         },
     ],
     "infrastructure": [

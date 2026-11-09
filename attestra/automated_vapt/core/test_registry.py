@@ -97,6 +97,20 @@ _CASES: tuple[TestCase, ...] = (
         "Read-only compare of two roles (lab account_a/b or secondary profile) on shared API paths.",
     ),
     TestCase(
+        "SSRF",
+        "injection",
+        "Scoped SSRF canary",
+        "Probe URL-fetcher params with an Attestra canary; finding only with canary reflection. "
+        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_SSRF=1.",
+    ),
+    TestCase(
+        "UPLOAD",
+        "file",
+        "Safe file-upload probe",
+        "Upload a benign HTML marker and check anonymous fetch of the stored URL. "
+        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_UPLOAD=1.",
+    ),
+    TestCase(
         "SCOPE_SMOKE",
         "scope",
         "Scope smoke",

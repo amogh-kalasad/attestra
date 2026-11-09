@@ -590,7 +590,10 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t01_http_capture(ctx, case.category)
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
-    if case.id in {"T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE", "BIZ", "ROLEDIFF"}:
+    if case.id in {
+        "T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE",
+        "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+    }:
         return _run_authz_module(case.id, ctx, case.category)
     if case.id in {"T19", "T20", "T21", "T22"}:
         return _run_replay_check(case.id, ctx, case.category)
@@ -981,13 +984,15 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         authorization_tests,
         business_logic_tests,
         file_security_tests,
+        file_upload_tests,
         idor_bola_tests,
         injection_tests,
+        role_diff_tests,
         session_security_tests,
+        ssrf_tests,
         tenant_isolation_tests,
         xss_tests,
     )
-    from attestra.automated_vapt.testing import role_diff_tests
 
     runners = {
         "T03": authentication_tests.run,
@@ -1001,6 +1006,8 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "FILE": file_security_tests.run,
         "BIZ": business_logic_tests.run,
         "ROLEDIFF": role_diff_tests.run,
+        "SSRF": ssrf_tests.run,
+        "UPLOAD": file_upload_tests.run,
     }
     try:
         result = runners[test_id](client, ctx.target_base_url, ctx=ctx)

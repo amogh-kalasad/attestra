@@ -3651,3 +3651,30 @@ When account_a login fails, T06 returns SKIPPED with skip_reason `no_mock_accoun
 
 [[attestra/automated_vapt/core/orchestrator.py#_run_authz_module]] runs BIZ against an injected client and returns FINDING on the vulnerable lab.
 
+
+## Phase 3b SSRF and upload
+
+Scoped SSRF canary (SSRF) and safe HTML-marker upload probe (UPLOAD), gated to local/test/development.
+
+[[attestra/automated_vapt/testing/ssrf_tests.py#run]] never uses metadata/loopback as the canary host; [[attestra/automated_vapt/testing/file_upload_tests.py#run]] uploads a benign marker and checks anonymous fetch. Both register in the catalogue and coverage matrix as partial.
+
+### Registry and matrix
+
+SSRF and UPLOAD appear in the registry; coverage marks ssrf_canary and upload_file_inclusion partial.
+
+### Blocked metadata destinations
+
+[[attestra/automated_vapt/testing/ssrf_tests.py#is_blocked_ssrf_destination]] rejects 169.254/127/localhost metadata hosts.
+
+### SSRF vulnerable vs secure
+
+Vulnerable lab reflects the canary → finding; secure allowlist rejects → no finding.
+
+### Upload vulnerable vs secure
+
+Vulnerable lab serves the HTML marker anonymously → finding; secure rejects upload → no finding.
+
+### Disabled outside allowlist
+
+With ATTESTRA_AUTOMATED_VAPT_SSRF/UPLOAD=0 both cases SKIP with explicit skip_reason.
+
