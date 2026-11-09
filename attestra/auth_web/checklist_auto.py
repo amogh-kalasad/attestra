@@ -92,6 +92,8 @@ AUTOMATED_MAP: dict[str, tuple[str, ...]] = {
     "INJ": ("WSTG-INPV-05",),
     "XSS": ("WSTG-INPV-01",),
     "FILE": ("WSTG-ATHZ-01",),
+    "BIZ": ("WSTG-ATHZ-04",),
+    "ROLEDIFF": ("WSTG-ATHZ-02",),
 }
 
 # Never set automatically (need a human / no tool coverage today).

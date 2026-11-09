@@ -3624,3 +3624,30 @@ SKIPPED T20/T19 results include `skip_reason` codes such as `no_object_ids`, `no
 
 Lab-shaped `items[].projectId` JSON harvests into `project_id` for T20 positive controls.
 
+
+## Phase 3a BIZ and ROLEDIFF
+
+Catalogue-wire business logic (BIZ) and multi-role comparison (ROLEDIFF); T06 skips cleanly without mock accounts.
+
+[[attestra/automated_vapt/testing/business_logic_tests.py#run]] and [[attestra/automated_vapt/testing/role_diff_tests.py#run]] are registered in [[attestra/automated_vapt/core/test_registry.py]] and dispatched by [[attestra/automated_vapt/core/orchestrator.py#_run_authz_module]]. Coverage matrix marks both implemented. Checklist maps BIZ→WSTG-ATHZ-04 and ROLEDIFF→WSTG-ATHZ-02.
+
+### Registry lists BIZ and ROLEDIFF
+
+Catalogue and coverage_matrix expose BIZ and ROLEDIFF as implemented authorization cases.
+
+### BIZ on secure vs vulnerable
+
+Secure lab: owner access ok and foreign object denied; vulnerable lab: foreign object exposed → finding_candidate.
+
+### ROLEDIFF flags cross-role list
+
+Vulnerable lab cross-lists proj-a/proj-b across roles; secure lab does not.
+
+### T06 skips without mock accounts
+
+When account_a login fails, T06 returns SKIPPED with skip_reason `no_mock_accounts` instead of a false pass.
+
+### Orchestrator dispatches BIZ
+
+[[attestra/automated_vapt/core/orchestrator.py#_run_authz_module]] runs BIZ against an injected client and returns FINDING on the vulnerable lab.
+

@@ -590,7 +590,7 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t01_http_capture(ctx, case.category)
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
-    if case.id in {"T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE"}:
+    if case.id in {"T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE", "BIZ", "ROLEDIFF"}:
         return _run_authz_module(case.id, ctx, case.category)
     if case.id in {"T19", "T20", "T21", "T22"}:
         return _run_replay_check(case.id, ctx, case.category)
@@ -979,6 +979,7 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         api_security_tests,
         authentication_tests,
         authorization_tests,
+        business_logic_tests,
         file_security_tests,
         idor_bola_tests,
         injection_tests,
@@ -986,6 +987,7 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         tenant_isolation_tests,
         xss_tests,
     )
+    from attestra.automated_vapt.testing import role_diff_tests
 
     runners = {
         "T03": authentication_tests.run,
@@ -997,9 +999,11 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "INJ": injection_tests.run,
         "XSS": xss_tests.run,
         "FILE": file_security_tests.run,
+        "BIZ": business_logic_tests.run,
+        "ROLEDIFF": role_diff_tests.run,
     }
     try:
-        result = runners[test_id](client, ctx.target_base_url)
+        result = runners[test_id](client, ctx.target_base_url, ctx=ctx)
     except Exception as exc:  # noqa: BLE001
         return {
             "test_id": test_id,
@@ -1050,20 +1054,27 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             "authorized_access": vctx["authorized_access"],
         }
     )
-    status = "FINDING" if result.get("finding_candidate") else "PASSED"
+    if result.get("status_hint") == "SKIPPED" or result.get("skip_reason"):
+        status = "SKIPPED"
+        detail = (result.get("observations") or {}).get("detail") or f"skipped: {result.get('skip_reason')}"
+    else:
+        status = "FINDING" if result.get("finding_candidate") else "PASSED"
+        detail = "authz module completed"
     out: dict[str, Any] = {
         "test_id": test_id,
         "status": status,
-        "detail": "authz module completed",
+        "detail": detail,
         "category": category,
         "module": {
             k: v
             for k, v in result.items()
             if k != "evidence_pairs"
         },
-        "validation": validation,
-        "false_positive": fp,
+        "validation": validation if status != "SKIPPED" else {},
+        "false_positive": fp if status != "SKIPPED" else {},
     }
+    if result.get("skip_reason"):
+        out["skip_reason"] = result["skip_reason"]
     if result.get("evidence_pairs"):
         out["evidence_pairs"] = list(result["evidence_pairs"])
     return out

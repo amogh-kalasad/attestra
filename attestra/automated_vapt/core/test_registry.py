@@ -85,6 +85,18 @@ _CASES: tuple[TestCase, ...] = (
         "Prefer a secondary (non-admin) login profile for confident IDOR.",
     ),
     TestCase(
+        "BIZ",
+        "authorization",
+        "Business logic owner access",
+        "Owner GET succeeds; foreign object GET must not return another owner's record (read-only).",
+    ),
+    TestCase(
+        "ROLEDIFF",
+        "authorization",
+        "Multi-role access comparison",
+        "Read-only compare of two roles (lab account_a/b or secondary profile) on shared API paths.",
+    ),
+    TestCase(
         "SCOPE_SMOKE",
         "scope",
         "Scope smoke",

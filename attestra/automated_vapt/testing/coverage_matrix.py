@@ -213,8 +213,15 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "capability": "owner_access_sanity",
             "module": "business_logic_tests",
             "test_ids": ["BIZ"],
-            "status": "partial",
-            "notes": "Helper module; not wired as catalogue id",
+            "status": "implemented",
+            "notes": "Catalogue id BIZ: owner GET + foreign object deny; lab mock accounts",
+        },
+        {
+            "capability": "multi_role_comparison",
+            "module": "role_diff_tests",
+            "test_ids": ["ROLEDIFF"],
+            "status": "implemented",
+            "notes": "Catalogue id ROLEDIFF: read-only account_a vs account_b compare",
         },
         {
             "capability": "workflow_approval_transaction_abuse",
