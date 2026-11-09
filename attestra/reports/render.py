@@ -832,6 +832,106 @@ def _security_testing_coverage_context(s: Session, eng: Engagement) -> dict:
     return {"security_testing_coverage": snap}
 
 
+def _redact_auth_note(note: str) -> str:
+    """Strip cookie/token-looking fragments from auth notes before report HTML/PDF."""
+    import re
+
+    text = (note or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"(?i)(cookie|authorization|bearer|token|session)=([^\s;]+)", r"\1=[REDACTED]", text)
+    text = re.sub(r"\b[A-Za-z0-9_-]{32,}\b", "[REDACTED]", text)
+    return text[:500]
+
+
+def _automated_coverage_limitations_context(s: Session, eng: Engagement) -> dict:
+    """Deferred catalogue + executed case skip/auth-loss notes for technical reports."""
+    # @lat: [[reports#Generation]]
+    # @lat: [[architecture#Remaining gaps plan (auth depth)]]
+    import json
+
+    deferred: list[dict] = []
+    try:
+        from attestra.automated_vapt.testing.coverage_matrix import deferred_capabilities
+
+        deferred = deferred_capabilities()[:40]
+    except Exception:  # noqa: BLE001
+        deferred = []
+
+    cases: list[dict] = []
+    auth_notes: list[str] = []
+    try:
+        from sqlalchemy import select
+
+        from attestra.models import AutomatedTestExecution, ScanRun
+
+        rows = list(
+            s.scalars(
+                select(AutomatedTestExecution)
+                .where(AutomatedTestExecution.engagement_id == eng.id)
+                .order_by(AutomatedTestExecution.id.desc())
+                .limit(5)
+            )
+        )
+        for ex in rows:
+            try:
+                payload = json.loads(ex.result_json or "{}")
+            except Exception:
+                payload = {}
+            auth = payload.get("auth") if isinstance(payload, dict) else None
+            if isinstance(auth, dict):
+                note = _redact_auth_note(str(auth.get("note") or auth.get("lost_reason") or ""))
+                if note:
+                    auth_notes.append(f"automated run #{ex.id}: {note}")
+                for ev in list(auth.get("events") or [])[-5:]:
+                    if isinstance(ev, dict) and ev.get("kind") in {"lost", "relogin_ok"}:
+                        auth_notes.append(
+                            f"automated run #{ex.id}: {ev.get('kind')} — {_redact_auth_note(str(ev.get('note') or ''))}"
+                        )
+            for c in list((payload or {}).get("cases") or []):
+                if not isinstance(c, dict):
+                    continue
+                cases.append(
+                    {
+                        "execution_id": ex.id,
+                        "test_id": c.get("test_id") or "",
+                        "status": c.get("status") or "",
+                        "skip_reason": c.get("skip_reason") or "",
+                        "detail": _redact_auth_note(str(c.get("detail") or ""))[:240],
+                    }
+                )
+
+        scans = list(
+            s.scalars(
+                select(ScanRun)
+                .where(ScanRun.engagement_id == eng.id)
+                .order_by(ScanRun.id.desc())
+                .limit(10)
+            )
+        )
+        for sr in scans:
+            note = _redact_auth_note(getattr(sr, "auth_note", None) or "")
+            if note and ("auth-loss:" in note or "auth-recovered:" in note or "mid-scan" in note.lower()):
+                auth_notes.append(f"scan #{sr.id} ({getattr(sr, 'tool', '')}): {note}")
+    except Exception:  # noqa: BLE001 — optional section must never break reports
+        pass
+
+    # Prefer skipped/blocked rows first so limitations are visible.
+    rank = {"BLOCKED": 0, "SKIPPED": 1, "FAILED": 2, "DEFERRED": 3, "FINDING": 4, "PASSED": 5}
+    cases.sort(key=lambda c: (rank.get(str(c.get("status") or "").upper(), 9), str(c.get("test_id") or "")))
+    section = bool(deferred or cases or auth_notes)
+    return {
+        "automated_coverage_limitations": {
+            "deferred": deferred,
+            "cases": cases[:80],
+            "auth_notes": auth_notes[:20],
+            "section": section,
+        }
+        if section
+        else None,
+    }
+
+
 def _annotate_scope_exposure(assets) -> list:
     """Wrap assets so public https FQDNs never render Exposure as Internal."""
     # @lat: [[reports#Display labels]]
@@ -1065,6 +1165,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         **_ai_context(engagement_id, eng.tenant_id),
         **_auth_web_report_context(s, eng),
         **_security_testing_coverage_context(s, eng),
+        **_automated_coverage_limitations_context(s, eng),
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }

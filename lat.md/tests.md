@@ -3701,3 +3701,25 @@ Vulnerable raw HTML guestbook → finding; secure html.escape guestbook → clea
 
 Boolean-safe quote payloads flag SQL error signatures without time-based or destructive probes.
 
+## Phase 5 report coverage limitations
+
+Technical reports surface deferred catalogue rows, executed skip/block reasons, and redacted mid-scan auth notes ([[tests/test_phase5_report_coverage_limitations.py]]).
+
+[[attestra/reports/render.py#_automated_coverage_limitations_context]] builds `automated_coverage_limitations` for `attestra/reports/templates/technical.html.j2`; secrets are stripped by [[attestra/reports/render.py#_redact_auth_note]].
+
+### Auth note redaction
+
+Cookie, bearer, token, and long opaque values become `[REDACTED]` before report HTML.
+
+### Deferred list always available
+
+Even without automated runs, the section lists deferred catalogue capabilities so they are never implied covered.
+
+### Skip reasons surface from execution
+
+AutomatedTestExecution case rows with SKIPPED/BLOCKED and auth-loss notes appear with skip_reason; secrets stay redacted.
+
+### Technical template renders section
+
+When `automated_coverage_limitations.section` is set, the technical template emits `#automated-coverage-limitations`.
+

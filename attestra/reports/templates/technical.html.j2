@@ -17,6 +17,7 @@
     <li><a href="#findings-overview">Findings overview</a></li>
     {% if passed_checks %}<li><a href="#status-checks">Status checks</a></li>{% endif %}
     {% if security_testing_coverage %}<li><a href="#security-testing-coverage">Security testing coverage</a></li>{% endif %}
+    {% if automated_coverage_limitations and automated_coverage_limitations.section %}<li><a href="#automated-coverage-limitations">Automated coverage and limitations</a></li>{% endif %}
     {% if auth_checklist_section %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
@@ -285,6 +286,46 @@ CVSS vector and version appear on individual findings when available.</p>
   <tr><td>Automated cases failed</td><td>{{ security_testing_coverage.automated_cases_failed }}</td></tr>
   <tr><td>Automated cases skipped</td><td>{{ security_testing_coverage.automated_cases_skipped }}</td></tr>
 </table>
+{% endif %}
+
+{% if automated_coverage_limitations and automated_coverage_limitations.section %}
+{% set sec.n = sec.n + 1 %}<h2 id="automated-coverage-limitations">{{ sec.n }}. Automated coverage and limitations</h2>
+<p class="meta">What the automated catalogue deferred, skipped, or blocked — including mid-scan authentication loss. These rows are never treated as passed.</p>
+{% if automated_coverage_limitations.auth_notes %}
+<p><b>Authentication notes.</b></p>
+<ul>
+  {% for note in automated_coverage_limitations.auth_notes %}
+  <li class="meta">{{ note }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if automated_coverage_limitations.cases %}
+<table>
+  <tr><th>Run</th><th>Case</th><th>Status</th><th>Skip reason</th><th>Detail</th></tr>
+  {% for c in automated_coverage_limitations.cases %}
+  <tr>
+    <td class="mono">#{{ c.execution_id }}</td>
+    <td class="mono">{{ c.test_id }}</td>
+    <td>{{ (c.status or "—")|status_label }}</td>
+    <td class="mono">{{ c.skip_reason or "—" }}</td>
+    <td>{{ c.detail or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% if automated_coverage_limitations.deferred %}
+<p><b>Deferred catalogue capabilities.</b> Not claimed as covered by this engagement's automated runs:</p>
+<table>
+  <tr><th>Category</th><th>Capability</th><th>Notes</th></tr>
+  {% for d in automated_coverage_limitations.deferred %}
+  <tr>
+    <td>{{ d.category or "—" }}</td>
+    <td>{{ d.capability or "—" }}</td>
+    <td class="meta">{{ d.notes or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
 {% endif %}
 
 {% if auth_checklist_section %}
