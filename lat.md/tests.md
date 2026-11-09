@@ -3454,3 +3454,72 @@ COEP/COOP/CORP/PP/XPCD nginx examples are pairwise distinct (no shared CSP paste
 ### XPCD not CORS concept
 
 X-Permitted-Cross-Domain-Policies maps to `header:x-permitted-cross-domain-missing`, never the CORS concept.
+
+## test_finding_validation_classify.py
+
+Phase 0 unit lock for [[attestra/finding_validation/classify.py#classify_observation]] noise, contradiction, Expect-CT, and ZAP importer severity caps (Remaining Gaps plan).
+
+### ZAP notices are informational
+
+ZAP rule ids 10109/10112 and Modern Web Application / Session Management Response titles classify as informational with info severity.
+
+### Cloudflare challenge and cookie noise
+
+cf_clearance SameSite, cache findings on `/cdn-cgi/challenge-platform` or `/_next/static`, and CORS on challenge URLs are informational; application-page cache stays unvalidated.
+
+### Expect-CT and X-XSS-Protection are informational
+
+Expect-CT and X-XSS-Protection missing map to informational with CWE 693 and clear injection remapping; never Medium/injection.
+
+### HSTS contradiction and severity cap
+
+HSTS-missing with max-age evidence is not_reproducible; without PoC severity caps to low; challenge URLs informational; Permissions-Policy and clickjacking contradictions are not_reproducible.
+
+### DNS and cipher honesty
+
+SPF-without-MX and DANE are informational; weak-cipher without suite names needs_manual_validation; unknown titles stay unvalidated.
+
+### Applying a classification remaps injection fields
+
+[[attestra/finding_validation/classify.py#apply_classification_to_finding]] remaps CWE/OWASP/ASVS/WSTG for Expect-CT-style headers and leaves unrelated fields untouched; Elite status mapping gates finding creation.
+
+### ZAP importer caps notice severity
+
+[[attestra/importers/zap.py#_force_informational_severity]] forces info for 10109/10112 and static/CDN cache plugin paths.
+
+## test_finding_validation_headers.py
+
+Phase 0 pure helpers for [[attestra/finding_validation/headers.py]] HSTS, Permissions-Policy, clickjacking, and missing-header claim detection.
+
+### HSTS presence requires max-age
+
+[[attestra/finding_validation/headers.py#hsts_present_in_evidence]] is true only when Strict-Transport-Security includes max-age.
+
+### Permissions-Policy and clickjacking helpers
+
+Permissions-Policy presence and clickjacking protection (XFO DENY/SAMEORIGIN or CSP frame-ancestors) match evidence strings; ALLOW-FROM and empty frame-ancestors do not.
+
+### Header claim detection
+
+[[attestra/finding_validation/headers.py#response_has_header]] and [[attestra/finding_validation/headers.py#finding_claims_header_missing]] map titles/descriptions to hsts, permissions_policy, or clickjacking keys.
+
+## test_remediation_match.py
+
+Phase 0 pack matching so Permissions-Policy, Expect-CT, and related headers never resolve to CSP packs ([[attestra/remediation/match.py#remediation_for_finding]]).
+
+### Permissions-Policy never resolves to a CSP pack
+
+Permissions-Policy / Feature-Policy titles resolve to `header:permissions-policy-missing` with Permissions-Policy fix text, never CSP.
+
+### Expect-CT resolves to its deprecated-header pack
+
+Expect-CT titles resolve to `header:expect-ct-deprecated`; COEP/COOP/CORP/XPCD keep own packs.
+
+### CSP titles still resolve to CSP packs
+
+CSP missing and weak titles still map to CSP packs; unknown titles return empty remediation.
+
+### Markdown has the seven sections
+
+[[attestra/remediation/match.py#format_remediation_markdown]] emits the seven remediation headings plus fenced config examples.
+

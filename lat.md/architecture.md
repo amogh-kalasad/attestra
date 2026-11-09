@@ -179,6 +179,12 @@ Final world-class VA + PT phase: regression suite against ENG1 technical report 
 
 Reuses Phases 2–9 classifiers, coverage honesty, grading, remediation packs, report narrative, and report QA — no second platform. Fifteen anchors (HSTS / Permissions-Policy / CORS cdn-cgi / CF cookies / weak cipher / site grade / remediation / informational-as-vuln / auth testing / IDOR-BOLA / limited XSS-SQLi / HTTP evidence / scan timestamps / evidence traceability / DRAFT approval metadata) are asserted in `tests/test_eng1_v21_regression.py` and documented in `docs/WORLDCLASS_VAPT_PHASE10_ENG1_V21.md`. Anchors 9–11 assert skipped/blocked/limited/deferred never become checklist Passed, coverage snapshots keep `scan_completion_is_not_security_coverage=True`, and limited PT probes stay blocked with honesty notes (QA `checklist_passed_incomplete`). Weak-cipher (F-10) depth: [[attestra/finding_validation/classify.py#_has_cipher_suite_evidence]] accepts IANA and OpenSSL suite tokens plus handshake proof (protocol versions alone stay needs_manual); [[attestra/grade.py]] skips `tls_weak_cipher` for informational / needs_manual without suites; [[attestra/importers/testssl.py#_cipher_name]] never invents suite names for TLS summary. Product wording remains security testing / VA + PT. There is no Phase 11 in the world-class prompt.
 
+## Remaining gaps plan (auth depth)
+
+Follow-on backlog after world-class Phases 0–10: mid-scan auth, T20/T22 harvest reliability, depth catalogue, lab fixtures, and honest report coverage (plan PDF `ATTESTRA_GAP_IMPLEMENTATION_PLAN`).
+
+Phase 0 locks Nov-6 classifiers and remediation matching with pure unit tests only ([[tests#test_finding_validation_classify.py]], [[tests#test_finding_validation_headers.py]], [[tests#test_remediation_match.py]]) — no production logic change unless a test reveals an obvious bug. Later phases: mid-scan session guard, ID harvest/write-body skip reasons, BIZ/SSRF/upload/DOM XSS catalogue depth, controlled lab fixtures, and report deferred/skip/auth-loss sections.
+
 ## Observability
 
 Prometheus metrics at `/metrics`, optional OpenTelemetry tracing for FastAPI and SQLAlchemy, and JSON logs for Loki.
