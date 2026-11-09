@@ -193,10 +193,10 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
         },
         {
             "capability": "stored_dom_xss",
-            "module": None,
-            "test_ids": ["T21"],
-            "status": "deferred",
-            "notes": "T21 may tip XSS payloads; stored/DOM deferred",
+            "module": "xss_tests",
+            "test_ids": ["XSSDOM", "XSSSTORE"],
+            "status": "partial",
+            "notes": "DOM sink source check + lab stored guestbook canary with cleanup",
         },
     ],
     "api_security": [

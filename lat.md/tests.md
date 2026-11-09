@@ -3678,3 +3678,26 @@ Vulnerable lab serves the HTML marker anonymously → finding; secure rejects up
 
 With ATTESTRA_AUTOMATED_VAPT_SSRF/UPLOAD=0 both cases SKIP with explicit skip_reason.
 
+
+## Phase 3c DOM stored XSS
+
+Safe DOM sink inspection (XSSDOM) and stored guestbook canary with cleanup (XSSSTORE); stronger boolean-safe injection error signatures on INJ.
+
+[[attestra/automated_vapt/testing/xss_tests.py#run_dom]] flags location→innerHTML sinks; [[attestra/automated_vapt/testing/xss_tests.py#run_stored]] posts a canary, requires unencoded payload reflection, then deletes. Lab fixtures add `/dom-sink` and `/guestbook`.
+
+### Registry XSSDOM XSSSTORE
+
+Catalogue and coverage mark stored_dom_xss partial with XSSDOM and XSSSTORE.
+
+### DOM sink vulnerable vs secure
+
+Vulnerable lab innerHTML sink → finding; secure textContent sink → clean.
+
+### Stored guestbook vulnerable vs secure
+
+Vulnerable raw HTML guestbook → finding; secure html.escape guestbook → clean.
+
+### Injection boolean canaries stay safe
+
+Boolean-safe quote payloads flag SQL error signatures without time-based or destructive probes.
+

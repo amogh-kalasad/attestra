@@ -189,6 +189,51 @@ def create_vulnerable_app() -> FastAPI:
         tokens = {pid: p["api_token"] for pid, p in PROJECTS.items()}
         return JSONResponse({"users": rows, "project_tokens": tokens})
 
+    # Phase 3c lab: stored XSS guestbook + DOM sink page (offline only).
+    comments: list[str] = []
+    app.state.lab_comments = comments
+
+    @app.post("/api/comments")
+    async def add_comment(request: Request) -> Response:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        text = str((body or {}).get("text") or "")[:500]
+        comments.append(text)
+        return JSONResponse({"id": len(comments), "stored": True}, status_code=201)
+
+    @app.get("/api/comments")
+    def list_comments() -> Response:
+        # Weakness: comments rendered without encoding on /guestbook.
+        return JSONResponse({"items": [{"id": i + 1, "text": t} for i, t in enumerate(comments)]})
+
+    @app.delete("/api/comments/{cid}")
+    def delete_comment(cid: int) -> Response:
+        idx = int(cid) - 1
+        if 0 <= idx < len(comments):
+            comments.pop(idx)
+            return JSONResponse({"deleted": True})
+        return JSONResponse({"detail": "not found"}, status_code=404)
+
+    @app.get("/guestbook", response_class=HTMLResponse)
+    def guestbook() -> Response:
+        # Weakness: stored comments concatenated raw into HTML.
+        body = "".join(f"<div class='c'>{t}</div>" for t in comments)
+        return HTMLResponse(f"<!doctype html><html><body><h1>Guestbook</h1>{body}</body></html>")
+
+    @app.get("/dom-sink", response_class=HTMLResponse)
+    def dom_sink() -> Response:
+        # Weakness: client-side sink writes location.hash into HTML without encoding.
+        return HTMLResponse(
+            "<!doctype html><html><body><h1>DOM sink</h1>"
+            "<div id='out'></div>"
+            "<script>"
+            "var h=(location.hash||'').slice(1);"
+            "document.getElementById('out').innerHTML=decodeURIComponent(h);"
+            "</script></body></html>"
+        )
+
     return app
 
 

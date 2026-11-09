@@ -12,6 +12,7 @@ future catalogue handler.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import urlencode
 
@@ -36,12 +37,26 @@ _DEFAULT_PROBES: tuple[tuple[str, str], ...] = (
 )
 _MAX_PROBES = 4
 
+# Boolean-safe error signatures only — never time-based, never destructive SQL.
+_ERROR_SIG_RE = re.compile(
+    r"(?i)(SQLSTATE|ORA-\d{5}|syntax error at|pg_query|mysql_fetch|"
+    r"Uncaught (?:PDO|mysqli)|SQLException|OLE DB|ODBC Driver|"
+    r"quoted string not properly terminated)"
+)
+_BOOLEAN_PAYLOADS: tuple[str, ...] = (
+    "'",
+    "\"",
+    "' OR '1'='1",
+    "1' AND '1'='2",
+)
+
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
-    """Probe common endpoints with a benign canary; max a few GETs."""
+    """Probe common endpoints with a benign canary plus boolean-safe error checks."""
     probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
     marker = new_canary(tag="INJ")
     payload = injection_canary_payload(marker)
+    boolean_on = kwargs.get("boolean_canaries", True)
 
     observations: list[dict[str, Any]] = []
     evidence = []
@@ -70,6 +85,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         unencoded_html = reflected_unencoded_in_html(payload, body, content_type=ctype) or (
             reflected_unencoded_in_html(marker, body, content_type=ctype)
         )
+        error_sig = bool(_ERROR_SIG_RE.search(body))
         row = {
             "path": path,
             "param": param,
@@ -78,12 +94,42 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "reflected_headers": header_hits,
             "html_context": html_ctx,
             "unencoded_html": unencoded_html,
+            "error_signature": error_sig,
         }
         observations.append(row)
         if unencoded_html and not finding:
             finding = True
             finding_detail = f"canary reflected unencoded in HTML at {path}?{param}="
             evidence.append(pair)
+        elif error_sig and not finding:
+            finding = True
+            finding_detail = f"boolean-safe injection error signature at {path}?{param}="
+            evidence.append(pair)
+
+    # One extra boolean-safe payload per first probe only (cap total requests).
+    if boolean_on and probes and not finding:
+        path, param = probes[0]
+        for bp in _BOOLEAN_PAYLOADS[:2]:
+            qs = urlencode({param: bp})
+            url = absolute(base_url, path)
+            sep = "&" if "?" in url else "?"
+            full = f"{url}{sep}{qs}"
+            pair = request_pair(client, "GET", full, follow_redirects=False)
+            body = pair.response_body or ""
+            if _ERROR_SIG_RE.search(body):
+                finding = True
+                finding_detail = f"boolean-safe error signature for payload at {path}?{param}="
+                evidence.append(pair)
+                observations.append(
+                    {
+                        "path": path,
+                        "param": param,
+                        "status": pair.status,
+                        "boolean_payload": bp,
+                        "error_signature": True,
+                    }
+                )
+                break
 
     return {
         "test_id": "INJ",
@@ -93,6 +139,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "payload": payload,
             "probes": observations,
             "probe_count": len(observations),
+            "boolean_canaries": boolean_on,
         },
         "finding_candidate": finding,
         "detail": finding_detail or "no unencoded HTML canary reflection",

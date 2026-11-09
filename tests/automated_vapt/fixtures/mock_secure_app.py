@@ -144,6 +144,65 @@ def create_secure_app() -> FastAPI:
         ]
         return JSONResponse({"users": rows})
 
+    # Phase 3c: stored comments are encoded; DOM sink uses textContent.
+    comments: list[str] = []
+    app.state.lab_comments = comments
+
+    @app.post("/api/comments")
+    async def add_comment(request: Request) -> Response:
+        denied = require_auth_json(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        text = str((body or {}).get("text") or "")[:500]
+        comments.append(text)
+        return JSONResponse({"id": len(comments), "stored": True}, status_code=201)
+
+    @app.get("/api/comments")
+    def list_comments(request: Request) -> Response:
+        denied = require_auth_json(request)
+        if denied is not None:
+            return denied
+        return JSONResponse({"items": [{"id": i + 1, "text": t} for i, t in enumerate(comments)]})
+
+    @app.delete("/api/comments/{cid}")
+    def delete_comment(cid: int, request: Request) -> Response:
+        denied = require_auth_json(request)
+        if denied is not None:
+            return denied
+        idx = int(cid) - 1
+        if 0 <= idx < len(comments):
+            comments.pop(idx)
+            return JSONResponse({"deleted": True})
+        return JSONResponse({"detail": "not found"}, status_code=404)
+
+    @app.get("/guestbook", response_class=HTMLResponse)
+    def guestbook(request: Request) -> Response:
+        denied = require_auth_redirect(request)
+        if denied is not None:
+            return denied
+        import html as _html
+
+        body = "".join(f"<div class='c'>{_html.escape(t)}</div>" for t in comments)
+        return HTMLResponse(f"<!doctype html><html><body><h1>Guestbook</h1>{body}</body></html>")
+
+    @app.get("/dom-sink", response_class=HTMLResponse)
+    def dom_sink(request: Request) -> Response:
+        denied = require_auth_redirect(request)
+        if denied is not None:
+            return denied
+        return HTMLResponse(
+            "<!doctype html><html><body><h1>DOM sink</h1>"
+            "<div id='out'></div>"
+            "<script>"
+            "var h=(location.hash||'').slice(1);"
+            "document.getElementById('out').textContent=decodeURIComponent(h);"
+            "</script></body></html>"
+        )
+
     return app
 
 

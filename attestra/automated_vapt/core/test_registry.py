@@ -41,6 +41,19 @@ _CASES: tuple[TestCase, ...] = (
         "Safe reflected XSS canary on common query params; no stored writes.",
     ),
     TestCase(
+        "XSSDOM",
+        "xss",
+        "DOM XSS sink check",
+        "Detect location→innerHTML/document.write sinks; optional Playwright marker (no alert()).",
+    ),
+    TestCase(
+        "XSSSTORE",
+        "xss",
+        "Stored XSS canary",
+        "Post a canary to lab guestbook, confirm unencoded HTML reflection, then delete. "
+        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_STORED_XSS=1.",
+    ),
+    TestCase(
         "FILE",
         "file",
         "Path traversal content proof",

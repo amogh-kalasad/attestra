@@ -96,6 +96,8 @@ AUTOMATED_MAP: dict[str, tuple[str, ...]] = {
     "ROLEDIFF": ("WSTG-ATHZ-02",),
     "SSRF": ("WSTG-INPV-19",),
     "UPLOAD": ("WSTG-BUSL-08",),
+    "XSSDOM": ("WSTG-INPV-01",),
+    "XSSSTORE": ("WSTG-INPV-02",),
 }
 
 # Never set automatically (need a human / no tool coverage today).
@@ -326,7 +328,10 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
         label = f"automated run #{ex.id} {tid}"
         ev = [f"automated_run:{ex.id}:{tid}"]
         fids = _canonical_ids(s, [case["finding_id"]]) if case.get("finding_id") else []
-        real = tid in ("T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "FILE", "BIZ", "ROLEDIFF", "SSRF", "UPLOAD")
+        real = tid in (
+            "T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
+            "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+        )
         # SKIPPED / FAILED / DEFERRED / BLOCKED (mid-scan auth loss) never become checklist
         # passed — record blocked with reason.
         if status in ("SKIPPED", "FAILED", "DEFERRED", "BLOCKED"):

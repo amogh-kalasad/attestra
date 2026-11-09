@@ -591,7 +591,7 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
     if case.id in {
-        "T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "FILE",
+        "T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
         "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
     }:
         return _run_authz_module(case.id, ctx, case.category)
@@ -1003,6 +1003,8 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "SESSION": session_security_tests.run,
         "INJ": injection_tests.run,
         "XSS": xss_tests.run,
+        "XSSDOM": lambda c, b, **kw: xss_tests.run(c, b, mode="dom", **kw),
+        "XSSSTORE": lambda c, b, **kw: xss_tests.run(c, b, mode="stored", **kw),
         "FILE": file_security_tests.run,
         "BIZ": business_logic_tests.run,
         "ROLEDIFF": role_diff_tests.run,

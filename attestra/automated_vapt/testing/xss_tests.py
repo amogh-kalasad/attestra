@@ -12,6 +12,7 @@ reflected-XSS canary. Call [[run]] directly or from a future catalogue handler.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import urlencode
 
@@ -35,6 +36,16 @@ _MAX_PROBES = 3
 
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
+    """Dispatch reflected / DOM / stored XSS modes (default: reflected)."""
+    mode = str(kwargs.get("mode") or "reflected").strip().lower()
+    if mode in {"dom", "xssdom"}:
+        return run_dom(client, base_url, **kwargs)
+    if mode in {"stored", "store", "xssstore", "xssstored"}:
+        return run_stored(client, base_url, **kwargs)
+    return run_reflected(client, base_url, **kwargs)
+
+
+def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Reflected XSS canary on a few query endpoints (no stored XSS writes)."""
     probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
     marker = new_canary(tag="XSS")
@@ -85,9 +96,138 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "payload": payload,
             "probes": observations,
             "probe_count": len(observations),
+            "mode": "reflected",
         },
         "finding_candidate": finding,
         "detail": finding_detail or "no unencoded HTML XSS canary reflection",
         "evidence_hints": [f"GET {p}?{param}=XSS-canary" for p, param in probes],
         "evidence_pairs": evidence,
+    }
+
+
+_DOM_SINK_RE = re.compile(
+    r"(?i)("
+    r"innerHTML\s*=\s*[^;]*(location\.hash|location\.search|document\.URL|decodeURIComponent)|"
+    r"document\.write\s*\(\s*(location|decodeURIComponent)|"
+    r"location\.hash[\s\S]{0,120}?innerHTML"
+    r")"
+)
+
+
+def run_dom(client, base_url: str, **kwargs) -> dict[str, Any]:
+    """DOM XSS: detect dangerous sinks in page source; optional Playwright evaluate.
+
+    Without Playwright, finding_candidate is True only when the page source shows a
+    classic location→innerHTML/document.write sink (lab positive control). Secure
+    pages that use textContent do not match.
+    """
+    path = str(kwargs.get("path") or "/dom-sink")
+    url = absolute(base_url, path)
+    pair = request_pair(client, "GET", url, follow_redirects=False)
+    body = pair.response_body or ""
+    sink = bool(_DOM_SINK_RE.search(body))
+    ctx = kwargs.get("ctx")
+    capture_fn = kwargs.get("capture_fn")
+    if capture_fn is None and ctx is not None:
+        capture_fn = (getattr(ctx, "extra", {}) or {}).get("capture_fn")
+    browser_hit = False
+    marker = new_canary(tag="DOM")
+    if capture_fn is not None:
+        # Injectable browser hook for tests: returns page content after navigation.
+        try:
+            content = capture_fn(f"{url}#{marker}")
+            browser_hit = marker in (content or "") and ("<" + marker) in (content or "")
+        except Exception:
+            browser_hit = False
+    finding = sink or browser_hit
+    return {
+        "test_id": "XSSDOM",
+        "category": "xss",
+        "observations": {
+            "mode": "dom",
+            "path": path,
+            "sink_in_source": sink,
+            "browser_marker_hit": browser_hit,
+            "status": pair.status,
+            "canary": marker,
+        },
+        "finding_candidate": finding,
+        "detail": "DOM sink writes location into HTML" if finding else "no DOM sink / marker hit",
+        "evidence_pairs": [pair] if finding else [],
+        "evidence_hints": [f"GET {path} DOM sink inspection"],
+    }
+
+
+def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
+    """Stored XSS: post canary to lab guestbook, confirm HTML reflection, then delete.
+
+    Gated to local/test/development unless force=True or ATTESTRA_AUTOMATED_VAPT_STORED_XSS=1.
+    """
+    import os
+
+    from attestra.automated_vapt.testing._http import clear_cookies, login
+
+    raw = (os.environ.get("ATTESTRA_AUTOMATED_VAPT_STORED_XSS") or "").strip().lower()
+    if not kwargs.get("force") and raw not in ("1", "true", "yes", "on"):
+        from attestra import config
+
+        env = config.parse_app_env() if hasattr(config, "parse_app_env") else getattr(config, "APP_ENV", None)
+        allow = getattr(config, "_APP_ENV_BYPASS_ALLOWLIST", frozenset({"local", "test", "development"}))
+        if env not in allow:
+            return {
+                "test_id": "XSSSTORE",
+                "category": "xss",
+                "status_hint": "SKIPPED",
+                "skip_reason": "stored_xss_disabled",
+                "observations": {"detail": "stored XSS probe disabled outside local/test/development"},
+                "finding_candidate": False,
+                "evidence_hints": [],
+            }
+
+    marker = new_canary(tag="STORED")
+    payload = xss_canary_payload(marker)
+    try:
+        clear_cookies(client)
+        login(client, base_url, "account_a", "account-a-pass")
+    except Exception:
+        pass
+    post = client.post(absolute(base_url, "/api/comments"), json={"text": payload})
+    post_status = int(getattr(post, "status_code", 0) or 0)
+    cid = None
+    try:
+        cid = int((post.json() or {}).get("id") or 0) or None
+    except Exception:
+        cid = None
+    page = request_pair(client, "GET", absolute(base_url, "/guestbook"), follow_redirects=False)
+    ctype = ""
+    for hk, hv in (page.response_headers or {}).items():
+        if hk.lower() == "content-type":
+            ctype = hv
+            break
+    body = page.response_body or ""
+    # Require the quote-break / angle-bracket payload literally — marker alone can
+    # appear inside a properly HTML-escaped guestbook and must not count as XSS.
+    finding = reflected_unencoded_in_html(payload, body, content_type=ctype)
+    if not finding and f"<{marker}>" in body:
+        finding = True
+    # Cleanup stored canary when delete API exists.
+    if cid:
+        try:
+            client.request("DELETE", absolute(base_url, f"/api/comments/{cid}"))
+        except Exception:
+            pass
+    return {
+        "test_id": "XSSSTORE",
+        "category": "xss",
+        "observations": {
+            "mode": "stored",
+            "post_status": post_status,
+            "comment_id": cid,
+            "canary": marker,
+            "reflected": finding,
+        },
+        "finding_candidate": finding,
+        "detail": "stored XSS canary reflected unencoded in guestbook" if finding else "stored canary not reflected raw",
+        "evidence_pairs": [page] if finding else [],
+        "evidence_hints": ["POST /api/comments → GET /guestbook"],
     }
