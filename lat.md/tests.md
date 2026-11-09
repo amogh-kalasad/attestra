@@ -3523,3 +3523,32 @@ CSP missing and weak titles still map to CSP packs; unknown titles return empty 
 
 [[attestra/remediation/match.py#format_remediation_markdown]] emits the seven remediation headings plus fenced config examples.
 
+
+## Lab fixtures and regression
+
+Phase 4 controlled lab apps under `tests/automated_vapt/fixtures/` plus quick offline regression ([[tests/automated_vapt/test_lab_regression.py]]).
+
+### WAF challenge gates the origin
+
+Cloudflare-like challenge returns 403 until cf_clearance is set; then the origin page loads.
+
+### WAF noise classifies informational
+
+Challenge HTML paths and cf_clearance cookie findings classify as informational via [[attestra/finding_validation/classify.py#classify_observation]].
+
+### Header conflicts across paths
+
+One path serves HSTS/Permissions-Policy and another does not; helpers and classifiers match evidence per path.
+
+### Session expiry after N requests
+
+Short-lived cookie yields 401 SESSION_EXPIRED after the configured request budget so Phase 1 guards can exercise recover/block.
+
+### JSON list harvest and write bodies
+
+Vulnerable app exposes JSON list `projectId` items and POST write bodies; secure twin stays owner-scoped; [[attestra/automated_vapt/core/replay_checks.py#harvest_ids]] finds ids.
+
+### Upload and SSRF fetcher controls
+
+Lab upload and URL-fetcher routes exist for later Phase 3b probes; secure twin refuses or scopes them safely.
+

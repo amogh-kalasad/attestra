@@ -183,7 +183,7 @@ Reuses Phases 2–9 classifiers, coverage honesty, grading, remediation packs, r
 
 Follow-on backlog after world-class Phases 0–10: mid-scan auth, T20/T22 harvest reliability, depth catalogue, lab fixtures, and honest report coverage (plan PDF `ATTESTRA_GAP_IMPLEMENTATION_PLAN`).
 
-Phase 0 locks Nov-6 classifiers and remediation matching with pure unit tests only ([[tests#test_finding_validation_classify.py]], [[tests#test_finding_validation_headers.py]], [[tests#test_remediation_match.py]]) — no production logic change unless a test reveals an obvious bug. Later phases: mid-scan session guard, ID harvest/write-body skip reasons, BIZ/SSRF/upload/DOM XSS catalogue depth, controlled lab fixtures, and report deferred/skip/auth-loss sections.
+Phase 0 locks Nov-6 classifiers and remediation matching with pure unit tests only ([[tests#test_finding_validation_classify.py]], [[tests#test_finding_validation_headers.py]], [[tests#test_remediation_match.py]]). Phase 4 adds controlled lab fixtures (WAF challenge, header conflict, session expiry) plus enriched JSON harvest/write/upload/SSRF routes on the vulnerable/secure mocks ([[tests#Lab fixtures and regression]]). Remaining: mid-scan session guard, T20/T22 harvest reliability, BIZ/SSRF/upload/DOM XSS catalogue depth, and report deferred/skip/auth-loss sections.
 
 ## Observability
 
