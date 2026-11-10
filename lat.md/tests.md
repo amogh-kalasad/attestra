@@ -2547,6 +2547,10 @@ Secure mock blocks cross-tenant and password listing; vulnerable mock does not.
 
 Orchestrator `T04` returns PASSED on secure and FINDING on vulnerable.
 
+### Worker path supplies httpx_client
+
+When execution `extra` omits `httpx_client`, the worker path creates an owned client so authz modules can run.
+
 ## Elite Phase E7 validation
 
 Vulnerability validator and false-positive checker (`tests/automated_vapt/test_e7_validation.py`).

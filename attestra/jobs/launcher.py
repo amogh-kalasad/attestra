@@ -50,6 +50,14 @@ def lock_path() -> Path:
     return config.DATA_DIR / ".lock-worker"
 
 
+def iter_worker_locks() -> list[Path]:
+    """Unsuffixed lock plus Compose ``.lock-worker-<id>`` files."""
+    root = config.DATA_DIR
+    found = [root / ".lock-worker"]
+    found.extend(sorted(p for p in root.glob(".lock-worker-*") if p.is_file()))
+    return found
+
+
 def stop_path() -> Path:
     return config.DATA_DIR / ".worker-stop"
 
@@ -115,14 +123,12 @@ def worker_status(s=None) -> WorkerStatus:
     """Is a scan worker alive? Lock file first, then fresh job heartbeats (needs ``s``)."""
     st = WorkerStatus(log=str(log_path()))
     st.stop_requested = stop_path().exists()
-    pid, age = read_lock(lock_path())
-    if pid is not None and pid_alive(pid):
-        # The lock holder is alive, so a new worker could not take the lock anyway.
-        # A lock that is not being refreshed is a worker from before this update, or
-        # (rarely) a reused PID: still "running", with a hint on the page.
-        st.running, st.pid, st.via = True, pid, "lock"
-        st.stale_lock = age is not None and age > LOCK_REFRESH_STALE_S
-        return st
+    for path in iter_worker_locks():
+        pid, age = read_lock(path)
+        if pid is not None and pid_alive(pid) and not (age is not None and age > LOCK_REFRESH_STALE_S):
+            st.running, st.pid, st.via = True, pid, "lock"
+            st.stale_lock = False
+            return st
     if s is not None:
         try:
             if _fresh_heartbeats(s):

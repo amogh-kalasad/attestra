@@ -54,13 +54,19 @@ Each tool has its own time limit, and scanner output goes to temporary files so 
 
 A run succeeds only when the report file exists and the importer can read it. A non-zero exit code alone is not a failure.
 
-[[attestra/runner/scanners/base.py#ScannerAdapter#validate_report]] parses the report with the matching importer. If the file is missing or cannot be parsed, the result carries an error with the exit code and the end of stderr. A valid report counts as success even when the tool exits 1 or 2 (ZAP on WARN or FAIL, semgrep on findings). Naabu may write an empty report when no ports are open.
+[[attestra/runner/scanners/base.py#ScannerAdapter#validate_report]] parses the report with the matching importer. If the file is missing or cannot be parsed, the result carries an error with the exit code and a failure detail that prefers a stdout ``Permission denied`` / ``PermissionError`` over a long Java stderr stack ([[attestra/runner/scanners/base.py#_report_failure_detail]]). A valid report counts as success even when the tool exits 1 or 2 (ZAP on WARN or FAIL, semgrep on findings). Naabu may write an empty report when no ports are open.
+
+### Docker bind mounts
+
+Compose DooD workers create report and secret dirs as uid ``attestra`` (10001); some scanner images run as uid 1000 and hit ``Permission denied`` on those mounts.
+
+[[attestra/runner/scanners/base.py#prepare_docker_bind_mount]] / [[attestra/runner/scanners/base.py#prepare_docker_bind_mounts]] run immediately before ``docker run``: rw mounts become ``0777``/``0666``, ro secret mounts ``0755``/``0644`` (best-effort on Windows). [[attestra/runner/scanners/base.py#ScannerAdapter#build_docker_argv]] and Nuclei's override call the helper for every ``-v`` source; ZAP calls it from [[attestra/runner/scanners/zap.py#ZapAdapter#build_argv]]. Image uids: ZAP and testssl are 1000 (need the prep); Nuclei and Naabu are root (prep is still applied for auth-secret readability if the image uid changes). Past ``Permission denied`` failures appear only in ZAP ``*-output.log`` under ``data/raw``.
 
 ### ZAP
 
 ZAP runs only in Docker. The report folder is mounted at `/zap/wrk`, the only place the ZAP scripts write their JSON report.
 
-[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside. Authenticated ZAP contexts from credential profiles are built by [[attestra/auth_web/zap_auth.py]] without putting secrets on argv. Packaged `-J` traditional-json often omits HTTP messages; when instances do include headers (e.g. traditional-json-plus uploads), [[attestra/importers/zap.py#parse]] and [[attestra/proof/capture.py#_zap]] surface them for validation.
+[[attestra/runner/scanners/zap.py#ZapAdapter]] runs `zap-baseline.py` for the baseline profile and `zap-full-scan.py` for the active profile ([[attestra/runner/scanners/zap.py#zap_script]]). The target host is pinned to the gate's IP. Mount prep for the ZAP uid-1000 image is documented under [[runner#Scanner runs#Docker bind mounts]]. After the run, [[attestra/runner/scanners/zap.py#ZapAdapter#quarantine_if_out_of_scope]] checks every site and alert URL against scope and quarantines the report if any is outside. Authenticated ZAP contexts from credential profiles are built by [[attestra/auth_web/zap_auth.py]] without putting secrets on argv. Packaged `-J` traditional-json often omits HTTP messages; when instances do include headers (e.g. traditional-json-plus uploads), [[attestra/importers/zap.py#parse]] and [[attestra/proof/capture.py#_zap]] surface them for validation.
 
 ### webcheck (passive headers and DNS)
 
@@ -125,7 +131,7 @@ See [[runner#Scanner runs#ZAP]] for the adapter report mount and scope quarantin
 
 Link a scan run to an auth credential profile and pass session material into ZAP/Nuclei without putting secrets on argv.
 
-Migrations `0031_scan_run_auth`, `0032_auth_profile_extra_headers`, and `0033_auth_profile_extra_cookies` add `auth_profile_id` / auth result fields on [[attestra/models.py#ScanRun]] plus optional non-secret headers and encrypted extra cookies on [[attestra/models.py#AuthCredentialProfile]]. [[attestra/auth_web/scan_auth.py]] loads the profile, resolves [[attestra/credentials/store.py#get_secret]], and builds scanner auth options. Worker paths pass those options into adapters; plaintext never enters SQL columns or ScanRun logs.
+Migrations `0031_scan_run_auth`, `0032_auth_profile_extra_headers`, and `0033_auth_profile_extra_cookies` add `auth_profile_id` / auth result fields on [[attestra/models.py#ScanRun]] plus optional non-secret headers and encrypted extra cookies on [[attestra/models.py#AuthCredentialProfile]]. [[attestra/auth_web/scan_auth.py]] loads the profile, resolves [[attestra/credentials/store.py#get_secret]], and builds scanner auth options. Worker paths pass those options into adapters; plaintext never enters SQL columns or ScanRun logs. Per-scan secret dirs come from [[attestra/auth_web/scan_auth.py#new_secret_dir]] under `ATTESTRA_AUTH_SECRET_DIR` (default OS temp). Compose workers must set that under the `/data` bind mount (e.g. `/data/auth-secrets`) so nested `docker run -v` can mount Nuclei's `attestra-nuclei-auth.yaml` via [[attestra/runner/scanners/base.py#docker_host_path]]; see [[architecture#Local Docker Compose]].
 
 ### Mid-scan session guard
 

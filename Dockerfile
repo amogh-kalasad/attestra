@@ -14,6 +14,7 @@ COPY attestra ./attestra
 RUN pip wheel --wheel-dir /wheels "."
 
 FROM python:3.12-slim
+ARG TARGETARCH
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     ATTESTRA_DATA_DIR=/data \
     ATTESTRA_PERSISTENCE=mongo \
@@ -23,8 +24,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 # ATTESTRA_MONGODB_URI above is compose-friendly (hostname `mongo`, no auth).
 # Production MUST override with credentials (and usually TLS), e.g. via Secret —
 # do not bake passwords into the image.
+# Docker CLI (client only) for compose/dev worker docker-out-of-Docker against a
+# mounted host socket. Scanners are still separate digest-pinned images, not baked in.
 RUN groupadd --system --gid 10001 attestra \
- && useradd --system --uid 10001 --gid attestra --home-dir /app --shell /usr/sbin/nologin attestra
+ && useradd --system --uid 10001 --gid attestra --home-dir /app --shell /usr/sbin/nologin attestra \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
+ && arch="$(case "${TARGETARCH:-amd64}" in amd64) echo x86_64;; arm64) echo aarch64;; *) echo x86_64;; esac)" \
+ && curl -fsSL "https://download.docker.com/linux/static/stable/${arch}/docker-27.5.1.tgz" -o /tmp/docker.tgz \
+ && tar -xzf /tmp/docker.tgz -C /tmp \
+ && mv /tmp/docker/docker /usr/local/bin/docker \
+ && chmod 755 /usr/local/bin/docker \
+ && rm -rf /tmp/docker /tmp/docker.tgz \
+ && apt-get purge -y curl \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels

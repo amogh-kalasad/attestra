@@ -33,6 +33,7 @@ from attestra.runner.scanners.base import (
     docker_available,
     docker_run_argv,
     new_container_name,
+    prepare_docker_bind_mounts,
 )
 from attestra.runner.scanners.nuclei_policy import is_active_profile
 from attestra.runner.scanners import zap_crawl
@@ -217,6 +218,8 @@ class ZapAdapter(ScannerAdapter):
         secret_dir = _resolve_secret_mount(out_file=out_file, auth_opts=auth_opts)
         if secret_dir is not None:
             mounts.append((secret_dir, ZAP_SECRETS, "ro"))
+        # Worker uid (e.g. attestra 10001) often differs from the ZAP image uid (1000).
+        prepare_docker_bind_mounts(mounts)
         # The host name is always pinned to the gate's IP (--add-host) so ZAP cannot resolve elsewhere.
         return docker_run_argv(
             image,

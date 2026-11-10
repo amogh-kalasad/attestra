@@ -11,7 +11,14 @@ from pathlib import Path
 
 from attestra import config
 from attestra.runner.dns_pin import PinnedTarget
-from attestra.runner.scanners.base import CONTAINER_OUT, ScannerAdapter, docker_run_argv, new_container_name, which
+from attestra.runner.scanners.base import (
+    CONTAINER_OUT,
+    ScannerAdapter,
+    docker_run_argv,
+    new_container_name,
+    prepare_docker_bind_mounts,
+    which,
+)
 from attestra.runner.scanners.nuclei_policy import excluded_tags, templates_allowed
 
 RATE_LIMIT = "50"
@@ -152,6 +159,8 @@ class NucleiAdapter(ScannerAdapter):
             if secret_dir.resolve() == out_file.parent.resolve():
                 raise ValueError("nuclei auth secret file must not live in the raw artifact dir")
             mounts.append((secret_dir, CONTAINER_SECRETS, "ro"))
+        # Nuclei image is root today; still prep so auth secrets stay readable if the image uid changes.
+        prepare_docker_bind_mounts(mounts)
         hosts = [(target.host, target.ip)] if isinstance(target, PinnedTarget) else []
         return docker_run_argv(
             config.SCANNER_IMAGES[self.image_key],

@@ -10,7 +10,7 @@ From the repository root, with Docker Desktop running:
 docker compose up -d --build
 ```
 
-This builds the app image, starts MongoDB with replica set `rs0`, initializes the set, starts the API (after `attestra init`), and starts the durable job worker.
+This builds the app image, starts MongoDB with replica set `rs0`, initializes the set, starts the API (after `attestra init`), runs one-shot `scanner-pull` (validates + pulls digest-pinned ZAP/Nuclei/testssl/Naabu), and starts the durable job worker.
 
 - UI / API: http://127.0.0.1:8000  
 - OpenAPI: http://127.0.0.1:8000/docs  
@@ -26,7 +26,10 @@ Copy `.env.example` to `.env` and set secrets before any shared or production us
 | `mongo` | MongoDB 7, `--replSet rs0`, named volume | `127.0.0.1:27017` |
 | `mongo-init` | One-shot idempotent `rs.initiate` | none |
 | `api` | FastAPI + UI; runs `attestra init` then `serve` | `127.0.0.1:8000` |
-| `worker` | Durable scan job worker | none (Docker socket mounted for scanner `docker run`) |
+| `scanner-pull` | One-shot: refuse placeholder digests and `docker pull` ZAP/Nuclei/testssl/Naabu | none |
+| `worker` | Durable scan job worker (waits for `scanner-pull`) | none (Docker socket mounted for scanner `docker run`) |
+
+Scanner digest defaults live in `compose.yaml` and `docker/scanner-digests.env` (`ATTESTRA_IMAGE_ZAP` / `NUCLEI` / `TESTSSL` / `NAABU`). Override in root `.env` when you need newer pins. `webcheck` needs no image.
 
 Automated VAPT stays **disabled** (`ATTESTRA_AUTOMATED_VAPT_ENABLED=false`).
 
@@ -55,17 +58,16 @@ docker compose down             # stop; keep volumes (data preserved)
 docker compose down -v          # stop AND delete volumes (DESTROYS Mongo/app data)
 ```
 
-Shell into the API container:
-
-```bash
-docker compose exec api sh
-```
-
-Create an admin user (password ≥12 chars, ≥4 distinct):
+Create an admin user (password ≥12 chars, ≥4 distinct) **inside the API container**:
 
 ```bash
 docker compose exec api attestra user add admin --role admin --password "YourStrongPass1"
 ```
+
+Do not run `attestra user add` on the Windows/macOS host against Compose Mongo unless
+`ATTESTRA_MONGODB_URI` includes `directConnection=true` (see root `.env`). The Compose
+replica set advertises hostname `mongo`, which only resolves on the Docker network; a
+host CLI without `directConnection=true` times out and the user is never written.
 
 ## Environment
 
@@ -105,6 +107,8 @@ Worker instance locks survive container restart (PID-namespace-aware steal in `I
 | Worker exits “another worker holds the instance lock” | Stale lock (pre-fix images) | Rebuild images; or `docker compose exec api rm -f /data/.lock-worker` then restart worker |
 | Scans stay Queued | Worker down | `docker compose ps` / `logs worker` |
 | Scanner refuses image | Placeholder digest | Set `ATTESTRA_IMAGE_<TOOL>` to a real `@sha256:` pin |
+| `docker was not found` from worker | Image lacked Docker CLI, or socket not usable | Rebuild so [[Dockerfile]] includes the Docker client; worker needs socket mount + `group_add: ["0"]`; set `ATTESTRA_DOCKER_HOST_DATA_DIR` to the absolute host path of `./data` |
+| Nuclei `secrets file '/attestra-secrets/...' does not exist` | Auth secrets written under container `/tmp`, invisible to host Docker | Set `ATTESTRA_AUTH_SECRET_DIR=/data/auth-secrets` on the worker (compose default) and recreate worker |
 | Port in use | Local process or old container | Stop the other listener; `docker ps` |
 
 ## Related docs

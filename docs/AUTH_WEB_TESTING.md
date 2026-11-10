@@ -22,11 +22,19 @@ Test-account passwords and similar secrets are stored outside normal DB columns 
 | `ATTESTRA_CREDENTIAL_FERNET_KEY` | unset | URL-safe base64 32-byte Fernet key (required in production) |
 | `ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL` | off | Dev/tests only: generate a process-local key when the Fernet key is unset |
 
-Generate a key (do not commit it):
+Generate and write a key into `.env` (preferred; idempotent — do not commit `.env`):
+
+```bash
+python scripts/ensure_env_secrets.py
+```
+
+Or print a key once to paste yourself:
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
+
+Compose and local install wrappers (`scripts/compose_up.*`, `scripts/install_local.*`) call the ensure script so API and worker share the same key.
 
 ## Local mock website
 

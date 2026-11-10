@@ -42,7 +42,25 @@ def _init_identity_db() -> None:
     """Open the MongoDB store (users, API keys, memberships, invites live there)."""
     from attestra.persistence.mongo.client import init_mongo
 
-    init_mongo()
+    try:
+        init_mongo()
+    except Exception as exc:  # noqa: BLE001 - surface a clear operator hint, then re-raise shape
+        # @lat: [[architecture#Local Docker Compose]]
+        msg = str(exc)
+        if "mongo:27017" in msg or "ServerSelectionTimeoutError" in type(exc).__name__:
+            print(
+                "error: cannot reach MongoDB for user/identity commands.\n"
+                "If Attestra is running under Docker Compose, create the admin inside the API "
+                "container (Compose replica set members use hostname 'mongo', which only "
+                "resolves on the Docker network):\n"
+                "  docker compose exec api attestra user add admin --role admin "
+                '--password "YourStrongPass1"\n'
+                "Or from the host, set ATTESTRA_MONGODB_URI to "
+                "mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        raise
 
 
 def _resolve_actor(args) -> tuple[str, int | None]:

@@ -157,13 +157,91 @@ def is_ip_literal(host: str) -> bool:
     return True
 
 
+_WIN_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def join_docker_host_path(host_data: str, *rel_parts: str) -> str:
+    """Join a host data dir with relative parts using the host path style.
+
+    The worker runs on Linux, so ``pathlib.Path`` would treat a Windows
+    ``C:\\...`` value as one filename and insert a forward slash. Docker Desktop
+    needs a real Windows path (backslashes) for nested ``docker run -v``.
+    """
+    host_data = host_data.strip().strip('"').strip("'")
+    parts = [p for p in rel_parts if p and p not in (".",)]
+    windows = bool(_WIN_DRIVE.match(host_data) or "\\" in host_data)
+    if windows:
+        base = host_data.replace("/", "\\").rstrip("\\")
+        if not parts:
+            return base
+        return base + "\\" + "\\".join(p.replace("/", "\\") for p in parts)
+    base = host_data.rstrip("/")
+    if not parts:
+        return base
+    return base + "/" + "/".join(parts)
+
+
 def docker_host_path(path: Path | str) -> str:
-    """Absolute host path for ``docker run -v`` (Docker Desktop accepts ``E:\\dir`` on Windows)."""
-    return str(Path(path).resolve())
+    """Absolute host path for ``docker run -v`` (Docker Desktop accepts ``E:\\dir`` on Windows).
+
+    When the worker itself runs in Compose, container paths under ``ATTESTRA_DATA_DIR``
+    are not visible to the host Docker engine. Set ``ATTESTRA_DOCKER_HOST_DATA_DIR`` to the
+    host bind-mount of that data dir so nested scanner ``-v`` mounts resolve on the host.
+    """
+    # @lat: [[architecture#Local Docker Compose]]
+    resolved = Path(path).resolve()
+    host_data = os.environ.get("ATTESTRA_DOCKER_HOST_DATA_DIR", "").strip()
+    if host_data:
+        data_dir = Path(config.DATA_DIR).resolve()
+        try:
+            rel = resolved.relative_to(data_dir)
+        except ValueError:
+            return str(resolved)
+        return join_docker_host_path(host_data, *rel.parts)
+    return str(resolved)
 
 
 def new_container_name(tool: str) -> str:
     return f"attestra-{tool.replace('_', '-')}-{uuid.uuid4().hex[:12]}"
+
+
+def prepare_docker_bind_mount(path: Path | str, *, writable: bool) -> None:
+    """Relax bind-mount modes so a non-root scanner image can use worker-created paths.
+
+    Compose workers often run as uid ``attestra`` (10001) while images like ZAP/testssl run as
+    uid 1000. Bind mounts keep the worker's 0755/0700/0600 modes, so the scanner then hits
+    ``Permission denied`` writing reports or reading auth secrets. Call this immediately
+    before ``docker run``: writable dirs become ``0777`` (and files ``0666``); read-only
+    secret dirs become ``0755`` with files ``0644``. Modes are best-effort (ignored when
+    the filesystem cannot represent them, e.g. some Windows host paths).
+    """
+    # @lat: [[runner#Scanner runs#Docker bind mounts]]
+    root = Path(path)
+    if not root.exists():
+        return
+    dir_mode = 0o0777 if writable else 0o0755
+    file_mode = 0o0666 if writable else 0o0644
+    try:
+        if root.is_dir():
+            root.chmod(dir_mode)
+            for child in root.iterdir():
+                try:
+                    if child.is_dir():
+                        child.chmod(dir_mode)
+                    elif child.is_file():
+                        child.chmod(file_mode)
+                except OSError:
+                    pass
+        elif root.is_file():
+            root.chmod(file_mode)
+    except OSError:
+        pass
+
+
+def prepare_docker_bind_mounts(mounts: list[tuple[Path | str, str, str]]) -> None:
+    """Apply [[prepare_docker_bind_mount]] to each docker ``-v`` source from ``docker_mounts``."""
+    for src, _dst, mode in mounts:
+        prepare_docker_bind_mount(src, writable=str(mode).startswith("rw"))
 
 
 def docker_run_argv(
@@ -207,6 +285,17 @@ def stop_container(name: str) -> None:
 
 def _tail(data: bytes, n: int = 1500, redact_values=()) -> str:
     return redact_text(data.decode("utf-8", errors="replace"), redact_values).strip()[-n:]
+
+
+def _report_failure_detail(result: ProcessResult, redact) -> str:
+    """Prefer a clear host/IO error from stdout over a long Java stderr stack."""
+    stdout_tail = _tail(result.stdout, redact_values=redact)
+    stderr_tail = _tail(result.stderr, redact_values=redact)
+    combined = f"{stdout_tail}\n{stderr_tail}"
+    if "Permission denied" in combined or "PermissionError" in combined:
+        # Surface the real DooD mount failure; ZAP often still logs CoreAPI.generateReport noise.
+        return stdout_tail or stderr_tail
+    return stderr_tail or stdout_tail
 
 
 _REDACT_PATTERNS = (
@@ -286,10 +375,13 @@ class ScannerAdapter(ABC):
         self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline", name: str = "", **opts
     ) -> list[str]:
         hosts = [(target.host, target.ip)] if isinstance(target, PinnedTarget) else []
+        mounts = list(self.docker_mounts(target, out_file=out_file))
+        # Covers uid-mismatched images (e.g. testssl uid 1000 vs worker 10001).
+        prepare_docker_bind_mounts(mounts)
         return docker_run_argv(
             config.SCANNER_IMAGES[self.image_key],
             name=name or new_container_name(self.name),
-            mounts=self.docker_mounts(target, out_file=out_file),
+            mounts=mounts,
             add_hosts=hosts,
             entrypoint=self.docker_entrypoint,
             args=self.docker_args(target, out_file=out_file, profile=profile, **opts),
@@ -368,12 +460,12 @@ class ScannerAdapter(ABC):
             tool=self.name, tool_version=version, image_digest=digest, import_tool=self.import_tool, extra=extra
         )
         if not out_file.exists():
-            detail = _tail(result.stderr, redact_values=redact) or _tail(result.stdout, redact_values=redact)
+            detail = _report_failure_detail(result, redact)
             sr.error = f"{self.name} wrote no report (exit code {result.returncode}): {detail}"[:1500]
             return sr
         problem = self.validate_report(out_file.read_bytes())
         if problem:
-            detail = _tail(result.stderr, redact_values=redact) or _tail(result.stdout, redact_values=redact)
+            detail = _report_failure_detail(result, redact)
             sr.error = f"{problem} (exit code {result.returncode}). {detail}"[:1500]
             return sr
         # A valid report is success even with a non-zero exit code (ZAP 1/2 on WARN/FAIL, semgrep 1 on findings).

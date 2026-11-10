@@ -86,14 +86,16 @@ Off by default. Full notes: [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md)
 
 ```powershell
 $env:ATTESTRA_AUTH_WEB_ENABLED = "1"
-# Production / shared installs: set a Fernet key (do not commit it)
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-$env:ATTESTRA_CREDENTIAL_FERNET_KEY = "<paste-key-here>"
+# Preferred: write a Fernet key into .env (idempotent; never overwrites an existing key)
+python .\scripts\ensure_env_secrets.py
+# Or full local install (venv + ensure + init):
+# powershell -ExecutionPolicy Bypass -File .\scripts\install_local.ps1
+# Compose path (ensure then up): powershell -ExecutionPolicy Bypass -File .\scripts\compose_up.ps1
 # Local/dev only when you have no Fernet key yet:
 # $env:ATTESTRA_CREDENTIAL_ALLOW_EPHEMERAL = "1"
 ```
 
-Restart the app and worker after changing these. `cryptography` is already in `requirements.txt`.
+Restart the app and worker after changing these. `cryptography` is already in `requirements.txt`. See README section **Local testing: auth-web + automated VAPT**.
 
 ## 7. Optional: PostgreSQL
 

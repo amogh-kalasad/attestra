@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -74,11 +75,24 @@ def read_lock(path: Path) -> tuple[int | None, float | None]:
         return None, age
 
 
+_INSTANCE_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def worker_lock_name(name: str = "worker") -> str:
+    """``.lock-worker`` by default; ``.lock-worker-<id>`` when ATTESTRA_WORKER_INSTANCE is set."""
+    if name != "worker":
+        return name
+    token = os.environ.get("ATTESTRA_WORKER_INSTANCE", "").strip()
+    if _INSTANCE_RE.match(token):
+        return f"worker-{token}"
+    return "worker"
+
+
 class InstanceLock:
     # @lat: [[architecture#Local Docker Compose]]
     def __init__(self, name: str = "worker"):
         config.ensure_dirs()
-        self.path = config.DATA_DIR / f".lock-{name}"
+        self.path = config.DATA_DIR / f".lock-{worker_lock_name(name)}"
         self._fh = None
 
     def acquire(self, timeout: float = 5.0) -> bool:

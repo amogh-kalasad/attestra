@@ -205,7 +205,25 @@ Environment variables and on-disk data layout.
 - `APP_ENV` / `BYPASS_SIGNED_AUTHORIZATION_VERIFICATION` — see [[interfaces#Configuration#Signed authorization flag]]
 - `APP_ENV` / `BYPASS_TARGET_OWNERSHIP_VERIFICATION` — see [[interfaces#Configuration#Ownership verification flag]]
 
-Template: `.env.example`. Operator checklist of where the ownership and signed-authorization bypasses reflect: `docs/OWNERSHIP_AND_AUTHORIZATION_FLAGS.md`.
+Template: `.env.example`. Recommended local auth-web + automated VAPT `.env` block: `README.md` (section Local testing: auth-web + automated VAPT). Operator checklist of where the ownership and signed-authorization bypasses reflect: `docs/OWNERSHIP_AND_AUTHORIZATION_FLAGS.md`.
+
+### Credential Fernet install bootstrap
+
+Install scripts seed `ATTESTRA_CREDENTIAL_FERNET_KEY` into the host `.env` for local and Compose installs.
+
+[[attestra/env_bootstrap.py#ensure_credential_fernet_key]] creates `.env` from `.env.example` when missing, generates a Fernet key only when the assignment is absent or empty, never overwrites a non-empty key, and does not print the secret. Drivers: `scripts/ensure_env_secrets.py`, `scripts/install_local.ps1` / `scripts/install_local.sh` (venv), and `scripts/compose_up.ps1` / `scripts/compose_up.sh` (runs ensure on the host before `docker compose up` so API/worker `env_file` share one key). Documented in `README.md`.
+
+#### Creates env and key
+
+Missing `.env` is copied from the example and an empty Fernet assignment is filled with a new key.
+
+#### Idempotent
+
+A non-empty existing `ATTESTRA_CREDENTIAL_FERNET_KEY` is left unchanged across re-runs.
+
+#### Fills empty assignment
+
+An existing `ATTESTRA_CREDENTIAL_FERNET_KEY=` line (empty value) is replaced in place with a generated key.
 
 ### Subscription service flag
 

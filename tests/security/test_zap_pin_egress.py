@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 
 import pytest
 
 from attestra.runner.authorization import AuthorizedScope
 from attestra.runner.dns_pin import PinnedTarget
+from attestra.runner.scanners.base import prepare_docker_bind_mount, prepare_docker_bind_mounts
 from attestra.runner.scanners.zap import ZapAdapter
 
 
@@ -50,6 +53,28 @@ def test_build_argv_requires_pinned_target(tmp_path):
     adapter = ZapAdapter()
     with pytest.raises((ValueError, Exception)):
         adapter.build_argv("https://shop.example.com/", out_file=tmp_path / "report.json")
+
+
+# @lat: [[runner#Scanner runs#Docker bind mounts]]
+def test_prepare_docker_bind_mount_relaxes_modes(tmp_path):
+    """Worker-owned 0700/0600 paths must be readable/writable by scanner uid 1000 after prep."""
+    out_dir = tmp_path / "scan-out"
+    out_dir.mkdir()
+    secret_dir = tmp_path / "secrets"
+    secret_dir.mkdir()
+    secret = secret_dir / "attestra-zap-hook-data.json"
+    secret.write_text("{}", encoding="utf-8")
+    if os.name != "nt":
+        out_dir.chmod(0o0755)
+        secret_dir.chmod(0o0700)
+        secret.chmod(0o0600)
+    prepare_docker_bind_mounts([(out_dir, "/out", "rw"), (secret_dir, "/secrets", "ro")])
+    if os.name != "nt":
+        assert stat.S_IMODE(out_dir.stat().st_mode) == 0o0777
+        assert stat.S_IMODE(secret_dir.stat().st_mode) == 0o0755
+        assert stat.S_IMODE(secret.stat().st_mode) == 0o0644
+    # Single-path helper stays available for adapters that prep one mount at a time.
+    prepare_docker_bind_mount(out_dir, writable=True)
 
 
 # ---------------------------------------------------------------- quarantine_if_out_of_scope
