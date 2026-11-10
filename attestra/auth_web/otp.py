@@ -224,6 +224,7 @@ class HttpReply:
     body: str = ""
     cookies: dict[str, str] = field(default_factory=dict)
     final_url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

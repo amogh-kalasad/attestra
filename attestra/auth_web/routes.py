@@ -44,6 +44,10 @@ class ProfileCreateIn(BaseModel):
     extra_cookies: str | None = Field(
         default=None, description="Encrypted 'name=value; name2=value2' cookies; accepted once, never echoed"
     )
+    refresh_cookie_secret: str | None = Field(
+        default=None,
+        description="Refresh cookie value (or name=value); stored encrypted in extra cookies, never echoed",
+    )
 
 
 class RotateIn(BaseModel):
@@ -86,8 +90,46 @@ def create_auth_profile(eid: int, body: ProfileCreateIn, principal=Depends(_prin
                 config_json=body.config,
                 extra_headers=body.extra_headers,
                 extra_cookies=body.extra_cookies,
+                refresh_cookie_secret=body.refresh_cookie_secret,
                 actor=principal.actor,
                 principal=principal,
+            )
+            return svc.profile_dict(row)
+    except (LookupError, services.ServiceError) as e:
+        raise _err(e) from e
+
+
+
+class RefreshConfigIn(BaseModel):
+    refresh_url: str | None = None
+    refresh_method: str | None = None
+    refresh_body: dict | str | None = None
+    refresh_content_type: str | None = None
+    refresh_cookies: list[str] | str | None = None
+    refresh_headers: dict | str | None = None
+    refresh_token_json_path: str | None = None
+    refresh_apply_as: str | None = None
+    refresh_cookie_secret: str | None = Field(
+        default=None, description="Refresh cookie value; stored encrypted, never echoed"
+    )
+
+
+@api_router.post("/engagements/{eid}/auth-profiles/{pid}/refresh-config")
+def update_auth_profile_refresh_config(eid: int, pid: int, body: RefreshConfigIn, principal=Depends(_principal)):
+    if not has_permission(principal.role, "engagement.write"):
+        raise HTTPException(403, "permission denied: engagement.write")
+    dump = body.model_dump if hasattr(body, "model_dump") else body.dict
+    updates = dump(exclude={"refresh_cookie_secret"}, exclude_unset=True)
+    try:
+        with db.session() as s:
+            row = svc.update_refresh_config(
+                s,
+                eid,
+                pid,
+                config_updates=updates,
+                refresh_cookie_secret=body.refresh_cookie_secret,
+                principal=principal,
+                actor=principal.actor,
             )
             return svc.profile_dict(row)
     except (LookupError, services.ServiceError) as e:

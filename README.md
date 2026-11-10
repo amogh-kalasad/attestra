@@ -171,8 +171,47 @@ Re-login behaviour depends on the profile method:
 | Method | Mid-scan recovery |
 | --- | --- |
 | `form` / `otp` | Existing login in `scan_auth` is run again (bounded by `ATTESTRA_AUTH_RELOGIN_MAX`, default 2) |
-| `header` / `cookie` | Static tokens are **not** refreshed unless the profile sets `config_json.refresh_url`. That URL is called with an **empty POST body**; only **new `Set-Cookie` values** are applied. There is no OAuth / token-body refresh |
+| `header` / `cookie` | Static tokens are **not** refreshed unless the profile sets `config_json.refresh_url`. Legacy behaviour (no JSON path) is an empty form POST; only new `Set-Cookie` values are applied. Optional JSON refresh keys (below) can renew a bearer/access token from a refresh endpoint |
 | `sso_bootstrap` / `none` | Not automatable |
+
+Optional `config_json` keys for header/cookie JSON refresh (all backward compatible; omit them to keep the legacy empty-POST + `Set-Cookie` path):
+
+| Key | Meaning |
+| --- | --- |
+| `refresh_url` | Absolute refresh endpoint |
+| `refresh_method` | `GET`, `POST` (default), `PUT`, or `PATCH` |
+| `refresh_body` | JSON object sent as the body (default `{}`) |
+| `refresh_content_type` | `json` or `form`. Defaults to `json` when `refresh_token_json_path` is set |
+| `refresh_cookies` | List of cookie **names** to send (for example `["refreshToken"]`). Values come from the profile's encrypted extra-cookie store, never from `config_json` |
+| `refresh_headers` | Extra non-secret request headers (`Origin`, `Referer`, `User-Agent`, `x-portal-host`) |
+| `refresh_token_json_path` | Dotted JSON path for the new access token (for example `accessToken`) |
+| `refresh_apply_as` | `bearer` (replace `Authorization` with `Bearer <token>`), `header:<Name>`, or `cookie:<Name>` |
+
+On success the new access token **replaces** the previous `Authorization` header (it is not duplicated), any `Set-Cookie` values (including a rotated refresh cookie) are merged into the in-memory session for the next refresh, and `on_renew` still rewrites the ZAP hook and Nuclei secret file. The refresh response body is treated as secret and is never logged or stored. A Cloudflare / WAF challenge (`cf-mitigated`, "Just a moment", challenge HTML) records the value-free note `refresh blocked by WAF/challenge`; after bounded retries the scan is **BLOCKED** with a value-free `auth_note`. Browser-only cookies such as `cf_clearance` are not solved automatically.
+
+Example (placeholders only — put the real refresh cookie in the encrypted Extra Cookies / Refresh Cookie Value field, not in config):
+
+```json
+{
+  "verify_url": "https://app.example.com/api/me",
+  "header_name": "Authorization",
+  "refresh_url": "https://api.example.com/api/auth/refresh-token",
+  "refresh_method": "POST",
+  "refresh_body": {},
+  "refresh_content_type": "json",
+  "refresh_cookies": ["refreshToken"],
+  "refresh_headers": {
+    "Origin": "https://app.example.com",
+    "Referer": "https://app.example.com/",
+    "User-Agent": "Mozilla/5.0",
+    "x-portal-host": "app.example.com"
+  },
+  "refresh_token_json_path": "accessToken",
+  "refresh_apply_as": "bearer"
+}
+```
+
+Configure the same fields on the asset Authentication Profile form (Token Refresh). See the UI: method Session Token, paste the current access token as Secret, set Verify URL, then Token Refresh as above with cookie name `refreshToken` and its value in the masked Refresh Cookie Value input.
 
 ## Automated security-testing catalogue
 

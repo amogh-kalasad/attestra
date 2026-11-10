@@ -68,6 +68,78 @@ def _truncate_ref(secret_ref: str) -> str:
     return f"{ref[:8]}…{ref[-6:]}"
 
 
+def _sanitize_profile_config(config_json: dict | None) -> dict:
+    """Validate optional mid-scan refresh keys; never persist token values in config."""
+    from attestra.auth_web import session_guard as sg
+
+    try:
+        return sg.sanitize_refresh_config(dict(config_json or {}))
+    except ValueError as exc:
+        raise services.ServiceError(str(exc)) from exc
+
+
+def parse_refresh_cookie_secret(secret: str | None, names: list[str]) -> list[tuple[str, str]]:
+    """Turn a masked refresh-cookie input into (name, value) pairs. Values stay out of config."""
+    from attestra.auth_web import extra_cookies as xc
+
+    raw = (secret or "").strip()
+    if not raw:
+        return []
+    if "=" in raw or "\n" in raw or ";" in raw:
+        try:
+            return xc.parse_extra_cookies(raw)
+        except xc.ExtraCookiesError as exc:
+            raise services.ServiceError(str(exc)) from exc
+    if len(names) == 1:
+        return [(names[0], raw)]
+    raise services.ServiceError(
+        "refresh cookie value must be name=value when refresh_cookies lists more than one name"
+    )
+
+
+def _merge_cookie_pairs(existing: list[tuple[str, str]], incoming: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    store = {k: v for k, v in existing}
+    for k, v in incoming:
+        store[k] = v
+    return list(store.items())
+
+
+
+
+def _refresh_form_values(cfg: dict | None) -> dict:
+    """Non-secret refresh fields prettified for the edit form (never includes cookie values)."""
+    import json
+
+    cfg = dict(cfg or {})
+    headers = cfg.get("refresh_headers") or {}
+    if isinstance(headers, dict):
+        headers_text = "\n".join(f"{k}: {v}" for k, v in headers.items())
+    else:
+        headers_text = str(headers or "")
+    cookies = cfg.get("refresh_cookies") or []
+    if isinstance(cookies, (list, tuple)):
+        cookies_text = ", ".join(str(c) for c in cookies)
+    else:
+        cookies_text = str(cookies or "")
+    body = cfg.get("refresh_body")
+    if isinstance(body, dict):
+        body_text = json.dumps(body)
+    elif body:
+        body_text = str(body)
+    else:
+        body_text = ""
+    return {
+        "refresh_url": str(cfg.get("refresh_url") or ""),
+        "refresh_method": str(cfg.get("refresh_method") or ""),
+        "refresh_body": body_text,
+        "refresh_content_type": str(cfg.get("refresh_content_type") or ""),
+        "refresh_cookies": cookies_text,
+        "refresh_headers": headers_text,
+        "refresh_token_json_path": str(cfg.get("refresh_token_json_path") or ""),
+        "refresh_apply_as": str(cfg.get("refresh_apply_as") or ""),
+    }
+
+
 def profile_dict(row: AuthCredentialProfile) -> dict:
     """Public serializer: metadata only — never plaintext secrets."""
     ref = (row.secret_ref or "").strip()
@@ -88,6 +160,7 @@ def profile_dict(row: AuthCredentialProfile) -> dict:
         "has_secret": bool(ref),
         "secret_ref": _truncate_ref(ref),
         "config": dict(row.config_json or {}),
+        "refresh": _refresh_form_values(row.config_json),
         "extra_headers": getattr(row, "extra_headers", "") or "",
         # Extra cookies are secret: only whether they exist + their NAMES, never values.
         "has_extra_cookies": bool((getattr(row, "extra_cookies_ref", "") or "").strip()),
@@ -139,6 +212,7 @@ def create_profile(
     config_json: dict | None = None,
     extra_headers: str | None = None,
     extra_cookies: str | None = None,
+    refresh_cookie_secret: str | None = None,
     actor: str | None = None,
     principal=None,
 ) -> AuthCredentialProfile:
@@ -156,8 +230,17 @@ def create_profile(
 
     if secret_value is not None and secret_ref is not None and str(secret_ref).strip():
         raise services.ServiceError("provide secret_value or secret_ref, not both")
+    config_json = _sanitize_profile_config(config_json)
     extra_text = _clean_extra_headers(extra_headers, method, config_json)
     cookie_pairs = _clean_extra_cookies(extra_cookies, method, config_json)
+    refresh_names = list((config_json or {}).get("refresh_cookies") or [])
+    cookie_pairs = _merge_cookie_pairs(
+        cookie_pairs, parse_refresh_cookie_secret(refresh_cookie_secret, refresh_names)
+    )
+    if cookie_pairs:
+        cookie_pairs = _clean_extra_cookies(
+            _cookie_secret_text(cookie_pairs), method, config_json
+        )
 
     stored_ref = ""
     if secret_value is not None:
@@ -371,6 +454,80 @@ def update_extra_cookies(
         engagement_id=engagement_id,
         extra_cookie_names=[k for k, _ in pairs],
         cleared=not pairs,
+    )
+    return row
+
+
+def update_refresh_config(
+    s: Session,
+    engagement_id: int,
+    profile_id: int,
+    *,
+    config_updates: dict | None,
+    refresh_cookie_secret: str | None = None,
+    principal,
+    actor: str | None = None,
+) -> AuthCredentialProfile:
+    """Update mid-scan refresh_* keys on config_json; optionally merge a refresh cookie secret.
+
+    Token values are never written to config_json. An empty refresh cookie input leaves
+    existing encrypted cookies unchanged.
+    """
+    _check_write(principal)
+    row = _get_profile(s, engagement_id, profile_id, principal)
+    if row.status == "revoked":
+        raise services.ServiceError("not allowed: profile is revoked")
+    merged = dict(row.config_json or {})
+    updates = dict(config_updates or {})
+    # Blank strings in the form clear optional keys.
+    for key, val in updates.items():
+        if val is None or (isinstance(val, str) and not val.strip()) or val == [] or val == {}:
+            merged.pop(key, None)
+        else:
+            merged[key] = val
+    merged = _sanitize_profile_config(merged)
+    incoming = parse_refresh_cookie_secret(
+        refresh_cookie_secret, list(merged.get("refresh_cookies") or [])
+    )
+    who = _actor_name(actor, principal)
+    if incoming:
+        from attestra import credentials as cred_mod
+
+        existing: list[tuple[str, str]] = []
+        old = (getattr(row, "extra_cookies_ref", "") or "").strip()
+        if old:
+            try:
+                existing = _clean_extra_cookies(cred_mod.get_secret(old), row.method, merged)
+            except Exception:
+                existing = []
+        pairs = _clean_extra_cookies(_cookie_secret_text(_merge_cookie_pairs(existing, incoming)), row.method, merged)
+        value = _cookie_secret_text(pairs)
+        new_ref = ""
+        if old:
+            try:
+                new_ref = credentials.rotate_secret(old, value)
+            except credentials.SecretsError:
+                new_ref = ""
+        if not new_ref:
+            new_ref = credentials.put_secret(
+                row.tenant_id, row.engagement_id, f"{row.label} (extra cookies)", value
+            )
+        row.extra_cookies_ref = new_ref
+        row.extra_cookie_names = _cookie_names_text(pairs)
+    row.config_json = merged
+    row.updated_by = who
+    row.updated_at = utcnow()
+    s.flush()
+    audit.record(
+        s,
+        who,
+        "auth_profile.refresh_config",
+        "auth_credential_profile",
+        row.id,
+        engagement_id=engagement_id,
+        has_refresh_url=bool(merged.get("refresh_url")),
+        refresh_cookie_names=list(merged.get("refresh_cookies") or []),
+        cookie_secret_updated=bool(incoming),
     )
     return row
 

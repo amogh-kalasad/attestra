@@ -4,8 +4,8 @@ Pre-flight :func:`attestra.auth_web.scan_auth.verify_logged_in` only proves the 
 alive before the scan started. This module keeps checking during ZAP, Nuclei and automated
 VAPT runs and, when the session dies, tries a bounded number of re-logins using the same
 ``AuthCredentialProfile`` material (form / otp login, or an opt-in ``refresh_url`` for
-static header / cookie profiles). When recovery fails the affected work is reported as
-**blocked** — never as passed or as authenticated coverage.
+static header / cookie profiles, including an optional JSON refresh endpoint). When recovery
+fails the affected work is reported as **blocked** — never as passed or as authenticated coverage.
 
 Secrets stay inside closures / the per-scan secret directory; :meth:`SessionGuard.public`
 and :meth:`SessionGuard.note` are value-free and safe for ``ScanRun.auth_note``, result JSON
@@ -22,6 +22,7 @@ Environment (all optional):
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -144,6 +145,292 @@ def check_session_alive(
         return False, f"login check failed: {type(exc).__name__}"
 
 
+# ------------------------------------------------------------------ JSON / cookie refresh config
+
+REFRESH_WAF_NOTE = "refresh blocked by WAF/challenge"
+
+_REFRESH_SECRET_KEYS = {
+    "refresh_token",
+    "refreshtoken",
+    "access_token",
+    "accesstoken",
+    "refresh_secret",
+    "cookie_value",
+    "refresh_cookie_value",
+    "refresh_cookie_secret",
+}
+_COOKIE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_JSON_PATH_PART_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_CHALLENGE_BODY_RE = re.compile(
+    r"(?i)just\s+a\s+moment|cdn-cgi/challenge-platform|cf-browser-verification|"
+    r"cf-error-code|attention required!|enable javascript and cookies to continue"
+)
+
+# Optional injectable: http_request(url, method=..., body=b"", headers={}, cookies={}) -> HttpReply
+HttpRequest = Callable[..., Any]
+
+
+def validate_refresh_apply_as(value: str | None, *, required: bool = False) -> str:
+    """Return a normalised ``refresh_apply_as`` or raise ``ValueError`` (value-free)."""
+    raw = (value or "").strip()
+    if not raw:
+        if required:
+            raise ValueError("refresh_apply_as is required when refresh_token_json_path is set")
+        return ""
+    low = raw.lower()
+    if low == "bearer":
+        return "bearer"
+    if low.startswith("header:") or low.startswith("cookie:"):
+        kind, _, name = raw.partition(":")
+        name = name.strip()
+        if not name or not _HEADER_NAME_RE.fullmatch(name):
+            raise ValueError("refresh_apply_as header/cookie name must be alphanumeric, '_' or '-'")
+        return f"{kind.lower()}:{name}"
+    raise ValueError("refresh_apply_as must be 'bearer', 'header:<Name>', or 'cookie:<Name>'")
+
+
+def _refresh_cookie_names(raw: Any) -> list[str]:
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+    elif isinstance(raw, (list, tuple)):
+        parts = [str(p).strip() for p in raw if str(p).strip()]
+    else:
+        raise ValueError("refresh_cookies must be a list of cookie names")
+    names: list[str] = []
+    for name in parts:
+        if "=" in name:
+            raise ValueError("refresh_cookies lists cookie names only; values belong in the encrypted store")
+        if not _COOKIE_NAME_RE.fullmatch(name):
+            raise ValueError("refresh_cookies names must be alphanumeric, '_' or '-'")
+        if name not in names:
+            names.append(name)
+    if len(names) > 10:
+        raise ValueError("refresh_cookies accepts at most 10 names")
+    return names
+
+
+def _refresh_headers_dict(raw: Any) -> dict[str, str]:
+    if raw is None or raw == "" or raw == {}:
+        return {}
+    if isinstance(raw, str):
+        try:
+            pairs = xh.parse_extra_headers(raw)
+        except xh.ExtraHeadersError as exc:
+            raise ValueError(str(exc)) from exc
+        return {k: v for k, v in pairs}
+    if isinstance(raw, dict):
+        out: dict[str, str] = {}
+        for k, v in raw.items():
+            name = str(k).strip()
+            if not name or not _HEADER_NAME_RE.fullmatch(name):
+                raise ValueError("refresh_headers names must be alphanumeric, '_' or '-'")
+            out[name] = "" if v is None else str(v)
+        if len(out) > 10:
+            raise ValueError("refresh_headers accepts at most 10 headers")
+        return out
+    raise ValueError("refresh_headers must be an object of header names to values")
+
+
+def _json_path_get(data: Any, path: str) -> Any:
+    cur = data
+    for part in path.split("."):
+        part = part.strip()
+        if not part or not _JSON_PATH_PART_RE.fullmatch(part):
+            return None
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit():
+            idx = int(part)
+            if idx < 0 or idx >= len(cur):
+                return None
+            cur = cur[idx]
+        else:
+            return None
+    return cur
+
+
+def sanitize_refresh_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate optional refresh_* keys in profile config; return a shallow-cleaned copy.
+
+    Cookie / token *values* are rejected — only names and non-secret request metadata belong
+    in ``config_json``. Raises ``ValueError`` with a value-free message.
+    """
+    out = dict(cfg or {})
+    for key in list(out):
+        if str(key).strip().lower().replace("-", "_") in _REFRESH_SECRET_KEYS:
+            raise ValueError("refresh token values must not be stored in config_json; use the encrypted cookie store")
+    url = out.get("refresh_url")
+    if url is not None:
+        url_s = str(url).strip()
+        out["refresh_url"] = url_s
+        if url_s and not (url_s.startswith("https://") or url_s.startswith("http://")):
+            raise ValueError("refresh_url must be an absolute http(s) URL")
+    method = out.get("refresh_method")
+    if method is not None and str(method).strip():
+        m = str(method).strip().upper()
+        if m not in ("GET", "POST", "PUT", "PATCH"):
+            raise ValueError("refresh_method must be GET, POST, PUT or PATCH")
+        out["refresh_method"] = m
+    elif "refresh_method" in out:
+        out.pop("refresh_method", None)
+    body = out.get("refresh_body")
+    if body is not None:
+        if isinstance(body, str) and body.strip():
+            try:
+                body = json.loads(body)
+            except ValueError as exc:
+                raise ValueError("refresh_body must be a JSON object") from exc
+        if body in ("", None):
+            out.pop("refresh_body", None)
+        elif not isinstance(body, dict):
+            raise ValueError("refresh_body must be a JSON object")
+        else:
+            out["refresh_body"] = body
+    ctype = out.get("refresh_content_type")
+    if ctype is not None and str(ctype).strip():
+        c = str(ctype).strip().lower()
+        if c in ("application/json", "json"):
+            c = "json"
+        elif c in ("application/x-www-form-urlencoded", "form", "urlencoded"):
+            c = "form"
+        else:
+            raise ValueError("refresh_content_type must be json or form")
+        out["refresh_content_type"] = c
+    elif "refresh_content_type" in out:
+        out.pop("refresh_content_type", None)
+    if "refresh_cookies" in out:
+        names = _refresh_cookie_names(out.get("refresh_cookies"))
+        if names:
+            out["refresh_cookies"] = names
+        else:
+            out.pop("refresh_cookies", None)
+    if "refresh_headers" in out:
+        hdrs = _refresh_headers_dict(out.get("refresh_headers"))
+        if hdrs:
+            out["refresh_headers"] = hdrs
+        else:
+            out.pop("refresh_headers", None)
+    path = out.get("refresh_token_json_path")
+    if path is not None:
+        path_s = str(path).strip()
+        if path_s:
+            for part in path_s.split("."):
+                if not part or not _JSON_PATH_PART_RE.fullmatch(part):
+                    raise ValueError("refresh_token_json_path must be a dotted JSON path (e.g. accessToken)")
+            out["refresh_token_json_path"] = path_s
+        else:
+            out.pop("refresh_token_json_path", None)
+    apply_as = out.get("refresh_apply_as")
+    json_path = str(out.get("refresh_token_json_path") or "").strip()
+    if apply_as is not None and str(apply_as).strip():
+        out["refresh_apply_as"] = validate_refresh_apply_as(str(apply_as), required=bool(json_path))
+    elif "refresh_apply_as" in out:
+        out.pop("refresh_apply_as", None)
+    if json_path and not str(out.get("refresh_apply_as") or "").strip():
+        out["refresh_apply_as"] = "bearer"
+    if out.get("refresh_apply_as") and not json_path:
+        raise ValueError("refresh_apply_as requires refresh_token_json_path")
+    return out
+
+
+def refresh_looks_like_challenge(
+    status: int | None,
+    *,
+    body: str = "",
+    headers: dict[str, str] | None = None,
+) -> bool:
+    """True when the refresh response is a WAF / Cloudflare challenge (value-free)."""
+    hdrs = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    if hdrs.get("cf-mitigated"):
+        return True
+    text = body or ""
+    if _CHALLENGE_BODY_RE.search(text[:20_000]):
+        return True
+    return False
+
+
+def _set_fail(bag: dict[str, str] | None, note: str) -> None:
+    if bag is not None:
+        bag["note"] = (note or "")[:300]
+
+
+def _replace_header(headers: dict[str, str], name: str, value: str) -> None:
+    for k in list(headers):
+        if k.lower() == name.lower():
+            headers.pop(k, None)
+    headers[name] = value
+
+
+def _apply_access_token(headers: dict[str, str], cookies: dict[str, str], token: str, apply_as: str) -> None:
+    kind = validate_refresh_apply_as(apply_as, required=True)
+    if kind == "bearer":
+        _replace_header(headers, "Authorization", f"Bearer {token}")
+    elif kind.startswith("header:"):
+        _replace_header(headers, kind.split(":", 1)[1], token)
+    else:
+        cookies[kind.split(":", 1)[1]] = token
+
+
+def _uses_json_refresh(cfg: dict[str, Any]) -> bool:
+    if str(cfg.get("refresh_token_json_path") or "").strip():
+        return True
+    if cfg.get("refresh_cookies"):
+        return True
+    if cfg.get("refresh_headers"):
+        return True
+    if cfg.get("refresh_apply_as"):
+        return True
+    body = cfg.get("refresh_body")
+    if isinstance(body, dict) and body:
+        return True
+    if str(cfg.get("refresh_content_type") or "").strip():
+        return True
+    method = str(cfg.get("refresh_method") or "").strip().upper()
+    if method and method != "POST":
+        return True
+    return False
+
+
+def _encode_refresh_body(cfg: dict[str, Any]) -> tuple[bytes, str]:
+    body = cfg.get("refresh_body")
+    if body is None:
+        payload: dict[str, Any] = {}
+    elif isinstance(body, dict):
+        payload = body
+    else:
+        payload = {}
+    json_path = str(cfg.get("refresh_token_json_path") or "").strip()
+    ctype = str(cfg.get("refresh_content_type") or "").strip().lower()
+    if not ctype:
+        ctype = "json" if json_path else "form"
+    if ctype == "form":
+        import urllib.parse
+
+        return urllib.parse.urlencode({str(k): "" if v is None else str(v) for k, v in payload.items()}).encode("utf-8"), "application/x-www-form-urlencoded"
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8"), "application/json"
+
+
+def _refresh_cookie_jar(
+    names: list[str],
+    current_cookies: dict[str, str] | None,
+    extra_cookies: list[tuple[str, str]],
+) -> dict[str, str] | None:
+    store: dict[str, str] = {}
+    for k, v in extra_cookies:
+        if k:
+            store[str(k)] = str(v)
+    store.update(dict(current_cookies or {}))
+    if not names:
+        return dict(current_cookies or {})
+    sent = {n: store[n] for n in names if n in store and store[n]}
+    if not sent:
+        return None
+    return sent
+
+
 # ------------------------------------------------------------------ re-login
 
 
@@ -175,13 +462,18 @@ def attempt_relogin(
     extra_cookies: list[tuple[str, str]] | None = None,
     current_cookies: dict[str, str] | None = None,
     verify: bool = True,
+    http_request: HttpRequest | None = None,
+    failure_note: dict[str, str] | None = None,
 ) -> SessionMaterial | None:
     """Re-establish a session from the profile material; ``None`` when impossible/failed.
 
     * ``form`` / ``otp``: the existing login paths in :mod:`scan_auth` run again.
     * ``header`` / ``cookie``: static material cannot be renewed unless the profile opts in
-      with ``config_json.refresh_url`` (a POST that answers with fresh ``Set-Cookie``);
-      no OAuth refresh logic is invented here.
+      with ``config_json.refresh_url``. Legacy behaviour (no JSON path / refresh cookies) is
+      an empty form POST that must return ``Set-Cookie``. When ``refresh_token_json_path``
+      (and optional ``refresh_cookies`` / ``refresh_headers`` / ``refresh_apply_as``) is set,
+      a JSON or form refresh is sent and the new access token is applied as a header or cookie.
+      The refresh response body is treated as secret and is never logged or stored.
     * ``sso_bootstrap`` / ``none``: never automatable.
     """
     method = (method or "").strip().lower()
@@ -191,22 +483,25 @@ def attempt_relogin(
     extra_cookies = list(extra_cookies or [])
     try:
         if method in ("header", "cookie"):
-            refresh_url = str(cfg.get("refresh_url") or "").strip()
-            if not refresh_url or http_post is None:
+            material = _refresh_static_session(
+                method, cfg, secret,
+                http_post=http_post, http_request=http_request,
+                extra_cookies=extra_cookies, current_cookies=current_cookies,
+                failure_note=failure_note,
+            )
+            if material is None:
                 return None
-            reply = http_post(refresh_url, {}, dict(current_cookies or {}))
-            if getattr(reply, "status", 599) >= 400 or not getattr(reply, "cookies", None):
-                return None
-            headers, cookies, _ = sa.session_material(method, cfg, secret)
-            cookies = {**cookies, **dict(reply.cookies)}
-            note = "session refreshed via refresh_url"
+            headers, cookies, note = material
         else:
             if http_post is None:
                 return None
             headers, cookies, note = sa.session_material(
                 method, cfg, secret, http_post=http_post, imap_search=imap_search
             )
-    except Exception:  # noqa: BLE001 - ScanAuthError / transport problems → not recovered
+    except Exception as exc:  # noqa: BLE001 - ScanAuthError / transport problems → not recovered
+        if not (failure_note or {}).get("note"):
+            msg = str(exc).strip()
+            _set_fail(failure_note, msg[:200] if msg and type(exc).__name__ == "ScanAuthError" else "refresh request failed")
         return None
     if not headers and not cookies:
         return None
@@ -216,9 +511,125 @@ def attempt_relogin(
     if verify:
         ok, vnote = check_session_alive(cfg, headers, cookies, login_probe=login_probe)
         if not ok:
+            _set_fail(failure_note, "session still invalid after refresh")
             return None
         note = f"{note}; {vnote}"
     return SessionMaterial(headers=headers, cookies=cookies, note=note, redact_values=redact)
+
+
+def _refresh_static_session(
+    method: str,
+    cfg: dict[str, Any],
+    secret: str,
+    *,
+    http_post: Any | None,
+    http_request: HttpRequest | None,
+    extra_cookies: list[tuple[str, str]],
+    current_cookies: dict[str, str] | None,
+    failure_note: dict[str, str] | None,
+) -> tuple[dict[str, str], dict[str, str], str] | None:
+    refresh_url = str(cfg.get("refresh_url") or "").strip()
+    if not refresh_url:
+        return None
+    if _uses_json_refresh(cfg):
+        return _refresh_via_request(
+            method, cfg, secret, refresh_url,
+            http_request=http_request, extra_cookies=extra_cookies,
+            current_cookies=current_cookies, failure_note=failure_note,
+        )
+    if http_post is None:
+        return None
+    reply = http_post(refresh_url, {}, dict(current_cookies or {}))
+    status = int(getattr(reply, "status", 599) or 599)
+    reply_headers = getattr(reply, "headers", None) or {}
+    body = getattr(reply, "body", "") or ""
+    if refresh_looks_like_challenge(status, body=body, headers=reply_headers):
+        _set_fail(failure_note, REFRESH_WAF_NOTE)
+        return None
+    if status >= 400 or not getattr(reply, "cookies", None):
+        _set_fail(failure_note, f"refresh failed (HTTP {status})" if status >= 400 else "refresh returned no Set-Cookie")
+        return None
+    headers, cookies, _ = sa.session_material(method, cfg, secret)
+    cookies = {**cookies, **dict(reply.cookies)}
+    return headers, cookies, "session refreshed via refresh_url"
+
+
+def _refresh_via_request(
+    method: str,
+    cfg: dict[str, Any],
+    secret: str,
+    refresh_url: str,
+    *,
+    http_request: HttpRequest | None,
+    extra_cookies: list[tuple[str, str]],
+    current_cookies: dict[str, str] | None,
+    failure_note: dict[str, str] | None,
+) -> tuple[dict[str, str], dict[str, str], str] | None:
+    if http_request is None:
+        _set_fail(failure_note, "refresh request helper is not available")
+        return None
+    try:
+        names = _refresh_cookie_names(cfg.get("refresh_cookies"))
+    except ValueError as exc:
+        _set_fail(failure_note, str(exc))
+        return None
+    sent = _refresh_cookie_jar(names, current_cookies, extra_cookies)
+    if names and sent is None:
+        _set_fail(failure_note, "refresh cookie missing")
+        return None
+    try:
+        body, content_type = _encode_refresh_body(cfg)
+        req_headers = {"Accept": "application/json, */*;q=0.8", "Content-Type": content_type}
+        extra_rh = _refresh_headers_dict(cfg.get("refresh_headers"))
+        req_headers.update(extra_rh)
+    except ValueError as exc:
+        _set_fail(failure_note, str(exc))
+        return None
+    method_name = str(cfg.get("refresh_method") or "POST").strip().upper() or "POST"
+    payload = None if method_name == "GET" else body
+    reply = http_request(
+        refresh_url,
+        method=method_name,
+        body=payload if payload is not None else b"",
+        headers=req_headers,
+        cookies=dict(sent or {}),
+    )
+    status = int(getattr(reply, "status", 599) or 599)
+    reply_headers = getattr(reply, "headers", None) or {}
+    raw_body = getattr(reply, "body", "") or ""
+    try:
+        if refresh_looks_like_challenge(status, body=raw_body, headers=reply_headers):
+            _set_fail(failure_note, REFRESH_WAF_NOTE)
+            return None
+        if status >= 400:
+            _set_fail(failure_note, f"refresh failed (HTTP {status})")
+            return None
+        json_path = str(cfg.get("refresh_token_json_path") or "").strip()
+        token = ""
+        if json_path:
+            try:
+                parsed = json.loads(raw_body) if raw_body else None
+            except ValueError:
+                parsed = None
+            extracted = _json_path_get(parsed, json_path) if isinstance(parsed, (dict, list)) else None
+            if not isinstance(extracted, str) or not extracted.strip():
+                _set_fail(failure_note, "refresh token missing in response")
+                return None
+            token = extracted.strip()
+        headers, cookies, _ = sa.session_material(method, cfg, secret)
+        if token:
+            apply_as = str(cfg.get("refresh_apply_as") or "bearer")
+            _apply_access_token(headers, cookies, token, apply_as)
+        reply_cookies = dict(getattr(reply, "cookies", None) or {})
+        if reply_cookies:
+            cookies = {**cookies, **reply_cookies}
+        if not token and not reply_cookies:
+            _set_fail(failure_note, "refresh returned no token or Set-Cookie")
+            return None
+        return headers, cookies, "session refreshed via refresh_url"
+    finally:
+        # Treat the refresh body as secret: drop the local reference; never log it.
+        raw_body = ""
 
 
 # ------------------------------------------------------------------ guard
@@ -246,6 +657,7 @@ class SessionGuard:
     on_renew: list[Callable[[SessionMaterial], None]] = field(default_factory=list, repr=False)
     redact_values: tuple[str, ...] = field(default=(), repr=False)
     status: str = "ok"  # ok | recovered | lost
+    last_relogin_note: str = ""
     relogins: int = 0
     failed_relogins: int = 0
     checks: int = 0
@@ -302,7 +714,11 @@ class SessionGuard:
             while True:
                 if self.relogins + self.failed_relogins >= self.max_relogins:
                     tail = "re-login failed" if self.failed_relogins else f"re-login budget exhausted ({self.max_relogins} attempt(s))"
-                    self._mark_lost(f"{why}; {tail}")
+                    detail = f"{why}; {tail}"
+                    extra = (self.last_relogin_note or "").strip()
+                    if extra and extra not in detail:
+                        detail = f"{detail}; {extra}"
+                    self._mark_lost(detail)
                     return False
                 if self._last_attempt is not None and self.min_interval_s > 0:
                     wait = self.min_interval_s - (self.clock() - self._last_attempt)
@@ -316,7 +732,7 @@ class SessionGuard:
                     self._event("relogin_error", type(exc).__name__)
                 if material is None:
                     self.failed_relogins += 1
-                    self._event("relogin_failed", why)
+                    self._event("relogin_failed", self.last_relogin_note or why)
                     continue
                 self.relogins += 1
                 self.headers = dict(material.headers)
@@ -406,23 +822,31 @@ def build_guard(
     redact_values: tuple[str, ...] = (),
     enabled: bool | None = None,
     max_relogins: int | None = None,
+    http_request: HttpRequest | None = None,
 ) -> SessionGuard:
     """Guard wired to the profile's verify URL and login path (secrets captured in closures)."""
     state: dict[str, Any] = {"cookies": dict(cookies)}
+    fail_bag: dict[str, str] = {"note": ""}
 
     def _verify(h: dict[str, str], c: dict[str, str]) -> tuple[bool, str]:
         state["cookies"] = dict(c)
         return check_session_alive(cfg, h, c, login_probe=login_probe)
 
     def _relogin() -> SessionMaterial | None:
-        return attempt_relogin(
+        fail_bag["note"] = ""
+        mat = attempt_relogin(
             method, cfg, secret,
             http_post=http_post, login_probe=login_probe, imap_search=imap_search,
             extra_headers=extra_headers, extra_cookies=extra_cookies,
             current_cookies=state.get("cookies"),
+            http_request=http_request, failure_note=fail_bag,
         )
+        guard.last_relogin_note = fail_bag.get("note", "")
+        if mat is not None:
+            state["cookies"] = dict(mat.cookies)
+        return mat
 
-    return SessionGuard(
+    guard = SessionGuard(
         verify=_verify,
         relogin=_relogin,
         headers=dict(headers),
@@ -433,6 +857,7 @@ def build_guard(
         min_interval_s=relogin_min_interval_s(),
         redact_values=tuple(redact_values),
     )
+    return guard
 
 
 # ------------------------------------------------------------------ background watcher

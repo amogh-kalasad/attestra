@@ -226,6 +226,57 @@
               </div>
             </form>
           </details>
+          <details style="margin-top:6px">
+            <summary>Token Refresh{% if p.refresh and p.refresh.refresh_url %} (configured){% endif %}</summary>
+            <form method="post" action="/engagements/{{ e.id }}/auth-profiles/{{ p.id }}/refresh-config" autocomplete="off" class="form-follow">
+              <input type="hidden" name="asset_id" value="{{ asset.id }}">
+              <p class="hint">Optional mid-scan renewal for Session Token / Session Cookie profiles. Cookie values are encrypted and never shown. Leave a field empty to clear it.</p>
+              <div class="fields">
+                <div>
+                  <label for="rf_url_{{ p.id }}">Refresh URL</label>
+                  <input type="url" id="rf_url_{{ p.id }}" name="refresh_url" value="{{ p.refresh.refresh_url }}" placeholder="https://api.example.com/api/auth/refresh-token" autocomplete="off">
+                </div>
+                <div>
+                  <label for="rf_method_{{ p.id }}">Refresh Method</label>
+                  <input type="text" id="rf_method_{{ p.id }}" name="refresh_method" value="{{ p.refresh.refresh_method }}" placeholder="POST" autocomplete="off">
+                </div>
+                <div>
+                  <label for="rf_ctype_{{ p.id }}">Refresh Content Type</label>
+                  <input type="text" id="rf_ctype_{{ p.id }}" name="refresh_content_type" value="{{ p.refresh.refresh_content_type }}" placeholder="json or form" autocomplete="off">
+                  <div class="hint">Defaults to json when a token JSON path is set.</div>
+                </div>
+                <div>
+                  <label for="rf_body_{{ p.id }}">Refresh Body (JSON object)</label>
+                  <textarea id="rf_body_{{ p.id }}" name="refresh_body" rows="2" spellcheck="false" placeholder="{}">{{ p.refresh.refresh_body }}</textarea>
+                </div>
+                <div>
+                  <label for="rf_path_{{ p.id }}">Access Token JSON Path</label>
+                  <input type="text" id="rf_path_{{ p.id }}" name="refresh_token_json_path" value="{{ p.refresh.refresh_token_json_path }}" placeholder="accessToken" autocomplete="off">
+                </div>
+                <div>
+                  <label for="rf_apply_{{ p.id }}">Apply Access Token As</label>
+                  <input type="text" id="rf_apply_{{ p.id }}" name="refresh_apply_as" value="{{ p.refresh.refresh_apply_as }}" placeholder="bearer, header:Name, or cookie:Name" autocomplete="off">
+                  <div class="hint">Use bearer to replace the Authorization header with Bearer &lt;token&gt;.</div>
+                </div>
+                <div>
+                  <label for="rf_cnames_{{ p.id }}">Refresh Cookie Names</label>
+                  <input type="text" id="rf_cnames_{{ p.id }}" name="refresh_cookies" value="{{ p.refresh.refresh_cookies }}" placeholder="refreshToken" autocomplete="off">
+                  <div class="hint">Names only, comma-separated. Values come from the encrypted store below or Extra Cookies.</div>
+                </div>
+                <div>
+                  <label for="rf_cval_{{ p.id }}">Refresh Cookie Value</label>
+                  <input type="password" id="rf_cval_{{ p.id }}" name="refresh_cookie_secret" autocomplete="off" spellcheck="false" placeholder="paste refresh cookie value">
+                  <div class="hint">Optional. Leave blank to keep the stored value. Encrypted; never shown again. Use a bare value when one cookie name is set, or name=value.</div>
+                </div>
+                <div>
+                  <label for="rf_hdrs_{{ p.id }}">Refresh Headers</label>
+                  <textarea id="rf_hdrs_{{ p.id }}" name="refresh_headers" rows="3" spellcheck="false" placeholder="Origin: https://app.example.com">{{ p.refresh.refresh_headers }}</textarea>
+                  <div class="hint">Non-secret request headers (Origin, Referer, User-Agent, x-portal-host), one "Name: value" per line. Never put tokens here.</div>
+                </div>
+              </div>
+              <div class="form-actions"><button type="submit" class="secondary">Save Token Refresh</button></div>
+            </form>
+          </details>
           {% endif %}
         </td>
         {% endif %}
@@ -313,6 +364,49 @@
         <div><label for="ap_subject_filter">Subject Filter</label><input type="text" id="ap_subject_filter" name="subject_filter" placeholder="Your code" autocomplete="off"></div>
         <div><label for="ap_otp_regex">OTP Regex</label><input type="text" id="ap_otp_regex" name="otp_regex" placeholder="\b(\d{4,8})\b" autocomplete="off"></div>
         <div><label for="ap_imap_app_password">IMAP App Password</label><input type="password" id="ap_imap_app_password" name="imap_app_password" autocomplete="off" spellcheck="false"></div>
+      </div>
+
+      <h3>Token Refresh (Session Token / Cookie)</h3>
+      <p class="hint">Optional mid-scan renewal. For a JSON refresh endpoint, set the refresh URL, access token JSON path (for example accessToken), apply-as (bearer), and the refresh cookie name plus its value. The cookie value is encrypted like the Secret and never stored in profile config.</p>
+      <div class="fields">
+        <div>
+          <label for="ap_refresh_url">Refresh URL</label>
+          <input type="url" id="ap_refresh_url" name="refresh_url" placeholder="https://api.example.com/api/auth/refresh-token" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_method">Refresh Method</label>
+          <input type="text" id="ap_refresh_method" name="refresh_method" placeholder="POST" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_ctype">Refresh Content Type</label>
+          <input type="text" id="ap_refresh_ctype" name="refresh_content_type" placeholder="json or form" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_body">Refresh Body (JSON object)</label>
+          <textarea id="ap_refresh_body" name="refresh_body" rows="2" spellcheck="false" placeholder="{}"></textarea>
+        </div>
+        <div>
+          <label for="ap_refresh_path">Access Token JSON Path</label>
+          <input type="text" id="ap_refresh_path" name="refresh_token_json_path" placeholder="accessToken" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_apply">Apply Access Token As</label>
+          <input type="text" id="ap_refresh_apply" name="refresh_apply_as" placeholder="bearer, header:Name, or cookie:Name" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_cnames">Refresh Cookie Names</label>
+          <input type="text" id="ap_refresh_cnames" name="refresh_cookies" placeholder="refreshToken" autocomplete="off">
+        </div>
+        <div>
+          <label for="ap_refresh_cval">Refresh Cookie Value</label>
+          <input type="password" id="ap_refresh_cval" name="refresh_cookie_secret" autocomplete="off" spellcheck="false" placeholder="paste refresh cookie value">
+          <div class="hint">Encrypted; never shown again. Bare value is stored under the single refresh cookie name, or use name=value.</div>
+        </div>
+        <div>
+          <label for="ap_refresh_hdrs">Refresh Headers</label>
+          <textarea id="ap_refresh_hdrs" name="refresh_headers" rows="3" spellcheck="false" placeholder="Origin: https://app.example.com&#10;Referer: https://app.example.com/&#10;User-Agent: Mozilla/5.0"></textarea>
+          <div class="hint">Non-secret headers only (Origin, Referer, User-Agent, x-portal-host). One "Name: value" per line.</div>
+        </div>
       </div>
 
       <h3>Secret</h3>

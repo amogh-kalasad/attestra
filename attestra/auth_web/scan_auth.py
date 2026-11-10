@@ -562,7 +562,13 @@ def _profile_cfg(profile) -> dict[str, Any]:
 
 def _allowed_hosts(profile, target_url: str) -> set[str]:
     hosts: set[str] = set()
-    for u in (target_url, getattr(profile, "login_url", "") or "", (profile.config_json or {}).get("verify_url", "")):
+    cfg = profile.config_json or {}
+    for u in (
+        target_url,
+        getattr(profile, "login_url", "") or "",
+        cfg.get("verify_url", ""),
+        cfg.get("refresh_url", ""),
+    ):
         try:
             host = urlsplit(u).hostname
         except Exception:
@@ -612,20 +618,113 @@ def live_http_post(
         got: dict[str, str] = {}
         status = 200
         final = url
+        resp_headers: dict[str, str] = {}
         try:
             with opener.open(req, timeout=timeout_s) as resp:  # noqa: S310 - host allowlisted
                 status = int(getattr(resp, "status", 200) or 200)
                 final = getattr(resp, "geturl", lambda: url)() or url
                 text = resp.read(200_000).decode("utf-8", "replace")
+                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
         except Exception as exc:  # noqa: BLE001
             code = getattr(exc, "code", None)
             status = int(code) if isinstance(code, int) else 599
             text = ""
+            hdrs = getattr(exc, "headers", None)
+            if hdrs is not None:
+                try:
+                    resp_headers = {str(k).lower(): str(v) for k, v in hdrs.items()}
+                except Exception:
+                    resp_headers = {}
+            try:
+                read = getattr(exc, "read", None)
+                if callable(read):
+                    text = read(200_000).decode("utf-8", "replace")
+            except Exception:
+                pass
         for ck in jar:
             got[ck.name] = ck.value or ""
-        return otp_mod.HttpReply(status=status, body=text, cookies=got, final_url=final)
+        return otp_mod.HttpReply(status=status, body=text, cookies=got, final_url=final, headers=resp_headers)
 
     return _post
+
+
+
+def live_refresh_http(
+    allowed_hosts: set[str],
+    *,
+    timeout_s: float = _FETCH_TIMEOUT_S,
+    extra_headers: list[tuple[str, str]] | None = None,
+) -> "Callable":
+    """A urllib request helper for mid-scan token refresh, restricted to allowlisted hosts.
+
+    Unlike :func:`live_http_post` this can send a JSON or form body with a chosen method
+    and request headers. Cookies are only those the caller passes (typically the refresh
+    cookie). The response body is returned on the ``HttpReply`` for the caller to parse
+    in memory; this helper does not log it.
+    """
+    import urllib.error
+    import urllib.request
+    from http.cookiejar import CookieJar
+    from typing import Callable
+
+    def _request(
+        url: str,
+        *,
+        method: str = "POST",
+        body: bytes = b"",
+        headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+    ) -> "otp_mod.HttpReply":
+        if not _host_ok(url, allowed_hosts):
+            raise ScanAuthError("refresh URL host is not in scope for this target")
+        method = (method or "POST").upper()
+        jar = CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        hdrs = {"User-Agent": _USER_AGENT}
+        for k, v in (headers or {}).items():
+            if k:
+                hdrs[str(k)] = "" if v is None else str(v)
+        if cookies and not any(k.lower() == "cookie" for k in hdrs):
+            hdrs["Cookie"] = cookie_header(dict(cookies))
+        hdrs = xh.merge_extra_headers(hdrs, list(extra_headers or []))
+        data = None if method == "GET" else (body if body is not None else b"")
+        req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+        got: dict[str, str] = {}
+        status = 200
+        final = url
+        text = ""
+        resp_headers: dict[str, str] = {}
+        try:
+            with opener.open(req, timeout=timeout_s) as resp:  # noqa: S310 - host allowlisted
+                status = int(getattr(resp, "status", 200) or 200)
+                final = getattr(resp, "geturl", lambda: url)() or url
+                text = resp.read(200_000).decode("utf-8", "replace")
+                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+        except urllib.error.HTTPError as exc:
+            status = int(exc.code) if getattr(exc, "code", None) else 599
+            try:
+                text = exc.read(200_000).decode("utf-8", "replace")
+            except Exception:
+                text = ""
+            try:
+                resp_headers = {str(k).lower(): str(v) for k, v in (exc.headers or {}).items()}
+            except Exception:
+                resp_headers = {}
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", None)
+            status = int(code) if isinstance(code, int) else 599
+            text = ""
+            hdrs_err = getattr(exc, "headers", None)
+            if hdrs_err is not None:
+                try:
+                    resp_headers = {str(k).lower(): str(v) for k, v in hdrs_err.items()}
+                except Exception:
+                    resp_headers = {}
+        for ck in jar:
+            got[ck.name] = ck.value or ""
+        return otp_mod.HttpReply(status=status, body=text, cookies=got, final_url=final, headers=resp_headers)
+
+    return _request
 
 
 def live_login_probe(allowed_hosts: set[str], *, timeout_s: float = _FETCH_TIMEOUT_S) -> LoginProbe:
@@ -721,6 +820,7 @@ def prepare_for_run(
     tool: str,
     target_url: str,
     http_post: "otp_mod.HttpPost | None" = None,
+    http_request=None,
     imap_search: "otp_mod.ImapSearch | None" = None,
     login_probe: LoginProbe | None = None,
     verify: bool = True,
@@ -779,6 +879,8 @@ def prepare_for_run(
     allowed = _allowed_hosts(profile, target_url)
     if http_post is None:
         http_post = live_http_post(allowed, extra_headers=extra, extra_cookies=extra_cookies)
+    if http_request is None:
+        http_request = live_refresh_http(allowed, extra_headers=extra)
     if login_probe is None:
         login_probe = live_login_probe(allowed)
 
@@ -835,6 +937,7 @@ def prepare_for_run(
             method=method, cfg=cfg, secret=secret, headers=headers, cookies=cookies,
             http_post=http_post, login_probe=login_probe, imap_search=imap_search,
             extra_headers=extra, extra_cookies=extra_cookies, redact_values=redact,
+            http_request=http_request,
         )
         if tool == "zap":
             guard.on_renew.append(lambda m: write_zap_hook(sdir, m.headers, m.cookies, target_url=target_url))

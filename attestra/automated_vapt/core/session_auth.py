@@ -143,6 +143,7 @@ def load_session_auth(
         allowed = sa._allowed_hosts(profile, target_url)
         if http_post is None:
             http_post = sa.live_http_post(allowed, extra_headers=extra, extra_cookies=extra_cookies)
+        http_request = sa.live_refresh_http(allowed, extra_headers=extra)
         if login_probe is None:
             login_probe = sa.live_login_probe(allowed)
         headers, cookies, note = sa.session_material(method, cfg, secret, http_post=http_post)
@@ -169,6 +170,7 @@ def load_session_auth(
                 method=method, cfg=cfg, secret=secret, headers=headers, cookies=cookies,
                 http_post=http_post, login_probe=login_probe,
                 extra_headers=extra, extra_cookies=extra_cookies, redact_values=out.redact_values,
+                http_request=http_request,
             )
         return out
     except Exception as exc:  # noqa: BLE001 - value-free reason only

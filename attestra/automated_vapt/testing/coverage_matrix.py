@@ -147,10 +147,10 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
         },
         {
             "capability": "session_expiration_invalidation_rotation",
-            "module": None,
-            "test_ids": [],
-            "status": "deferred",
-            "notes": "Requires timed logout/refresh endpoints",
+            "module": "attestra.auth_web.session_guard",
+            "test_ids": ["SESSION"],
+            "status": "partial",
+            "notes": "Mid-scan expiry detection, bounded re-login, and optional JSON/cookie refresh via session_guard; full timed logout/invalidation catalogue still limited",
         },
     ],
     "injection": [

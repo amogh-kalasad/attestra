@@ -1324,6 +1324,15 @@ def ui_create_auth_profile(
     imap_app_password: str = Form(""),
     extra_headers: str = Form(""),
     extra_cookies: str = Form(""),
+    refresh_url: str = Form(""),
+    refresh_method: str = Form(""),
+    refresh_body: str = Form(""),
+    refresh_content_type: str = Form(""),
+    refresh_cookies: str = Form(""),
+    refresh_headers: str = Form(""),
+    refresh_token_json_path: str = Form(""),
+    refresh_apply_as: str = Form(""),
+    refresh_cookie_secret: str = Form(""),
 ):
     """Create an auth credential profile. Secrets go only to the credential store (masked in UI)."""
     import json as _json
@@ -1351,6 +1360,18 @@ def ui_create_auth_profile(
             cfg[key] = val.strip()
     if imap_port.strip().isdigit():
         cfg["imap_port"] = int(imap_port.strip())
+    for key, val in (
+        ("refresh_url", refresh_url),
+        ("refresh_method", refresh_method),
+        ("refresh_body", refresh_body),
+        ("refresh_content_type", refresh_content_type),
+        ("refresh_cookies", refresh_cookies),
+        ("refresh_headers", refresh_headers),
+        ("refresh_token_json_path", refresh_token_json_path),
+        ("refresh_apply_as", refresh_apply_as),
+    ):
+        if val and val.strip():
+            cfg[key] = val.strip()
     # Compose the stored secret value (never persisted in metadata / audit).
     secret_value: str | None
     if method == "none":
@@ -1370,6 +1391,7 @@ def ui_create_auth_profile(
                 login_url=login_url, success_url_contains=success_url_contains,
                 secret_value=secret_value, config_json=cfg, extra_headers=extra_headers,
                 extra_cookies=extra_cookies or None,
+                refresh_cookie_secret=refresh_cookie_secret or None,
                 asset_id=int(aid) if aid.isdigit() else None,
                 actor=principal.actor, principal=principal,
             )
@@ -1409,6 +1431,53 @@ def ui_rotate_auth_profile(
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#authentication")
     return _back(url, msg="Secret rotated. Re-validate the profile before scanning.", anchor="#authentication")
+
+
+@router.post("/engagements/{eid}/auth-profiles/{pid}/refresh-config")
+def ui_update_auth_profile_refresh_config(
+    request: Request, eid: int, pid: int,
+    asset_id: str = Form(""),
+    refresh_url: str = Form(""),
+    refresh_method: str = Form(""),
+    refresh_body: str = Form(""),
+    refresh_content_type: str = Form(""),
+    refresh_cookies: str = Form(""),
+    refresh_headers: str = Form(""),
+    refresh_token_json_path: str = Form(""),
+    refresh_apply_as: str = Form(""),
+    refresh_cookie_secret: str = Form(""),
+):
+    """Update mid-scan JSON/cookie refresh settings. Refresh cookie values stay encrypted."""
+    aid = asset_id.strip()
+    url = _auth_url(eid, aid if aid.isdigit() else "")
+    principal, redirect = _require_login(request, url)
+    if redirect:
+        return redirect
+    if not has_permission(principal.role, "auth_profile.manage"):
+        return _back(url, error="Only a lead or admin can manage authentication profiles.", anchor="#authentication")
+    updates = {
+        "refresh_url": refresh_url,
+        "refresh_method": refresh_method,
+        "refresh_body": refresh_body,
+        "refresh_content_type": refresh_content_type,
+        "refresh_cookies": refresh_cookies,
+        "refresh_headers": refresh_headers,
+        "refresh_token_json_path": refresh_token_json_path,
+        "refresh_apply_as": refresh_apply_as,
+    }
+    try:
+        with data_access.session() as s:
+            from attestra.auth_web import profiles as auth_profiles
+
+            auth_profiles.update_refresh_config(
+                s, eid, pid, config_updates=updates,
+                refresh_cookie_secret=refresh_cookie_secret or None,
+                principal=principal, actor=principal.actor,
+            )
+            data_access.commit(s)
+    except (services.ServiceError, LookupError) as e:
+        return _back(url, error=str(e), anchor="#authentication")
+    return _back(url, msg="Token refresh settings saved. Re-validate the profile before scanning.", anchor="#authentication")
 
 
 @router.post("/engagements/{eid}/auth-profiles/{pid}/extra-headers")
