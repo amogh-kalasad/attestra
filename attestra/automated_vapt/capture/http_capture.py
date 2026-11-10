@@ -75,7 +75,19 @@ def capture_request(
     if scope is not None:
         scope_validator.validate_target_url(absolute, scope, check_dns=check_dns)
 
-    req_headers = {"user-agent": _UA, **(headers or {})}
+    req_headers = dict(headers or {})
+    if not any(k.lower() == "user-agent" for k in req_headers):
+        client_ua = ""
+        if client is not None:
+            try:
+                client_ua = str(
+                    client.headers.get("user-agent")
+                    or client.headers.get("User-Agent")
+                    or ""
+                )
+            except Exception:
+                client_ua = ""
+        req_headers["user-agent"] = client_ua or _UA
     owns_client = client is None
     http = client or httpx.Client(timeout=timeout_s, follow_redirects=follow_redirects)
     started = time.perf_counter()

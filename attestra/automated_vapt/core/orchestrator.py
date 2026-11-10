@@ -20,6 +20,56 @@ from attestra.services import ServiceError
 
 log = logging.getLogger(__name__)
 
+# Desktop Chrome UA so WAF/CDN bot checks (e.g. Cloudflare) are less likely
+# to 403 the shared HTTP client used by T01 and the authz modules.
+_CHROME_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+_DEFAULT_HTTPX_TIMEOUT_S = 15.0
+_DEFAULT_HTTPX_HEADERS = {
+    "User-Agent": _CHROME_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _ensure_httpx_client(ctx: TestContext) -> bool:
+    """Attach a shared httpx.Client when the caller did not inject one.
+
+    Unit tests pass FastAPI TestClient (or httpx.Client) via extra["httpx_client"];
+    those are left untouched and must not be closed here.
+    """
+    if ctx.extra.get("httpx_client") is not None:
+        return False
+    import httpx
+
+    client = httpx.Client(
+        timeout=_DEFAULT_HTTPX_TIMEOUT_S,
+        follow_redirects=True,
+        headers=dict(_DEFAULT_HTTPX_HEADERS),
+    )
+    ctx.extra["httpx_client"] = client
+    ctx.extra["_httpx_client_owned"] = True
+    return True
+
+
+def _close_owned_httpx_client(ctx: TestContext) -> None:
+    """Close a client created by ``_ensure_httpx_client``; never close a caller-supplied one."""
+    owned = bool(ctx.extra.pop("_httpx_client_owned", False))
+    if not owned:
+        return
+    client = ctx.extra.pop("httpx_client", None)
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001 - never fail the run during cleanup
+            log.debug("owned httpx_client close failed", exc_info=True)
+
+
 # @lat: [[architecture#Elite automated security testing]]
 # @lat: [[architecture#Elite automated security testing#Orchestrator]]
 
@@ -120,6 +170,73 @@ def recover_stale_executions(s: Session, *, stale_s: int | None = None) -> int:
     return n
 
 
+def _parse_optional_profile_id(value: Any, *, field: str) -> int | None:
+    """Accept an int, numeric string, or blank; reject other values."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    try:
+        pid = int(value)
+    except (TypeError, ValueError):
+        raise ServiceError(f"{field} must be a profile id") from None
+    if pid <= 0:
+        raise ServiceError(f"{field} must be a profile id")
+    return pid
+
+
+def _load_engagement_auth_profile(
+    s: Session,
+    *,
+    engagement_id: int,
+    tenant_id: int,
+    asset_id: int,
+    profile_id: int,
+    field: str,
+):
+    """Ensure the profile belongs to this engagement and (if bound) this target."""
+    from attestra.models import AuthCredentialProfile
+
+    row = s.get(AuthCredentialProfile, profile_id)
+    if row is None or row.engagement_id != engagement_id or row.tenant_id != tenant_id:
+        raise ServiceError(f"{field} not found for this engagement")
+    if (row.status or "") == "revoked":
+        raise ServiceError(f"{field} is revoked; choose another or re-validate it")
+    if row.asset_id is not None and int(row.asset_id) != int(asset_id):
+        raise ServiceError(f"{field} is not for this target")
+    return row
+
+
+def _auth_ids_from_execution(ex: AutomatedTestExecution) -> dict[str, int]:
+    """Queued primary/secondary profile ids stored in result_json until the run starts."""
+    try:
+        stored = json.loads(ex.result_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key in ("auth_profile_id", "secondary_auth_profile_id", "auth_profile_id_secondary"):
+        raw = stored.get(key)
+        if raw in (None, "", 0):
+            continue
+        try:
+            out[key] = int(raw)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _hydrate_auth_profile_ids(ctx: TestContext, ex: AutomatedTestExecution) -> dict[str, int]:
+    """Copy stored profile ids into ctx.extra without overriding an explicit extra value."""
+    stored = _auth_ids_from_execution(ex)
+    for key, val in stored.items():
+        ctx.extra.setdefault(key, val)
+    return stored
+
+
 def create_execution(
     s: Session,
     *,
@@ -130,6 +247,8 @@ def create_execution(
     principal=None,
     profile: str = "baseline",
     allow_private: bool | None = None,
+    auth_profile_id: int | str | None = None,
+    secondary_auth_profile_id: int | str | None = None,
 ) -> AutomatedTestExecution:
     """Queue an approved Elite test execution for an engagement asset."""
     guard.require_feature_enabled()
@@ -149,6 +268,36 @@ def create_execution(
     # Validate the asset URL itself is in the scope we just built (shape/SSRF).
     scope_validator.validate_target_url(target, scope, check_dns=not private)
 
+    primary_pid = _parse_optional_profile_id(auth_profile_id, field="auth profile")
+    secondary_pid = _parse_optional_profile_id(
+        secondary_auth_profile_id, field="secondary auth profile"
+    )
+    if primary_pid is not None:
+        _load_engagement_auth_profile(
+            s,
+            engagement_id=eng.id,
+            tenant_id=eng.tenant_id,
+            asset_id=asset.id,
+            profile_id=primary_pid,
+            field="auth profile",
+        )
+    if secondary_pid is not None:
+        _load_engagement_auth_profile(
+            s,
+            engagement_id=eng.id,
+            tenant_id=eng.tenant_id,
+            asset_id=asset.id,
+            profile_id=secondary_pid,
+            field="secondary auth profile",
+        )
+    if primary_pid is not None and secondary_pid is not None and primary_pid == secondary_pid:
+        raise ServiceError("secondary auth profile must be different from the primary profile")
+    request_auth: dict[str, int] = {}
+    if primary_pid is not None:
+        request_auth["auth_profile_id"] = primary_pid
+    if secondary_pid is not None:
+        request_auth["secondary_auth_profile_id"] = secondary_pid
+
     ex = AutomatedTestExecution(
         engagement_id=eng.id,
         tenant_id=eng.tenant_id,
@@ -159,7 +308,7 @@ def create_execution(
         status="QUEUED",
         requested_by=actor,
         allow_private=private,
-        result_json="{}",
+        result_json=json.dumps(request_auth, sort_keys=True) if request_auth else "{}",
         error="",
         created_at=utcnow(),
     )
@@ -237,6 +386,8 @@ def run_execution(
         extra=dict(extra or {}),
     )
 
+    queued_auth = _hydrate_auth_profile_ids(ctx, ex)
+    _ensure_httpx_client(ctx)
     try:
         seeds = [ln.strip() for ln in (asset.crawl_seed_urls or "").splitlines() if ln.strip()]
         scope = scope_validator.build_scope_from_asset(
@@ -268,9 +419,10 @@ def run_execution(
         ctx.extra["_capture_url_source"] = capture_source
         ctx.extra["_capture_api_urls"] = list(capture_info.get("api_urls") or [])
         ctx.extra["_js_api"] = capture_info.get("js_api")
-        # T01 sends the login profile's session (header + extra headers + extra cookies):
+        # Engagement login profile (header + extra headers + extra cookies):
         # explicit extra["auth_profile_id"], else the profile of the reused ZAP scan.
-        if any(t in ctx.test_case_ids for t in ("T01", "T02", "T19", "T20", "T21", "T22")) and "_session_auth" not in ctx.extra:
+        # Loaded for capture, replay, and authz modules so they do not use lab accounts.
+        if any(t in ctx.test_case_ids for t in _SESSION_AUTH_CASES) and "_session_auth" not in ctx.extra:
             from attestra.automated_vapt.core.session_auth import load_session_auth
 
             pid = ctx.extra.get("auth_profile_id")
@@ -312,6 +464,8 @@ def run_execution(
                 case_result.setdefault("auth_events", list(ctx.extra["_auth_events"]))
             # Always keep proof of testing on disk, even when no finding is created.
             _persist_run_evidence(ex.id, case_result, ctx, pairs_before, shots_before)
+            # Meta cases T08-T14 read earlier results + captures from ctx.extra.
+            ctx.extra.setdefault("_case_results", []).append(case_result)
             # E11: map CONFIRMED/POTENTIAL validation onto findings.
             validation = case_result.get("validation") or {}
             if (validation.get("status") or "").upper() in ("CONFIRMED", "POTENTIAL"):
@@ -376,15 +530,15 @@ def run_execution(
             case_result.pop("finding_evidence_pairs", None)
             results.append(case_result)
             # Persist cases + ledger after each case so FAILED mid-run still retains rows.
-            ex.result_json = json.dumps(
-                {"cases": results, "coverage_ledger": coverage_ledger},
-                sort_keys=True,
-            )
+            mid: dict[str, Any] = {"cases": results, "coverage_ledger": coverage_ledger}
+            mid.update(queued_auth)
+            ex.result_json = json.dumps(mid, sort_keys=True)
             s.flush()
 
         sess_final = ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
         ctx.extra.pop("_secondary_session_auth", None)
         summary: dict[str, Any] = {"cases": results, "coverage_ledger": coverage_ledger}
+        summary.update(queued_auth)
         if sess_final is not None and hasattr(sess_final, "public"):
             summary["auth"] = sess_final.public()
             if ctx.extra.get("_auth_events"):
@@ -429,6 +583,8 @@ def run_execution(
             engagement_id=eng.id,
             error=type(exc).__name__,
         )
+    finally:
+        _close_owned_httpx_client(ctx)
     s.flush()
     return ex
 
@@ -521,7 +677,21 @@ def _normalize_test_ids(test_case_ids: list[str]) -> list[str]:
     return out
 
 
-_SESSION_DEPENDENT = frozenset({"T19", "T20", "T21", "T22", "SESSION"})
+# Cases that should load the engagement login profile (if not already injected).
+_SESSION_AUTH_CASES = frozenset({
+    "T01", "T02", "T03", "T04", "T05", "T06", "T07",
+    "T19", "T20", "T21", "T22",
+    "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
+    "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+})
+
+# Mid-scan liveness checks before these cases run (no-op when no ready session).
+_SESSION_DEPENDENT = frozenset({
+    "T03", "T04", "T05", "T06", "T07",
+    "T19", "T20", "T21", "T22",
+    "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
+    "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+})
 
 
 def _record_auth_event(ctx: TestContext, kind: str, note: str, *, test_id: str = "") -> None:
@@ -574,7 +744,7 @@ def _blocked_case(test_id: str, reason: str, auth: Any) -> dict[str, Any]:
 
 
 def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
-    """Dispatch a single case. Implemented: SCOPE_SMOKE, T01; others deferred."""
+    """Dispatch a single case. Meta cases T08-T14 live in meta_handlers."""
     case = get_test_case(test_id)
     if case is None:
         return {"test_id": test_id, "status": "FAILED", "detail": "unknown test case"}
@@ -597,6 +767,10 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_authz_module(case.id, ctx, case.category)
     if case.id in {"T19", "T20", "T21", "T22"}:
         return _run_replay_check(case.id, ctx, case.category)
+    if case.id in {"T08", "T09", "T10", "T11", "T12", "T13", "T14"}:
+        from attestra.automated_vapt.core.meta_handlers import run_meta_case
+
+        return run_meta_case(case.id, ctx, case.category)
     # Later Elite phases register real handlers; record deferred honestly.
     known = {c.id for c in list_test_cases()}
     if test_id in known or case.id in known:
@@ -969,7 +1143,7 @@ def _run_replay_check(test_id: str, ctx: TestContext, category: str) -> dict[str
 
 
 def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str, Any]:
-    """Dispatch T03–T07 / SESSION testing modules against an injected HTTP client."""
+    """Dispatch T03-T07 / SESSION / BIZ authz modules against an injected HTTP client."""
     client = ctx.extra.get("httpx_client")
     if client is None:
         return {

@@ -148,6 +148,33 @@ def test_zap_argv_ajax_off(tmp_path, monkeypatch):
     assert "-j" not in argv and "--shm-size=1g" not in argv
 
 
+def test_zap_argv_silent_default_and_opt_out(tmp_path, monkeypatch):
+    """Default -z -silent so the image does not pass -addonupdate; ATTESTRA_ZAP_SILENT=0 disables it."""
+    monkeypatch.delenv("ATTESTRA_ZAP_SILENT", raising=False)
+    argv = _zap_argv(tmp_path, monkeypatch, _plan(spider=2, ajax=1), profile="baseline")
+    assert "-z" in argv and argv[argv.index("-z") + 1] == "-silent"
+    # After packaged script flags; a single -z (merge, do not duplicate).
+    assert argv.count("-z") == 1
+    assert argv.index("-z") > argv.index("-T")
+    # Full/active scan uses the same helper.
+    argv_full = _zap_argv(tmp_path, monkeypatch, _plan(spider=2, ajax=0), profile="active")
+    assert "zap-full-scan.py" in argv_full
+    assert "-z" in argv_full and argv_full[argv_full.index("-z") + 1] == "-silent"
+
+    monkeypatch.setenv("ATTESTRA_ZAP_SILENT", "0")
+    argv_off = _zap_argv(tmp_path, monkeypatch, _plan(spider=2, ajax=0))
+    assert "-z" not in argv_off and "-silent" not in argv_off
+
+
+def test_merge_zap_daemon_opts_merges_existing_dash_z():
+    from attestra.runner.scanners.zap import merge_zap_daemon_opts
+
+    merged = merge_zap_daemon_opts(["zap-baseline.py", "-z", "-config foo=bar"])
+    assert merged[-2:] == ["-z", "-config foo=bar -silent"]
+    already = merge_zap_daemon_opts(["zap-baseline.py", "-z", "-silent -config foo=bar"])
+    assert already[-2:] == ["-z", "-silent -config foo=bar"]
+
+
 def test_zap_argv_defaults_from_env_without_plan(tmp_path, monkeypatch):
     monkeypatch.setenv("ATTESTRA_ZAP_SPIDER_MINUTES", "3")
     monkeypatch.setenv("ATTESTRA_ZAP_AJAX_MINUTES", "2")

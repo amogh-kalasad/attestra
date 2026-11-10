@@ -528,6 +528,45 @@
       }
     }
 
+    /* Elite automated tests: show only auth profiles for the selected target (or engagement-wide). */
+    var eliteAsset = document.getElementById("elite_asset");
+    var elitePrimary = document.getElementById("elite_auth_profile");
+    var eliteSecondary = document.getElementById("elite_secondary_auth_profile");
+    function filterEliteAuthProfiles() {
+      if (!eliteAsset) return;
+      var assetId = eliteAsset.value || "";
+      [elitePrimary, eliteSecondary].forEach(function (sel) {
+        if (!sel) return;
+        var opts = sel.options;
+        for (var i = 0; i < opts.length; i++) {
+          var owned = opts[i].getAttribute("data-asset-id") || "";
+          var ok = !opts[i].value || !owned || owned === assetId;
+          opts[i].hidden = !ok;
+          opts[i].disabled = !ok;
+        }
+        if (sel.selectedIndex >= 0 && sel.options[sel.selectedIndex].disabled) {
+          sel.value = "";
+        }
+      });
+    }
+    function eliteAuthDistinct() {
+      if (!elitePrimary || !eliteSecondary) return true;
+      if (!elitePrimary.value || !eliteSecondary.value) return true;
+      return elitePrimary.value !== eliteSecondary.value;
+    }
+    if (eliteAsset) {
+      eliteAsset.addEventListener("change", filterEliteAuthProfiles);
+      filterEliteAuthProfiles();
+    }
+    if (elitePrimary && eliteSecondary) {
+      var eliteForm = elitePrimary.closest("form");
+      if (eliteForm) {
+        eliteForm.addEventListener("submit", function (ev) {
+          if (!eliteAuthDistinct()) ev.preventDefault();
+        });
+      }
+    }
+
     /* Keep edit window end min in sync with start. */
     var editWs = document.getElementById("edit_ws");
     var editWe = document.getElementById("edit_we");

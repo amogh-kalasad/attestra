@@ -14,6 +14,12 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from attestra.automated_vapt.testing._http import absolute, request_pair
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    request_auth,
+    resolve_mode,
+    skip_result,
+)
 
 # @lat: [[architecture#Remaining gaps plan (auth depth)]]
 
@@ -69,17 +75,17 @@ def _with_param(url: str, name: str, value: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), ""))
 
 
-def _candidate_urls(base_url: str, ctx: Any | None) -> list[tuple[str, str]]:
+def _candidate_urls(base_url: str, ctx: Any | None, *, include_lab_default: bool = True) -> list[tuple[str, str]]:
     """Return (url, param_name) pairs that look like URL fetchers."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
-    # Lab default
-    for name in ("url",):
-        u = absolute(base_url, "/api/fetch")
-        key = f"{u}?{name}"
-        if key not in seen:
-            seen.add(key)
-            out.append((u, name))
+    if include_lab_default:
+        for name in ("url",):
+            u = absolute(base_url, "/api/fetch")
+            key = f"{u}?{name}"
+            if key not in seen:
+                seen.add(key)
+                out.append((u, name))
     extra = []
     if ctx is not None:
         extra = list((getattr(ctx, "extra", {}) or {}).get("_capture_api_urls") or [])
@@ -117,6 +123,15 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "evidence_hints": [],
         }
 
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "skip":
+        return skip_result(
+            "SSRF",
+            "injection",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab /api/fetch SSRF probes",
+        )
+
     canary = canary_url()
     if is_blocked_ssrf_destination(canary):
         # Misconfigured canary — refuse rather than point at metadata.
@@ -130,7 +145,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "evidence_hints": [],
         }
 
-    candidates = _candidate_urls(base_url, ctx)
+    candidates = _candidate_urls(base_url, ctx, include_lab_default=(mode != "engagement"))
     if not candidates:
         return {
             "test_id": "SSRF",
@@ -147,7 +162,10 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     finding = False
     for endpoint, param in candidates:
         probe = _with_param(endpoint, param, canary)
-        pair = request_pair(client, "GET", probe, follow_redirects=False)
+        if auth is not None:
+            pair = request_auth(client, "GET", probe, auth, base_url, follow_redirects=False)
+        else:
+            pair = request_pair(client, "GET", probe, follow_redirects=False)
         body = pair.response_body or ""
         reflected = CANARY_TOKEN in body or "attestra-ssrf-canary" in body.lower()
         # Lab vulnerable fetcher echoes body with canary= from our token query.

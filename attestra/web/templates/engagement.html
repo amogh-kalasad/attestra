@@ -506,6 +506,24 @@
       <div><label for="elite_profile">Profile</label>
         <select id="elite_profile" name="profile"><option value="baseline">Baseline</option><option value="active">Active</option></select>
       </div>
+      {% if auth_web_enabled %}
+      <div><label for="elite_auth_profile">Auth profile</label>
+        <select id="elite_auth_profile" name="auth_profile_id">
+          <option value="">Use latest ZAP scan login (or unauthenticated)</option>
+          {% for p in auth_profiles if p.method and p.method != "none" and p.status != "revoked" %}<option value="{{ p.id }}" data-asset-id="{{ p.asset_id or '' }}">{{ p.label }}{% if p.role_name %} &middot; {{ p.role_name }}{% endif %} &middot; {{ p.method }}{% if p.status and p.status != "valid" %} ({{ p.status }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Optional. Leave blank to reuse the login from the latest ZAP scan on this target. Only saved profiles for this engagement are listed; the list narrows to the chosen target.</div>
+      </div>
+      <div><label for="elite_secondary_auth_profile">Secondary auth profile</label>
+        <select id="elite_secondary_auth_profile" name="secondary_auth_profile_id">
+          <option value="">None (ROLEDIFF / T20 use a single role)</option>
+          {% for p in auth_profiles if p.method and p.method != "none" and p.status != "revoked" %}<option value="{{ p.id }}" data-asset-id="{{ p.asset_id or '' }}">{{ p.label }}{% if p.role_name %} &middot; {{ p.role_name }}{% endif %} &middot; {{ p.method }}{% if p.status and p.status != "valid" %} ({{ p.status }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Optional second login (typically another role) for ROLEDIFF and T20 IDOR. Tick those cases as well. Must be a different profile from the primary. Leave blank if you only have one login.</div>
+      </div>
+      {% endif %}
     </div>
     <label>Test cases *</label>
     <div class="checks">

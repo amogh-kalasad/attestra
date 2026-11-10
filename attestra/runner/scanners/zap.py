@@ -20,6 +20,7 @@ Without auth opts (or with the feature flag off), behavior matches the unauthent
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,41 @@ OUTPUT_LOG_NAME = "zap-output.log"
 # Baseline spiders for ATTESTRA_ZAP_SPIDER_MINUTES (+ AJAX spider for ATTESTRA_ZAP_AJAX_MINUTES)
 # and only runs passive rules; full adds the active scan. See attestra/runner/crawl.py.
 SCRIPTS = {"baseline": "zap-baseline.py", "active": "zap-full-scan.py"}
+
+
+
+_FALSE = ("0", "false", "no", "off")
+
+
+def zap_silent_enabled() -> bool:
+    """``ATTESTRA_ZAP_SILENT``; unset or any truthy value enables ``-z -silent`` (default on)."""
+    raw = os.environ.get("ATTESTRA_ZAP_SILENT", "").strip().lower()
+    return raw not in _FALSE
+
+
+def merge_zap_daemon_opts(args: list[str]) -> list[str]:
+    """Append or merge ``-z -silent`` so packaged zap-*.py does not pass ``-addonupdate``.
+
+    In the official zaproxy image, ``zap-baseline.py`` / ``zap-full-scan.py`` / ``zap-api-scan.py``
+    skip ``-addonupdate`` and extra ``-addoninstall`` only when ``-silent`` appears in the ``-z``
+    options string. ``-silent`` also stops unsolicited "call home" / update checks. The Attestra
+    hook is a Python ``--hook`` (not a ZAP add-on install) and is unaffected. Set
+    ``ATTESTRA_ZAP_SILENT=0`` to restore the image default (add-on updates on startup).
+    """
+    if not zap_silent_enabled():
+        return list(args)
+    out = list(args)
+    if "-z" in out:
+        idx = len(out) - 1 - out[::-1].index("-z")
+        if idx + 1 < len(out):
+            val = str(out[idx + 1] or "")
+            if "-silent" not in val.split():
+                out[idx + 1] = f"{val} -silent".strip()
+            return out
+        out.append("-silent")
+        return out
+    out += ["-z", "-silent"]
+    return out
 
 
 def zap_script(profile: str) -> str:
@@ -165,6 +201,7 @@ class ZapAdapter(ScannerAdapter):
         )
         crawl_opts = zap_crawl.crawl_args(spider_min, ajax_min, hook_path=f"{ZAP_WRK}/{zap_crawl.HOOK_NAME}")
         args = [zap_script(profile), "-t", target_url, "-J", out_file.name, *crawl_opts, "-T", "10"]
+        args = merge_zap_daemon_opts(args)
         ctx_path, zap_user = _resolve_auth_wiring(
             out_file=out_file,
             auth_context_path=auth_context_path,

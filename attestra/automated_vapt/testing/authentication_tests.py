@@ -10,6 +10,17 @@ from attestra.automated_vapt.testing._http import (
     login,
     login_response,
 )
+from attestra.automated_vapt.testing._session import (
+    SKIP_AUTH_REQUESTS_FAILED,
+    SKIP_NO_AUTH_SESSION,
+    is_substantive_json,
+    probe_urls,
+    request_auth,
+    request_plain,
+    resolve_mode,
+    scrub_pair,
+    skip_result,
+)
 
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
@@ -73,8 +84,92 @@ def _probe_auth_state(client, base_url: str) -> dict[str, Any]:
     }
 
 
-def run(client, base_url: str, **_kwargs) -> dict[str, Any]:
+def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, Any]:
+    """Compare unauthenticated vs engagement-session GETs on capture/target URLs."""
+    urls = probe_urls(base_url, kwargs, api=False, limit=6)
+    evidence: list[Any] = []
+    rows: list[dict[str, Any]] = []
+    any_auth_ok = False
+    any_unauth_open = False
+    any_unauth_blocked = False
+    for url in urls:
+        unauth = request_plain(client, "GET", url)
+        authed = request_auth(client, "GET", url, auth, base_url)
+        u_status = int(unauth.status or 0)
+        a_status = int(authed.status or 0)
+        blocked = u_status in (301, 302, 303, 307, 308, 401, 403)
+        auth_ok = a_status == 200
+        # Same authenticated content without a session is a bypass. A 200 login-page
+        # HTML that differs from the authed body is not.
+        same_body = (unauth.response_body or "") == (authed.response_body or "") and len(
+            unauth.response_body or ""
+        ) >= 32
+        open_unauth = u_status == 200 and (
+            is_substantive_json(u_status, unauth.response_body)
+            or (auth_ok and same_body)
+        )
+        if auth_ok:
+            any_auth_ok = True
+        if blocked:
+            any_unauth_blocked = True
+        if open_unauth:
+            any_unauth_open = True
+            evidence.append(scrub_pair(unauth, auth))
+        rows.append(
+            {
+                "url": url,
+                "unauth_status": u_status,
+                "auth_status": a_status,
+                "unauth_blocked": blocked,
+                "unauth_open": open_unauth,
+            }
+        )
+    if not any_auth_ok:
+        return skip_result(
+            "T03",
+            "authentication",
+            SKIP_AUTH_REQUESTS_FAILED,
+            "authenticated GETs did not succeed with the engagement session; cannot assess auth enforcement",
+        )
+    finding = any_unauth_open
+    return {
+        "test_id": "T03",
+        "category": "authentication",
+        "observations": {
+            "mode": "engagement_session",
+            "unauth_app_status": rows[0]["unauth_status"] if rows else None,
+            "auth_required_ok": (not any_unauth_open) and any_unauth_blocked,
+            "invalid_creds_rejected": True,
+            "settings_unauth_status": next((r["unauth_status"] for r in rows if r["unauth_open"]), None),
+            "settings_open_without_auth": any_unauth_open,
+            "login_works": any_auth_ok,
+            "authorized_ok": any_auth_ok,
+            "unauthorized_blocked": any_unauth_blocked,
+            "account_enumeration": {
+                "skipped": True,
+                "reason": "engagement profile path does not probe /login differentials",
+            },
+            "probes": rows,
+        },
+        "finding_candidate": finding,
+        "evidence_pairs": evidence,
+        "evidence_hints": [f"GET {u} unauth vs session" for u in urls],
+    }
+
+
+def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Probe auth gates, enumeration differentials, invalid creds, and auth state."""
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "engagement":
+        return _run_with_session(client, base_url, auth, **kwargs)
+    if mode == "skip":
+        return skip_result(
+            "T03",
+            "authentication",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab /login probes",
+        )
+
     clear_cookies(client)
     unauth = client.get(absolute(base_url, "/app"), follow_redirects=False)
     unauth_status = int(unauth.status_code)

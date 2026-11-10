@@ -38,6 +38,8 @@ class CreateExecutionIn(BaseModel):
     test_case_ids: list[str] = Field(..., min_length=1)
     profile: str = "baseline"
     allow_private: bool | None = None
+    auth_profile_id: int | None = None
+    secondary_auth_profile_id: int | None = None
 
 
 @api_router.get("/categories")
@@ -99,6 +101,8 @@ def create_engagement_execution(eid: int, body: CreateExecutionIn, principal=Dep
                 principal=principal,
                 profile=body.profile,
                 allow_private=body.allow_private,
+                auth_profile_id=body.auth_profile_id,
+                secondary_auth_profile_id=body.secondary_auth_profile_id,
             )
             return orch.execution_public_dict(ex)
     except services.ServiceError as e:
@@ -159,6 +163,19 @@ def cancel_one_execution(xid: int, principal=Depends(_principal)):
         raise _err(e) from e
 
 
+def _optional_form_id(raw, *, field: str) -> int | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        pid = int(text)
+    except (TypeError, ValueError):
+        raise services.ServiceError(f"{field} must be a profile id") from None
+    if pid <= 0:
+        raise services.ServiceError(f"{field} must be a profile id")
+    return pid
+
+
 def _ui_principal(request: Request):
     from attestra.web.ui import _principal, _require_login
 
@@ -182,6 +199,10 @@ async def ui_create_execution(
     form = await request.form()
     ids = [str(v) for v in form.getlist("test_case_id")]
     try:
+        primary_pid = _optional_form_id(form.get("auth_profile_id"), field="auth profile")
+        secondary_pid = _optional_form_id(
+            form.get("secondary_auth_profile_id"), field="secondary auth profile"
+        )
         with db.session() as s:
             orch.create_execution(
                 s,
@@ -191,6 +212,8 @@ async def ui_create_execution(
                 actor=principal.username,
                 principal=principal,
                 profile=profile,
+                auth_profile_id=primary_pid,
+                secondary_auth_profile_id=secondary_pid,
             )
         return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
     except services.ServiceError as e:

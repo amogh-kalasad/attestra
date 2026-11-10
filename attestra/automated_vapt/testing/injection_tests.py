@@ -25,6 +25,13 @@ from attestra.automated_vapt.testing._reflection import (
     reflected_unencoded_in_html,
     reflection_in_headers,
 )
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    probe_urls,
+    request_auth,
+    resolve_mode,
+    skip_result,
+)
 
 # @lat: [[architecture#Elite automated security testing#Safe non-destructive probes]]
 
@@ -51,9 +58,33 @@ _BOOLEAN_PAYLOADS: tuple[str, ...] = (
 )
 
 
+def _target_url(base_url: str, path: str) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return absolute(base_url, path)
+
+
+def _engagement_probes(base_url: str, kwargs: dict[str, Any]) -> list[tuple[str, str]]:
+    urls = probe_urls(base_url, kwargs, api=False, limit=_MAX_PROBES)
+    return [(u, "q") for u in urls] or list(_DEFAULT_PROBES)[:_MAX_PROBES]
+
+
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Probe common endpoints with a benign canary plus boolean-safe error checks."""
-    probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "skip":
+        return skip_result(
+            "INJ",
+            "injection",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped default /search lab probes",
+        )
+    if kwargs.get("probes"):
+        probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    elif mode == "engagement":
+        probes = _engagement_probes(base_url, kwargs)[:_MAX_PROBES]
+    else:
+        probes = list(_DEFAULT_PROBES)[:_MAX_PROBES]
     marker = new_canary(tag="INJ")
     payload = injection_canary_payload(marker)
     boolean_on = kwargs.get("boolean_canaries", True)
@@ -63,12 +94,17 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     finding = False
     finding_detail = ""
 
+    def _get(full: str):
+        if auth is not None:
+            return request_auth(client, "GET", full, auth, base_url, follow_redirects=False)
+        return request_pair(client, "GET", full, follow_redirects=False)
+
     for path, param in probes:
         qs = urlencode({param: payload})
-        url = absolute(base_url, path)
+        url = _target_url(base_url, path)
         sep = "&" if "?" in url else "?"
         full = f"{url}{sep}{qs}"
-        pair = request_pair(client, "GET", full, follow_redirects=False)
+        pair = _get(full)
         ctype = ""
         for hk, hv in (pair.response_headers or {}).items():
             if hk.lower() == "content-type":
@@ -111,10 +147,10 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         path, param = probes[0]
         for bp in _BOOLEAN_PAYLOADS[:2]:
             qs = urlencode({param: bp})
-            url = absolute(base_url, path)
+            url = _target_url(base_url, path)
             sep = "&" if "?" in url else "?"
             full = f"{url}{sep}{qs}"
-            pair = request_pair(client, "GET", full, follow_redirects=False)
+            pair = _get(full)
             body = pair.response_body or ""
             if _ERROR_SIG_RE.search(body):
                 finding = True
