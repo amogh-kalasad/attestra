@@ -25,6 +25,16 @@ dependencies = [
   "openpyxl>=3.1.5",
   # MongoDB persistence; SQLAlchemy remains as the MongoSession schema/query builder only.
   "pymongo>=4.19.0",
+  "pytest>=9.2.0", 
+  "httpx>=0.28.1", 
+  "httpx2>=2.16.0", 
+  "ruff>=0.17.4",
+  "authlib>=1.9.5",
+  "docxtpl>=0.20.2", 
+  "weasyprint>=70.0",
+  "boto3>=1.43.127",
+  "Pillow>=13.0.0",
+  "temporalio>=1.35.0"
 ]
 
 [project.optional-dependencies]
