@@ -244,5 +244,34 @@ def test_reports_work_without_ca_config(loaded):
     with db.session() as s:
         r = generate_report(s, loaded, kind="technical", actor="tester")
         body = Path(r.path).read_text(encoding="utf-8")
-    assert "ATTESTRA" in body
+    # Built-in cover no longer prints all-caps ATTESTRA; footer still names Attestra.
+    assert "Attestra" in body
     assert r.sha256
+    assert r.status == "draft"
+
+
+# @lat: [[tests#Certification Authority#CA save refreshes draft reports]]
+def test_ca_save_refreshes_draft_reports_all_tenants(loaded):
+    """Saving CA settings auto-generates/refreshes draft technical reports for all tenants."""
+    from attestra import db
+    from attestra.certification import service as ca
+    from attestra.persistence.mongo import report_reads
+
+    with db.session() as s:
+        admin = _admin_principal(s, username="ca-refresh-admin")
+        before = report_reads.reports(loaded, kind="technical", newest_first=True, limit=5)
+        assert before == [] or all(r.status in ("draft", "rejected") for r in before)
+        ca.update_settings(
+            s,
+            admin,
+            legal_name="Auto Apply Firm",
+            contact_email="auto@firm.example",
+            city="Denver",
+            logo=_PNG,
+        )
+        after = report_reads.reports(loaded, kind="technical", newest_first=True, limit=1)
+        assert after, "CA save should create a draft technical report for engagements without one"
+        assert after[0].status == "draft"
+        body = Path(after[0].path).read_text(encoding="utf-8")
+        assert "Auto Apply Firm" in body
+        assert "auto@firm.example" in body

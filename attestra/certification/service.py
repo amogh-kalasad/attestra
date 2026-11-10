@@ -253,4 +253,25 @@ def update_settings(
         has_address=bool(format_address(row)),
         has_contact=bool(row.contact_email or row.contact_phone or row.contact_name),
     )
+    # Apply new issuer branding to engagements that have no report yet, or only
+    # draft/rejected technical reports, across every tenant.
+    try:
+        from attestra.reports.auto_draft import refresh_drafts_for_ca
+
+        summary = refresh_drafts_for_ca(
+            s,
+            actor=row.updated_by or "system",
+            user_id=getattr(principal, "user_id", None),
+        )
+        audit.record(
+            s,
+            row.updated_by,
+            "certification_authority.reports_refreshed",
+            "certification_authority",
+            row.id,
+            **summary,
+        )
+    except Exception:
+        # CA save itself already succeeded; refresh is best-effort.
+        pass
     return row

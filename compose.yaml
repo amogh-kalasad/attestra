@@ -1,0 +1,135 @@
+# Local Attestra stack: single-node MongoDB replica set + API + worker.
+# Start:  docker compose up -d --build
+# Stop:   docker compose down
+# API:    http://127.0.0.1:8000
+# Mongo:  mongodb://127.0.0.1:27017/?replicaSet=rs0 (loopback only)
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - attestra
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo-init/init-replica-set.js:/init-replica-set.js:ro
+    entrypoint: ["mongosh", "--host", "mongo:27017", "--file", "/init-replica-set.js"]
+    restart: "no"
+    networks:
+      - attestra
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATTESTRA_MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      ATTESTRA_PERSISTENCE: mongo
+      ATTESTRA_STORAGE: mongo
+      ATTESTRA_AUTOMATED_VAPT_ENABLED: "false"
+      ATTESTRA_DATA_DIR: /data
+      APP_ENV: ${APP_ENV:-local}
+      # Insecure default for local compose only; override via .env / shell.
+      ATTESTRA_SESSION_SECRET: ${ATTESTRA_SESSION_SECRET:-attestra-dev-session-change-me}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - attestra-data:/data
+    healthcheck:
+      # Prefer python (image has no curl). Optional helper: docker/scripts/healthcheck-api.sh
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+    # attestra init applies Mongo schema migrations (idempotent) then serves.
+    command: ["sh", "-c", "attestra init && attestra serve --host 0.0.0.0 --port 8000"]
+    restart: unless-stopped
+    networks:
+      - attestra
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATTESTRA_MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      ATTESTRA_PERSISTENCE: mongo
+      ATTESTRA_STORAGE: mongo
+      ATTESTRA_AUTOMATED_VAPT_ENABLED: "false"
+      ATTESTRA_DATA_DIR: /data
+      APP_ENV: ${APP_ENV:-local}
+      ATTESTRA_SESSION_SECRET: ${ATTESTRA_SESSION_SECRET:-attestra-dev-session-change-me}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    volumes:
+      - attestra-data:/data
+      # Dev/compose only: lets the worker docker-run scanner containers on the host engine.
+      # Tradeoff: grants the worker Docker control on the host — do not copy this into production.
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["attestra", "worker"]
+    # Dockerfile HEALTHCHECK hits :8000; worker has no HTTP server.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import attestra"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - attestra
+
+volumes:
+  mongo-data:
+  attestra-data:
+
+networks:
+  attestra:
+    driver: bridge

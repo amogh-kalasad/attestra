@@ -40,11 +40,39 @@ def test_same_user_cannot_do_two_steps(loaded):
             qa_approve(s, rid, actor=author.username, user_id=author.id)
 
 
-def test_full_workflow_three_actors(loaded):
+def test_super_admin_can_qa_and_sign_own_report(loaded):
+    """Super Admin may complete every QA stage even when they authored the report."""
+    from attestra import db
+    from attestra.auth.keys import create_user
+    from attestra.reports import generate_report, qa_approve, sign_report, submit_report
+
+    with db.session() as s:
+        admin = create_user(s, username="wf_sa", role="admin", password="pw-wf-sa1")
+        r = generate_report(s, loaded, kind="executive", actor=admin.username, user_id=admin.id)
+        rid = r.id
+        submit_report(s, rid, actor=admin.username, user_id=admin.id)
+        approved = qa_approve(
+            s, rid, actor=admin.username, user_id=admin.id, role="admin"
+        )
+        assert approved.status == "qa_approved"
+        signed = sign_report(
+            s, rid, actor=admin.username, user_id=admin.id, role="admin"
+        )
+        assert signed.status == "signed"
+
+
+def test_full_workflow_three_actors(loaded, monkeypatch):
     from attestra import db
     from attestra.auth.keys import create_user
     from attestra.reports import generate_report, qa_approve, sign_report, submit_report, verify_report
     from attestra.services import ServiceError
+
+    # Workflow under test is submit → QA → sign; allow automated QA so empty
+    # coverage on fixture imports does not block the three-actor path.
+    monkeypatch.setattr(
+        "attestra.reports.qa.assert_qa_allows_approval",
+        lambda result: None,
+    )
 
     with db.session() as s:
         author = create_user(s, username="wf_t", role="tester", password="pw-wf-t1")

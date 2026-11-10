@@ -742,6 +742,7 @@
         <td>{{ r.approved_by or "-" }}{% if r.signed_at %}<div class="meta">{{ r.signed_at|dt }}</div>{% endif %}</td>
         <td>
         <div class="action-stack">
+        {% set sa_override = prole == "admin" %}
         {% if r.status in ("draft", "rejected") %}
           {% if can(prole, "report.submit") %}
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/submit">
@@ -749,11 +750,11 @@
           </form>
           {% else %}<span class="meta">Waiting for the author to submit it for QA.</span>{% endif %}
         {% elif r.status == "submitted" %}
-          {% if can(prole, "report.approve") and (my_uid is none or my_uid != r.generated_by_user_id) %}
+          {% if can(prole, "report.approve") and (sa_override or my_uid is none or my_uid != r.generated_by_user_id) %}
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-approve">
             <button type="submit" class="secondary">QA approve</button>
           </form>
-          <div class="meta">Automated report QA runs on approve (GET /api/reports/{{ r.id }}/qa).</div>
+          <div class="meta">Automated report QA runs on approve (GET /api/reports/{{ r.id }}/qa).{% if sa_override and my_uid is not none and my_uid == r.generated_by_user_id %} Super Admin may QA their own report.{% endif %}</div>
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/qa-reject" class="row">
             <input name="note" required aria-label="Reason for rejecting" placeholder="Reason (needed to reject)" style="width:150px;min-width:140px">
             <button type="submit" class="secondary">QA reject</button>
@@ -761,10 +762,13 @@
           {% elif can(prole, "report.approve") %}<span class="meta">Waiting for QA by someone else. You made this report, so you can't QA it.</span>
           {% else %}<span class="meta">Waiting for QA by a reviewer or lead.</span>{% endif %}
         {% elif r.status == "qa_approved" %}
-          {% if can(prole, "report.sign") and (my_uid is none or (my_uid != r.generated_by_user_id and my_uid != r.qa_by_user_id)) %}
+          {% if can(prole, "report.sign") and (sa_override or my_uid is none or (my_uid != r.generated_by_user_id and my_uid != r.qa_by_user_id)) %}
           <form method="post" action="/engagements/{{ e.id }}/reports/{{ r.id }}/sign">
             <button type="submit">Approve and sign</button>
           </form>
+          {% if sa_override and my_uid is not none and (my_uid == r.generated_by_user_id or my_uid == r.qa_by_user_id) %}
+          <div class="meta">Super Admin may sign even when they authored or QA'd this report.</div>
+          {% endif %}
           {% elif can(prole, "report.sign") %}<span class="meta">Waiting for a lead who didn't make or QA this report to sign it.</span>
           {% else %}<span class="meta">Waiting for a lead to approve and sign it.</span>{% endif %}
         {% elif r.status == "signed" %}<span class="meta">Signed. Nothing more to do.</span>

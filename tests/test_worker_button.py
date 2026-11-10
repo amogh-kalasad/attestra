@@ -255,3 +255,11 @@ def test_instance_lock_refuses_while_holder_alive_and_frees_dead(fresh_db):
     lk = InstanceLock("worker")
     assert lk.acquire(timeout=1.0) is True
     lk.release()
+
+
+def test_instance_lock_steals_same_pid_without_held_fd(fresh_db):
+    """Container restart reuses PID numbers; a leftover lock with our pid is stale."""
+    _hold_lock(pid=os.getpid())
+    lk = InstanceLock("worker")
+    assert lk.acquire(timeout=1.0) is True
+    lk.release()

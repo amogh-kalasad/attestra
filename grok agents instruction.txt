@@ -1,0 +1,1331 @@
+# MASTER PROMPT: ATTESTRA — FULL CODEBASE AUDIT, DOCKER INFRASTRUCTURE CONSOLIDATION, WORKER INTEGRATION & ONE-COMMAND DEPLOYMENT
+
+## ROLE
+
+Act as a Principal Software Architect, DevOps Architect, Docker/Kubernetes Engineer, Python/FastAPI Engineer, MongoDB Specialist, Security Testing Engineer, and CI/CD Automation Specialist.
+
+You are working on the existing Attestra Security Testing and Compliance Platform.
+
+Your responsibility is to conduct a complete repository-wide infrastructure audit, identify all implementation and deployment gaps, fix them, and deliver a production-ready Docker deployment that starts the entire Attestra application using one command.
+
+This is an IMPLEMENTATION assignment, not a documentation-only or advisory assignment.
+
+You must inspect the existing repository before making architectural decisions.
+
+Do not assume the existing Docker configuration, services, worker implementations, database connections, scanner integrations, or compliance engines are complete.
+
+---
+
+# PHASE 0 — MANDATORY FULL CODEBASE DISCOVERY
+
+Before modifying anything, scan the ENTIRE repository.
+
+Do not restrict the analysis to the root directory.
+
+Inspect:
+
+1. All application source directories.
+2. All Python packages and modules.
+3. All API routes and service layers.
+4. All database models and repository implementations.
+5. All MongoDB integrations.
+6. Remaining SQLAlchemy and Alembic dependencies.
+7. All background workers and task queues.
+8. All scheduler implementations.
+9. All scanner integrations.
+10. All compliance framework implementations.
+11. All report-generation modules.
+12. All evidence storage implementations.
+13. Authentication and authorization.
+14. Configuration and environment-variable management.
+15. All Dockerfiles.
+16. All docker-compose files.
+17. All deployment scripts.
+18. All CI/CD workflows.
+19. All shell and PowerShell scripts.
+20. All dependency manifests.
+21. All test suites.
+22. Existing README.md.
+23. Every relevant document under docs/.
+24. MongoDB migration documentation.
+25. Existing infrastructure and deployment configurations.
+
+Inspect at least:
+
+- Dockerfile*
+- compose.yaml
+- compose.yml
+- docker-compose*.yml
+- .dockerignore
+- .env*
+- pyproject.toml
+- requirements*.txt
+- alembic.ini
+- package.json, if present
+- deploy/
+- scripts/
+- migrations/
+- tests/
+- docs/
+
+Search the entire repository for:
+
+- Docker services
+- Database connection strings
+- MongoDB clients
+- SQLAlchemy sessions
+- Worker entry points
+- Queue names
+- Task registration
+- Temporal workflows
+- Scanner binaries
+- Scanner configuration
+- Framework identifiers
+- API endpoints
+- Internal service URLs
+- Environment variables
+- Health-check endpoints
+- Startup commands
+- Shutdown handlers
+
+IMPORTANT:
+
+Create a complete infrastructure inventory before implementing changes.
+
+Do not delete existing infrastructure configurations simply because they appear unused. Verify references and dependencies first.
+
+## Required discovery deliverables
+
+Create:
+
+docs/DOCKER_INFRASTRUCTURE_AUDIT.md
+
+Include:
+
+- Current architecture.
+- Existing Docker architecture.
+- Existing service inventory.
+- Existing worker inventory.
+- Database dependency inventory.
+- Scanner inventory.
+- Compliance framework inventory.
+- API service inventory.
+- External service dependencies.
+- Configuration inventory.
+- Missing Docker configurations.
+- Broken service connections.
+- Duplicate configurations.
+- Missing environment variables.
+- Missing health checks.
+- Missing startup dependencies.
+- Security vulnerabilities in deployment configuration.
+- Required infrastructure changes.
+
+For every identified gap, record:
+
+- Gap ID.
+- Component.
+- Current state.
+- Expected state.
+- Risk.
+- Required change.
+- Implementation status.
+- Validation evidence.
+
+Do not proceed with major architectural changes until this baseline has been documented.
+
+---
+
+# PHASE 1 — MULTI-AGENT PARALLEL INVESTIGATION
+
+Use multiple specialized agents to investigate independent parts of the repository.
+
+The lead agent owns architecture, task allocation, integration, conflict resolution, and final acceptance.
+
+Assign the following agents where parallel execution is supported.
+
+## AGENT 1 — DOCKER AND DEVOPS ARCHITECT
+
+Responsibilities:
+
+- Audit every Dockerfile.
+- Audit every Compose configuration.
+- Inspect image versions and base images.
+- Inspect build contexts.
+- Inspect volumes.
+- Inspect networks.
+- Inspect environment variables.
+- Inspect health checks.
+- Inspect restart policies.
+- Inspect service dependencies.
+- Identify missing containers.
+- Identify unnecessary containers.
+- Identify conflicting configurations.
+- Design the consolidated Docker Compose architecture.
+
+Deliver:
+
+docs/audit/DOCKER_AUDIT.md
+
+## AGENT 2 — MONGODB AND PERSISTENCE ENGINEER
+
+Responsibilities:
+
+- Inspect all MongoDB implementations.
+- Verify MongoDB connection configuration.
+- Identify replica-set requirements.
+- Verify MongoDB initialization.
+- Verify indexes.
+- Verify database migrations and initialization.
+- Inspect repository registration.
+- Inspect database lifecycle management.
+- Identify remaining SQLAlchemy dependencies.
+- Verify that every API and worker uses the intended persistence implementation.
+- Verify tenant isolation.
+- Verify backup and restore compatibility.
+
+Do not assume the MongoDB migration is complete merely because MongoDB repositories exist.
+
+Check actual production execution paths.
+
+Deliver:
+
+docs/audit/DATABASE_AUDIT.md
+
+## AGENT 3 — WORKER AND JOB ORCHESTRATION ENGINEER
+
+Responsibilities:
+
+Inspect:
+
+- CLI worker.
+- Durable job system.
+- Scanner execution workers.
+- Scheduled jobs.
+- Temporal workflows.
+- Background processing.
+- Job persistence.
+- Retry mechanisms.
+- Job locking.
+- Worker registration.
+- Queue registration.
+- Failure handling.
+- Worker concurrency.
+- Worker shutdown.
+- Worker health monitoring.
+
+Identify:
+
+- Workers that cannot start.
+- Workers with missing dependencies.
+- Workers connected to incorrect databases.
+- Workers using inconsistent configuration.
+- Missing task registrations.
+- Missing scanner adapters.
+- Jobs that are enqueued but never executed.
+- Jobs that execute without correct authorization checks.
+
+Verify every worker has a valid execution path from API admission to job completion.
+
+Deliver:
+
+docs/audit/WORKER_AUDIT.md
+
+## AGENT 4 — VAPT AND SECURITY TOOL INTEGRATION ENGINEER
+
+Inspect every scanner adapter and importer.
+
+Verify the actual integrations for:
+
+- OWASP ZAP.
+- Nuclei.
+- Trivy.
+- Semgrep.
+- Prowler.
+- kube-bench.
+- testssl.sh.
+- Gitleaks.
+- Checkov.
+- Naabu.
+- WebCheck.
+- Observatory.
+- SSL Labs.
+- Burp.
+- Nessus.
+- SARIF.
+- CycloneDX.
+- Dependency-Track.
+
+For each tool, determine:
+
+1. Is an importer implemented?
+2. Is a runner adapter implemented?
+3. Is the tool executable available?
+4. Is a Docker image required?
+5. Is the tool configured correctly?
+6. Does the worker know how to invoke it?
+7. Does the tool produce the expected output?
+8. Is the output imported correctly?
+9. Are findings normalized?
+10. Are errors and timeouts handled?
+11. Are licenses compatible with the intended distribution model?
+12. Is execution restricted to authorized engagement scope?
+
+Do not install every scanner into every application container.
+
+Determine the correct dedicated scanner image or worker image based on actual dependencies and licensing.
+
+Deliver:
+
+docs/audit/SCANNER_INTEGRATION_AUDIT.md
+
+## AGENT 5 — COMPLIANCE AND REPORTING ENGINEER
+
+Inspect all existing compliance framework implementations.
+
+Use the existing framework catalogue as the source of truth.
+
+Verify:
+
+- PCI DSS 4.0.
+- ISO 27001:2022.
+- SOC 2.
+- OWASP ASVS 4.0.
+- CERT-In 2022.
+- DORA 2022.
+- ISO 42001:2023.
+- NIST CSF 2.0.
+- RBI CSF 2016.
+- SEBI CSCRF 2024.
+
+Inspect:
+
+- Framework YAML files.
+- Control identifiers.
+- Control mappings.
+- CWE mappings.
+- Evidence mappings.
+- Assessment logic.
+- Framework registration.
+- Report templates.
+- Supported framework configuration.
+- API exposure.
+- Frontend framework selection.
+
+Verify that the compliance engine can load the full framework catalogue after deployment.
+
+Ensure framework data is available to API processes and workers wherever needed.
+
+Do not invent framework identifiers or claim unsupported framework coverage.
+
+Deliver:
+
+docs/audit/COMPLIANCE_AUDIT.md
+
+## AGENT 6 — API, SECURITY AND INTEGRATION ENGINEER
+
+Inspect:
+
+- FastAPI application startup.
+- API route registration.
+- Authentication.
+- Authorization.
+- RBAC.
+- Tenant isolation.
+- Internal service connections.
+- Database session lifecycle.
+- API-to-worker communication.
+- API-to-storage communication.
+- API-to-scanner communication.
+- CORS.
+- Rate limits.
+- SSRF protection.
+- DNS pinning.
+- Scope validation.
+- Health and readiness endpoints.
+- Shutdown lifecycle.
+
+Verify that the complete API starts inside Docker and communicates with all required services.
+
+Deliver:
+
+docs/audit/API_INTEGRATION_AUDIT.md
+
+## AGENT 7 — TESTING AND RELEASE VALIDATION ENGINEER
+
+Inspect existing tests and build an integration test strategy.
+
+Verify:
+
+- Application startup.
+- Database connectivity.
+- Database initialization.
+- Worker startup.
+- Task registration.
+- Scanner availability.
+- Compliance framework loading.
+- API authentication.
+- API authorization.
+- Tenant isolation.
+- Job execution.
+- Result persistence.
+- Report generation.
+- Evidence storage.
+- Container restart behavior.
+- Service recovery.
+- End-to-end deployment.
+
+Deliver:
+
+docs/audit/DEPLOYMENT_TEST_PLAN.md
+
+## PARALLEL EXECUTION RULES
+
+Agents must work on independent investigation and implementation areas.
+
+The lead agent must:
+
+- Maintain one shared implementation plan.
+- Avoid conflicting modifications to the same files.
+- Define file ownership for implementation tasks.
+- Review all agent findings.
+- Resolve architectural disagreements.
+- Consolidate changes.
+- Verify that agents did not introduce incompatible configurations.
+- Run final tests after all agents finish.
+
+Do not allow agents to independently create competing Docker Compose architectures.
+
+The lead agent owns the final architecture.
+
+If parallel agents are unavailable, execute the same work sequentially without skipping any task.
+
+---
+
+# PHASE 2 — TARGET DOCKER ARCHITECTURE
+
+Design a unified Docker Compose deployment for the complete Attestra product.
+
+The objective is:
+
+ONE COMMAND TO BUILD AND START THE ENTIRE PRODUCT.
+
+Use separate service containers under one Docker Compose deployment where appropriate.
+
+Do not combine all services into one monolithic container.
+
+## Required service discovery
+
+Evaluate whether the following services are required based on actual code dependencies.
+
+### 1. Attestra API
+
+Build a dedicated application image.
+
+Requirements:
+
+- FastAPI application.
+- Correct application entry point.
+- Correct dependency installation.
+- Configuration loading.
+- Database connectivity.
+- API route registration.
+- Startup validation.
+- Health endpoint.
+- Graceful shutdown.
+
+### 2. MongoDB
+
+Configure MongoDB according to the actual application requirements.
+
+Verify:
+
+- Supported MongoDB version.
+- Replica-set requirement.
+- Initialization process.
+- Authentication.
+- Persistent volumes.
+- Database name.
+- Application credentials.
+- Index creation.
+- Health checks.
+- Backup compatibility.
+
+If a replica set is required, implement a reliable initialization mechanism.
+
+Do not expose MongoDB publicly by default.
+
+Do not use an unsecured MongoDB configuration in production.
+
+### 3. Background workers
+
+Determine the actual worker processes required.
+
+Possible services include:
+
+- General job worker.
+- VAPT worker.
+- Scanner worker.
+- Scheduled task worker.
+- Report generation worker.
+- Evidence processing worker.
+- Temporal worker.
+
+Only create separate services where the architecture requires them.
+
+Each worker must:
+
+- Use the correct application image.
+- Load the correct configuration.
+- Connect to MongoDB.
+- Connect to its actual queue or orchestrator.
+- Register its task handlers.
+- Access required storage.
+- Have appropriate scanner dependencies.
+- Have a health-check mechanism.
+- Handle graceful termination.
+
+### 4. Security scanner infrastructure
+
+Determine the correct architecture for:
+
+- ZAP.
+- Nuclei.
+- Trivy.
+- Semgrep.
+- Prowler.
+- Other existing scanner integrations.
+
+Prefer dedicated scanner images or scanner-capable worker images.
+
+Do not introduce unnecessary always-running scanner services.
+
+If ZAP requires daemon mode or an HTTP API, configure a dedicated ZAP service only if the existing integration requires it.
+
+Nuclei should have appropriate template availability and version management.
+
+Do not download templates or vulnerability databases on every container restart.
+
+Use controlled persistent caches where appropriate.
+
+### 5. Optional infrastructure
+
+Evaluate whether these are actually required:
+
+- Temporal server.
+- Temporal UI.
+- Redis.
+- PostgreSQL.
+- Keycloak.
+- Vault/OpenBao.
+- Reverse proxy.
+- Frontend service.
+- Object storage.
+
+Do not add a service merely because it is mentioned in documentation.
+
+Verify actual implementation dependencies and configuration flags first.
+
+If an integration is optional, document how to enable it.
+
+---
+
+# PHASE 3 — DOCKER COMPOSE CONSOLIDATION
+
+Create or consolidate the main deployment files.
+
+Preferred structure:
+
+docker/
+    api.Dockerfile
+    worker.Dockerfile
+    scanner.Dockerfile
+    mongo-init/
+        init-replica-set.js
+    scripts/
+        healthcheck.sh
+        wait-for-services.sh
+
+compose.yaml
+.dockerignore
+.env.example
+
+Adjust this structure to the existing repository conventions.
+
+## Docker Compose requirements
+
+The main Compose configuration must:
+
+1. Build required application images.
+2. Start MongoDB.
+3. Initialize MongoDB correctly.
+4. Start the API.
+5. Start required workers.
+6. Start required orchestration services.
+7. Provide scanner dependencies.
+8. Mount persistent data volumes.
+9. Configure internal networking.
+10. Configure health checks.
+11. Configure restart policies.
+12. Configure startup dependencies.
+13. Configure service-specific environments.
+14. Support graceful shutdown.
+15. Avoid unnecessary public port exposure.
+
+Use service health conditions where supported.
+
+Do not confuse container startup with application readiness.
+
+A running container is not necessarily a healthy application.
+
+## Environment configuration
+
+Create a complete .env.example.
+
+Include every required environment variable discovered in the repository.
+
+Organize variables into sections:
+
+- Application.
+- MongoDB.
+- Persistence.
+- Authentication.
+- Authorization.
+- Secrets.
+- API.
+- Workers.
+- Queue/orchestration.
+- Scanner configuration.
+- Compliance.
+- Evidence storage.
+- Reporting.
+- Logging.
+- Security.
+- Optional integrations.
+
+Do not include actual secrets.
+
+Do not hardcode credentials into Dockerfiles or Compose files.
+
+Provide secure development defaults only where safe.
+
+Require explicit production secrets.
+
+---
+
+# PHASE 4 — VERIFY ALL WORKER CONNECTIONS
+
+This phase is mandatory.
+
+Do not consider Docker integration complete merely because all containers show as running.
+
+Trace actual execution paths.
+
+For every background job, verify:
+
+API request
+    ↓
+Authentication
+    ↓
+Authorization
+    ↓
+Tenant validation
+    ↓
+Engagement validation
+    ↓
+Signed authorization and scope validation
+    ↓
+Job admission
+    ↓
+Job persistence / queue
+    ↓
+Worker discovery
+    ↓
+Worker task registration
+    ↓
+Scanner or processing module
+    ↓
+Result normalization
+    ↓
+MongoDB persistence
+    ↓
+Evidence processing
+    ↓
+Compliance mapping
+    ↓
+Report generation
+    ↓
+Job completion
+    ↓
+API/UI result availability
+
+Identify every disconnected stage.
+
+Fix all legitimate integration gaps.
+
+## Worker validation matrix
+
+For every worker, record:
+
+| Validation | Expected result |
+|---|---|
+| Container starts | Pass |
+| Application initializes | Pass |
+| Configuration loads | Pass |
+| MongoDB connects | Pass |
+| Queue connects | Pass, if applicable |
+| Tasks register | Pass |
+| Scanner dependencies available | Pass, if applicable |
+| Job is received | Pass |
+| Job is executed | Pass |
+| Results are persisted | Pass |
+| Errors are reported | Pass |
+| Shutdown is graceful | Pass |
+
+If any component is not applicable, explicitly document why.
+
+Do not mark untested components as passing.
+
+## Important security constraints
+
+Preserve:
+
+- Signed authorization requirements.
+- Engagement scope restrictions.
+- Ownership verification.
+- SSRF protections.
+- DNS pinning.
+- Tenant isolation.
+- RBAC.
+- Audit integrity.
+- Evidence hashing.
+- Secret encryption.
+- Scanner execution safeguards.
+
+Automated VAPT must remain disabled by default unless explicitly enabled through the documented feature flag.
+
+No scanner should be allowed to execute arbitrary targets merely because a worker has network access.
+
+---
+
+# PHASE 5 — COMPLETE COMPLIANCE FRAMEWORK INTEGRATION
+
+Verify the compliance catalogue in the actual deployed environment.
+
+The following framework IDs must be evaluated against the existing implementation:
+
+pci_dss_4
+iso_27001_2022
+soc2
+asvs_4_0
+cert_in_2022
+dora_2022
+iso_42001_2023
+nist_csf_2
+rbi_csf_2016
+sebi_cscrf_2024
+
+Verify:
+
+- Framework files are included in Docker images.
+- YAML libraries are accessible.
+- Framework loader works.
+- Framework IDs resolve correctly.
+- Control mappings load.
+- Compliance APIs expose the expected catalogue.
+- Report generation can resolve framework controls.
+- Workers that need compliance mappings can access them.
+- No framework files are missing from build contexts.
+
+Create an automated compliance catalogue smoke test.
+
+Do not falsely mark framework implementations as complete when controls or mappings are missing.
+
+---
+
+# PHASE 6 — DATA PERSISTENCE AND MONGODB VALIDATION
+
+Inspect the actual MongoDB migration status.
+
+Do not assume all SQLAlchemy services have been migrated.
+
+Verify:
+
+- All required repositories.
+- All API database paths.
+- All worker database paths.
+- Tenant filters.
+- Indexes.
+- Unique constraints.
+- Transaction assumptions.
+- Replica-set dependencies.
+- Backup procedures.
+- Restore procedures.
+- Evidence storage references.
+- Migration scripts.
+- Application startup initialization.
+
+Identify any remaining SQL-backed code paths.
+
+Determine whether those paths are intentionally retained, require PostgreSQL, or should be migrated.
+
+Do not silently remove existing database compatibility.
+
+Preserve existing data.
+
+Never run destructive database initialization against a non-empty production volume.
+
+Provide a safe migration and rollback strategy.
+
+---
+
+# PHASE 7 — DOCKER HEALTH AND RECOVERY
+
+Implement appropriate health checks for each service.
+
+Examples:
+
+- API readiness endpoint.
+- MongoDB ping and replica-set readiness.
+- Worker heartbeat or health command.
+- Temporal frontend readiness, if deployed.
+- ZAP API readiness, if deployed.
+- Other required services.
+
+Implement:
+
+- Restart policies.
+- Service dependencies.
+- Startup retries.
+- Connection retry logic.
+- Graceful shutdown.
+- Persistent volumes.
+- Application logging.
+- Container resource limits where appropriate.
+
+Ensure that a temporary MongoDB startup delay does not permanently kill the API or workers.
+
+Ensure that worker failures are observable.
+
+Do not create health checks that merely test whether a process exists.
+
+Health checks must validate actual service readiness.
+
+---
+
+# PHASE 8 — WINDOWS AND MACOS COMPATIBILITY
+
+The complete deployment must work on:
+
+1. Windows 10/11 with Docker Desktop and WSL2.
+2. macOS with Docker Desktop, including Apple Silicon and Intel where supported.
+
+Verify:
+
+- Docker Compose compatibility.
+- Build context paths.
+- Environment file handling.
+- Shell script compatibility.
+- Volume mount behavior.
+- File permissions.
+- Line endings.
+- Host-to-container networking.
+- Port mappings.
+- Architecture compatibility.
+- ARM64 image support.
+
+Do not assume Linux-only scripts will work natively on Windows.
+
+Prefer cross-platform Docker Compose configuration.
+
+Where platform-specific scripts are necessary, provide separate PowerShell and Bash scripts.
+
+Document any Apple Silicon or Windows-specific limitations.
+
+Do not use host-specific absolute paths in Compose configuration.
+
+---
+
+# PHASE 9 — COMPLETE README.md REWRITE
+
+After implementation and validation, completely rewrite the root README.md.
+
+The README must reflect the ACTUAL final implementation.
+
+Do not copy old installation commands without verifying them.
+
+Do not document services that are not deployed.
+
+Do not document commands that do not work.
+
+Use the following structure.
+
+## 1. Project overview
+
+- What Attestra does.
+- Major capabilities.
+- Supported architecture.
+- Deployment overview.
+
+## 2. System architecture
+
+Explain:
+
+- API.
+- MongoDB.
+- Workers.
+- Scanner infrastructure.
+- Compliance engine.
+- Evidence storage.
+- Reporting.
+- Optional integrations.
+
+Include a Mermaid architecture diagram.
+
+## 3. Prerequisites
+
+Separate Windows and macOS prerequisites.
+
+Document supported Docker Desktop and Docker Compose requirements.
+
+## 4. Windows installation
+
+Provide exact instructions for:
+
+- Installing Docker Desktop.
+- Enabling WSL2 where required.
+- Cloning the repository.
+- Opening PowerShell.
+- Creating the environment file.
+- Configuring required secrets.
+- Starting the application.
+- Verifying health.
+- Accessing the application.
+- Viewing logs.
+- Stopping the application.
+- Rebuilding the application.
+- Restarting services.
+
+All commands must be PowerShell-compatible.
+
+## 5. macOS installation
+
+Provide exact instructions for:
+
+- Installing Docker Desktop.
+- Apple Silicon considerations.
+- Intel Mac considerations.
+- Cloning the repository.
+- Creating the environment file.
+- Configuring secrets.
+- Starting the application.
+- Verifying health.
+- Accessing the application.
+- Viewing logs.
+- Stopping the application.
+- Rebuilding the application.
+- Restarting services.
+
+All commands must be Bash-compatible.
+
+## 6. One-command deployment
+
+The primary installation must be simple.
+
+Expected command:
+
+docker compose up -d --build
+
+If initial setup or configuration requires additional commands, document those separately.
+
+The user should not need to manually start MongoDB, the API, workers, or individual required services.
+
+## 7. Docker management commands
+
+Document verified commands for:
+
+- Build.
+- Start.
+- Stop.
+- Restart.
+- Status.
+- Logs.
+- Individual service logs.
+- Shell access.
+- Health inspection.
+- Rebuild.
+- Cleanup.
+
+Clearly explain the difference between:
+
+docker compose down
+
+and:
+
+docker compose down -v
+
+Warn that deleting volumes can destroy persistent application data.
+
+## 8. Environment variables
+
+Document every mandatory variable and important optional configuration.
+
+Include descriptions and safe example values.
+
+## 9. Service inventory
+
+Document each deployed service, purpose, dependencies, and exposed ports.
+
+## 10. Scanner configuration
+
+Document supported scanner integrations, required binaries or services, versions, and configuration.
+
+## 11. Compliance frameworks
+
+List only verified framework IDs and explain how the catalogue is loaded.
+
+## 12. Database and backup
+
+Explain:
+
+- MongoDB initialization.
+- Persistence.
+- Backup.
+- Restore.
+- Migration.
+- Data protection.
+
+## 13. Troubleshooting
+
+Include actual solutions for:
+
+- MongoDB connection failures.
+- Replica-set initialization failures.
+- API startup failures.
+- Worker startup failures.
+- Missing scanner binaries.
+- Scanner connectivity problems.
+- Missing templates.
+- Compliance framework loading errors.
+- Docker build failures.
+- Port conflicts.
+- Volume permission problems.
+- Apple Silicon image compatibility.
+
+## 14. Security considerations
+
+Document:
+
+- Secrets management.
+- Production configuration.
+- Network isolation.
+- Database access.
+- Scanner authorization.
+- Evidence integrity.
+- Tenant isolation.
+
+## 15. Development and testing
+
+Provide verified commands for:
+
+- Installing development dependencies.
+- Running tests.
+- Running focused integration tests.
+- Running lint.
+- Running type checks where configured.
+- Running the application locally.
+
+## README quality requirements
+
+The README must be:
+
+- Technically accurate.
+- Tested against the actual implementation.
+- Windows-specific where appropriate.
+- macOS-specific where appropriate.
+- Free from obsolete commands.
+- Free from fictitious service names.
+- Free from undocumented assumptions.
+
+Every documented command must be validated where practical.
+
+---
+
+# PHASE 10 — END-TO-END DOCKER ACCEPTANCE TEST
+
+This is the final mandatory gate.
+
+Perform a real deployment test.
+
+Do not stop after generating Dockerfiles or Compose configurations.
+
+## Test 1: Clean build
+
+Run:
+
+docker compose build --no-cache
+
+Resolve all legitimate build failures.
+
+## Test 2: Full startup
+
+Run:
+
+docker compose up -d --build
+
+Verify that every required service starts.
+
+## Test 3: Container health
+
+Run:
+
+docker compose ps
+
+Check every required service.
+
+No required service may remain unhealthy.
+
+## Test 4: API validation
+
+Call the actual configured health and readiness endpoints.
+
+Verify API routes initialize correctly.
+
+## Test 5: MongoDB validation
+
+Verify:
+
+- Database connection.
+- Replica-set readiness, if required.
+- Required collections.
+- Index initialization.
+- Persistent storage.
+
+## Test 6: Worker validation
+
+Verify:
+
+- Worker registration.
+- Database connection.
+- Queue connectivity.
+- Job consumption.
+- Successful job completion.
+
+## Test 7: Scanner validation
+
+Verify scanner availability using safe version and health commands.
+
+Use controlled fixtures and authorized test targets for functional validation.
+
+Do not run scans against unauthorized external targets.
+
+## Test 8: Compliance validation
+
+Verify every configured framework loads successfully.
+
+Run the compliance catalogue smoke test.
+
+## Test 9: End-to-end workflow
+
+Where the current application supports it, execute a controlled test workflow:
+
+- Create or use a test tenant.
+- Create an authorized test engagement.
+- Verify scope and authorization.
+- Submit a test job.
+- Process it through the actual worker.
+- Persist results.
+- Verify finding retrieval.
+- Verify compliance mapping.
+- Generate a test report.
+- Verify evidence integrity.
+
+Do not bypass authentication or authorization merely to make the test pass.
+
+## Test 10: Restart and recovery
+
+Restart the services.
+
+Verify that:
+
+- Persistent data survives.
+- Workers reconnect.
+- MongoDB remains available.
+- API becomes ready.
+- Jobs recover according to the implemented job semantics.
+
+## Test 11: Shutdown
+
+Run:
+
+docker compose down
+
+Verify graceful shutdown and data preservation.
+
+Repeat startup after shutdown to verify recovery.
+
+---
+
+# PHASE 11 — FINAL DOCUMENTATION AND DELIVERABLES
+
+Create or update the following:
+
+1. README.md
+2. compose.yaml
+3. Dockerfile or Dockerfiles as required.
+4. .dockerignore
+5. .env.example
+6. MongoDB initialization scripts, if required.
+7. Worker startup scripts, if required.
+8. Health-check scripts.
+9. Docker deployment smoke tests.
+10. docs/DOCKER_INFRASTRUCTURE_AUDIT.md
+11. docs/audit/DOCKER_AUDIT.md
+12. docs/audit/DATABASE_AUDIT.md
+13. docs/audit/WORKER_AUDIT.md
+14. docs/audit/SCANNER_INTEGRATION_AUDIT.md
+15. docs/audit/COMPLIANCE_AUDIT.md
+16. docs/audit/API_INTEGRATION_AUDIT.md
+17. docs/audit/DEPLOYMENT_TEST_PLAN.md
+18. docs/DOCKER_DEPLOYMENT_GUIDE.md
+
+Adapt filenames to existing repository conventions where necessary.
+
+Do not generate duplicate documentation if an equivalent authoritative document already exists.
+
+---
+
+# PHASE 12 — FINAL ACCEPTANCE CRITERIA
+
+The implementation is complete only when the following conditions are satisfied.
+
+| ID | Acceptance criterion |
+|---|---|
+| A01 | Entire codebase audited |
+| A02 | Existing infrastructure documented |
+| A03 | Docker architecture consolidated |
+| A04 | Required services included |
+| A05 | MongoDB connectivity verified |
+| A06 | Database persistence verified |
+| A07 | Worker processes connected |
+| A08 | Worker task registration verified |
+| A09 | Scanner dependencies available |
+| A10 | Scanner integration paths validated |
+| A11 | Compliance frameworks load |
+| A12 | API endpoints operational |
+| A13 | Evidence storage operational |
+| A14 | Reports generate correctly |
+| A15 | Authentication and RBAC preserved |
+| A16 | Tenant isolation preserved |
+| A17 | Health checks operational |
+| A18 | Restart and recovery validated |
+| A19 | Windows deployment instructions verified |
+| A20 | macOS deployment instructions verified |
+| A21 | One-command deployment verified |
+| A22 | README completely updated |
+| A23 | Integration tests pass |
+| A24 | No undocumented critical infrastructure gaps |
+
+If a requirement cannot be implemented because of an external dependency, licensing restriction, missing credentials, or architectural limitation, explicitly document it.
+
+Do not falsely report success.
+
+---
+
+# EXECUTION RULES — STRICT
+
+1. Start with full repository inspection.
+2. Read the relevant project documentation.
+3. Create the audit baseline.
+4. Delegate independent work to specialized agents.
+5. Consolidate agent findings.
+6. Establish the target architecture.
+7. Implement infrastructure changes.
+8. Fix worker connectivity and registration gaps.
+9. Verify all scanner dependencies.
+10. Verify compliance framework loading.
+11. Test actual API-to-worker execution.
+12. Test complete Docker deployment.
+13. Rewrite README.md last.
+14. Perform a final regression and security review.
+
+Do not stop after the audit.
+
+Do not stop after writing a Docker Compose file.
+
+Do not replace actual implementation with pseudocode.
+
+Do not silently remove existing functionality.
+
+Do not disable security controls to make deployment easier.
+
+Do not fabricate successful test results.
+
+Do not mark a service as operational solely because its container is running.
+
+Do not make destructive database changes.
+
+Do not introduce unnecessary infrastructure.
+
+If implementation requires a decision that could cause data loss, security weakening, or an incompatible architectural migration, stop that specific operation and document the decision required. Continue with independent safe tasks.
+
+## FINAL REPORT FORMAT
+
+At completion, provide:
+
+### 1. Executive summary
+What was inspected, implemented, and verified.
+
+### 2. Infrastructure before vs after
+Explain the old and new deployment architecture.
+
+### 3. Docker service inventory
+List every service and its role.
+
+### 4. Worker integration report
+Show every worker, its dependencies, registration status, and test results.
+
+### 5. Scanner integration report
+Show installed, executable, configured, and validated scanners separately.
+
+### 6. Compliance integration report
+Show every framework and its loading status.
+
+### 7. Files changed
+List all created, modified, and removed files with reasons.
+
+### 8. Testing results
+Show actual commands, pass/fail results, and unresolved failures.
+
+### 9. Deployment instructions
+Provide the final one-command deployment for Windows and macOS.
+
+### 10. Outstanding gaps
+List anything that remains incomplete and why.
+
+### 11. Production readiness
+Give an evidence-based assessment. Do not claim production readiness if critical security, persistence, or recovery requirements remain unverified.
+
+---
+
+# FINAL OBJECTIVE
+
+Deliver an integrated Attestra platform where:
+
+- The entire application is orchestrated through one Docker Compose deployment.
+- MongoDB is correctly initialized and persistent.
+- API services communicate with the correct database.
+- Background workers are registered and operational.
+- Security scanner integrations are available to their appropriate workers.
+- Compliance frameworks load correctly.
+- Evidence and reports work end to end.
+- Authentication, authorization, and tenant isolation remain intact.
+- All required services have meaningful health checks.
+- The deployment supports Windows and macOS.
+- README.md contains only verified installation and operational instructions.
+
+**The ultimate user experience must be:**
+
+Clone repository → Configure environment → Run one Docker command → Entire Attestra platform becomes operational.
+
+Start by auditing the complete existing repository. Then execute the implementation through to final acceptance.

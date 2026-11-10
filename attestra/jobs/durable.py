@@ -325,6 +325,19 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
         from attestra.webhooks.service import safe_emit_scan
 
         safe_emit_scan(s, run, "scan.finished", actor=run.requested_by)
+        # Auto-save a draft technical report so Super Admin / staff can start QA
+        # without a manual Generate click after the worker finishes.
+        try:
+            from attestra.reports.auto_draft import ensure_draft_technical_report
+
+            ensure_draft_technical_report(
+                s,
+                run.engagement_id,
+                actor=run.requested_by or "system",
+                user_id=None,
+            )
+        except Exception:
+            pass
     except Exception as exc:
         run.status = "failed"
         run.ended_at = utcnow()

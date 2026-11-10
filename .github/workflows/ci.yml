@@ -8,32 +8,70 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: attestra
-          POSTGRES_PASSWORD: attestra
-          POSTGRES_DB: attestra
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U attestra"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    # GHA service containers cannot pass mongod --replSet args reliably, so Mongo
+    # is started in a step with docker run (Docker is available on ubuntu-latest).
     env:
-      ATTESTRA_TEST_POSTGRES_URL: postgresql+psycopg://attestra:attestra@localhost:5432/attestra
+      ATTESTRA_MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      # Tests create/drop throwaway attestra_test_* databases on this URI.
+      ATTESTRA_TEST_MONGODB_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start MongoDB replica set
+        run: |
+          set -euo pipefail
+          docker run -d --name mongo \
+            -p 27017:27017 \
+            mongo:7 --replSet rs0 --bind_ip_all
+          echo "Waiting for mongod..."
+          for i in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' 2>/dev/null | grep -q 1; then
+              break
+            fi
+            sleep 1
+            if [ "$i" -eq 60 ]; then
+              echo "mongod did not become ready" >&2
+              docker logs mongo || true
+              exit 1
+            fi
+          done
+          docker exec mongo mongosh --quiet --eval '
+            try {
+              rs.status();
+            } catch (e) {
+              rs.initiate({_id: "rs0", members: [{_id: 0, host: "127.0.0.1:27017"}]});
+            }
+          '
+          echo "Waiting for PRIMARY..."
+          for i in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet --eval 'rs.isMaster().ismaster' 2>/dev/null | grep -q true; then
+              echo "MongoDB replica set rs0 is PRIMARY"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Replica set did not become PRIMARY" >&2
+          docker exec mongo mongosh --quiet --eval 'rs.status()' || true
+          docker logs mongo || true
+          exit 1
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+
       - name: Install
-        run: pip install -e ".[dev,postgres]"
+        run: pip install -e ".[dev]"
+
       - name: Ruff
         run: ruff check .
-      - name: Migrations on Postgres
-        run: python -c "from attestra import db; db.upgrade('postgresql+psycopg://attestra:attestra@localhost:5432/attestra')"
+
       - name: Pytest
         run: pytest -q
+
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Attestra image
+        run: docker build -t attestra:ci .

@@ -2262,7 +2262,7 @@ def ui_qa_approve_report(request: Request, eid: int, rid: int):
     return _report_step(
         request, eid, rid, "report.approve", "Your role can't QA reports.",
         f"Report #{rid} passed QA. A lead who didn't make or QA it can now approve and sign it.",
-        lambda s, p: qa_approve(s, rid, actor=p.actor, user_id=p.user_id),
+        lambda s, p: qa_approve(s, rid, actor=p.actor, user_id=p.user_id, role=p.role),
     )
 
 
@@ -2273,7 +2273,7 @@ def ui_qa_reject_report(request: Request, eid: int, rid: int, note: str = Form("
     return _report_step(
         request, eid, rid, "report.approve", "Your role can't QA reports.",
         f"Report #{rid} sent back to the author with your note.",
-        lambda s, p: qa_reject(s, rid, actor=p.actor, note=note, user_id=p.user_id),
+        lambda s, p: qa_reject(s, rid, actor=p.actor, note=note, user_id=p.user_id, role=p.role),
     )
 
 

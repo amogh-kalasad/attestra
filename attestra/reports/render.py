@@ -1442,6 +1442,11 @@ def _user_conflict(user_id: int | None, *others: int | None) -> bool:
     return any(o is not None and o == user_id for o in others)
 
 
+def _admin_may_override_four_eyes(role: str | None) -> bool:
+    """Super Admin may complete every QA stage on the engagement screen."""
+    return (role or "").strip().lower() == "admin"
+
+
 def submit_report(s: Session, report_id: int, *, actor: str, user_id: int | None = None) -> Report:
     r = _get_report(s, report_id)
     if r.status not in ("draft", "rejected"):
@@ -1452,12 +1457,20 @@ def submit_report(s: Session, report_id: int, *, actor: str, user_id: int | None
                              updates={"status": "submitted", "rejection_note": ""})
 
 
-def qa_approve(s: Session, report_id: int, *, actor: str, user_id: int | None = None) -> Report:
+def qa_approve(
+    s: Session,
+    report_id: int,
+    *,
+    actor: str,
+    user_id: int | None = None,
+    role: str | None = None,
+) -> Report:
     r = _get_report(s, report_id)
     if r.status != "submitted":
         raise services.ServiceError(f"cannot QA-approve report in status '{r.status}'")
-    if _user_conflict(user_id, r.generated_by_user_id) or (
-        user_id is None and actor.strip().lower() == r.generated_by.strip().lower()
+    if not _admin_may_override_four_eyes(role) and (
+        _user_conflict(user_id, r.generated_by_user_id)
+        or (user_id is None and actor.strip().lower() == r.generated_by.strip().lower())
     ):
         raise services.ServiceError("four-eyes rule: QA must be a different person from the author")
     _assert_hash(r)
@@ -1469,13 +1482,21 @@ def qa_approve(s: Session, report_id: int, *, actor: str, user_id: int | None = 
                              updates={"status": "qa_approved", "qa_by": actor, "qa_by_user_id": user_id})
 
 
-def qa_reject(s: Session, report_id: int, *, actor: str, note: str, user_id: int | None = None) -> Report:
+def qa_reject(
+    s: Session,
+    report_id: int,
+    *,
+    actor: str,
+    note: str,
+    user_id: int | None = None,
+    role: str | None = None,
+) -> Report:
     r = _get_report(s, report_id)
     if r.status != "submitted":
         raise services.ServiceError(f"cannot reject report in status '{r.status}'")
     if not note.strip():
         raise services.ServiceError("a rejection note is required")
-    if _user_conflict(user_id, r.generated_by_user_id):
+    if not _admin_may_override_four_eyes(role) and _user_conflict(user_id, r.generated_by_user_id):
         raise services.ServiceError("four-eyes rule: QA must be a different person from the author")
     return _mongo_transition(
         r, from_status="submitted", actor=actor, action="report.qa_reject", sha_guard=False, note=note.strip(),
@@ -1497,11 +1518,14 @@ def sign_report(
         raise services.ServiceError(f"cannot sign report in status '{r.status}'; QA approval required")
     if role is not None and role not in ("lead", "admin"):
         raise services.ServiceError("only lead or admin may sign a report")
-    if _user_conflict(user_id, r.generated_by_user_id, r.qa_by_user_id) or (
-        user_id is None
-        and (
-            actor.strip().lower() == r.generated_by.strip().lower()
-            or (r.qa_by and actor.strip().lower() == r.qa_by.strip().lower())
+    if not _admin_may_override_four_eyes(role) and (
+        _user_conflict(user_id, r.generated_by_user_id, r.qa_by_user_id)
+        or (
+            user_id is None
+            and (
+                actor.strip().lower() == r.generated_by.strip().lower()
+                or (r.qa_by and actor.strip().lower() == r.qa_by.strip().lower())
+            )
         )
     ):
         raise services.ServiceError("four-eyes rule: signer must differ from author and QA")
@@ -1514,24 +1538,33 @@ def sign_report(
     return _mongo_sign(s, r, actor=actor, user_id=user_id, from_status="qa_approved")
 
 
-def approve_report(s: Session, report_id: int, *, actor: str, user_id: int | None = None) -> Report:
+def approve_report(
+    s: Session,
+    report_id: int,
+    *,
+    actor: str,
+    user_id: int | None = None,
+    role: str | None = None,
+) -> Report:
     """Legacy two-step path: draft → signed when author ≠ approver.
 
     Prefer [[submit_report]] / [[qa_approve]] / [[sign_report]] for the full workflow.
     If the report is already ``qa_approved``, delegates to [[sign_report]].
+    Super Admin (``role=admin``) may override four-eyes on this path.
     """
     r = _get_report(s, report_id)
     if r.status == "signed":
         raise services.ServiceError("report is already signed; generate a new version to change it")
     if r.status == "qa_approved":
-        return sign_report(s, report_id, actor=actor, user_id=user_id, role="lead")
+        return sign_report(s, report_id, actor=actor, user_id=user_id, role=role or "lead")
     if r.status not in ("draft", "rejected", "submitted"):
         raise services.ServiceError(f"cannot approve report in status '{r.status}'")
-    if user_id is not None and r.generated_by_user_id is not None:
-        if user_id == r.generated_by_user_id:
+    if not _admin_may_override_four_eyes(role):
+        if user_id is not None and r.generated_by_user_id is not None:
+            if user_id == r.generated_by_user_id:
+                raise services.ServiceError("four-eyes rule: the approver must be a different person from the author")
+        elif actor.strip().lower() == r.generated_by.strip().lower():
             raise services.ServiceError("four-eyes rule: the approver must be a different person from the author")
-    elif actor.strip().lower() == r.generated_by.strip().lower():
-        raise services.ServiceError("four-eyes rule: the approver must be a different person from the author")
     _assert_hash(r)
     # @lat: [[reports#World-class report QA (Phase 9)]]
     from attestra.reports.qa import assert_qa_allows_approval, run_report_qa

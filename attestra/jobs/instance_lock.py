@@ -75,6 +75,7 @@ def read_lock(path: Path) -> tuple[int | None, float | None]:
 
 
 class InstanceLock:
+    # @lat: [[architecture#Local Docker Compose]]
     def __init__(self, name: str = "worker"):
         config.ensure_dirs()
         self.path = config.DATA_DIR / f".lock-{name}"
@@ -94,7 +95,18 @@ class InstanceLock:
                 pid, age = read_lock(self.path)
                 if pid is None and age is not None and age < 5:
                     pass
-                elif pid is None or not pid_alive(pid):
+                elif (
+                    # Container restart: PID namespaces recycle. A previous worker
+                    # often wrote pid 1; the new container's pid 1 is alive but is
+                    # not the holder of this file (we have no fd yet).
+                    (pid is not None and pid == os.getpid() and self._fh is None)
+                    or pid is None
+                    or not pid_alive(pid)
+                    # Heartbeat-touch stops when the holder dies without unlinking
+                    # (kill -9). Steal after LOCK_REFRESH_STALE_S even if pid_alive
+                    # is wrong across PID namespaces.
+                    or (age is not None and age > LOCK_REFRESH_STALE_S)
+                ):
                     try:
                         self.path.unlink(missing_ok=True)
                     except OSError:

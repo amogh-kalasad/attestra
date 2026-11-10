@@ -71,6 +71,12 @@ Runtime persistence is MongoDB only; `db.session()` yields a MongoSession.
 
 Bootstrap: [[attestra/bootstrap.py#init_persistence]]. Client: [[attestra/persistence/mongo/client.py#init_mongo]]; repos under `attestra/persistence/mongo/repositories/`; GridFS [[attestra/storage/mongo.py#MongoStorage]]; tenant filters [[attestra/persistence/mongo/tenant.py]]. Session façade: [[attestra/db.py#session]] → MongoSession. Domain write paths (audit, jobs, credits, reports) hit Mongo repositories. Logical backup: [[attestra/ops/mongo_backup.py#backup_mongo]]. Post-cutover helpers: [[attestra/migration/engine.py#validate]]. Design notes: `docs/mongodb_migration/`.
 
+## Local Docker Compose
+
+Root [[compose.yaml]] runs a loopback-only MongoDB `rs0` set plus API and worker for local development.
+
+Services: `mongo` (`mongo:7`, `--replSet rs0`, published only on `127.0.0.1:27017`); oneshot `mongo-init` ([[docker/mongo-init/init-replica-set.js]], idempotent `rs.initiate` with member `mongo:27017`); `api` (build [[Dockerfile]], `attestra init` then `attestra serve`, `127.0.0.1:8000`, health on [[attestra/api.py#health]]); `worker` (`attestra worker`, same Mongo env, waits for API healthy). Helpers: [[docker/scripts/wait-for-mongo.sh]], [[docker/scripts/healthcheck-api.sh]]. Start with `docker compose up -d --build`. Worker mounts `/var/run/docker.sock` for compose/dev scanner `docker run` only (not for production). No Temporal/Keycloak/Postgres in the default stack. [[attestra/jobs/instance_lock.py#InstanceLock#acquire]] steals a leftover lock whose pid equals the current process without a held fd so container restarts (PID-namespace recycle, often pid 1) recover cleanly. Operator guide: `docs/DOCKER_DEPLOYMENT_GUIDE.md`.
+
 
 ## Engagement flow
 
@@ -94,10 +100,12 @@ See [[runner]]. Adapters write raw output under [[attestra/config.py#RAW_DIR]] t
 
 Capabilities intentionally left for later phases (see `docs/GAP_ANALYSIS_CURRENT.md`).
 
-- Temporal workflows, OPA policy engine, Postgres RLS, Helm (Phase 6)
+- Temporal workflows as the default orchestrator; OPA policy engine; Postgres RLS (Mongo is the runtime store)
 - Full Keycloak UI login flow (OIDC flag and claim validation exist; enable when IdP is provisioned)
 - Client portal polish, ticket sync, extra scanners (Phase 7)
 - External pentest / GA (Phase 8)
+
+Helm chart and root Docker Compose for local mongo+api+worker are implemented (see [[architecture#Local Docker Compose]] and `deploy/README.md`).
 
 ## World-class security testing audit (Phase 1)
 

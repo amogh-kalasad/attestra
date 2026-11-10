@@ -1109,13 +1109,21 @@ class RejectIn(BaseModel):
 
 @app.post("/api/reports/{rid}/qa-approve")
 def report_qa_approve(rid: int, principal: Principal = Depends(require("report.approve"))):
-    return _run(lambda s: _report_dict(qa_approve(s, rid, actor=principal.actor, user_id=principal.user_id)))
+    return _run(
+        lambda s: _report_dict(
+            qa_approve(s, rid, actor=principal.actor, user_id=principal.user_id, role=principal.role)
+        )
+    )
 
 
 @app.post("/api/reports/{rid}/qa-reject")
 def report_qa_reject(rid: int, body: RejectIn, principal: Principal = Depends(require("report.approve"))):
     return _run(
-        lambda s: _report_dict(qa_reject(s, rid, actor=principal.actor, note=body.note, user_id=principal.user_id))
+        lambda s: _report_dict(
+            qa_reject(
+                s, rid, actor=principal.actor, note=body.note, user_id=principal.user_id, role=principal.role
+            )
+        )
     )
 
 
@@ -1133,7 +1141,7 @@ def approve(rid: int, principal: Principal = Depends(require("report.approve")))
     """Legacy shortcut: draft → signed (or sign if already QA-approved)."""
     return _run(
         lambda s: _report_dict(
-            approve_report(s, rid, actor=principal.actor, user_id=principal.user_id)
+            approve_report(s, rid, actor=principal.actor, user_id=principal.user_id, role=principal.role)
         )
     )
 

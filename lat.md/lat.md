@@ -26,7 +26,7 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - World-class report QA (Phase 9): [[reports#World-class report QA (Phase 9)]]
 - World-class ENG1 V21 regression (Phase 10): [[architecture#World-class ENG1 V21 regression (Phase 10)]] / [[tests#World-class Phase 10 ENG1 V21]] (`docs/WORLDCLASS_VAPT_PHASE10_ENG1_V21.md`)
 
-MongoDB is the runtime store (see [[architecture#MongoDB migration (in progress)]]); cutover design notes live in `docs/mongodb_migration/`.
+MongoDB is the runtime store (see [[architecture#MongoDB migration (in progress)]]); cutover design notes live in `docs/mongodb_migration/`. Local stack: [[architecture#Local Docker Compose]] (`docker compose up -d --build`).
 
 ## Quick orientation
 

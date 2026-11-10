@@ -49,34 +49,56 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURIT
 
 ## Requirements
 
-- Python 3.11 or newer
-- **MongoDB** listening locally (or a reachable replica set). **MongoDB Community Server** installed as a Windows service is the usual local setup. **MongoDB Compass is a GUI only** — it does not start `mongod`. If Compass cannot connect, the database service is not running.
-- Docker, for the in-app scanners that run in containers (ZAP, testssl, Nuclei and others)
+### One-command Docker (recommended)
 
-## MongoDB setup
+- Docker Desktop with Compose v2
+- Windows 10/11 + WSL2, or macOS (Apple Silicon or Intel)
+- Free localhost ports `8000` and `27017`
 
-Attestra talks to MongoDB using `ATTESTRA_MONGODB_URI` (default `mongodb://127.0.0.1:27017/?replicaSet=rs0`) and `ATTESTRA_MONGODB_DB` (default `attestra`). Multi-document transactions need a **replica set** (or a compatible transactional deployment). A standalone `mongod` without a replica set is not supported.
+### Host Python (optional alternative)
 
-### Install and run the server (Windows)
+- Python 3.11 or newer (3.12 matches the container image)
+- A MongoDB replica set (`rs0`), or use the Compose `mongo` service alone
+- Docker still required for containerized scanners (ZAP, Nuclei, Trivy, …)
 
-1. Install **MongoDB Community Server** and keep the **Windows service** enabled so `mongod` starts at boot.
-2. Confirm the service is running (Services → MongoDB, or `Get-Service MongoDB*` in PowerShell). Compass can then be used to browse data, but it is not a substitute for the service.
-3. Because the default URI includes `replicaSet=rs0`, initialise a single-node set once (mongosh, typically as an admin user):
+## One-command deployment
 
-```javascript
-rs.initiate()
+From the repository root:
+
+```bash
+docker compose up -d --build
 ```
 
-If you already have a set name other than `rs0`, put that name in the URI instead of changing a live set casually.
+That starts MongoDB (replica set `rs0`), the API/UI, and the durable job worker.
 
-4. Create an application user (example role set used in the hardening guide: `readWrite` and `dbAdmin` on the `attestra` database, users created in `admin`). Then set a credentialed URI — do not commit passwords. URL-encode special characters in the password. A typical shape:
+| Check | URL / command |
+| --- | --- |
+| UI | http://127.0.0.1:8000 |
+| Health | http://127.0.0.1:8000/api/health |
+| OpenAPI | http://127.0.0.1:8000/docs |
+| Status | `docker compose ps` |
+
+Optional: copy `.env.example` to `.env` and set `ATTESTRA_SESSION_SECRET` / `ATTESTRA_API_KEY_PEPPER` before shared use. Create an admin user:
+
+```bash
+docker compose exec api attestra user add admin --role admin --password "YourStrongPass1"
+```
+
+Stop without deleting data: `docker compose down`.  
+**Destroy volumes (data loss):** `docker compose down -v`.
+
+Full Windows/macOS ops, scanner pins, and troubleshooting: [docs/DOCKER_DEPLOYMENT_GUIDE.md](docs/DOCKER_DEPLOYMENT_GUIDE.md). Infrastructure baseline: [docs/DOCKER_INFRASTRUCTURE_AUDIT.md](docs/DOCKER_INFRASTRUCTURE_AUDIT.md).
+
+## MongoDB setup (host install)
+
+Attestra talks to MongoDB using `ATTESTRA_MONGODB_URI` (default `mongodb://127.0.0.1:27017/?replicaSet=rs0`) and `ATTESTRA_MONGODB_DB` (default `attestra`). Multi-document transactions need a **replica set**. Prefer Compose for local stacks; for a host `mongod`, initialise `rs0` once and harden before non-local use: [docs/mongodb_migration/SECURE_LOCAL_MONGO.md](docs/mongodb_migration/SECURE_LOCAL_MONGO.md).
+
+Example credentialed URI (do not commit passwords):
 
 ```
 ATTESTRA_MONGODB_URI=mongodb://USER:PASSWORD@127.0.0.1:27017/attestra?replicaSet=rs0&authSource=admin
 ATTESTRA_MONGODB_DB=attestra
 ```
-
-Hardening a local server (auth, bind 127.0.0.1, keyFile): [docs/mongodb_migration/SECURE_LOCAL_MONGO.md](docs/mongodb_migration/SECURE_LOCAL_MONGO.md).
 
 ### Copy data between machines
 
@@ -100,41 +122,40 @@ Restore refuses a backup if the manifest hashes do not match.
 | `Command … requires authentication` / Unauthorized | The URI has no user, the user is wrong, or `authSource` is not where the user was created (often `admin`) |
 | Startup error that standalone is not supported | URI works, but the deployment is not a replica set |
 
-## Quick start
+## Quick start (host venv)
 
-Windows (PowerShell), from the repo folder, with MongoDB already running as above:
+Prefer [One-command deployment](#one-command-deployment) unless you need an editable install.
+
+Windows (PowerShell), with MongoDB reachable (`replicaSet=rs0`):
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e ".[dev]"          # or: pip install -r requirements.txt
-# Copy .env.example to .env and set ATTESTRA_MONGODB_URI / ATTESTRA_MONGODB_DB (and secrets).
-python -m attestra.cli init      # connect and apply Mongo schema
-python -m attestra.cli demo      # optional: load sample data
+pip install -e ".[dev]"
+# Copy .env.example to .env and set ATTESTRA_MONGODB_URI / secrets.
+python -m attestra.cli init
 python -m attestra.cli serve --host 127.0.0.1 --port 8000
 ```
 
-In a second window, start the worker that runs scans:
+Second window for scans:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m attestra.cli worker
 ```
 
-Linux or macOS:
+macOS / Linux:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 python -m attestra.cli init
-python -m attestra.cli serve        # http://127.0.0.1:8000  (API docs at /docs)
-python -m attestra.cli worker       # in a second terminal
+python -m attestra.cli serve
+python -m attestra.cli worker   # second terminal
 ```
 
-Then open http://127.0.0.1:8000 and sign in. Staff routes include `/dashboard` and `/sites`. Client and auditor roles use `/portal`.
-
-`python -m attestra.cli` always runs the code in this folder. If the plain `attestra` command is missing a subcommand, run `pip install -e .` again or use `python -m attestra.cli`.
+Open http://127.0.0.1:8000. Prefer `python -m attestra.cli` over a stale `attestra` entrypoint.
 
 ## Users and passwords
 

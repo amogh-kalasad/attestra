@@ -698,7 +698,11 @@ Report workflow, retest false-close, letters, DOCX/PDF, SARIF/OSCAL, packs, and 
 
 ### tests/test_report_workflow.py
 
-Reject loop; same user cannot QA their own draft; three distinct actors for submit ÔåÆ QA ÔåÆ sign with role enforcement on sign.
+Reject loop; same user cannot QA their own draft; three distinct actors for submit → QA → sign with role enforcement on sign; Super Admin may QA and sign a report they authored.
+
+### Scan complete saves draft report
+
+[[attestra/reports/auto_draft.py#ensure_draft_technical_report]] creates or refreshes a draft technical report after worker scan complete, and skips when the latest technical report is already submitted (`tests/test_auto_draft_report.py`).
 
 ### tests/test_retest_false_close.py
 
@@ -2054,6 +2058,12 @@ Technical and attestation reports include configured legal name, address, contac
 ### Reports work without CA config
 
 Report generation still succeeds and keeps the default ATTESTRA brand when no CA row is configured.
+
+### CA save refreshes draft reports
+
+CA save regenerates draft/non-generated technical reports for every tenant with current issuer branding.
+
+[[attestra/certification/service.py#update_settings]] triggers [[attestra/reports/auto_draft.py#refresh_drafts_for_ca]]. Submitted and signed reports stay untouched (`tests/test_certification_authority.py`, `tests/test_auto_draft_report.py`).
 
 ## Super Admin authorization documents
 
