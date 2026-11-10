@@ -24,6 +24,13 @@ from attestra.automated_vapt.testing._reflection import (
     reflected_unencoded_in_html,
     xss_canary_payload,
 )
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    probe_urls,
+    request_auth,
+    resolve_mode,
+    skip_result,
+)
 
 # @lat: [[architecture#Elite automated security testing#Safe non-destructive probes]]
 
@@ -33,6 +40,12 @@ _DEFAULT_PROBES: tuple[tuple[str, str], ...] = (
     ("/q", "query"),
 )
 _MAX_PROBES = 3
+
+
+def _target_url(base_url: str, path: str) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+    return absolute(base_url, path)
 
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
@@ -47,7 +60,21 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
 
 def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Reflected XSS canary on a few query endpoints (no stored XSS writes)."""
-    probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    sess_mode, auth = resolve_mode(client, kwargs)
+    if sess_mode == "skip":
+        return skip_result(
+            "XSS",
+            "xss",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped default /search XSS probes",
+        )
+    if kwargs.get("probes"):
+        probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    elif sess_mode == "engagement":
+        probes = [(u, "q") for u in probe_urls(base_url, kwargs, api=False, limit=_MAX_PROBES)]
+        probes = probes or list(_DEFAULT_PROBES)[:_MAX_PROBES]
+    else:
+        probes = list(_DEFAULT_PROBES)[:_MAX_PROBES]
     marker = new_canary(tag="XSS")
     payload = xss_canary_payload(marker)
 
@@ -56,12 +83,17 @@ def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
     finding = False
     finding_detail = ""
 
+    def _get(full: str):
+        if auth is not None:
+            return request_auth(client, "GET", full, auth, base_url, follow_redirects=False)
+        return request_pair(client, "GET", full, follow_redirects=False)
+
     for path, param in probes:
         qs = urlencode({param: payload})
-        url = absolute(base_url, path)
+        url = _target_url(base_url, path)
         sep = "&" if "?" in url else "?"
         full = f"{url}{sep}{qs}"
-        pair = request_pair(client, "GET", full, follow_redirects=False)
+        pair = _get(full)
         ctype = ""
         for hk, hv in (pair.response_headers or {}).items():
             if hk.lower() == "content-type":
@@ -121,9 +153,25 @@ def run_dom(client, base_url: str, **kwargs) -> dict[str, Any]:
     classic location→innerHTML/document.write sink (lab positive control). Secure
     pages that use textContent do not match.
     """
+    sess_mode, auth = resolve_mode(client, kwargs)
+    if sess_mode == "skip":
+        return skip_result(
+            "XSSDOM",
+            "xss",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab /dom-sink probes",
+        )
     path = str(kwargs.get("path") or "/dom-sink")
-    url = absolute(base_url, path)
-    pair = request_pair(client, "GET", url, follow_redirects=False)
+    if sess_mode == "engagement" and not kwargs.get("path"):
+        urls = probe_urls(base_url, kwargs, api=False, limit=1)
+        url = urls[0] if urls else _target_url(base_url, path)
+        path = url
+    else:
+        url = _target_url(base_url, path)
+    if auth is not None:
+        pair = request_auth(client, "GET", url, auth, base_url, follow_redirects=False)
+    else:
+        pair = request_pair(client, "GET", url, follow_redirects=False)
     body = pair.response_body or ""
     sink = bool(_DOM_SINK_RE.search(body))
     ctx = kwargs.get("ctx")
@@ -184,21 +232,39 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
                 "evidence_hints": [],
             }
 
+    sess_mode, auth = resolve_mode(client, kwargs)
+    if sess_mode == "skip":
+        return skip_result(
+            "XSSSTORE",
+            "xss",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab guestbook stored-XSS probes",
+        )
+
     marker = new_canary(tag="STORED")
     payload = xss_canary_payload(marker)
-    try:
-        clear_cookies(client)
-        login(client, base_url, "account_a", "account-a-pass")
-    except Exception:
-        pass
-    post = client.post(absolute(base_url, "/api/comments"), json={"text": payload})
+    comment_url = absolute(base_url, "/api/comments")
+    session_headers = {}
+    if auth is not None and hasattr(auth, "headers_for"):
+        session_headers = auth.headers_for(comment_url, base_url) or {}
+    elif sess_mode == "lab":
+        try:
+            clear_cookies(client)
+            login(client, base_url, "account_a", "account-a-pass")
+        except Exception:
+            pass
+    post = client.post(comment_url, json={"text": payload}, headers=session_headers or None)
     post_status = int(getattr(post, "status_code", 0) or 0)
     cid = None
     try:
         cid = int((post.json() or {}).get("id") or 0) or None
     except Exception:
         cid = None
-    page = request_pair(client, "GET", absolute(base_url, "/guestbook"), follow_redirects=False)
+    guestbook = absolute(base_url, "/guestbook")
+    if auth is not None:
+        page = request_auth(client, "GET", guestbook, auth, base_url, follow_redirects=False)
+    else:
+        page = request_pair(client, "GET", guestbook, follow_redirects=False)
     ctype = ""
     for hk, hv in (page.response_headers or {}).items():
         if hk.lower() == "content-type":
@@ -213,7 +279,11 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
     # Cleanup stored canary when delete API exists.
     if cid:
         try:
-            client.request("DELETE", absolute(base_url, f"/api/comments/{cid}"))
+            client.request(
+                "DELETE",
+                absolute(base_url, f"/api/comments/{cid}"),
+                headers=session_headers or None,
+            )
         except Exception:
             pass
     return {

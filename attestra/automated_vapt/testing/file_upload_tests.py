@@ -11,6 +11,12 @@ import os
 from typing import Any
 
 from attestra.automated_vapt.testing._http import absolute, clear_cookies, login, request_pair
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    request_auth,
+    resolve_mode,
+    skip_result,
+)
 
 # @lat: [[architecture#Remaining gaps plan (auth depth)]]
 
@@ -48,18 +54,32 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "evidence_hints": [],
         }
 
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "skip":
+        return skip_result(
+            "UPLOAD",
+            "file",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab /api/upload probes",
+        )
+
     upload_url = absolute(base_url, "/api/upload")
-    # Prefer authenticated session when lab login works; anon is also informative.
-    try:
-        clear_cookies(client)
-        login(client, base_url, "account_a", "account-a-pass")
-    except Exception:
-        pass
+    session_headers = {}
+    if auth is not None and hasattr(auth, "headers_for"):
+        session_headers = auth.headers_for(upload_url, base_url) or {}
+    elif mode == "lab":
+        # Prefer authenticated session when lab login works; anon is also informative.
+        try:
+            clear_cookies(client)
+            login(client, base_url, "account_a", "account-a-pass")
+        except Exception:
+            pass
 
     try:
         r = client.post(
             upload_url,
             files={"file": (MARKER_NAME, MARKER, "text/html")},
+            headers=session_headers or None,
         )
     except Exception as exc:  # noqa: BLE001
         return {
@@ -107,7 +127,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "evidence_hints": [],
         }
 
-    # Anonymous fetch of stored URL (clear cookies).
+    # Anonymous fetch of stored URL (clear cookies, no session headers).
     clear_cookies(client)
     fetch = request_pair(client, "GET", absolute(base_url, stored_url), follow_redirects=False)
     served = (fetch.response_body or "").encode("utf-8", "replace") if isinstance(fetch.response_body, str) else b""

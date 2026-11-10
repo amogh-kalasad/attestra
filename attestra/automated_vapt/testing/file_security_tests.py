@@ -14,9 +14,16 @@ future catalogue handler.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from attestra.automated_vapt.testing._http import absolute, request_pair
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    probe_urls,
+    request_auth,
+    resolve_mode,
+    skip_result,
+)
 
 # @lat: [[architecture#Elite automated security testing#Safe non-destructive probes]]
 
@@ -46,26 +53,66 @@ def detect_sensitive_content(body: str) -> list[str]:
     return [m for m in _SENSITIVE_MARKERS if m in text]
 
 
+def _engagement_probes(base_url: str, kwargs: dict[str, Any]) -> list[tuple[str, str | None]]:
+    urls = probe_urls(base_url, kwargs, api=False, limit=_MAX_PROBES)
+    out: list[tuple[str, str | None]] = []
+    for u in urls:
+        out.append((u, "file"))
+    return out or list(_DEFAULT_PROBES)[:_MAX_PROBES]
+
+
+def _full_url(base_url: str, path: str, param: str | None) -> str:
+    if path.startswith("http://") or path.startswith("https://"):
+        url = path
+        if param is None:
+            # append traversal as a path segment
+            parts = urlsplit(url)
+            new_path = (parts.path or "/").rstrip("/") + "/" + FAKE_TRAVERSAL
+            return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, ""))
+        if path.endswith("/") and param == FAKE_TRAVERSAL:
+            return url.rstrip("/") + "/" + param.lstrip("/")
+        qs = urlencode({param: FAKE_TRAVERSAL})
+        sep = "&" if "?" in url else "?"
+        return f"{url}{sep}{qs}"
+    if param is None:
+        return absolute(base_url, path)
+    if path.endswith("/") and param == FAKE_TRAVERSAL:
+        return absolute(base_url, path + param.lstrip("/"))
+    url = absolute(base_url, path)
+    qs = urlencode({param: FAKE_TRAVERSAL})
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}{qs}"
+
+
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Probe fake traversal paths; find only with sensitive content proof."""
-    probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "skip":
+        return skip_result(
+            "FILE",
+            "file",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped default lab traversal probes",
+        )
+    if kwargs.get("probes"):
+        probes = list(kwargs.get("probes") or _DEFAULT_PROBES)[:_MAX_PROBES]
+    elif mode == "engagement":
+        probes = _engagement_probes(base_url, kwargs)[:_MAX_PROBES]
+    else:
+        probes = list(_DEFAULT_PROBES)[:_MAX_PROBES]
     observations: list[dict[str, Any]] = []
     evidence = []
     finding = False
     finding_detail = ""
 
-    for path, param in probes:
-        if param is None:
-            full = absolute(base_url, path)
-        elif path.endswith("/") and param == FAKE_TRAVERSAL:
-            full = absolute(base_url, path + param.lstrip("/"))
-        else:
-            url = absolute(base_url, path)
-            qs = urlencode({param: FAKE_TRAVERSAL})
-            sep = "&" if "?" in url else "?"
-            full = f"{url}{sep}{qs}"
+    def _get(full: str):
+        if auth is not None:
+            return request_auth(client, "GET", full, auth, base_url, follow_redirects=False)
+        return request_pair(client, "GET", full, follow_redirects=False)
 
-        pair = request_pair(client, "GET", full, follow_redirects=False)
+    for path, param in probes:
+        full = _full_url(base_url, path, param)
+        pair = _get(full)
         body = pair.response_body or ""
         markers = detect_sensitive_content(body)
         denied = int(pair.status or 0) in (401, 403, 404)

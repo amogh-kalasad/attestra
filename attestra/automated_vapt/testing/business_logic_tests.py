@@ -9,6 +9,16 @@ from __future__ import annotations
 from typing import Any
 
 from attestra.automated_vapt.testing._http import absolute, clear_cookies, login, request_json, request_pair
+from attestra.automated_vapt.testing._session import (
+    SKIP_NO_AUTH_SESSION,
+    is_substantive_json,
+    probe_urls,
+    ready_auth,
+    request_auth,
+    resolve_mode,
+    scrub_pair,
+    skip_result,
+)
 
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
@@ -24,7 +34,75 @@ def _login_ok(client, base_url: str, user: str, password: str) -> bool:
     return int(code or 0) in (200, 302, 303)
 
 
-def run(client, base_url: str, **_kwargs) -> dict[str, Any]:
+def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, Any]:
+    """Confirm the engagement session can read in-scope resources (read-only)."""
+    urls = probe_urls(base_url, kwargs, api=True, limit=6)
+    if not urls:
+        urls = probe_urls(base_url, kwargs, api=False, limit=6)
+    secondary = ready_auth(kwargs, "_secondary_session_auth")
+    evidence: list[Any] = []
+    rows: list[dict[str, Any]] = []
+    owner_ok = False
+    owner_status = None
+    foreign_exposed = False
+    foreign_status = None
+    for url in urls:
+        pair = request_auth(client, "GET", url, auth, base_url)
+        status = int(pair.status or 0)
+        if owner_status is None:
+            owner_status = status
+        if status == 200:
+            owner_ok = True
+        rows.append({"url": url, "primary_status": status})
+        if secondary is not None:
+            other = request_auth(client, "GET", url, secondary, base_url)
+            ostatus = int(other.status or 0)
+            foreign_status = ostatus if foreign_status is None else foreign_status
+            same = (
+                is_substantive_json(status, pair.response_body)
+                and is_substantive_json(ostatus, other.response_body)
+                and (pair.response_body or "").strip() == (other.response_body or "").strip()
+            )
+            rows[-1]["secondary_status"] = ostatus
+            rows[-1]["same_body"] = same
+            if same:
+                foreign_exposed = True
+                evidence.append(scrub_pair(other, auth, secondary))
+    if not owner_ok:
+        # Session was ready but no resource accepted it — report as not-ok, not a skip
+        # (unlike T03 which cannot assess enforcement). BIZ is "owner access works".
+        finding = True
+    else:
+        finding = foreign_exposed
+    return {
+        "test_id": "BIZ",
+        "category": "authorization",
+        "observations": {
+            "mode": "engagement_session",
+            "owner_access_ok": owner_ok,
+            "owner_status": owner_status,
+            "foreign_status": foreign_status,
+            "foreign_exposed": foreign_exposed,
+            "probes": rows,
+        },
+        "finding_candidate": finding,
+        "evidence_pairs": evidence,
+        "evidence_hints": [f"GET {u} with engagement session" for u in urls],
+    }
+
+
+def run(client, base_url: str, **kwargs) -> dict[str, Any]:
+    mode, auth = resolve_mode(client, kwargs)
+    if mode == "engagement":
+        return _run_with_session(client, base_url, auth, **kwargs)
+    if mode == "skip":
+        return skip_result(
+            "BIZ",
+            "authorization",
+            SKIP_NO_AUTH_SESSION,
+            "engagement login profile not ready; skipped lab account_a business-logic probes",
+        )
+
     if not _login_ok(client, base_url, "account_a", "account-a-pass"):
         return {
             "test_id": "BIZ",
