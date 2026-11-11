@@ -21,7 +21,25 @@ from attestra.runner.scanners.base import (
 )
 from attestra.runner.scanners.nuclei_policy import excluded_tags, templates_allowed
 
-RATE_LIMIT = "50"
+DEFAULT_RATE_LIMIT = "50"
+
+
+def rate_limit() -> str:
+    """Nuclei -rl (requests/sec). Lower it for Cloudflare/WAF-fronted targets that reset
+    connections under burst: ATTESTRA_NUCLEI_RATE_LIMIT=N (1..150); default 50.
+    """
+    import os as _os
+
+    raw = (_os.environ.get("ATTESTRA_NUCLEI_RATE_LIMIT") or "").strip()
+    if raw.isdigit():
+        n = int(raw)
+        if n >= 1:
+            return str(min(n, 150))
+    return DEFAULT_RATE_LIMIT
+
+
+# Backwards-compatible module constant (static default; call rate_limit() for the live value).
+RATE_LIMIT = DEFAULT_RATE_LIMIT
 # Authenticated scans: the per-scan secret dir (outside data/raw) is mounted here read-only.
 CONTAINER_SECRETS = "/attestra-secrets"
 STDERR_LOG_NAME = "nuclei-stderr.log"
@@ -62,7 +80,7 @@ def nuclei_flags(
         excluded_tags(profile=profile),
         "-ni",  # no interactsh: never send data to out-of-band servers
         "-rl",
-        RATE_LIMIT,
+        rate_limit(),
         # No -silent: the banner, template/target counts, warnings, [FTL] errors and the
         # periodic -stats lines go to stderr, which is kept (redacted) as nuclei-stderr.log.
         "-stats",
