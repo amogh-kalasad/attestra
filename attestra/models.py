@@ -879,6 +879,7 @@ class LibraryEntry(Base):
     snippet_apache: Mapped[str] = mapped_column(Text, default="")
     snippet_iis: Mapped[str] = mapped_column(Text, default="")
     snippet_cloudflare: Mapped[str] = mapped_column(Text, default="")
+    snippet_node: Mapped[str] = mapped_column(Text, default="")  # Node.js/Express/Next.js app-level fix
     updated_by: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

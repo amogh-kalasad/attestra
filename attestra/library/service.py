@@ -107,6 +107,7 @@ def entry_dict(e: LibraryEntry) -> dict:
         "importance": e.importance or "", "effort": e.effort or "", "fix_steps": e.fix_steps or "",
         "snippet_nginx": e.snippet_nginx or "", "snippet_apache": e.snippet_apache or "",
         "snippet_iis": e.snippet_iis or "", "snippet_cloudflare": e.snippet_cloudflare or "",
+        "snippet_node": e.snippet_node or "",
         "updated_by": e.updated_by, "updated_at": e.updated_at,
     }
 
@@ -387,8 +388,19 @@ def guidance_for_finding(s: Session, f: Finding) -> dict | None:
     return pack_guidance
 
 
+def server_type_for_finding(f: Finding) -> str | None:
+    """Infer nginx/apache/iis/cloudflare/node from one finding's own text when unambiguous."""
+    return detect_server_type(f.title or "", f.description or "", f.location or "")
+
+
 def server_type_for_findings(findings: list[Finding]) -> str | None:
-    """Infer nginx/apache/iis/cloudflare from finding text when unambiguous."""
+    """Infer nginx/apache/iis/cloudflare/node from finding text when unambiguous.
+
+    Kept for the engagement-wide "predominant stack" signal (e.g. the Site Grade panel);
+    per-finding remediation snippets use :func:`server_type_for_finding` instead so an
+    unrelated CDN/Cloudflare finding elsewhere in the report cannot blank out the correct
+    origin-stack snippet (e.g. Node/Express) for *this* finding.
+    """
     parts = []
     for f in findings:
         parts.append(f.title or "")
@@ -398,7 +410,13 @@ def server_type_for_findings(findings: list[Finding]) -> str | None:
 
 
 def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
-    """Maps finding id → guidance and report snippet pairs; plus detected server type."""
+    """Maps finding id → guidance and report snippet pairs; plus detected server type.
+
+    Each finding's config snippet is chosen from *that finding's own* evidence text, not
+    one server type guessed from every finding in the engagement — a report with both
+    Cloudflare-edge noise and an origin Node/Express disclosure must not let the Cloudflare
+    mentions elsewhere blank out (or override) the Node/Express snippet for the real finding.
+    """
     server_type = server_type_for_findings(findings)
     by_id: dict[int, dict] = {}
     report_snips: dict[int, list[tuple[str, str]]] = {}
@@ -407,7 +425,7 @@ def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
         g = guidance_for_finding(s, f)
         if g:
             by_id[f.id] = g
-            report_snips[f.id] = snippets_for_report(g, server_type)
+            report_snips[f.id] = snippets_for_report(g, server_type_for_finding(f))
         rem = remediation_api_fields(_safe_remediation_for_finding(f))
         if rem:
             rem_by_id[f.id] = rem

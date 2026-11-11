@@ -12,8 +12,8 @@ from typing import Any
 FIX_TAGS = frozenset({"headers", "tls", "cookies", "csp", "cors"})
 IMPORTANCE_VALUES = ("High", "Medium", "Low")
 EFFORT_VALUES = ("Easy", "Medium", "Hard")
-SNIPPET_KEYS = ("nginx", "apache", "iis", "cloudflare")
-SERVER_TYPES = ("nginx", "apache", "iis", "cloudflare")
+SNIPPET_KEYS = ("nginx", "apache", "iis", "cloudflare", "node")
+SERVER_TYPES = ("nginx", "apache", "iis", "cloudflare", "node")
 FIX_FIELD_KEYS = (
     "importance",
     "effort",
@@ -22,6 +22,7 @@ FIX_FIELD_KEYS = (
     "snippet_apache",
     "snippet_iis",
     "snippet_cloudflare",
+    "snippet_node",
 )
 
 # Header concepts that must never receive CSP-only library guidance (ENG1 F-7 / Expect-CT).
@@ -376,6 +377,18 @@ BY_TITLE: dict[str, dict[str, str]] = {
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: remove Server and X-Powered-By if present from origin.\n"
             "Cloudflare may still add its own cf-ray style headers; that is expected."
+        ),
+        "snippet_node": (
+            "// Express (or any app mounted behind it)\n"
+            "app.disable('x-powered-by');\n"
+            "// or, with helmet (also sets other hardening headers):\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet({ hidePoweredBy: true }));\n"
+            "\n"
+            "// Next.js: next.config.js\n"
+            "module.exports = {\n"
+            "  poweredByHeader: false,\n"
+            "};"
         ),
     },
     "Active mixed content": {
@@ -939,6 +952,7 @@ def guidance_from_mapping(data: dict[str, Any] | Any) -> dict[str, Any]:
         "snippet_apache": snippets["apache"],
         "snippet_iis": snippets["iis"],
         "snippet_cloudflare": snippets["cloudflare"],
+        "snippet_node": snippets["node"],
     }
 
 
@@ -951,7 +965,7 @@ def has_fix_content(guidance: dict[str, Any] | None) -> bool:
 
 
 def detect_server_type(*texts: str) -> str | None:
-    """Return nginx / apache / iis / cloudflare when clearly mentioned, else None."""
+    """Return nginx / apache / iis / cloudflare / node when clearly mentioned, else None."""
     blob = " ".join(t for t in texts if t).lower()
     if not blob:
         return None
@@ -960,6 +974,8 @@ def detect_server_type(*texts: str) -> str | None:
         ("nginx", r"\bnginx\b"),
         ("apache", r"\bapache\b|\bhttpd\b"),
         ("iis", r"\biis\b|\bmicrosoft-iis\b|\bweb\.config\b"),
+        # X-Powered-By: Express, Next.js dev/server banners, or an explicit Node.js mention.
+        ("node", r"\bexpress\b|\bnext\.js\b|\bnextjs\b|\bnode\.js\b"),
     )
     hits = [name for name, pat in patterns if re.search(pat, blob)]
     if len(hits) == 1:

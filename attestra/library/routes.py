@@ -81,6 +81,7 @@ class EntryIn(BaseModel):
     snippet_apache: str = ""
     snippet_iis: str = ""
     snippet_cloudflare: str = ""
+    snippet_node: str = ""
 
 
 class EntryPatch(BaseModel):
@@ -100,6 +101,7 @@ class EntryPatch(BaseModel):
     snippet_apache: str | None = None
     snippet_iis: str | None = None
     snippet_cloudflare: str | None = None
+    snippet_node: str | None = None
 
 
 class ApplyIn(BaseModel):
@@ -292,12 +294,12 @@ def _ui_tenant(s, principal, tenant_id: int | None) -> int | None:
 
 def _form_entry(title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
                 importance="", effort="", fix_steps="", snippet_nginx="", snippet_apache="",
-                snippet_iis="", snippet_cloudflare="") -> dict:
+                snippet_iis="", snippet_cloudflare="", snippet_node="") -> dict:
     return {"title": title, "description": description, "impact": impact, "remediation": remediation,
             "references": references, "cwe": cwe or None, "default_severity": default_severity,
             "tags": tags, "rule_ids": rule_ids, "importance": importance, "effort": effort,
             "fix_steps": fix_steps, "snippet_nginx": snippet_nginx, "snippet_apache": snippet_apache,
-            "snippet_iis": snippet_iis, "snippet_cloudflare": snippet_cloudflare}
+            "snippet_iis": snippet_iis, "snippet_cloudflare": snippet_cloudflare, "snippet_node": snippet_node}
 
 
 @ui_router.get("/library", response_class=HTMLResponse)
@@ -319,7 +321,7 @@ def ui_create(request: Request, tenant_id: int = Form(...), title: str = Form(..
               default_severity: str = Form("medium"), tags: str = Form(""), rule_ids: str = Form(""),
               importance: str = Form(""), effort: str = Form(""), fix_steps: str = Form(""),
               snippet_nginx: str = Form(""), snippet_apache: str = Form(""), snippet_iis: str = Form(""),
-              snippet_cloudflare: str = Form("")):
+              snippet_cloudflare: str = Form(""), snippet_node: str = Form("")):
     ui, principal, redirect = _ui_ctx(request)
     if redirect:
         return redirect
@@ -333,6 +335,7 @@ def ui_create(request: Request, tenant_id: int = Form(...), title: str = Form(..
                 _form_entry(
                     title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
                     importance, effort, fix_steps, snippet_nginx, snippet_apache, snippet_iis, snippet_cloudflare,
+                    snippet_node,
                 ),
                 actor=principal.actor,
             )
@@ -431,7 +434,7 @@ def ui_update(request: Request, entry_id: int, title: str = Form(...), descripti
               default_severity: str = Form("medium"), tags: str = Form(""), rule_ids: str = Form(""),
               importance: str = Form(""), effort: str = Form(""), fix_steps: str = Form(""),
               snippet_nginx: str = Form(""), snippet_apache: str = Form(""), snippet_iis: str = Form(""),
-              snippet_cloudflare: str = Form(""), action: str = Form("save")):
+              snippet_cloudflare: str = Form(""), snippet_node: str = Form(""), action: str = Form("save")):
     ui, principal, redirect = _ui_ctx(request)
     if redirect:
         return redirect
@@ -447,6 +450,7 @@ def ui_update(request: Request, entry_id: int, title: str = Form(...), descripti
                 _form_entry(
                     title, description, impact, remediation, references, cwe, default_severity, tags, rule_ids,
                     importance, effort, fix_steps, snippet_nginx, snippet_apache, snippet_iis, snippet_cloudflare,
+                    snippet_node,
                 ),
                 actor=principal.actor,
             )
