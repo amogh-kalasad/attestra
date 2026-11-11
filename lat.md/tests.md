@@ -3737,3 +3737,39 @@ AutomatedTestExecution case rows with SKIPPED/BLOCKED and auth-loss notes appear
 
 When `automated_coverage_limitations.section` is set, the technical template emits `#automated-coverage-limitations`.
 
+## Phase 10 report genuineness
+
+Reproduction steps use real captured HTTP evidence instead of generic scanner boilerplate, and QA gates sign-off on background scans finishing while surfacing skipped multi-role IDOR/BOLA testing ([[tests/test_phase10_report_genuineness.py]]).
+
+[[attestra/reports/render.py#_reproduction_steps_for_finding]] prefers (1) an explicit stored narrative, (2) steps derived from [[attestra/reports/render.py#_verified_http_pairs_for_finding]] (shared with [[attestra/reports/render.py#_http_pair_embeds]]), then (3) a generic default — honest about "not independently reproduced" for unvalidated/needs-manual/potential findings instead of implying a PoC was performed. [[attestra/reports/qa/checks.py#check_background_scans_running]] is a critical gate blocking QA approval/signing while any [[attestra/models.py#AutomatedTestExecution]] is QUEUED/RUNNING. [[attestra/reports/qa/checks.py#check_authz_manual_testing_gap]] is a non-blocking warning raised when T04/T05/T06/T20/T22/ROLEDIFF cases were SKIPPED/BLOCKED (no secondary login profile, no write templates, mutation sends disabled), prompting a human reviewer to confirm manual multi-role (Admin vs. Standard User vs. Tenant B) and state-changing workflow testing before sign-off.
+
+### Reproduction steps use real HTTP evidence
+
+A finding with verified `http_pair` evidence gets concrete "Send METHOD URL ... server responded STATUS" steps pointing at the attached evidence instead of generic text.
+
+### Honest fallback without evidence
+
+An unvalidated finding with no captured HTTP evidence states plainly that it is an automated scanner/import observation only, not a performed proof-of-concept.
+
+### QA blocks sign-off while a scan is running
+
+[[attestra/reports/qa/checks.py#check_background_scans_running]] raises a critical issue (and `run_report_qa(...).ok` is False) when an engagement has a QUEUED/RUNNING `AutomatedTestExecution`.
+
+### QA warns on skipped IDOR BOLA probes
+
+[[attestra/reports/qa/checks.py#check_authz_manual_testing_gap]] raises a warning (never critical) naming the skipped/blocked test id when T22 (or another authorization probe) could not run.
+
+### Live HTML view drops DRAFT mark once signed
+
+The `GET /reports/{rid}` page shows the sealed file's background "DRAFT" watermark before sign-off, but not after [[attestra/reports/render.py#approve_report]] signs it — only the sign-off banner remains.
+
+### Sealed download drops mark and stays verifiable
+
+`GET /reports/{rid}/sealed` also loses the background watermark once signed (re-sealed by [[attestra/reports/render.py#_reseal_for_signing]] with a fresh sha256), and `verify_report` still reports a matching hash and a valid signature afterward.
+
+### Signed report resolves DRAFT placeholder text
+
+Once signed, the "this generation" Document control/Sign-off rows show the real reviewer/signer names instead of "Pending QA/approval (DRAFT)" text.
+
+[[attestra/reports/render.py#_polish_signed_placeholders]] leaves an *other*, still-unsigned prior version's own history row untouched even though it is baked into the same signed report's HTML.
+

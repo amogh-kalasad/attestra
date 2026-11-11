@@ -1319,7 +1319,8 @@ def download_report(rid: int, principal: Principal = Depends(require("report.rea
             docs_url=f"/reports/{rid}/export/docx",
         )
         audit.record(s, principal.actor, "report.download", "report", r.id)
-    return HTMLResponse(inject(sealed, banner), headers={"Cache-Control": "no-store"})
+    body = inject(sealed, banner, drop_draft_mark=(r.status == "signed"))
+    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/reports/{rid}/export/{fmt}")

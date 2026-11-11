@@ -16,6 +16,11 @@ from attestra.models import Report
 
 BANNER_ID = "attestra-signoff-record"
 _BODY_OPEN = re.compile(rb"<body\b[^>]*>", re.IGNORECASE)
+# The sealed HTML always bakes in a background "DRAFT" watermark at generation time
+# (every report starts life as draft); PDF/DOCX exports already recompute freshness
+# from the current status and drop it when signed (see [[attestra/reports/pdf.py#prepare_html]]).
+# @lat: [[reports#Sign-off record]]
+_DRAFT_MARK_RE = re.compile(rb'(?is)<div class="draft-mark"[^>]*>.*?</div>')
 
 _STATUS_TEXT = {
     "draft": "Draft. Not submitted for QA, not approved and not signed.",
@@ -124,10 +129,18 @@ def banner_html(
     )
 
 
-def inject(sealed: bytes, banner: str) -> bytes:
-    """Return a copy of the sealed HTML with the banner right after <body>. The input is not modified."""
+def inject(sealed: bytes, banner: str, *, drop_draft_mark: bool = False) -> bytes:
+    """Return a copy of the sealed HTML with the banner right after <body>.
+
+    The input (and the file on disk) is never modified. When ``drop_draft_mark`` is
+    True — the report is ``signed`` — the served copy also strips the background
+    "DRAFT" watermark that was baked into the sealed HTML at generation time, so a
+    signed report never visually still reads as a draft underneath its sign-off
+    banner, even though the frozen file itself stays byte-for-byte untouched.
+    """
+    body = _DRAFT_MARK_RE.sub(b"", sealed) if drop_draft_mark else sealed
     data = banner.encode("utf-8")
-    m = _BODY_OPEN.search(sealed)
+    m = _BODY_OPEN.search(body)
     if not m:
-        return data + sealed
-    return sealed[: m.end()] + data + sealed[m.end():]
+        return data + body
+    return body[: m.end()] + data + body[m.end():]

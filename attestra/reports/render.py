@@ -86,8 +86,11 @@ def _finding_validation_status_label(f) -> str:
 
 
 def _reproduction_steps_for_finding(f) -> str:
-    """Stored reproduction_steps when present; else a short location/tool default."""
+    """Stored reproduction_steps when present; else derived from real HTTP PoC evidence;
+    else an honest scanner/import default that never implies an unperformed PoC.
+    """
     # @lat: [[reports#Generation]]
+    # @lat: [[reports#Real evidence (proof of concept)]]
     from attestra.reports.labels import tool_label
 
     stored = getattr(f, "reproduction_steps", None)
@@ -109,6 +112,25 @@ def _reproduction_steps_for_finding(f) -> str:
                     url = str(u).strip()
                     break
 
+    # Prefer a concrete, real-evidence-backed step over generic boilerplate: when a
+    # sanitized HTTP request/response pair was actually captured for this finding, name
+    # the exact method/URL/status and point at the attached evidence block instead of a
+    # placeholder "Navigate to ... Reproduce with <tool> evidence attached" line.
+    pairs = _verified_http_pairs_for_finding(f)
+    if pairs:
+        _, doc = pairs[0]
+        method = str(doc.get("method") or "GET").upper()
+        pair_url = str(doc.get("url") or "").strip() or url or "the affected endpoint"
+        status = doc.get("status")
+        status_s = str(status) if status not in (None, "") else "an observed response"
+        n = len(pairs)
+        block_phrase = "HTTP evidence block" + ("s" if n > 1 else "")
+        return (
+            f"1. Send {method} {pair_url} as captured in the attached, sanitized "
+            f"request/response evidence below (server responded {status_s}). "
+            f"2. See the {n} attached {block_phrase} for the exact bytes sent and received."
+        )
+
     param = (getattr(f, "param", None) or "").strip()
     tools = getattr(f, "tools", None) or []
     if isinstance(tools, str):
@@ -122,6 +144,18 @@ def _reproduction_steps_for_finding(f) -> str:
         step1 = f"1. Navigate to {url}."
     else:
         step1 = "1. Navigate to the affected asset or endpoint for this finding."
+
+    # No captured HTTP PoC: say so honestly rather than implying one was reproduced.
+    # Confirmed findings may still have been reproduced manually without an attached
+    # pair (e.g. a browser-driven check); only unconfirmed validation classes get the
+    # stronger "not independently reproduced" wording.
+    validation = _validation_status_of(f)
+    if validation in ("unvalidated", "needs_manual_validation", "potential"):
+        return (
+            f"{step1} 2. This reflects an automated scanner/import observation only — "
+            "no manual proof-of-concept request/response has been captured or attached; "
+            "reproduce manually and attach HTTP evidence before relying on this finding."
+        )
     return f"{step1} 2. Reproduce with {tool_phrase} evidence attached."
 
 
@@ -697,43 +731,56 @@ def _format_http_pair_display(doc: dict) -> str:
     return "\n".join(parts)
 
 
-def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
-    """Load http_pair evidence (hash-verified), defensive re-mask, for report display."""
+def _verified_http_pairs_for_finding(f) -> list[tuple[Any, dict]]:
+    """Hash-verified, re-masked http_pair evidence as ``(Evidence row, parsed doc)`` pairs.
+
+    Shared by [[_http_pair_embeds]] (full raw request/response display) and
+    [[_reproduction_steps_for_finding]] (deriving real, non-generic PoC steps) so a
+    finding with captured HTTP evidence is described consistently in both places.
+    """
+    # @lat: [[reports#Real evidence (proof of concept)]]
     import json
 
     from attestra.evidence.mask import mask_bytes
 
+    out: list[tuple[Any, dict]] = []
+    for e in _filter_automated_vapt_evidence(f, list(getattr(f, "evidence", None) or [])):
+        if e.kind != "http_pair":
+            continue
+        path = Path(e.path)
+        if not path.is_file():
+            continue
+        try:
+            raw = services.read_stored_bytes(path)
+        except (OSError, LookupError):
+            continue
+        if hashlib.sha256(raw).hexdigest() != e.sha256:
+            continue
+        masked, _ = mask_bytes(raw, content_type="application/json")
+        try:
+            doc = json.loads(masked.decode("utf-8", "replace"))
+        except (ValueError, UnicodeError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        out.append((e, doc))
+    return out
+
+
+def _http_pair_embeds(findings: list) -> dict[int, list[dict]]:
+    """Load http_pair evidence (hash-verified), defensive re-mask, for report display."""
     out: dict[int, list[dict]] = {}
     for f in findings:
-        pairs: list[dict] = []
-        for e in _filter_automated_vapt_evidence(f, list(f.evidence or [])):
-            if e.kind != "http_pair":
-                continue
-            path = Path(e.path)
-            if not path.is_file():
-                continue
-            try:
-                raw = services.read_stored_bytes(path)
-            except (OSError, LookupError):
-                continue
-            if hashlib.sha256(raw).hexdigest() != e.sha256:
-                continue
-            masked, _ = mask_bytes(raw, content_type="application/json")
-            try:
-                doc = json.loads(masked.decode("utf-8", "replace"))
-            except (ValueError, UnicodeError):
-                continue
-            if not isinstance(doc, dict):
-                continue
-            pairs.append(
-                {
-                    "id": e.id,
-                    "filename": e.filename,
-                    "sha256": e.sha256,
-                    "note": e.note or "",
-                    "display": _format_http_pair_display(doc),
-                }
-            )
+        pairs = [
+            {
+                "id": e.id,
+                "filename": e.filename,
+                "sha256": e.sha256,
+                "note": e.note or "",
+                "display": _format_http_pair_display(doc),
+            }
+            for e, doc in _verified_http_pairs_for_finding(f)
+        ]
         if pairs:
             out[f.id] = pairs
     return out
@@ -1575,16 +1622,125 @@ def approve_report(
                        qa=(actor, user_id))
 
 
+def _polish_signed_placeholders(text: str, *, qa_by: str, approved_by: str) -> str:
+    """Resolve DRAFT/pending placeholder text that describes THIS generation's own
+    workflow state in [[attestra/reports/templates/technical.html.j2]], now that it
+    is signed: the Document control "this generation" row, its explanatory note, and
+    the Sign-off table's Author/QA reviewer/Approved rows and note.
+
+    Every substitution is bounded between unique literal anchors — e.g. the hardcoded
+    "Draft (this generation)" row, which the [[attestra/reports/render.py#_report_history]]
+    loop never produces — so historical rows describing OTHER, still-unsigned prior
+    versions are never touched. A missing anchor (other kinds, or templates without
+    this placeholder language) is a silent no-op: cosmetic polish must never fail or
+    corrupt a sign operation. The hash-of-self "pending freeze" cell and the
+    Certification-Authority signer/legal name themselves are left untouched by design —
+    a document cannot display its own final hash inline, and CA branding is a distinct,
+    institution-level concept independent of this report's own qa_by/approved_by.
+    """
+    import html as html_lib
+
+    qa_name = html_lib.escape(qa_by or "—")
+    approved_name = html_lib.escape(approved_by or "—")
+
+    start = text.find("Draft (this generation)")
+    end = text.find("pending freeze</td>")
+    if start != -1 and end != -1 and end > start:
+        window = text[start:end]
+        window = window.replace("Draft (this generation)", "Signed (this generation)", 1)
+        window = window.replace("Pending QA (DRAFT)", qa_name, 1)
+        window = window.replace("Pending approval (DRAFT)", approved_name, 1)
+        window = window.replace(">Draft generated<", ">Signed<", 1)
+        text = text[:start] + window + text[end:]
+    text = text.replace(
+        "This generation is a <b>DRAFT</b> until QA approval and signature complete in Attestra. "
+        "QA and Approved stay as explicit pending placeholders below; prior versions show recorded "
+        "QA/signer names when present.",
+        "This generation has been QA-reviewed and signed in Attestra. The QA and Approved cells "
+        "below show the recorded reviewer and signer.",
+        1,
+    )
+
+    text = text.replace(">Generated (DRAFT)<", ">Generated<", 1)
+    qa_row_start = text.find("<td>QA reviewer</td>")
+    if qa_row_start != -1:
+        qa_row_end = text.find("</tr>", qa_row_start)
+        if qa_row_end != -1:
+            window = text[qa_row_start:qa_row_end]
+            window = window.replace("Pending QA (DRAFT)", qa_name)
+            text = text[:qa_row_start] + window + text[qa_row_end:]
+
+    approved_row_start = text.find("<td>Approved / signed</td>")
+    if approved_row_start != -1:
+        approved_row_end = text.find("</tr>", approved_row_start)
+        if approved_row_end != -1:
+            window = text[approved_row_start:approved_row_end]
+            window = window.replace(' <span class="meta">(placeholder until signed)</span>', "", 1)
+            window = window.replace(' <span class="meta">(pending signature)</span>', "", 1)
+            window = window.replace("Pending approval (DRAFT)", approved_name, 1)  # name cell
+            window = window.replace("Pending approval (DRAFT)", "Signed", 1)  # mark cell
+            text = text[:approved_row_start] + window + text[approved_row_end:]
+    text = text.replace(
+        "This sealed generation is a <b>DRAFT</b>: QA reviewer and Approved / signed rows use "
+        "explicit pending placeholders. Prior document-control rows show recorded QA and signer "
+        "names when a previous version completed the workflow. Live status, hash check and "
+        "signature validity appear in the Attestra sign-off record when you open the report in "
+        "the product; the sealed file below stays unchanged.",
+        "This sealed generation has been QA-reviewed and signed in Attestra. Live status, hash "
+        "check and signature validity appear in the Attestra sign-off record when you open the "
+        "report in the product; the sealed file below stays unchanged.",
+        1,
+    )
+    return text
+
+
+def _reseal_for_signing(r, *, approved_by: str, qa_by: str) -> tuple[str, bool]:
+    """Strip the baked-in background DRAFT watermark and resolve DRAFT/pending
+    placeholder text from the sealed file at sign time.
+
+    Every report is generated with the watermark and placeholder text present (a
+    report always starts as draft); without this, the file users download from
+    [[attestra/api.py#download_sealed_report]] — "byte for byte, exactly as it was
+    hashed and signed" — would still visually read DRAFT forever even once signed.
+    The cosmetic ``.draft-mark`` div is removed, and [[attestra/reports/render.py#_polish_signed_placeholders]]
+    fills in the few cells that describe this generation's own now-known workflow
+    state. Finding content, embedded evidence, and the hashes shown inside the
+    document are otherwise untouched, so recomputing sha256/signature over this
+    polished content at the exact moment of signing keeps the "sealed file is
+    exactly what was hashed and signed" contract intact.
+    Returns ``(sha256, changed)``; a kind that never emits these markers (closure /
+    attestation letters) is a no-op and keeps the existing ``r.sha256``.
+    """
+    # @lat: [[reports#Sign-off record]]
+    from attestra.reports.export import _atomic_write_readonly
+    from attestra.reports.signoff import _DRAFT_MARK_RE
+
+    path = Path(r.path)
+    raw = path.read_bytes()
+    no_watermark = _DRAFT_MARK_RE.sub(b"", raw)
+    text = no_watermark.decode("utf-8", errors="replace")
+    polished = _polish_signed_placeholders(text, qa_by=qa_by, approved_by=approved_by)
+    final = polished.encode("utf-8")
+    if final == raw:
+        return r.sha256, False
+    _atomic_write_readonly(path, final)
+    return hashlib.sha256(final).hexdigest(), True
+
+
 def _mongo_sign(s: Session, r, *, actor: str, user_id: int | None, from_status, qa=None):
     """Mongo: sign (status+hash guarded) and audit in one transaction, then notify."""
-    signature = signing.sign(r.sha256)
+    qa_by_name = qa[0] if qa is not None else (r.qa_by or "")
+    sha256, resealed = _reseal_for_signing(r, approved_by=actor, qa_by=qa_by_name)
+    signature = signing.sign(sha256)
     algorithm = signing.algorithm_of(signature)
     updates = {"status": "signed", "signature": signature, "algorithm": algorithm,
                "approved_by": actor, "approved_by_user_id": user_id, "signed_at": utcnow()}
+    if resealed:
+        updates["sha256"] = sha256
     if qa is not None:
         updates["qa_by"], updates["qa_by_user_id"] = qa
     signed = _mongo_transition(r, from_status=from_status, updates=updates, actor=actor, action="report.sign",
-                               sha256=r.sha256, signature=signature, algorithm=algorithm)
+                               sha256=sha256, signature=signature, algorithm=algorithm, resealed=resealed)
     from attestra.webhooks.service import safe_emit_report
 
     safe_emit_report(s, signed, actor=actor)

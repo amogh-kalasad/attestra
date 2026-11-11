@@ -708,6 +708,121 @@ def check_missing_screenshots(ctx: QaContext) -> None:
                     )
 
 
+_RUNNING_EXECUTION_STATUSES = frozenset({"QUEUED", "RUNNING"})
+
+
+def check_background_scans_running(ctx: QaContext) -> None:
+    """Block QA approval/signing while an automated scan is still queued or running.
+
+    "Let all background scans complete" before review: a report sealed while a scan
+    execution is still in flight cannot reflect that scan's eventual findings, so
+    QA/sign-off must wait rather than ship a report around an unfinished background job.
+    """
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    try:
+        from sqlalchemy import select
+
+        from attestra.models import AutomatedTestExecution
+
+        rows = list(
+            ctx.s.scalars(
+                select(AutomatedTestExecution).where(
+                    AutomatedTestExecution.engagement_id == ctx.engagement.id,
+                    AutomatedTestExecution.status.in_(tuple(_RUNNING_EXECUTION_STATUSES)),
+                )
+            )
+        )
+    except Exception:  # noqa: BLE001 — optional subsystem must never break QA
+        return
+    if not rows:
+        return
+    ctx.add(
+        "background_scan_in_progress",
+        "critical",
+        f"{len(rows)} automated test execution(s) are still queued/running for this "
+        "engagement; wait for all background scans to complete before QA review or sign-off",
+        details={
+            "execution_ids": [int(getattr(r, "id", 0) or 0) for r in rows],
+            "statuses": [getattr(r, "status", None) for r in rows],
+        },
+    )
+
+
+_AUTHZ_PROBE_TEST_IDS = frozenset({"T04", "T05", "T05-PRIV", "T06", "T20", "T22", "ROLEDIFF"})
+_AUTHZ_INCOMPLETE_STATUSES = frozenset({"SKIPPED", "BLOCKED"})
+
+
+def check_authz_manual_testing_gap(ctx: QaContext) -> None:
+    """Warn when multi-role IDOR/BOLA/state-changing probes were skipped or blocked.
+
+    Automated T04/T05/T06/T20/T22/ROLEDIFF probes approximate manual Admin vs. Standard
+    User vs. Tenant B authorization testing and state-changing (write) workflow testing.
+    When they could not run — no secondary login profile, no write templates captured,
+    mutation sends disabled — a human reviewer must confirm real manual testing was
+    performed (or document the scope limitation) before sign-off; this is a visibility
+    warning, not a hard block, since some engagements are legitimately read-only in scope.
+    """
+    # @lat: [[reports#World-class report QA (Phase 9)]]
+    if ctx.kind not in ("technical", ""):
+        return
+    try:
+        import json
+
+        from sqlalchemy import select
+
+        from attestra.models import AutomatedTestExecution
+
+        rows = list(
+            ctx.s.scalars(
+                select(AutomatedTestExecution)
+                .where(AutomatedTestExecution.engagement_id == ctx.engagement.id)
+                .order_by(AutomatedTestExecution.id.desc())
+                .limit(20)
+            )
+        )
+    except Exception:  # noqa: BLE001 — optional subsystem must never break QA
+        return
+    if not rows:
+        return
+
+    gaps: list[dict] = []
+    seen_ids: set[str] = set()
+    for ex in rows:
+        try:
+            payload = json.loads(getattr(ex, "result_json", None) or "{}")
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for c in list(payload.get("cases") or []):
+            if not isinstance(c, dict):
+                continue
+            tid = str(c.get("test_id") or "").upper()
+            status = str(c.get("status") or "").upper()
+            if tid in _AUTHZ_PROBE_TEST_IDS and status in _AUTHZ_INCOMPLETE_STATUSES and tid not in seen_ids:
+                seen_ids.add(tid)
+                gaps.append(
+                    {
+                        "test_id": tid,
+                        "status": status,
+                        "skip_reason": c.get("skip_reason") or "",
+                        "execution_id": int(getattr(ex, "id", 0) or 0),
+                    }
+                )
+
+    if not gaps:
+        return
+    ctx.add(
+        "authz_manual_testing_gap",
+        "warning",
+        f"Authorization probe(s) {', '.join(sorted(seen_ids))} were skipped or blocked "
+        "(no secondary login profile / no write templates captured / mutation disabled); "
+        "confirm manual multi-role (Admin vs. Standard User vs. Tenant B) IDOR/BOLA and "
+        "state-changing workflow testing was performed before sign-off, or document the limitation",
+        details={"gaps": gaps},
+    )
+
+
 def check_approval_status(ctx: QaContext) -> None:
     """Report.status consistency note for gate callers (informational)."""
     status = (getattr(ctx.report, "status", None) or "").strip()
@@ -749,5 +864,7 @@ ALL_CHECKS: list[Callable[[QaContext], None]] = [
     check_site_grade,
     check_missing_content,
     check_missing_screenshots,
+    check_background_scans_running,
+    check_authz_manual_testing_gap,
     check_approval_status,
 ]
