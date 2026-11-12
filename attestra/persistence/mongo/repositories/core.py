@@ -256,6 +256,7 @@ class AssetRepository(BaseRepository):
             "crawl_seed_urls": fields.get("crawl_seed_urls", ""),
             "crawl_spider_minutes": fields.get("crawl_spider_minutes"),
             "crawl_ajax_minutes": fields.get("crawl_ajax_minutes"),
+            "api_base_url": fields.get("api_base_url", "") or "",
         }
         return self.insert_with_id(payload, doc_id=fields.get("doc_id"))
 

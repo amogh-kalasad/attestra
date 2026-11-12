@@ -25,6 +25,16 @@ class SessionAuth:
     # path exists. Holds secret closures; never serialised.
     guard: Any = field(default=None, repr=False)
     cfg: dict[str, Any] = field(default_factory=dict, repr=False)
+    # Origin (scheme://host[:port]) of the profile's refresh_url; no path, no secrets.
+    refresh_origin: str = ""
+    # Extra origins allowed to receive the session headers (the resolved API base origin).
+    extra_origins: tuple[str, ...] = ()
+
+    def allow_origin(self, url: str) -> None:
+        """Also send session headers to ``url``'s origin (resolved API base for this run)."""
+        o = _origin(url)
+        if o[1] and o not in self.extra_origins:
+            self.extra_origins = tuple(self.extra_origins) + (o,)
 
     @property
     def injected_names(self) -> list[str]:
@@ -76,7 +86,8 @@ class SessionAuth:
         """Session headers only for the target origin (never another host)."""
         if self.status != "ready" or not self.headers:
             return {}
-        if _origin(url) != _origin(root):
+        o = _origin(url)
+        if o != _origin(root) and o not in self.extra_origins:
             return {}
         return dict(self.headers)
 
@@ -136,6 +147,12 @@ def load_session_auth(
             return out
         secret = credentials.get_secret(ref)
         cfg = sa._profile_cfg(profile)
+        try:
+            from attestra.automated_vapt.core.api_base import origin_of as _origin_of
+
+            out.refresh_origin = _origin_of(str(cfg.get("refresh_url") or ""))
+        except Exception:  # noqa: BLE001 - optional hint only
+            out.refresh_origin = ""
         extra = xh.parse_extra_headers(
             getattr(profile, "extra_headers", "") or "", own_header_name=xh.own_header_name(method, cfg)
         )

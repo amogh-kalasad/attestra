@@ -430,6 +430,13 @@ def _abs(root: str, path: str) -> str:
     return urljoin(root if root.endswith("/") else root + "/", path.lstrip("/"))
 
 
+def _api_root(ctx: Any) -> str:
+    """Base for relative API paths: resolved API base for the run, else the target."""
+    from attestra.automated_vapt.core.api_base import api_root
+
+    return api_root(ctx)
+
+
 def _build_scope(ctx: Any, urls: list[str]):
     return scope_validator.build_scope_from_asset(
         ctx.target_base_url,
@@ -466,7 +473,7 @@ def run_auth_bypass(
     api_urls = list(ctx.extra.get("_capture_api_urls") or [])
     if not api_urls:
         # fall back to capture_safe endpoints from js discovery
-        api_urls = [_abs(ctx.target_base_url, e.path) for e in _endpoints_from_ctx(ctx) if e.capture_safe]
+        api_urls = [_abs(_api_root(ctx), e.path) for e in _endpoints_from_ctx(ctx) if e.capture_safe]
     api_urls = api_urls[:cap]
     if not api_urls:
         return {
@@ -639,7 +646,7 @@ def run_idor(
     # still contributes, then confirm with a fresh baseline fetch.
     safe_urls = list(ctx.extra.get("_capture_api_urls") or [])
     if not safe_urls:
-        safe_urls = [_abs(ctx.target_base_url, e.path) for e in _endpoints_from_ctx(ctx) if e.capture_safe]
+        safe_urls = [_abs(_api_root(ctx), e.path) for e in _endpoints_from_ctx(ctx) if e.capture_safe]
     safe_urls = safe_urls[: max(5, min(cap // 2, 15))]
     scope = _build_scope(ctx, safe_urls)
     client = ctx.extra.get("httpx_client")
@@ -727,7 +734,7 @@ def run_idor(
             break
         # baseline with an owned id
         owned_id = next(iter(owned_primary))
-        base_url = _fill_idor_url(ctx.target_base_url, ep, owned_id)
+        base_url = _fill_idor_url(_api_root(ctx), ep, owned_id)
         if not base_url:
             continue
         # refresh scope to cover the new URLs
@@ -754,7 +761,7 @@ def run_idor(
         for fid in foreign[:3]:
             if requests_left <= 0:
                 break
-            probe_url = _fill_idor_url(ctx.target_base_url, ep, fid)
+            probe_url = _fill_idor_url(_api_root(ctx), ep, fid)
             if not probe_url:
                 continue
             scope = _build_scope(ctx, [probe_url])
@@ -979,7 +986,7 @@ def run_input_validation(
     for ep in ordered:
         if requests_left <= 0:
             break
-        for seed_url, param in _param_targets(ctx.target_base_url, ep, owned_id):
+        for seed_url, param in _param_targets(_api_root(ctx), ep, owned_id):
             if requests_left <= 0:
                 break
             scope = _build_scope(ctx, [seed_url])
@@ -1004,7 +1011,7 @@ def run_input_validation(
                     break
                 probe_url = _with_param(seed_url, param, payload)
                 # path traversal / long strings can break SSRF/scope; skip if out of origin
-                if _origin(probe_url) != _origin(ctx.target_base_url):
+                if _origin(probe_url) != _origin(seed_url):
                     continue
                 try:
                     scope_validator.validate_target_url(probe_url, scope, check_dns=not ctx.allow_private)

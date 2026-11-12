@@ -154,6 +154,11 @@ class AssetIn(BaseModel):
     in_cde: bool = False
     owner: str = ""
     notes: str = ""
+    api_base_url: str = Field(
+        "",
+        description="Optional API origin/base for automated API tests (e.g. https://api.example.com); "
+        "empty = login profile refresh URL host (same site) or the target",
+    )
 
 
 class AssignIn(BaseModel):
@@ -512,10 +517,28 @@ def download_authorization_document(aid: int, principal: Principal = Depends(req
 def add_asset(eid: int, body: AssetIn, principal: Principal = Depends(require("asset.write"))):
     def fn(s):
         services.get_engagement(s, eid, principal)
-        return services.add_asset(s, eid, **body.model_dump(), actor=principal.actor)
+        from attestra.automated_vapt.core import api_base as _ab
+
+        data = body.model_dump()
+        raw_api_base = data.pop("api_base_url", "")
+        try:
+            api_base = _ab.normalize_api_base(raw_api_base)
+        except _ab.ApiBaseError as exc:
+            raise services.ServiceError(str(exc)) from None
+        asset = services.add_asset(s, eid, **data, actor=principal.actor)
+        if api_base:
+            asset.api_base_url = api_base
+            s.flush()
+        return asset
 
     a = _run(fn)
-    return {"id": a.id, "identifier": a.identifier, "environment": a.environment, "test_types": a.test_types}
+    return {
+        "id": a.id,
+        "identifier": a.identifier,
+        "environment": a.environment,
+        "test_types": a.test_types,
+        "api_base_url": getattr(a, "api_base_url", "") or "",
+    }
 
 
 @app.get("/api/engagements/{eid}/assets")
@@ -535,6 +558,7 @@ def list_assets(eid: int, principal: Principal = Depends(require("engagement.rea
                 "in_cde": a.in_cde,
                 "owner": a.owner,
                 "notes": a.notes,
+                "api_base_url": getattr(a, "api_base_url", "") or "",
             }
             for a in services.get_engagement(s, eid, principal).assets
         ]

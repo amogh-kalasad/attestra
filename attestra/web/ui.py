@@ -976,11 +976,13 @@ def add_target(
     crawl_seed_urls: str = Form(""),
     crawl_spider_minutes: str = Form(""),
     crawl_ajax_minutes: str = Form(""),
+    api_base_url: str = Form(""),
 ):
     return _do(
         request, f"/engagements/{eid}", "#scope", f"Target {identifier.strip()} added to scope.",
         _crawl.add_asset_with_crawl, eid, crawl_seed_urls=crawl_seed_urls,
-        crawl_spider_minutes=crawl_spider_minutes, crawl_ajax_minutes=crawl_ajax_minutes, kind=kind, identifier=identifier, name=name, environment=environment,
+        crawl_spider_minutes=crawl_spider_minutes, crawl_ajax_minutes=crawl_ajax_minutes,
+        api_base_url=api_base_url, kind=kind, identifier=identifier, name=name, environment=environment,
         test_types=test_types, intrusive_allowed=intrusive_allowed, criticality=criticality, exposure=exposure,
         in_cde=in_cde, owner=owner, notes=notes,
     )
@@ -2423,8 +2425,12 @@ def save_target_crawl_settings(
     crawl_seed_urls: str = Form(""),
     crawl_spider_minutes: str = Form(""),
     crawl_ajax_minutes: str = Form(""),
+    api_base_url: str = Form(""),
 ):
-    """Extra Start URLs and crawl minutes for ZAP / nuclei (same host only, checked against scope)."""
+    """Extra Start URLs and crawl minutes for ZAP / nuclei (same host only, checked against scope).
+
+    Also the optional API Base URL used by automated API tests for relative /api paths.
+    """
     from attestra.runner import crawl as crawl_settings
 
     url = f"/engagements/{eid}/targets/{aid}"
@@ -2439,7 +2445,7 @@ def save_target_crawl_settings(
             services.get_asset(s, aid, principal)
             crawl_settings.update_crawl_settings(
                 s, eid, aid, seed_text=crawl_seed_urls, spider=crawl_spider_minutes, ajax=crawl_ajax_minutes,
-                actor=principal.actor,
+                actor=principal.actor, api_base_url=api_base_url,
             )
     except (services.ServiceError, LookupError) as e:
         return _back(url, error=str(e), anchor="#crawl")

@@ -357,6 +357,7 @@ def add_asset_with_crawl(
     crawl_seed_urls: str = "",
     crawl_spider_minutes: str = "",
     crawl_ajax_minutes: str = "",
+    api_base_url: str = "",
     **kwargs,
 ):
     """services.add_asset plus the optional Crawl Settings from the Add Target form."""
@@ -369,16 +370,35 @@ def add_asset_with_crawl(
         )
     except CrawlSettingsError as exc:
         raise services.ServiceError(str(exc)) from None
+    api_base = _validated_api_base(api_base_url, kind)
     asset = services.add_asset(s, engagement_id, **kwargs)
-    if seeds or spider is not None or ajax is not None:
+    if seeds or spider is not None or ajax is not None or api_base:
         asset.crawl_seed_urls = seeds
         asset.crawl_spider_minutes = spider
         asset.crawl_ajax_minutes = ajax
+        if api_base:
+            asset.api_base_url = api_base
         s.flush()
     return asset
 
 
-def update_crawl_settings(s, engagement_id: int, asset_id: int, *, seed_text, spider, ajax, actor: str):
+def _validated_api_base(raw, kind: str) -> str:
+    """Normalize the optional API Base URL (http/https origin or base, no trailing slash)."""
+    from attestra import services
+    from attestra.automated_vapt.core import api_base as _ab
+
+    try:
+        value = _ab.normalize_api_base(raw)
+    except _ab.ApiBaseError as exc:
+        raise services.ServiceError(str(exc)) from None
+    if value and kind not in ("web_app", "api"):
+        raise services.ServiceError("API Base URL only applies to web application and API targets")
+    return value
+
+
+def update_crawl_settings(
+    s, engagement_id: int, asset_id: int, *, seed_text, spider, ajax, actor: str, api_base_url=None
+):
     from attestra import audit, services
     from attestra.models import Asset
 
@@ -389,12 +409,16 @@ def update_crawl_settings(s, engagement_id: int, asset_id: int, *, seed_text, sp
         seeds, sp, aj = validate_settings(asset.identifier, asset.kind, seed_text, spider, ajax)
     except CrawlSettingsError as exc:
         raise services.ServiceError(str(exc)) from None
+    api_base = None if api_base_url is None else _validated_api_base(api_base_url, asset.kind)
     asset.crawl_seed_urls = seeds
     asset.crawl_spider_minutes = sp
     asset.crawl_ajax_minutes = aj
+    if api_base is not None:
+        asset.api_base_url = api_base
     audit.record(
         s, actor, "asset.crawl_settings", "asset", asset.id,
         seeds=len(seeds.splitlines()) if seeds else 0, spider_minutes=sp, ajax_minutes=aj,
+        api_base_url=api_base if api_base is not None else (getattr(asset, "api_base_url", "") or ""),
     )
     return asset
 

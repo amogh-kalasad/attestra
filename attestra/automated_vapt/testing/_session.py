@@ -119,13 +119,15 @@ def probe_urls(
 ) -> list[str]:
     """Same-origin capture URLs, falling back to the target base."""
     extra = ctx_extra(kwargs)
+    # Resolved API base (asset API Base URL / same-site refresh origin), else the target.
+    api_root = str(extra.get("_api_base_url") or base_url or "")
     seen: list[str] = []
 
     def add(raw: Any) -> None:
         u = str(raw or "").strip()
         if not u or u in seen:
             return
-        if base_url and not same_origin(u, base_url):
+        if base_url and not same_origin(u, base_url) and not (api_root and same_origin(u, api_root)):
             return
         seen.append(u)
 
@@ -139,7 +141,7 @@ def probe_urls(
                 if path:
                     from attestra.automated_vapt.testing._http import absolute
 
-                    add(absolute(base_url, str(path)))
+                    add(absolute(api_root or base_url, str(path)))
     else:
         for u in extra.get("_capture_urls") or []:
             add(u)

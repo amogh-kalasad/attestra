@@ -146,7 +146,9 @@ def collect_write_templates(ctx: Any) -> list[dict[str, Any]]:
             return
         # same origin only
         root = ctx.target_base_url
-        if _origin(url) != _origin(root):
+        from attestra.automated_vapt.core.api_base import api_root as _api_root
+
+        if _origin(url) != _origin(root) and _origin(url) != _origin(_api_root(ctx)):
             return
         key = (method_u, urlsplit(url).path)
         if key in seen:

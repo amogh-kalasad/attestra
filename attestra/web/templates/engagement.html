@@ -327,6 +327,9 @@
             <input type="number" id="crawl_ajax_minutes" name="crawl_ajax_minutes" min="0" max="{{ cd.max_minutes }}" placeholder="Default {{ cd.ajax_minutes }}">
             <div class="hint">0 turns the browser crawl off. Leave empty for the default.</div></div>
         </div>
+        <label for="api_base_url">API Base URL (Optional)</label>
+        <input type="url" id="api_base_url" name="api_base_url" placeholder="https://api.example.com">
+        <div class="hint">Used by automated API tests (T19-T22, JS-discovered APIs) for relative /api paths. Leave empty to use the login profile&#39;s refresh URL host (same site only), else this target. Pages stay on the target.</div>
       </details>
       <label for="notes">Notes (test accounts, exclusions, allow-listed IPs)</label>
       <textarea id="notes" name="notes" placeholder="Test user provisioned: qa-tester. Exclude /admin/payments/refund."></textarea>

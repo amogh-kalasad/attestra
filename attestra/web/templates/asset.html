@@ -83,6 +83,9 @@
         <input type="number" id="crawl_ajax_minutes" name="crawl_ajax_minutes" min="0" max="{{ cd.max_minutes }}" value="{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else '' }}" placeholder="Default {{ cd.ajax_minutes }}">
         <div class="hint">0 turns the browser crawl off. Empty uses the default.</div></div>
     </div>
+    <label for="api_base_url">API Base URL (Optional)</label>
+    <input type="url" id="api_base_url" name="api_base_url" value="{{ asset.api_base_url or '' }}" placeholder="https://api.example.com">
+    <div class="hint">Used by automated API tests (T19-T22, JS-discovered APIs) for relative /api paths. Leave empty to use the login profile&#39;s refresh URL host (same site only), else this target. Pages stay on the target.</div>
     <div class="form-actions"><button type="submit">Save Crawl Settings</button></div>
   </form>
   {% else %}
@@ -90,6 +93,7 @@
     <tr><th>Extra Start URLs</th><td class="mono">{% if asset.crawl_seed_urls %}{% for u in asset.crawl_seed_urls.splitlines() %}{{ u }}<br>{% endfor %}{% else %}-{% endif %}</td></tr>
     <tr><th>Spider Minutes</th><td>{{ asset.crawl_spider_minutes if asset.crawl_spider_minutes is not none else "Default " ~ cd.spider_minutes }}</td></tr>
     <tr><th>AJAX Spider Minutes</th><td>{{ asset.crawl_ajax_minutes if asset.crawl_ajax_minutes is not none else "Default " ~ cd.ajax_minutes }}</td></tr>
+    <tr><th>API Base URL</th><td class="mono">{{ asset.api_base_url or "- (refresh URL host or target)" }}</td></tr>
   </table>
   {% endif %}
 </div>

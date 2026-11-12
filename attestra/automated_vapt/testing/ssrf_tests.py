@@ -94,7 +94,8 @@ def _candidate_urls(base_url: str, ctx: Any | None, *, include_lab_default: bool
             qkeys = ep.get("query_keys") if isinstance(ep, dict) else getattr(ep, "query_keys", ()) or ()
             for q in qkeys:
                 if str(q).lower() in _URL_PARAM_NAMES and path:
-                    extra.append(absolute(base_url, str(path)))
+                    api_root = (getattr(ctx, "extra", {}) or {}).get("_api_base_url") or base_url
+                    extra.append(absolute(api_root, str(path)))
     for u in extra:
         low = u.lower()
         if "fetch" in low or "proxy" in low or "webhook" in low or "url=" in low:

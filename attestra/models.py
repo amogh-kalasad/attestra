@@ -341,6 +341,9 @@ class Asset(Base):
     crawl_seed_urls: Mapped[str] = mapped_column(Text, default="")
     crawl_spider_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     crawl_ajax_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Optional API origin/base for automated API tests (SPA on one host, API on another).
+    # Empty = fall back to the login profile's same-site refresh URL origin, then the target.
+    api_base_url: Mapped[str] = mapped_column(Text, default="")
 
     engagement: Mapped[Engagement] = relationship(back_populates="assets")
 

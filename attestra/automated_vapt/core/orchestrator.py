@@ -446,6 +446,14 @@ def run_execution(
                     engagement_id=eng.id,
                     target_url=ex.target_base_url,
                 )
+        # Relative API paths (JS discovery / T19-T22) go to the asset's API Base URL, else the
+        # login profile's same-site refresh URL origin, else the target. Pages stay on the target.
+        try:
+            from attestra.automated_vapt.core import api_base as _api_base
+
+            _api_base.apply_to_ctx(ctx, asset=asset)
+        except Exception as exc:  # noqa: BLE001 - never fail the run on base resolution
+            ctx.extra["_api_base"] = {"url": ex.target_base_url, "source": "target", "error": type(exc).__name__}
         results: list[dict[str, Any]] = []
         coverage_ledger: list[dict[str, Any]] = []
         from attestra.automated_vapt.coverage.ledger import (
@@ -997,6 +1005,7 @@ def _run_t01_http_capture(ctx: TestContext, category: str) -> dict[str, Any]:
         "status_counts": status_counts,
         "auth": auth.public() if auth is not None else auth_info,
         "js_api": ctx.extra.get("_js_api"),
+        "api_base": ctx.extra.get("_api_base"),
     }
     if auth_loss_note:
         blocked_n = sum(1 for p in pages if p["status"] == "BLOCKED")
