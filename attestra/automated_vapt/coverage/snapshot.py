@@ -12,7 +12,6 @@ from urllib.parse import parse_qsl, urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from attestra.auth_web.coverage import _route_bucket
 from attestra.automated_vapt.coverage.models import CoverageSnapshot
 from attestra.models import (
     AuthChecklistItem,
@@ -123,6 +122,195 @@ def _ledger_status_tested(entry: dict[str, Any]) -> bool:
     return st in {"PASSED", "FINDING", "FAILED"}
 
 
+
+def _normalize_endpoint(url_or_path: str) -> str:
+    """Path-only key: drop scheme, host, query and fragment; no trailing slash."""
+    raw = (url_or_path or "").strip()
+    if not raw:
+        return ""
+    raw = raw.split("#")[0].split("?")[0].strip()
+    if not raw:
+        return ""
+    if "://" in raw:
+        try:
+            path = urlsplit(raw).path or "/"
+        except ValueError:
+            path = raw
+    else:
+        path = raw if raw.startswith("/") else "/" + raw
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    return path
+
+
+_DONE_SCAN_STATUSES = frozenset({"done", "completed", "finished", "imported", "succeeded", "success"})
+_SKIP_SCAN_STATUSES = frozenset({
+    "queued", "running", "failed", "refused", "cancelled", "canceled", "error", "timeout",
+})
+
+
+def _scan_artifact_dir(run) -> "Path | None":
+    from pathlib import Path
+
+    raw = Path((getattr(run, "raw_artifact_uri", None) or "").strip())
+    if raw.is_dir():
+        return raw
+    if raw.suffix and raw.parent.is_dir():
+        return raw.parent
+    try:
+        from attestra import config
+
+        data_dir = Path(getattr(config, "DATA_DIR", "data"))
+        fallback = data_dir / "raw" / f"scan-{getattr(run, 'id', '')}"
+        if fallback.is_dir():
+            return fallback
+    except Exception:  # noqa: BLE001 - inventory is best-effort
+        return None
+    return None
+
+
+def _js_paths_from_cache(data: Any) -> set[str]:
+    paths: set[str] = set()
+    if isinstance(data, dict):
+        eps = data.get("endpoints") or data.get("endpoints_list") or []
+    elif isinstance(data, list):
+        eps = data
+    else:
+        return paths
+    for e in eps:
+        if isinstance(e, str):
+            key = _normalize_endpoint(e)
+        elif isinstance(e, dict):
+            key = _normalize_endpoint(str(e.get("path") or e.get("url") or ""))
+        else:
+            continue
+        if key:
+            paths.add(key)
+    return paths
+
+
+def _collect_scan_inventory(session: Session, engagement_id: int) -> tuple[set[str], set[str], bool]:
+    """ZAP URL lists and JS API caches from finished ZAP scans on this engagement.
+
+    Returns (zap_urls, js_paths, zap_authenticated). Failures return empty sets.
+    """
+    from pathlib import Path
+
+    zap: set[str] = set()
+    js: set[str] = set()
+    zap_authenticated = False
+    try:
+        from attestra.models import ScanRun
+
+        runs = list(
+            session.scalars(
+                select(ScanRun).where(
+                    ScanRun.engagement_id == engagement_id,
+                    ScanRun.tool == "zap",
+                )
+            ).all()
+        )
+    except Exception:  # noqa: BLE001 - snapshot must still return crawl/ledger counts
+        return zap, js, False
+    for run in runs:
+        st = (getattr(run, "status", "") or "").strip().lower()
+        if st in _SKIP_SCAN_STATUSES:
+            continue
+        if st and st not in _DONE_SCAN_STATUSES:
+            continue
+        folder = _scan_artifact_dir(run)
+        if folder is None:
+            continue
+        urls_file = folder / "zap-urls.txt"
+        if urls_file.is_file():
+            try:
+                for line in urls_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                    key = _normalize_endpoint(line)
+                    if key:
+                        zap.add(key)
+            except OSError:
+                pass
+        js_file = folder / "js-api-endpoints.json"
+        if js_file.is_file():
+            try:
+                data = json.loads(js_file.read_text(encoding="utf-8"))
+                js |= _js_paths_from_cache(data)
+            except (OSError, TypeError, ValueError):
+                pass
+        if zap and bool(getattr(run, "authenticated", False)):
+            zap_authenticated = True
+    return zap, js, zap_authenticated
+
+
+def _endpoint_sets(
+    routes: list,
+    ledger_rows: list[dict[str, Any]],
+    zap_urls: set[str],
+    js_paths: set[str],
+) -> tuple[set[str], set[str]]:
+    """Union discovered/tested endpoint paths from crawl, ledger, ZAP, and JS discovery."""
+    discovered: set[str] = set()
+    tested: set[str] = set()
+    for r in routes:
+        key = _normalize_endpoint(getattr(r, "url", None) or "")
+        if not key:
+            continue
+        discovered.add(key)
+        if (getattr(r, "status", "") or "") == "visited":
+            tested.add(key)
+    for entry in ledger_rows:
+        if not isinstance(entry, dict):
+            continue
+        key = _normalize_endpoint(str(entry.get("target_endpoint") or entry.get("url") or ""))
+        if not key:
+            continue
+        discovered.add(key)
+        if _ledger_status_tested(entry):
+            tested.add(key)
+    for key in zap_urls:
+        if key:
+            discovered.add(key)
+            # ZAP requested and scanned these URLs.
+            tested.add(key)
+    for key in js_paths:
+        if key:
+            discovered.add(key)
+            # JS discovery alone is not a test; ledger/ZAP may already have marked it tested.
+    return discovered, tested
+
+
+def _authenticated_endpoint_keys(
+    routes: list,
+    ledger_rows: list[dict[str, Any]],
+    zap_urls: set[str],
+    zap_authenticated: bool,
+) -> set[str]:
+    keys: set[str] = set()
+    for r in routes:
+        if _route_is_authenticated(r):
+            key = _normalize_endpoint(getattr(r, "url", None) or "")
+            if key:
+                keys.add(key)
+    for entry in ledger_rows:
+        if not isinstance(entry, dict):
+            continue
+        key = _normalize_endpoint(str(entry.get("target_endpoint") or entry.get("url") or ""))
+        if not key:
+            continue
+        auth = entry.get("auth_context")
+        has_auth = False
+        if isinstance(auth, dict):
+            st = str(auth.get("status") or "").strip().lower()
+            has_auth = st in {"ready", "ok"} or bool(auth.get("profile_id") or auth.get("enabled"))
+        elif isinstance(auth, str) and auth.strip().lower() not in {"", "none", "anonymous", "unauthenticated"}:
+            has_auth = True
+        if has_auth:
+            keys.add(key)
+    if zap_authenticated:
+        keys |= {k for k in zap_urls if k}
+    return keys
+
+
 def build_coverage_snapshot(session: Session, engagement_id: int) -> dict:
     """Aggregate checklist + route + element + automated-execution coverage for ``engagement_id``.
 
@@ -141,18 +329,26 @@ def build_coverage_snapshot(session: Session, engagement_id: int) -> dict:
             select(AuthRouteInventory).where(AuthRouteInventory.engagement_id == engagement_id)
         ).all()
     )
-    route_bucket = _route_bucket(routes)
-    snap.endpoints_discovered = route_bucket["discovered"]
-    snap.endpoints_tested = route_bucket["visited"]
-    snap.endpoints_untested = max(0, snap.endpoints_discovered - snap.endpoints_tested)
-    snap.coverage_pct_endpoints = float(route_bucket["coverage_pct"])
-
-    auth_n = sum(1 for r in routes if _route_is_authenticated(r))
-    snap.endpoints_authenticated = auth_n
-    snap.endpoints_unauthenticated = max(0, snap.endpoints_discovered - auth_n)
-
+    # Count endpoints from crawl inventory PLUS the automated-test ledger,
+    # finished ZAP URL lists, and JS-discovered API paths. Auth-crawl routes
+    # alone are often empty (SPA / no auth-web crawl), which used to leave
+    # endpoints_tested=0 and block QA even after a real ZAP + automated run.
     ledger_rows = _collect_ledger_rows(session, engagement_id)
     snap.ledger_entry_count = len(ledger_rows)
+    zap_urls, js_paths, zap_authenticated = _collect_scan_inventory(session, engagement_id)
+    discovered, tested = _endpoint_sets(routes, ledger_rows, zap_urls, js_paths)
+    snap.endpoints_discovered = len(discovered)
+    snap.endpoints_tested = len(tested)
+    snap.endpoints_untested = max(0, snap.endpoints_discovered - snap.endpoints_tested)
+    snap.coverage_pct_endpoints = (
+        round((snap.endpoints_tested / snap.endpoints_discovered) * 100.0, 1)
+        if snap.endpoints_discovered
+        else 0.0
+    )
+
+    auth_keys = _authenticated_endpoint_keys(routes, ledger_rows, zap_urls, zap_authenticated)
+    snap.endpoints_authenticated = len(auth_keys & discovered)
+    snap.endpoints_unauthenticated = max(0, snap.endpoints_discovered - snap.endpoints_authenticated)
 
     visited = [r for r in routes if r.status == "visited"]
     methods = {
