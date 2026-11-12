@@ -21,12 +21,12 @@ from attestra.runner.scanners.base import (
 )
 from attestra.runner.scanners.nuclei_policy import excluded_tags, templates_allowed
 
-DEFAULT_RATE_LIMIT = "50"
+DEFAULT_RATE_LIMIT = "30"
 
 
 def rate_limit() -> str:
     """Nuclei -rl (requests/sec). Lower it for Cloudflare/WAF-fronted targets that reset
-    connections under burst: ATTESTRA_NUCLEI_RATE_LIMIT=N (1..150); default 50.
+    connections under burst: ATTESTRA_NUCLEI_RATE_LIMIT=N (1..150); default 30.
     """
     import os as _os
 
@@ -107,8 +107,9 @@ class NucleiAdapter(ScannerAdapter):
     empty_report_ok = True  # nuclei writes nothing when no template matched
     tool_log_name = STDERR_LOG_NAME
     tool_log_streams = ("stderr",)
-    # The first run downloads the template library; a full baseline sends about 13,000 requests.
-    default_timeout_s = 1800
+    # Full baseline (~5800 templates, ~106k requests) needs 45-95 min at a
+    # WAF-safe rate; 7200s leaves headroom. Override with ATTESTRA_SCANNER_TIMEOUT_NUCLEI.
+    default_timeout_s = 7200
 
     def available(self) -> bool:
         return which("nuclei") is not None
