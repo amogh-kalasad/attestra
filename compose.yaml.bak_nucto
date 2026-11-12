@@ -1,0 +1,258 @@
+# Local Attestra stack: single-node MongoDB replica set + API + worker.
+# Start:  docker compose up -d --build
+# Stop:   docker compose down
+# API:    http://127.0.0.1:8000
+# Mongo:  mongodb://127.0.0.1:27017/?replicaSet=rs0 (loopback only)
+#
+# Scanner digests (ZAP/Nuclei/testssl/Naabu): defaults match docker/scanner-digests.env.
+# Override via root `.env`. One-shot `scanner-pull` validates + pulls them on up.
+
+services:
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - attestra
+
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo-init/init-replica-set.js:/init-replica-set.js:ro
+    entrypoint: ["mongosh", "--host", "mongo:27017", "--file", "/init-replica-set.js"]
+    restart: "no"
+    networks:
+      - attestra
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATTESTRA_MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      ATTESTRA_PERSISTENCE: mongo
+      ATTESTRA_STORAGE: mongo
+      # Defaults stay off. scripts/compose_up.* --local-testing turns these on in `.env`.
+      ATTESTRA_AUTOMATED_VAPT_ENABLED: ${ATTESTRA_AUTOMATED_VAPT_ENABLED:-false}
+      ATTESTRA_AUTOMATED_VAPT_MUTATION: ${ATTESTRA_AUTOMATED_VAPT_MUTATION:-0}
+      ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
+      ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
+      ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}
+      ATTESTRA_PUBLIC_URL: ${ATTESTRA_PUBLIC_URL:-http://127.0.0.1:8000}
+      ATTESTRA_AUTH_SECRET_DIR: ${ATTESTRA_AUTH_SECRET_DIR:-/data/auth-secrets}
+      ATTESTRA_DATA_DIR: /data
+      APP_ENV: ${APP_ENV:-local}
+      # Insecure default for local compose only; override via .env / shell.
+      ATTESTRA_SESSION_SECRET: ${ATTESTRA_SESSION_SECRET:-attestra-dev-session-change-me}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Bind mount so nested scanner `docker run -v` can use ATTESTRA_DOCKER_HOST_DATA_DIR.
+      - ${ATTESTRA_DOCKER_HOST_DATA_DIR:-./data}:/data
+    healthcheck:
+      # Prefer python (image has no curl). Optional helper: docker/scripts/healthcheck-api.sh
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+    # attestra init applies Mongo schema migrations (idempotent) then serves.
+    command: ["sh", "-c", "attestra init && attestra serve --host 0.0.0.0 --port 8000"]
+    restart: unless-stopped
+    networks:
+      - attestra
+
+  # One-shot: refuse placeholder digests and pull ZAP/Nuclei/testssl/Naabu for the worker.
+  # Inline script (not a bind-mounted .sh) so Windows CRLF checkouts cannot break `up`.
+  scanner-pull:
+    image: docker:27-cli
+    environment:
+      ATTESTRA_IMAGE_ZAP: ${ATTESTRA_IMAGE_ZAP:-ghcr.io/zaproxy/zaproxy@sha256:7aaa659b0d43078febd82e29bad112285c370727e86ab8340444220e17d9f0d2}
+      ATTESTRA_IMAGE_NUCLEI: ${ATTESTRA_IMAGE_NUCLEI:-docker.io/projectdiscovery/nuclei@sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb}
+      ATTESTRA_IMAGE_TESTSSL: ${ATTESTRA_IMAGE_TESTSSL:-docker.io/drwetter/testssl.sh@sha256:4a96111aaacfbc2200f4d12f7c32695c2a70392406c505bcb0cdf2a1f1ae0216}
+      ATTESTRA_IMAGE_NAABU: ${ATTESTRA_IMAGE_NAABU:-docker.io/projectdiscovery/naabu@sha256:67c120a669954b768354197fc04328e08027898dc821bc8f276b3e26cd21f6aa}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        zeros=0000000000000000000000000000000000000000000000000000000000000000
+        pull_one() {
+          name=$$1; img=$$2
+          case "$$img" in
+            "") echo "ERROR: ATTESTRA_IMAGE_$${name} is empty" >&2; exit 1 ;;
+            *"@sha256:$${zeros}") echo "ERROR: ATTESTRA_IMAGE_$${name} is still a placeholder digest" >&2; exit 1 ;;
+            *"@sha256:"*) ;;
+            *) echo "ERROR: ATTESTRA_IMAGE_$${name} must be digest-pinned (repo@sha256:...): $$img" >&2; exit 1 ;;
+          esac
+          echo "Pulling $${name}: $${img}"
+          docker pull "$$img"
+        }
+        pull_one ZAP "$$ATTESTRA_IMAGE_ZAP"
+        pull_one NUCLEI "$$ATTESTRA_IMAGE_NUCLEI"
+        pull_one TESTSSL "$$ATTESTRA_IMAGE_TESTSSL"
+        pull_one NAABU "$$ATTESTRA_IMAGE_NAABU"
+        echo "All scanner images ready."
+    restart: "no"
+    networks:
+      - attestra
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATTESTRA_MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      ATTESTRA_PERSISTENCE: mongo
+      ATTESTRA_STORAGE: mongo
+      # Defaults stay off. scripts/compose_up.* --local-testing turns these on in `.env`.
+      ATTESTRA_AUTOMATED_VAPT_ENABLED: ${ATTESTRA_AUTOMATED_VAPT_ENABLED:-false}
+      ATTESTRA_AUTOMATED_VAPT_MUTATION: ${ATTESTRA_AUTOMATED_VAPT_MUTATION:-0}
+      ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
+      ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
+      ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}
+      ATTESTRA_PUBLIC_URL: ${ATTESTRA_PUBLIC_URL:-http://127.0.0.1:8000}
+      ATTESTRA_DATA_DIR: /data
+      # Host path of the ./data bind mount — required for nested scanner volume mounts.
+      ATTESTRA_DOCKER_HOST_DATA_DIR: ${ATTESTRA_DOCKER_HOST_DATA_DIR:-}
+      # Must sit under /data (bind-mounted) so host Docker can mount Nuclei/ZAP auth secrets.
+      # Default OS temp (/tmp/...) is invisible to the host engine in docker-out-of-Docker.
+      ATTESTRA_AUTH_SECRET_DIR: ${ATTESTRA_AUTH_SECRET_DIR:-/data/auth-secrets}
+      # Digest-pinned scanners (defaults = docker/scanner-digests.env). Override via `.env`.
+      ATTESTRA_IMAGE_ZAP: ${ATTESTRA_IMAGE_ZAP:-ghcr.io/zaproxy/zaproxy@sha256:7aaa659b0d43078febd82e29bad112285c370727e86ab8340444220e17d9f0d2}
+      ATTESTRA_IMAGE_NUCLEI: ${ATTESTRA_IMAGE_NUCLEI:-docker.io/projectdiscovery/nuclei@sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb}
+      ATTESTRA_IMAGE_TESTSSL: ${ATTESTRA_IMAGE_TESTSSL:-docker.io/drwetter/testssl.sh@sha256:4a96111aaacfbc2200f4d12f7c32695c2a70392406c505bcb0cdf2a1f1ae0216}
+      ATTESTRA_IMAGE_NAABU: ${ATTESTRA_IMAGE_NAABU:-docker.io/projectdiscovery/naabu@sha256:67c120a669954b768354197fc04328e08027898dc821bc8f276b3e26cd21f6aa}
+      APP_ENV: ${APP_ENV:-local}
+      ATTESTRA_SESSION_SECRET: ${ATTESTRA_SESSION_SECRET:-attestra-dev-session-change-me}
+      ATTESTRA_WORKER_INSTANCE: "1"
+    # Socket is root:root mode 660; supplementary group 0 lets uid 10001 talk to Docker.
+    group_add:
+      - "0"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      scanner-pull:
+        condition: service_completed_successfully
+    volumes:
+      - ${ATTESTRA_DOCKER_HOST_DATA_DIR:-./data}:/data
+      # Dev/compose only: lets the worker docker-run scanner containers on the host engine.
+      # Tradeoff: grants the worker Docker control on the host — do not copy this into production.
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["attestra", "worker"]
+    # Dockerfile HEALTHCHECK hits :8000; worker has no HTTP server.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import attestra"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - attestra
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ATTESTRA_MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      ATTESTRA_MONGODB_DB: attestra
+      ATTESTRA_PERSISTENCE: mongo
+      ATTESTRA_STORAGE: mongo
+      ATTESTRA_AUTOMATED_VAPT_ENABLED: ${ATTESTRA_AUTOMATED_VAPT_ENABLED:-false}
+      ATTESTRA_AUTOMATED_VAPT_MUTATION: ${ATTESTRA_AUTOMATED_VAPT_MUTATION:-0}
+      ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
+      ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
+      ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}
+      ATTESTRA_PUBLIC_URL: ${ATTESTRA_PUBLIC_URL:-http://127.0.0.1:8000}
+      ATTESTRA_DATA_DIR: /data
+      ATTESTRA_DOCKER_HOST_DATA_DIR: ${ATTESTRA_DOCKER_HOST_DATA_DIR:-}
+      ATTESTRA_AUTH_SECRET_DIR: ${ATTESTRA_AUTH_SECRET_DIR:-/data/auth-secrets}
+      ATTESTRA_IMAGE_ZAP: ${ATTESTRA_IMAGE_ZAP:-ghcr.io/zaproxy/zaproxy@sha256:7aaa659b0d43078febd82e29bad112285c370727e86ab8340444220e17d9f0d2}
+      ATTESTRA_IMAGE_NUCLEI: ${ATTESTRA_IMAGE_NUCLEI:-docker.io/projectdiscovery/nuclei@sha256:582d5546902e67052097cb2d07296c642d50a1afc5e44623cb038845df9a32eb}
+      ATTESTRA_IMAGE_TESTSSL: ${ATTESTRA_IMAGE_TESTSSL:-docker.io/drwetter/testssl.sh@sha256:4a96111aaacfbc2200f4d12f7c32695c2a70392406c505bcb0cdf2a1f1ae0216}
+      ATTESTRA_IMAGE_NAABU: ${ATTESTRA_IMAGE_NAABU:-docker.io/projectdiscovery/naabu@sha256:67c120a669954b768354197fc04328e08027898dc821bc8f276b3e26cd21f6aa}
+      APP_ENV: ${APP_ENV:-local}
+      ATTESTRA_SESSION_SECRET: ${ATTESTRA_SESSION_SECRET:-attestra-dev-session-change-me}
+      ATTESTRA_WORKER_INSTANCE: "2"
+    group_add:
+      - "0"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mongo-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      scanner-pull:
+        condition: service_completed_successfully
+    volumes:
+      - ${ATTESTRA_DOCKER_HOST_DATA_DIR:-./data}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["attestra", "worker"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import attestra"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - attestra
+
+volumes:
+  mongo-data:
+
+networks:
+  attestra:
+    driver: bridge
