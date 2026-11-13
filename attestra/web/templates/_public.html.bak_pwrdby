@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Trust Center{% endblock %}</title>
+<style>
+  :root {
+    --bg: #F8FAFB; --card: #fff; --ink: #0B1220; --quiet: #64748B; --rule: #E8EDF1;
+    --accent: #0F766E; --accent-hover: #115E59; --accent-ink: #fff;
+    --ok: #15803D; --bad: #B91C1C; --chip: #E8F6F3; --field: #F7F9FB; --placeholder: #64748B;
+    --radius: 14px; --font: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    --control-h: 44px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 var(--font); color: var(--ink); background: var(--bg); min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  .trust-top {
+    max-width: 880px; margin: 0 auto; padding: 24px 20px 0;
+    display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px;
+  }
+  .trust-top .mark {
+    width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-weight: 700; font-size: 15px;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 20px 56px; }
+  h1 { font-size: 28px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 10px; line-height: 1.2; }
+  h2 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; color: var(--accent-hover); }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: var(--radius); padding: 20px; margin: 12px 0; }
+  .ok { color: var(--ok); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
+  .badge {
+    display: inline-block; background: var(--chip); border-radius: 8px; padding: 6px 12px;
+    margin: 3px 4px 3px 0; font-weight: 500; font-size: 13px; color: var(--accent-hover);
+  }
+  .meta { color: var(--quiet); font-size: 13px; }
+  code { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  label { display: block; font-size: 13px; color: #475467; font-weight: 500; margin: 10px 0 6px; }
+  input, textarea {
+    font: inherit; color: var(--ink); background: var(--card); border: 1px solid #D0D5DD;
+    border-radius: 10px; padding: 0 14px; width: 100%; max-width: 420px; height: var(--control-h); text-align: left;
+  }
+  textarea { height: auto; min-height: 88px; padding: 12px 14px; max-width: 100%; resize: vertical; }
+  input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(15,118,110,.18); }
+  input[type=checkbox] { width: auto; height: auto; padding: 0; accent-color: var(--accent); }
+  button {
+    font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink);
+    border: 0; border-radius: 10px; padding: 0 18px; cursor: pointer; margin-top: 12px;
+    min-height: var(--control-h); height: var(--control-h);
+  }
+  button:hover { background: var(--accent-hover); }
+  footer { border-top: 1px solid var(--rule); margin-top: 40px; padding-top: 16px; color: var(--quiet); font-size: 13px; }
+  footer details summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+
+  /* ===== Attestra light design system ===== */
+  body { background: linear-gradient(180deg, #EEF8F6 0, var(--bg) 360px) no-repeat, var(--bg); }
+  .trust-top .mark { background: linear-gradient(135deg, #14B8A6, #0F766E); }
+  .card { box-shadow: 0 1px 2px rgba(15,40,60,.04), 0 1px 3px rgba(15,40,60,.05); border-radius: 12px; }
+  .badge { border: 1px solid #CDEBE5; font-weight: 600; }
+  h1 { font-weight: 650; letter-spacing: -.022em; }
+  button { box-shadow: 0 1px 2px rgba(15,118,110,.18); }
+  input, textarea { border-color: #D8E0E6; }
+  code { background: #F3F6F8; border: 1px solid var(--rule); border-radius: 5px; padding: 1px 5px; }
+</style>
+<link rel="stylesheet" href="/static/attestra.css?v=13">
+<script src="/static/attestra.js?v=10" defer></script>
+</head>
+<body class="public">
+<div class="trust-top"><span class="mark" aria-hidden="true">a</span> Trust Center</div>
+<main>
+{% block main %}{% endblock %}
+<footer>
+  <p>Published by the security team. Documents marked NDA are shared after a review of your request. Powered by Attestra.</p>
+  <details id="nda"><summary>NDA terms for requested documents</summary>
+    <p>By requesting a document you agree to keep it confidential, to use it only to assess this organisation's security, and not to share it outside your company without written permission. Downloads are logged.</p>
+  </details>
+</footer>
+</main>
+</body>
+</html>

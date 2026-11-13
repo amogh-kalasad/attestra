@@ -1061,14 +1061,13 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
         out = _zebra_tables(out)
         out = _size_columns(out)
         # Footer chrome last so zebra/size_columns never touch the split footer table.
-        # Left: Confidential · Page X of Y; right: Powered by Attestra (xhtml2pdf align=).
+        # Left: Confidential, Page X of Y.
         chrome = (
             '<div id="pdf-footer">'
             '<table class="pdf-footer-table" width="100%" cellpadding="0" cellspacing="0">'
             "<tr>"
-            '<td class="pdf-footer-left" align="left" width="68%">'
+            '<td class="pdf-footer-left" align="left" width="100%">'
             "Confidential &#183; Page <pdf:pagenumber> of <pdf:pagecount></td>"
-            '<td class="pdf-footer-right" align="right" width="32%">Powered by Attestra</td>'
             "</tr></table></div>"
         )
         out = re.sub(r"(?is)(<body[^>]*>)", r"\1" + chrome, out, count=1)

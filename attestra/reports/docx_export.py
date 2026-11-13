@@ -1104,23 +1104,11 @@ class Builder:
             for hp in ([p] + ([sec.first_page_header.paragraphs[0]] if not letter else [])):
                 hp._p.append(etree.fromstring(WATERMARK_XML))
         ftr = sec.footer.paragraphs[0]
-        ftr.alignment = 0  # left; Powered by Attestra is right-aligned tab
+        ftr.alignment = 0
         para_top = ftr._p.get_or_add_pPr()
         bdr = _el("w:pBdr")
         bdr.append(_el("w:top", **{"w__val": "single", "w__sz": 4, "w__space": 4, "w__color": "C9D1DC"}))
         para_top.append(bdr)
-        # Tab stop near right margin for "Powered by Attestra".
-        try:
-            from docx.oxml.ns import qn
-            from docx.shared import Twips
-
-            pPr = ftr._p.get_or_add_pPr()
-            tabs = _el("w:tabs")
-            tab = _el("w:tab", **{"w__val": "right", "w__pos": "9360"})
-            tabs.append(tab)
-            pPr.append(tabs)
-        except Exception:  # noqa: BLE001 — footer still usable without tab
-            pass
         self._run(ftr, "Confidential  \u00b7  ", {"muted": True, "size": 8.5})
         self._run(ftr, "Page ", {"muted": True, "size": 8.5})
         for r in add_field(ftr, "PAGE"):
@@ -1128,7 +1116,6 @@ class Builder:
         self._run(ftr, " of ", {"muted": True, "size": 8.5})
         for r in add_field(ftr, "NUMPAGES"):
             r.font.size, r.font.color.rgb = self.RGB and self.Pt(8.5), self.RGB.from_string(MUTED)
-        self._run(ftr, "\tPowered by Attestra", {"muted": True, "size": 8.5})
 
 
 def _find(node, pred):
