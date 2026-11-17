@@ -245,6 +245,8 @@ Engagement-scoped orchestrator for approved automated security-test executions (
 
 Flag: `ATTESTRA_AUTOMATED_VAPT_ENABLED` → [[attestra/config.py#AUTOMATED_VAPT_ENABLED]]. Rows: [[attestra/models.py#AutomatedTestExecution]] (migration `0034_automated_test_executions`). Statuses QUEUED/RUNNING/COMPLETED/FAILED/CANCELLED via [[attestra/automated_vapt/core/execution_manager.py#transition]]. Create/run/cancel: [[attestra/automated_vapt/core/orchestrator.py#create_execution]], [[attestra/automated_vapt/core/orchestrator.py#run_execution]], [[attestra/automated_vapt/core/orchestrator.py#cancel_execution]]. Scope reuses [[attestra/auth_web/scope.py]] through [[attestra/automated_vapt/core/scope_validator.py#validate_target_url]]. Authorization guard: [[attestra/automated_vapt/core/authorization_guard.py#assert_engagement_ready]]. API under `/api/automated-vapt/...` ([[attestra/automated_vapt/routes.py]]). E3 implements `SCOPE_SMOKE`; other catalogue ids return DEFERRED until later Elite phases.
 
+Upgrade (INT): every case is re-checked for readiness, gated by its response-class validity and the run validity, and intrusive cases are decided from the target asset environment — see [[run-validity-and-policy]]. Safe web/API probes: [[web-api-probes]]. Discovery, tenant strict mode and maintenance: [[attack-surface-and-platform]]. Intel feeds and report validity: [[intel-and-reporting]].
+
 ### Scope validation
 
 Elite targets must pass auth_web crawl allowlist and SSRF checks before execution.

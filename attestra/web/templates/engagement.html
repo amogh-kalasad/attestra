@@ -418,6 +418,7 @@
     {% elif wk.queued %}<span class="hint">Start it in a terminal: <span class="mono">attestra worker</span>{% if not wk.allowed %}. {{ wk.why }}{% elif not wk.role_ok %}, or ask an admin or lead to click Start Worker.{% endif %}</span>{% endif %}
     {% if wk.status.last_start_exited and wk.queued %}<span class="hint">The last worker started from this page has stopped. Check <span class="mono">{{ wk.status.log }}</span>.</span>{% endif %}
     {% endif %}
+    {% if stuck_jobs and stuck_jobs.count %}<span class="pill" id="stuck_jobs" style="background:#fef3c7;color:#92400e" title="{{ stuck_jobs.hint }}">{{ stuck_jobs.count }} stuck scan{{ "s" if stuck_jobs.count != 1 }} (no heartbeat for {{ stuck_jobs.threshold_s }}s)</span>{% endif %}
   </div>
   {% endif %}
   <table id="scan-runs-table" data-engagement-id="{{ e.id }}">
@@ -492,6 +493,7 @@
     </form>
   </details>
 </div>
+{% if discovery_enabled and can(prole, "finding.read") %}{% include "_discovery_candidates.html" %}{% endif %}
 
 {% if automated_vapt_enabled %}
 <!-- ============================================================ ELITE AUTOMATED TESTING -->
@@ -561,6 +563,7 @@
       <div class="av-head">
         <b>Run #{{ x.id }}</b>
         <span class="av-badge av-{{ x.status_class }}" data-role="auto-status">{{ x.status }}</span>
+        {% if x.run_validity_state and x.run_validity_state != 'NOT_COMPUTED' %}<span class="av-badge av-{{ 'ok' if x.run_validity_state == 'VALID' else 'warn' }}" data-role="run-validity" title="{{ x.run_validity_reasons|join('; ') }}">Run validity: {{ x.run_validity_state }}</span>{% endif %}
         <span class="meta" data-role="auto-meta">Profile {{ x.profile }}{% if x.requested_by %} &middot; by {{ x.requested_by }}{% endif %}{% if x.ended_at %} &middot; finished {{ x.ended_at }}{% elif x.created_at %} &middot; queued {{ x.created_at }}{% endif %}</span>
         {% if x.status == 'QUEUED' %}
         <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/cancel" style="display:inline" data-role="auto-cancel"><button type="submit">Cancel</button></form>
@@ -584,6 +587,21 @@
       </table>
       {% elif x.status in ('QUEUED', 'RUNNING') %}
       <p class="meta" data-role="auto-wait">Waiting for the worker to pick this up (status updates automatically).</p>
+      {% endif %}
+      {% if guided_plans_enabled and guided_plans %}
+      <details class="av-guided" id="guided-{{ x.id }}"><summary>Guided manual plans (D-05)</summary>
+        <p class="hint">Manual business-logic plans for the tester. Nothing is sent by Attestra; record what you observed. PASSED and FINDING need evidence ids.</p>
+        {% if x.guided_results %}<ul class="meta">{% for g in x.guided_results %}<li>{{ g.plan_id }}: <b>{{ g.status }}</b>{% if g.evidence_ids %} &middot; evidence {{ g.evidence_ids|join(', ') }}{% endif %}{% if g.recorded_by %} &middot; {{ g.recorded_by }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+        {% if can(prole, "engagement.write") %}
+        <form method="post" action="/engagements/{{ e.id }}/automated-vapt/executions/{{ x.id }}/guided" class="row" style="gap:6px">
+          <select name="plan_id" aria-label="Guided plan">{% for p in guided_plans %}<option value="{{ p.plan_id }}" {{ "disabled" if not p.available }}>{{ p.title or p.plan_id }}</option>{% endfor %}</select>
+          <select name="status" aria-label="Result"><option>PASSED</option><option>FINDING</option><option>NOT_TESTED</option><option>BLOCKED</option><option>INCONCLUSIVE</option></select>
+          <input name="evidence_ids" placeholder="Evidence ids (comma separated)" aria-label="Evidence ids">
+          <input name="note" placeholder="Note" aria-label="Note">
+          <button type="submit" class="secondary">Record</button>
+        </form>
+        {% endif %}
+      </details>
       {% endif %}
       <details><summary>Raw results</summary><pre class="av-raw mono">{{ x.result_pretty }}</pre></details>
     </div>

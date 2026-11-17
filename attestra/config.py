@@ -29,7 +29,7 @@ TEMPORAL_ADDRESS = os.environ.get("ATTESTRA_TEMPORAL_ADDRESS", "localhost:7233")
 TEMPORAL_NAMESPACE = os.environ.get("ATTESTRA_TEMPORAL_NAMESPACE", "default")
 TEMPORAL_TASK_QUEUE = os.environ.get("ATTESTRA_TEMPORAL_TASK_QUEUE", "attestra-scans")
 
-API_KEY_PEPPER = os.environ.get("ATTESTRA_API_KEY_PEPPER", "attestra-dev-pepper-change-me")
+API_KEY_PEPPER = os.environ.get("ATTESTRA_API_KEY_PEPPER", "attestra-dev-pepper-change-me")  # K-04: default refused in staging/production
 SESSION_SECRET = os.environ.get("ATTESTRA_SESSION_SECRET", "attestra-dev-session-change-me")
 API_RATE_LIMIT = int(os.environ.get("ATTESTRA_API_RATE_LIMIT", "120"))
 
@@ -76,6 +76,10 @@ _PLACEHOLDER_IMAGES = {
     "naabu": "docker.io/projectdiscovery/naabu@sha256:0000000000000000000000000000000000000000000000000000000000000006",
     "gitleaks": "docker.io/zricethezav/gitleaks@sha256:0000000000000000000000000000000000000000000000000000000000000007",
     "checkov": "docker.io/bridgecrew/checkov@sha256:0000000000000000000000000000000000000000000000000000000000000008",
+    # WP4 passive discovery (VERIFY: replace with real digests after `docker inspect`).
+    "subfinder": "docker.io/projectdiscovery/subfinder@sha256:0000000000000000000000000000000000000000000000000000000000000009",
+    "dnsx": "docker.io/projectdiscovery/dnsx@sha256:000000000000000000000000000000000000000000000000000000000000000a",
+    "httpx": "docker.io/projectdiscovery/httpx@sha256:000000000000000000000000000000000000000000000000000000000000000b",
 }
 SCANNER_IMAGES = {
     tool: os.environ.get(f"ATTESTRA_IMAGE_{tool.upper()}", default) for tool, default in _PLACEHOLDER_IMAGES.items()
@@ -128,6 +132,41 @@ AUTOMATED_VAPT_MUTATION = os.environ.get("ATTESTRA_AUTOMATED_VAPT_MUTATION", "0"
     "true",
     "yes",
 )
+
+
+def _flag(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+# --- Upgrade INT (WP1-WP4). Every new feature flag is OFF by default. ---------------------------
+# Intrusive tests (SSRF / UPLOAD / XSSSTORE / T22) are decided by the *target asset's* environment,
+# never by APP_ENV. Allowed environments default to dev,demo; "production" is rejected at startup.
+INTRUSIVE_ALLOWED_ENVIRONMENTS_RAW = os.environ.get("ATTESTRA_INTRUSIVE_ALLOWED_ENVIRONMENTS", "dev,demo")
+# Parsed by validate_runtime_config(); until then intrusive_policy falls back to the env var.
+INTRUSIVE_ALLOWED_ENVIRONMENTS: frozenset[str] | None = None
+AUTOMATED_VAPT_SSRF = _flag("ATTESTRA_AUTOMATED_VAPT_SSRF")
+AUTOMATED_VAPT_UPLOAD = _flag("ATTESTRA_AUTOMATED_VAPT_UPLOAD")
+AUTOMATED_VAPT_STORED_XSS = _flag("ATTESTRA_AUTOMATED_VAPT_STORED_XSS")
+# enforce (default): non-VALID cases never PASS and confirmed findings are capped to POTENTIAL.
+# observe: compute and display validity only. ATTESTRA_RUN_VALIDITY is accepted as an alias.
+RUN_VALIDITY_MODE = (
+    os.environ.get("ATTESTRA_RUN_VALIDITY_MODE") or os.environ.get("ATTESTRA_RUN_VALIDITY") or "enforce"
+).strip().lower()
+if RUN_VALIDITY_MODE not in ("enforce", "observe"):
+    RUN_VALIDITY_MODE = "enforce"
+PLANNER_ENABLED = _flag("ATTESTRA_AUTOMATED_VAPT_PLANNER")
+GUIDED_PLANS_ENABLED = _flag("ATTESTRA_GUIDED_PLANS")
+# WP2 safe web/API probes.
+PROBES_WEB_SAFE = _flag("ATTESTRA_PROBES_WEB_SAFE")
+API_IMPORT_ENABLED = _flag("ATTESTRA_API_IMPORT_ENABLED")
+GRAPHQL_PROBE = _flag("ATTESTRA_GRAPHQL_PROBE")
+# WP4 attack surface / operations. TENANT_STRICT must stay off until the system call sites use
+# SYSTEM_SCOPE (done by INT) and the operator has verified admin views.
+DISCOVERY_ENABLED = _flag("ATTESTRA_DISCOVERY_ENABLED", "")
+TENANT_STRICT = _flag("ATTESTRA_TENANT_STRICT", "")
+MAINTENANCE_ENABLED = _flag("ATTESTRA_MAINTENANCE_ENABLED", "")
+# WP3 threat-intel scheduled refresh (runs from the maintenance tick).
+INTEL_AUTO_REFRESH = _flag("ATTESTRA_INTEL_AUTO_REFRESH", "")
 
 # Feature flags. Changing these requires restarting the API and any workers
 # (no hot reload). Bypass flags default to false and only activate in an
@@ -321,6 +360,50 @@ def validate_runtime_config() -> None:
                 f"Bypass flags are not allowed for APP_ENV={APP_ENV!r}. "
                 f"Allowlist: {sorted(_APP_ENV_BYPASS_ALLOWLIST)}."
             )
+
+    validate_intrusive_allowlist()
+    validate_default_secrets(APP_ENV)
+
+
+_DEFAULT_API_KEY_PEPPER = "attestra-dev-pepper-change-me"
+_DEFAULT_SESSION_SECRET = "attestra-dev-session-change-me"
+
+
+def validate_intrusive_allowlist(raw: str | None = None) -> frozenset[str]:
+    """Parse ``ATTESTRA_INTRUSIVE_ALLOWED_ENVIRONMENTS``; ``production`` fails startup (FND-02)."""
+    global INTRUSIVE_ALLOWED_ENVIRONMENTS, INTRUSIVE_ALLOWED_ENVIRONMENTS_RAW
+    from attestra.automated_vapt.core.intrusive_policy import AllowlistError, parse_allowed_environments
+
+    if raw is None:
+        raw = os.environ.get("ATTESTRA_INTRUSIVE_ALLOWED_ENVIRONMENTS", "dev,demo")
+    try:
+        envs = parse_allowed_environments(raw)
+    except AllowlistError as exc:
+        INTRUSIVE_ALLOWED_ENVIRONMENTS = frozenset()  # fail closed even if the caller swallows the error
+        raise ConfigurationError(str(exc)) from exc
+    INTRUSIVE_ALLOWED_ENVIRONMENTS_RAW = raw
+    INTRUSIVE_ALLOWED_ENVIRONMENTS = envs
+    return envs
+
+
+def validate_default_secrets(app_env: str | None = None) -> None:
+    """K-04: the built-in dev pepper / session secret are refused when APP_ENV is staging/production.
+
+    Only compares against the public default strings; never logs or returns the configured values.
+    """
+    env = app_env if app_env is not None else parse_app_env()
+    if env not in _APP_ENV_PROHIBITED_BYPASS:
+        return
+    bad: list[str] = []
+    if os.environ.get("ATTESTRA_API_KEY_PEPPER", _DEFAULT_API_KEY_PEPPER) == _DEFAULT_API_KEY_PEPPER:
+        bad.append("ATTESTRA_API_KEY_PEPPER")
+    if os.environ.get("ATTESTRA_SESSION_SECRET", _DEFAULT_SESSION_SECRET) == _DEFAULT_SESSION_SECRET:
+        bad.append("ATTESTRA_SESSION_SECRET")
+    if bad:
+        raise ConfigurationError(
+            f"{', '.join(bad)} still use the built-in development default while APP_ENV={env!r}. "
+            "Set strong unique values and restart the application or worker."
+        )
 
 
 SUBSCRIPTION_SERVICE = parse_subscription_service()

@@ -1,0 +1,46 @@
+{#- J-01: run-validity and coverage disclosure. Included by technical (full) and executive (compact).
+    Expects `run_validity` (attestra.reports.run_validity.build_section) and, for the full
+    variant, the `sec` section-number namespace. Never shows secrets; reasons are already
+    value-free in the run_validity contract. -#}
+{% if run_validity and run_validity.has_runs %}
+{% if rv_compact %}
+<p class="meta" id="run-validity-summary" data-run-validity-state="{{ run_validity.overall_state }}">Automated run validity: <b>{{ run_validity.overall_label }}</b>. {{ run_validity.overall_meaning }}{% if run_validity.incomplete %} {{ run_validity.notice }}{% endif %}</p>
+{% else %}
+{% set sec.n = sec.n + 1 %}<h2 id="run-validity" data-run-validity-state="{{ run_validity.overall_state }}">{{ sec.n }}. Run validity and coverage</h2>
+<p class="meta">Whether the target actually answered the automated tests. A blocked, challenged, rate-limited or expired-session run can return zero findings without the application being free of vulnerabilities.</p>
+<table>
+  <tr><th style="width:180px">Overall run validity</th><td><b>{{ run_validity.overall_label }}</b> — {{ run_validity.overall_meaning }}</td></tr>
+  {% if run_validity.incomplete %}
+  <tr><th>Testing status</th><td><b>{{ run_validity.notice }}</b></td></tr>
+  {% elif not run_validity.computed %}
+  <tr><th>Testing status</th><td>Run validity was not computed for these runs (recorded before validity tracking). Treat results with caution.</td></tr>
+  {% endif %}
+</table>
+<table>
+  <tr><th>Run</th><th>Validity</th><th>Samples</th><th>Reasons</th><th>Affected cases</th></tr>
+  {% for r in run_validity.runs %}
+  <tr>
+    <td class="mono">#{{ r.execution_id }}</td>
+    <td>{{ r.label }}</td>
+    <td>{{ r.sample_count if r.sample_count is not none else "—" }}</td>
+    <td>{{ r.reasons|join("; ") if r.reasons else "—" }}</td>
+    <td class="mono">{{ r.affected_cases|join(", ") if r.affected_cases else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% if run_validity.incomplete_cases %}
+<p><b>Incomplete test cases.</b> These were not completed and are never counted as passed:</p>
+<table>
+  <tr><th>Run</th><th>Case</th><th>Status</th><th>Reason</th></tr>
+  {% for c in run_validity.incomplete_cases %}
+  <tr>
+    <td class="mono">#{{ c.execution_id }}</td>
+    <td class="mono">{{ c.test_id }}</td>
+    <td>{{ (c.status or c.validity or "—")|status_label }}</td>
+    <td class="meta">{{ c.reason or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
+{% endif %}

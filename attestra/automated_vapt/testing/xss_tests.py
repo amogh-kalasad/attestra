@@ -16,9 +16,18 @@ import re
 from typing import Any
 from urllib.parse import urlencode
 
+from attestra.automated_vapt.core.response_classifier import (
+    classify_httpx,
+    classify_pair,
+    mark_blocked_if_needed,
+    samples_to_json,
+)
 from attestra.automated_vapt.testing._http import absolute, request_pair
 from attestra.automated_vapt.testing._reflection import (
+    classify_reflection_context,
+    context_breakout_possible,
     detect_unencoded_reflection,
+    url_attribute_starts_with,
     is_html_body,
     new_canary,
     reflected_unencoded_in_html,
@@ -40,6 +49,7 @@ _DEFAULT_PROBES: tuple[tuple[str, str], ...] = (
     ("/q", "query"),
 )
 _MAX_PROBES = 3
+SKIP_STORED_DISABLED = "stored_xss_disabled"
 
 
 def _target_url(base_url: str, path: str) -> str:
@@ -80,6 +90,7 @@ def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
 
     observations: list[dict[str, Any]] = []
     evidence = []
+    samples = []
     finding = False
     finding_detail = ""
 
@@ -100,6 +111,7 @@ def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
                 ctype = hv
                 break
         body = pair.response_body or ""
+        samples.append(classify_pair(pair, authed=auth is not None))
         # Prefer full payload reflection; marker alone is weaker but still noted.
         full_hit = reflected_unencoded_in_html(payload, body, content_type=ctype)
         marker_hit = reflected_unencoded_in_html(marker, body, content_type=ctype)
@@ -113,14 +125,22 @@ def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
             "html_context": is_html_body(body, ctype),
             "unencoded_html": unencoded_html,
             "full_payload_unencoded": full_hit,
+            "response_class": samples[-1].cls.value,
         }
+        # B-06: where did the marker land, and could it break out of that context?
+        contexts = classify_reflection_context(marker, body) if is_html_body(body, ctype) else []
+        breakout = [c for c in contexts if context_breakout_possible(c, payload, body, marker)]
+        row["contexts"] = contexts
+        row["breakout_contexts"] = breakout
+        row["url_attribute_start"] = url_attribute_starts_with(marker, body)
         observations.append(row)
         if unencoded_html and not finding:
             finding = True
-            finding_detail = f"XSS canary reflected unencoded in HTML at {path}?{param}="
+            where = f" ({', '.join(breakout or contexts)})" if (breakout or contexts) else ""
+            finding_detail = f"XSS canary reflected unencoded in HTML at {path}?{param}={where}"
             evidence.append(pair)
 
-    return {
+    result = {
         "test_id": "XSS",
         "category": "xss",
         "observations": {
@@ -129,12 +149,15 @@ def run_reflected(client, base_url: str, **kwargs) -> dict[str, Any]:
             "probes": observations,
             "probe_count": len(observations),
             "mode": "reflected",
+            "reflection_contexts": sorted({c for o in observations for c in o.get("contexts", [])}),
         },
         "finding_candidate": finding,
         "detail": finding_detail or "no unencoded HTML XSS canary reflection",
         "evidence_hints": [f"GET {p}?{param}=XSS-canary" for p, param in probes],
         "evidence_pairs": evidence,
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)
 
 
 _DOM_SINK_RE = re.compile(
@@ -173,6 +196,7 @@ def run_dom(client, base_url: str, **kwargs) -> dict[str, Any]:
     else:
         pair = request_pair(client, "GET", url, follow_redirects=False)
     body = pair.response_body or ""
+    samples = [classify_pair(pair, authed=auth is not None)]
     sink = bool(_DOM_SINK_RE.search(body))
     ctx = kwargs.get("ctx")
     capture_fn = kwargs.get("capture_fn")
@@ -188,7 +212,7 @@ def run_dom(client, base_url: str, **kwargs) -> dict[str, Any]:
         except Exception:
             browser_hit = False
     finding = sink or browser_hit
-    return {
+    result = {
         "test_id": "XSSDOM",
         "category": "xss",
         "observations": {
@@ -203,34 +227,25 @@ def run_dom(client, base_url: str, **kwargs) -> dict[str, Any]:
         "detail": "DOM sink writes location into HTML" if finding else "no DOM sink / marker hit",
         "evidence_pairs": [pair] if finding else [],
         "evidence_hints": [f"GET {path} DOM sink inspection"],
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)
 
 
 def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
     """Stored XSS: post canary to lab guestbook, confirm HTML reflection, then delete.
 
-    Gated to local/test/development unless force=True or ATTESTRA_AUTOMATED_VAPT_STORED_XSS=1.
+    Runs only when the FND-02 decision for this execution allows XSSSTORE
+    (``ctx.extra["_intrusive_policy"]``); ``force=True`` is honoured for lab mock
+    clients only (unit tests).
     """
-    import os
-
+    from attestra.automated_vapt.core import intrusive_policy
     from attestra.automated_vapt.testing._http import clear_cookies, login
+    from attestra.automated_vapt.testing._session import is_lab_client
 
-    raw = (os.environ.get("ATTESTRA_AUTOMATED_VAPT_STORED_XSS") or "").strip().lower()
-    if not kwargs.get("force") and raw not in ("1", "true", "yes", "on"):
-        from attestra import config
-
-        env = config.parse_app_env() if hasattr(config, "parse_app_env") else getattr(config, "APP_ENV", None)
-        allow = getattr(config, "_APP_ENV_BYPASS_ALLOWLIST", frozenset({"local", "test", "development"}))
-        if env not in allow:
-            return {
-                "test_id": "XSSSTORE",
-                "category": "xss",
-                "status_hint": "SKIPPED",
-                "skip_reason": "stored_xss_disabled",
-                "observations": {"detail": "stored XSS probe disabled outside local/test/development"},
-                "finding_candidate": False,
-                "evidence_hints": [],
-            }
+    decision = intrusive_policy.decision_from_ctx(kwargs.get("ctx"), "XSSSTORE")
+    if not decision.allow and not (kwargs.get("force") and is_lab_client(client)):
+        return intrusive_policy.skip_payload("XSSSTORE", "xss", decision, disabled_reason=SKIP_STORED_DISABLED)
 
     sess_mode, auth = resolve_mode(client, kwargs)
     if sess_mode == "skip":
@@ -255,6 +270,7 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
             pass
     post = client.post(comment_url, json={"text": payload}, headers=session_headers or None)
     post_status = int(getattr(post, "status_code", 0) or 0)
+    samples = [classify_httpx(post, authed=auth is not None)]
     cid = None
     try:
         cid = int((post.json() or {}).get("id") or 0) or None
@@ -271,6 +287,7 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
             ctype = hv
             break
     body = page.response_body or ""
+    samples.append(classify_pair(page, authed=auth is not None))
     # Require the quote-break / angle-bracket payload literally — marker alone can
     # appear inside a properly HTML-escaped guestbook and must not count as XSS.
     finding = reflected_unencoded_in_html(payload, body, content_type=ctype)
@@ -286,7 +303,7 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
             )
         except Exception:
             pass
-    return {
+    result = {
         "test_id": "XSSSTORE",
         "category": "xss",
         "observations": {
@@ -295,9 +312,14 @@ def run_stored(client, base_url: str, **kwargs) -> dict[str, Any]:
             "comment_id": cid,
             "canary": marker,
             "reflected": finding,
+            "contexts": classify_reflection_context(marker, body),
+            "cleanup_attempted": bool(cid),
         },
         "finding_candidate": finding,
         "detail": "stored XSS canary reflected unencoded in guestbook" if finding else "stored canary not reflected raw",
         "evidence_pairs": [page] if finding else [],
         "evidence_hints": ["POST /api/comments → GET /guestbook"],
+        "policy_decision": decision.to_json(),
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)

@@ -48,6 +48,7 @@ class Registry:
         self._lock = Lock()
         self._counters: dict[str, dict[tuple, float]] = defaultdict(lambda: defaultdict(float))
         self._hist: dict[str, dict[tuple, list]] = defaultdict(dict)
+        self._gauges: dict[str, dict[tuple, float]] = defaultdict(dict)
         self._help: dict[str, tuple[str, str]] = {}
 
     def describe(self, name: str, kind: str, text: str) -> None:
@@ -68,10 +69,33 @@ class Registry:
             h[1] += value
             h[2] += 1
 
+    def set_gauge(self, name: str, value: float, labels: dict[str, str] | None = None) -> None:
+        """Set a gauge to ``value`` (I-01: queue depth, active jobs, saturation)."""
+        key = tuple(sorted((labels or {}).items()))
+        with self._lock:
+            self._gauges[name][key] = float(value)
+
+    def counter_value(self, name: str, labels: dict[str, str] | None = None) -> float:
+        key = tuple(sorted((labels or {}).items()))
+        with self._lock:
+            return float(self._counters.get(name, {}).get(key, 0.0))
+
+    def gauge_value(self, name: str, labels: dict[str, str] | None = None) -> float | None:
+        key = tuple(sorted((labels or {}).items()))
+        with self._lock:
+            return self._gauges.get(name, {}).get(key)
+
+    def hist_count(self, name: str, labels: dict[str, str] | None = None) -> int:
+        key = tuple(sorted((labels or {}).items()))
+        with self._lock:
+            h = self._hist.get(name, {}).get(key)
+            return int(h[2]) if h else 0
+
     def reset(self) -> None:
         with self._lock:
             self._counters.clear()
             self._hist.clear()
+            self._gauges.clear()
 
     def render(self) -> str:
         out: list[str] = []
@@ -79,6 +103,11 @@ class Registry:
             for name, series in sorted(self._counters.items()):
                 kind, text = self._help.get(name, ("counter", name))
                 out += [f"# HELP {name} {text}", f"# TYPE {name} {kind}"]
+                for key, val in sorted(series.items()):
+                    out.append(f"{name}{_labels(key)} {val:g}")
+            for name, series in sorted(self._gauges.items()):
+                _, text = self._help.get(name, ("gauge", name))
+                out += [f"# HELP {name} {text}", f"# TYPE {name} gauge"]
                 for key, val in sorted(series.items()):
                     out.append(f"{name}{_labels(key)} {val:g}")
             for name, series in sorted(self._hist.items()):
@@ -97,11 +126,68 @@ REGISTRY = Registry()
 REGISTRY.describe("attestra_http_requests_total", "counter", "HTTP requests by method, route and status.")
 REGISTRY.describe("attestra_http_request_duration_seconds", "histogram", "HTTP request latency in seconds.")
 REGISTRY.describe("attestra_events_total", "counter", "Domain events (imports, reports, jobs) by kind.")
+# I-01 queue and worker metrics (labels stay low-cardinality: tool / kind / outcome only).
+REGISTRY.describe("attestra_job_queue_age_seconds", "histogram", "Seconds a job waited in the queue before a worker claimed it.")
+REGISTRY.describe("attestra_job_duration_seconds", "histogram", "Seconds a claimed job ran, by tool and outcome.")
+REGISTRY.describe("attestra_job_retries_total", "counter", "Jobs put back in the queue for another attempt, by tool.")
+REGISTRY.describe("attestra_job_cancellations_total", "counter", "Jobs cancelled by a user, kill switch or worker stop, by tool.")
+REGISTRY.describe("attestra_job_outcomes_total", "counter", "Finished jobs by tool and outcome.")
+REGISTRY.describe("attestra_worker_active_jobs", "gauge", "Jobs running in this worker process, by kind.")
+REGISTRY.describe("attestra_worker_saturation_ratio", "gauge", "Active jobs divided by worker concurrency (1 = every slot busy).")
+REGISTRY.describe("attestra_jobs_stuck", "gauge", "Running jobs whose heartbeat is older than the stale threshold.")
+REGISTRY.describe("attestra_maintenance_runs_total", "counter", "Maintenance tick task runs by task and outcome.")
+
+_TOOL_LABEL_MAX = 40
+
+
+def _label(v: object) -> str:
+    """Bound label values so a bad tool name cannot explode series cardinality."""
+    s = str(v or "unknown").strip().lower()[:_TOOL_LABEL_MAX]
+    return "".join(ch if ch.isalnum() or ch in "_-." else "_" for ch in s) or "unknown"
 
 
 def record_event(kind: str, **labels: str) -> None:
     """Count a domain event, e.g. ``record_event("import", tool="zap")``."""
     REGISTRY.inc("attestra_events_total", {"kind": kind, **labels})
+
+
+def record_job_claimed(tool: str, queue_age_s: float | None) -> None:
+    """I-01: a worker claimed a job; ``queue_age_s`` is created→claimed (None when unknown)."""
+    record_event("job.claimed", tool=_label(tool))
+    if queue_age_s is not None and queue_age_s >= 0:
+        REGISTRY.observe("attestra_job_queue_age_seconds", float(queue_age_s), {"tool": _label(tool)})
+
+
+def record_job_finished(tool: str, outcome: str, duration_s: float | None) -> None:
+    """I-01: a job finished (done / failed / cancelled / quarantined / refused / requeued)."""
+    labels = {"tool": _label(tool), "outcome": _label(outcome)}
+    REGISTRY.inc("attestra_job_outcomes_total", labels)
+    if duration_s is not None and duration_s >= 0:
+        REGISTRY.observe("attestra_job_duration_seconds", float(duration_s), labels)
+    if outcome == "cancelled":
+        REGISTRY.inc("attestra_job_cancellations_total", {"tool": _label(tool)})
+
+
+def record_job_retry(tool: str) -> None:
+    REGISTRY.inc("attestra_job_retries_total", {"tool": _label(tool)})
+
+
+def record_worker_load(active_by_kind: dict[str, int], concurrency: int) -> None:
+    """I-01: gauges for the worker's busy slots (scan / automated) and saturation."""
+    total = 0
+    for kind in ("scan", "automated"):
+        n = int(active_by_kind.get(kind, 0))
+        total += n
+        REGISTRY.set_gauge("attestra_worker_active_jobs", n, {"kind": kind})
+    REGISTRY.set_gauge("attestra_worker_saturation_ratio", total / max(1, int(concurrency)))
+
+
+def record_stuck_jobs(count: int) -> None:
+    REGISTRY.set_gauge("attestra_jobs_stuck", max(0, int(count)))
+
+
+def record_maintenance(task: str, outcome: str) -> None:
+    REGISTRY.inc("attestra_maintenance_runs_total", {"task": _label(task), "outcome": _label(outcome)})
 
 
 def _route_template(request: Request) -> str:
@@ -183,6 +269,28 @@ def setup_otel(app, engine=None) -> bool:
                 log.warning("OTLP exporter not installed; spans will not be exported")
         trace.set_tracer_provider(provider)
     FastAPIInstrumentor.instrument_app(app, excluded_urls="metrics,api/health")
+    return True
+
+
+def instrument_engine(engine=None) -> bool:
+    """Kept for the observability API (Phase 6.6): DB-driver instrumentation hook.
+
+    Attestra's runtime store is MongoDB (no SQLAlchemy engine), so there is nothing to
+    instrument unless OTel is enabled *and* the optional pymongo instrumentation is
+    installed. Returns True only when instrumentation was actually activated; it is a
+    no-op (False) when ``ATTESTRA_OTEL_ENABLED`` is off.
+    """
+    if not OTEL_ENABLED:
+        return False
+    try:
+        from opentelemetry.instrumentation.pymongo import PymongoInstrumentor  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+    try:
+        PymongoInstrumentor().instrument()
+    except Exception:  # noqa: BLE001 - tracing must never break startup
+        log.warning("pymongo instrumentation failed; continuing without DB spans")
+        return False
     return True
 
 

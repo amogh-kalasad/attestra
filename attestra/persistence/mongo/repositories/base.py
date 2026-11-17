@@ -1,4 +1,5 @@
 """Shared repository primitives."""
+# @lat: [[attack-surface-and-platform#Tenant strict mode]]
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from pymongo.database import Database
 from attestra.persistence.mongo import collections as C
 from attestra.persistence.mongo.sequences import next_id
 from attestra.persistence.mongo.serialization import with_id
-from attestra.persistence.mongo.tenant import TenantAccessDenied, TenantIds
+from attestra.persistence.mongo.tenant import TenantAccessDenied, TenantIds, effective_scope
 
 
 class BaseRepository:
@@ -18,7 +19,11 @@ class BaseRepository:
 
     def __init__(self, db: Database, *, tenant_ids: TenantIds = None):
         self.db = db
-        self.tenant_ids = tenant_ids
+        # K-01: SYSTEM_SCOPE → None (explicit unrestricted); None → deny under
+        # ATTESTRA_TENANT_STRICT=1, legacy unrestricted otherwise. Every subclass
+        # reads self.tenant_ids, so resolving here makes all repositories fail closed.
+        self.requested_tenant_ids = tenant_ids
+        self.tenant_ids = effective_scope(tenant_ids, where=type(self).__name__)
         self.col = db[self.collection_name]
 
     def allocate_id(self) -> int:

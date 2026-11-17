@@ -135,3 +135,25 @@ def test_session_auth_headers_only_same_origin_and_scrub():
     assert pub["injected"] == ["Authorization"] and "abcdefgh" not in str(pub)
     failed = SessionAuth(profile_id=2, status="failed", headers={"Authorization": "x"})
     assert failed.headers_for("https://demo.example/", ROOT) == {}
+
+
+def test_graphql_tag_and_inventory_endpoints():
+    """C-05/C-04 (WP2): GraphQL paths tagged; spec endpoints merge with JS ones."""
+    eps = jsd.extract_api_endpoints('a.post("/api/graphql",q); a.get("/api/projects/list");', ROOT)
+    by = _by_path(eps)
+    assert by["/api/graphql"].graphql is True and by["/api/graphql"].to_dict()["graphql"] is True
+    assert by["/api/projects/list"].graphql is False
+    spec = jsd.endpoints_from_inventory(
+        [
+            {"method": "GET", "path": "/api/projects/list", "params": [{"name": "page", "location": "query"}]},
+            {"method": "DELETE", "path": "/api/projects/{id}"},
+            {"method": "GET", "path": "/api/other", "in_scope": False},
+        ]
+    )
+    sb = _by_path(spec)
+    assert set(sb) == {"/api/projects/list", "/api/projects/{id}"}
+    assert sb["/api/projects/{id}"].path_param and not sb["/api/projects/{id}"].capture_safe
+    merged = _by_path(jsd.merge_endpoints([eps, spec]))
+    assert merged["/api/projects/list"].source == "js+spec"
+    assert "page" in merged["/api/projects/list"].query_keys
+    assert jsd.ApiEndpoint.from_dict(merged["/api/projects/list"].to_dict()).source == "js+spec"

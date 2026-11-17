@@ -279,8 +279,32 @@ def secret_key_names(data: Any, *, depth: int = 0) -> list[str]:
     return out
 
 
-def blocked_status(status: int | None) -> bool:
-    return int(status or 0) in (301, 302, 303, 307, 308, 401, 403, 404)
+def blocked_status(
+    status: int | None,
+    headers: dict[str, Any] | None = None,
+    body: str = "",
+) -> bool:
+    """Deprecated (FND-04): use ``response_classifier.classify_pair`` + ``proves_enforcement``.
+
+    Kept for callers outside WP1. Routed through the shared classifier so a WAF block
+    page, challenge, or rate limit is never reported as "blocked by the application".
+    A bare status without headers/body is still classified (status-only callers keep the
+    old 3xx/401/403/404 behaviour minus infrastructure answers).
+    """
+    from attestra.automated_vapt.core.response_classifier import ResponseClass, classify_response
+
+    code = int(status or 0)
+    if code in (301, 302, 303, 307, 308) and not headers:
+        return True  # status-only legacy call: cannot see Location
+    cls = classify_response(code or None, headers or {}, body or "").cls
+    return cls in (ResponseClass.APP_AUTH_DENIED, ResponseClass.AUTH_REDIRECT, ResponseClass.NOT_FOUND)
+
+
+def classify_for_validity(pair: Any, *, authed: bool = False) -> dict[str, Any]:
+    """Value-free ``validity_samples`` entry for one evidence pair (FND-03 input)."""
+    from attestra.automated_vapt.core.response_classifier import classify_pair
+
+    return classify_pair(pair, authed=authed).to_dict()
 
 
 def looks_privileged_url(url: str) -> bool:

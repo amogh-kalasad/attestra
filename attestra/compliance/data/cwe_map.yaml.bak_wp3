@@ -1,0 +1,243 @@
+# CWE -> control objectives (keys in controls.yaml).
+# Every finding also maps to vuln_identification; findings with a CVE also map
+# to patching. Unknown CWEs fall back to `default`.
+# Each entry includes strength (full|partial) and rationale for library integrity.
+
+default: ['vuln_identification']
+
+cwe:
+  16:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  20:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  22:
+    objectives: ['access_control', 'secure_coding']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  74:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  77:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  78:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  79:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  89:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  94:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  200:
+    objectives: ['data_protection']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  209:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  259:
+    objectives: ['secrets_management']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  284:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  285:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  287:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  295:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  306:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  307:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  311:
+    objectives: ['crypto_in_transit', 'data_protection']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  319:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  321:
+    objectives: ['secrets_management', 'crypto_in_transit']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  326:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  327:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Weak or missing transport crypto maps to cryptography controls.'
+  352:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  384:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  497:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  502:
+    objectives: ['secure_coding']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  521:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Authn failures map to authentication and credential controls.'
+  525:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  532:
+    objectives: ['data_protection', 'logging']
+    strength: full
+    rationale: 'Sensitive data exposure maps to leakage prevention controls.'
+  601:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  611:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  614:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  639:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  693:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  778:
+    objectives: ['logging']
+    strength: full
+    rationale: 'Insufficient logging maps to monitoring and audit log controls.'
+  798:
+    objectives: ['secrets_management', 'authentication']
+    strength: full
+    rationale: 'Hardcoded secrets map to credential and secret management controls.'
+  829:
+    objectives: ['supply_chain']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  862:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  863:
+    objectives: ['access_control']
+    strength: full
+    rationale: 'Authorization and path traversal CWEs map to access restriction controls.'
+  917:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  918:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Injection and unsafe coding patterns map to secure development controls.'
+  937:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  1004:
+    objectives: ['secure_config']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  1021:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Misconfiguration CWEs map to secure configuration baselines.'
+  1035:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+  1104:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Vulnerable components map to supply-chain and patching controls.'
+
+  # ---- AI / LLM weaknesses (OWASP Top 10 for LLM Applications 2025), used by the
+  # ISO/IEC 42001 pack. CWE-1426 is not mapped: MITRE marks it DISCOURAGED.
+  116:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Improper output encoding (OWASP LLM05 when model output reaches a browser, shell or query) maps to secure development controls.'
+  117:
+    objectives: ['logging']
+    strength: full
+    rationale: 'Unneutralised log output undermines log integrity and maps to logging and monitoring controls.'
+  250:
+    objectives: ['ai_excessive_agency', 'access_control']
+    strength: partial
+    rationale: 'Running with unnecessary privileges (OWASP LLM06 excessive agency) partly evidences least-privilege and responsible-use controls.'
+  269:
+    objectives: ['ai_excessive_agency', 'access_control']
+    strength: partial
+    rationale: 'Improper privilege management (OWASP LLM06 excessive agency) partly evidences least-privilege and responsible-use controls.'
+  345:
+    objectives: ['ai_data_integrity']
+    strength: partial
+    rationale: 'Insufficient verification of data authenticity (OWASP LLM04 poisoning) partly evidences data provenance and quality controls; lineage records need an assessor.'
+  359:
+    objectives: ['data_protection']
+    strength: full
+    rationale: 'Exposure of private personal information (OWASP LLM02) maps to leakage prevention controls.'
+  400:
+    objectives: ['ai_resource_limits']
+    strength: full
+    rationale: 'Uncontrolled resource consumption (OWASP LLM10 unbounded consumption) maps to rate, size and cost limit controls.'
+  494:
+    objectives: ['supply_chain', 'ai_data_integrity']
+    strength: partial
+    rationale: 'Code or model downloaded without an integrity check (OWASP LLM03/LLM04) partly evidences supply-chain and model integrity controls.'
+  770:
+    objectives: ['ai_resource_limits']
+    strength: full
+    rationale: 'Allocation without limits or throttling (OWASP LLM10 unbounded consumption) maps to rate, size and cost limit controls.'
+  1395:
+    objectives: ['supply_chain', 'patching']
+    strength: full
+    rationale: 'Dependency on a vulnerable third-party component (OWASP LLM03) maps to supply-chain and patching controls.'
+  1427:
+    objectives: ['ai_prompt_injection', 'secure_coding']
+    strength: full
+    rationale: 'Improper neutralisation of input used for LLM prompting (prompt injection, OWASP LLM01/LLM07) maps to AI verification and secure development controls.'

@@ -1,4 +1,11 @@
-"""Session cookie and JWT structure observations for Elite automated security testing."""
+"""Session cookie and JWT structure observations for Elite automated security testing.
+
+D-02: JWTs found in the session material are assessed offline by
+``testing/jwt_posture.py`` (claims, header, lifetime; no
+forging or replay). D-01: passive expiry observations come from
+``testing/session_lifecycle.py``; the full rotation /
+logout checks run as the separate ``SESSLIFE`` case.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +19,12 @@ from attestra.automated_vapt.testing._http import (
     login_response,
     observe_cookie_flags,
 )
+from attestra.automated_vapt.core.response_classifier import (
+    classify_httpx,
+    classify_pair,
+    mark_blocked_if_needed,
+    samples_to_json,
+)
 from attestra.automated_vapt.testing._session import (
     SKIP_NO_AUTH_SESSION,
     probe_urls,
@@ -19,6 +32,8 @@ from attestra.automated_vapt.testing._session import (
     resolve_mode,
     skip_result,
 )
+from attestra.automated_vapt.testing.jwt_posture import assess_tokens
+from attestra.automated_vapt.testing.session_lifecycle import expiry_posture
 
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
@@ -89,6 +104,8 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
     urls.extend(probe_urls(base_url, kwargs, api=False, limit=3))
     cookie_flags: list[dict[str, Any]] = []
     seen_names: set[str] = set()
+    samples = []
+    set_cookie_lines: list[str] = []
     for url in urls:
         if not url:
             continue
@@ -96,6 +113,10 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
             pair = request_auth(client, "GET", url, auth, base_url)
         except Exception:
             continue
+        samples.append(classify_pair(pair, authed=True))
+        for hk, hv in (pair.response_headers or {}).items():
+            if str(hk).lower() == "set-cookie":
+                set_cookie_lines.extend(str(hv).split("\n"))
         for row in observe_cookie_flags(pair.response_headers or {}):
             name = str(row.get("name") or "")
             if name and name not in seen_names:
@@ -113,10 +134,11 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
     jwt_tokens = find_jwt_candidates(*jwt_texts)
     jwt_inspections = [inspect_jwt_structure(t) for t in jwt_tokens[:5]]
     alg_none = any(bool(j.get("alg_none")) for j in jwt_inspections)
+    jwt_posture = assess_tokens(jwt_tokens)
 
     # Only raise cookie-flag findings when we actually observed Set-Cookie (not just a Cookie header).
-    finding_candidate = bool(missing_httponly) or bool(missing_secure_https) or alg_none
-    return {
+    finding_candidate = bool(missing_httponly) or bool(missing_secure_https) or alg_none or bool(jwt_posture["finding"])
+    result = {
         "test_id": "SESSION",
         "category": "session",
         "observations": {
@@ -132,11 +154,16 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
             "jwt_present": bool(jwt_tokens),
             "jwt_inspections": jwt_inspections,
             "jwt_alg_none": alg_none,
+            "jwt_posture": jwt_posture,
+            "session_expiry": expiry_posture(set_cookie_lines, jwt_posture),
+            "identity": f"profile#{getattr(auth, 'profile_id', None)}",
             "injected_header_names": sorted(header_map.keys()),
         },
         "finding_candidate": finding_candidate,
         "evidence_hints": ["engagement session JWT / Set-Cookie structure"],
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)
 
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
@@ -159,6 +186,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     clear_cookies(client)
     resp = login_response(client, base_url, "viewer", "viewer-pass")
     login_status = int(resp.status_code)
+    samples = [classify_httpx(resp)]
     header_map = {str(k): str(v) for k, v in getattr(resp, "headers", {}).items()}
     cookie_flags = observe_cookie_flags(header_map)
 
@@ -184,9 +212,14 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     jwt_tokens = find_jwt_candidates(*jwt_texts)
     jwt_inspections = [inspect_jwt_structure(t) for t in jwt_tokens[:5]]
     alg_none = any(bool(j.get("alg_none")) for j in jwt_inspections)
+    jwt_posture = assess_tokens(jwt_tokens)
+    set_cookie_lines = []
+    get_list = getattr(getattr(resp, "headers", None), "get_list", None)
+    if callable(get_list):
+        set_cookie_lines = [str(v) for v in get_list("set-cookie")]
 
-    finding_candidate = bool(missing_httponly) or bool(missing_secure_https) or alg_none
-    return {
+    finding_candidate = bool(missing_httponly) or bool(missing_secure_https) or alg_none or bool(jwt_posture["finding"])
+    result = {
         "test_id": "SESSION",
         "category": "session",
         "observations": {
@@ -201,7 +234,11 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "jwt_present": bool(jwt_tokens),
             "jwt_inspections": jwt_inspections,
             "jwt_alg_none": alg_none,
+            "jwt_posture": jwt_posture,
+            "session_expiry": expiry_posture(set_cookie_lines, jwt_posture),
         },
         "finding_candidate": finding_candidate,
         "evidence_hints": ["POST /login Set-Cookie / JWT structure"],
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)

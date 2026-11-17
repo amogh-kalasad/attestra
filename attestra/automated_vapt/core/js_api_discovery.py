@@ -16,6 +16,12 @@ Only endpoints seen exclusively with GET, without dynamic segments (``${id}``, t
 refresh, ...) are marked ``capture_safe``. Automated capture (T01) only ever requests those,
 and only with GET.
 
+Endpoints are tagged ``graphql`` when the path names a GraphQL endpoint (C-05), and
+[[endpoints_from_inventory]] turns imported OpenAPI / Postman / HAR operations into the same
+[[ApiEndpoint]] shape (``source="spec"``) so they merge with the JS-discovered ones (C-04).
+Inventory operations keep their declared methods, so a mutating operation is never
+``capture_safe`` or ``gettable``.
+
 Results are cached as ``js-api-endpoints.json`` (paths only, never secrets) next to the
 ZAP scan's ``zap-urls.txt`` so later executions don't refetch the bundles.
 """
@@ -70,6 +76,9 @@ UNSAFE_WORDS_RE = re.compile(
 )
 
 
+# GraphQL endpoint paths (/graphql, /api/graphql, /v1/graphql, /graphiql is excluded).
+GRAPHQL_PATH_RE = re.compile(r"(?i)/graphql(?:/|$|\?)")
+
 # Query/path parameter names that look like an object identifier (IDOR candidates).
 ID_PARAM_RE = re.compile(r"(?i)(^id$|_id$|id$|project|client|user|tenant|account|org|member|team|company|workspace)")
 
@@ -82,6 +91,12 @@ class ApiEndpoint:
     files: set[str] = field(default_factory=set)
     query_keys: set[str] = field(default_factory=set)  # query param names seen (e.g. clientId)
     path_param: bool = False  # endpoint takes a trailing path id (e.g. /get-timeline/<id>)
+    source: str = "js"  # js | spec (imported API inventory)
+
+    @property
+    def graphql(self) -> bool:
+        """Path names a GraphQL endpoint (tagged for the GRAPHQL probe, C-05)."""
+        return bool(GRAPHQL_PATH_RE.search(self.path))
 
     @property
     def capture_safe(self) -> bool:
@@ -116,6 +131,8 @@ class ApiEndpoint:
             "path_param": self.path_param,
             "idor_candidate": self.idor_candidate,
             "files": sorted(self.files)[:5],
+            "graphql": self.graphql,
+            "source": self.source,
         }
 
     @classmethod
@@ -127,6 +144,7 @@ class ApiEndpoint:
             files=set(d.get("files") or []),
             query_keys={str(k) for k in d.get("query_keys") or []},
             path_param=bool(d.get("path_param")),
+            source=str(d.get("source") or "js"),
         )
 
 
@@ -349,6 +367,7 @@ def merge_endpoints(groups: Iterable[Iterable[ApiEndpoint]]) -> list[ApiEndpoint
                     files=set(ep.files),
                     query_keys=set(ep.query_keys),
                     path_param=ep.path_param,
+                    source=ep.source,
                 )
             else:
                 cur.methods |= ep.methods
@@ -356,7 +375,39 @@ def merge_endpoints(groups: Iterable[Iterable[ApiEndpoint]]) -> list[ApiEndpoint
                 cur.files |= ep.files
                 cur.query_keys |= ep.query_keys
                 cur.path_param = cur.path_param or ep.path_param
+                if ep.source != cur.source:
+                    cur.source = "js+spec"
     return sorted(out.values(), key=lambda e: e.path)
+
+
+def endpoints_from_inventory(operations: Iterable[Any], *, include_out_of_scope: bool = False) -> list[ApiEndpoint]:
+    """Imported API operations (``api_inventory``) as [[ApiEndpoint]] rows (``source="spec"``).
+
+    Path templates (``/users/{id}``) are kept verbatim with ``dynamic`` and ``path_param``
+    set, so templated or mutating operations are never capture-safe.
+    Out-of-scope operations are skipped unless asked for.
+    """
+    rows: list[ApiEndpoint] = []
+    for op in operations or []:
+        d = op.to_dict() if hasattr(op, "to_dict") else dict(op or {})
+        if not include_out_of_scope and d.get("in_scope") is False:
+            continue
+        path = str(d.get("path") or "")
+        if not path.startswith("/"):
+            continue
+        templated = "{" in path
+        qkeys = {str(p.get("name")) for p in d.get("params") or [] if isinstance(p, dict) and p.get("location") == "query" and p.get("name")}
+        rows.append(
+            ApiEndpoint(
+                path=path,
+                methods={str(d.get("method") or "GET").upper()},
+                dynamic=templated,
+                query_keys=qkeys,
+                path_param=templated,
+                source="spec",
+            )
+        )
+    return merge_endpoints([rows])
 
 
 # ------------------------------------------------------------------ fetching

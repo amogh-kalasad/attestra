@@ -333,6 +333,18 @@ def cmd_enrich(args) -> None:
         _print(result)
 
 
+def cmd_intel_refresh(args) -> None:
+    from attestra.ops.feeds import refresh_feeds
+
+    _print(refresh_feeds())  # raises FeedError on a rejected feed; the last good copy is kept
+
+
+def cmd_intel_status(args) -> None:
+    from attestra.intel import feed_store
+
+    _print(feed_store.status())
+
+
 def cmd_purge(args) -> None:
     from attestra.ops.retention import purge_expired
 
@@ -711,6 +723,14 @@ def cmd_worker(args) -> None:
             print(f"removed {len(removed)} leftover authentication secret file(s)/folder(s): {', '.join(removed)}")
     except Exception as exc:  # noqa: BLE001 - never block the worker on housekeeping
         print(f"warning: could not sweep leftover authentication secrets ({type(exc).__name__})", file=sys.stderr)
+    # I-03: maintenance tasks are registered at import; the pool tick is a no-op unless
+    # ATTESTRA_MAINTENANCE_ENABLED=1 (and each task's own flag) is on.
+    try:
+        from attestra.jobs import maintenance
+
+        maintenance.register_builtin_tasks()
+    except Exception as exc:  # noqa: BLE001 - never block the worker on maintenance setup
+        print(f"warning: maintenance tasks not registered ({type(exc).__name__})", file=sys.stderr)
     print(f"worker {worker_id} started (runs up to {concurrency} scan(s) at the same time)")
     try:
         WorkerPool(
@@ -790,6 +810,14 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("--epss")
     sp.add_argument("--refresh", action="store_true", help="download KEV/EPSS into DATA_DIR/feeds then apply")
     sp.set_defaults(fn=cmd_enrich)
+
+    # WP3 G-03/G-04: validated threat-intel feeds (last good copy kept on a bad download).
+    sp = sub.add_parser("intel", help="threat-intel feeds (KEV/EPSS)")
+    isub = sp.add_subparsers(dest="intel_cmd", required=True)
+    ip = isub.add_parser("refresh", help="download + validate KEV/EPSS (keeps last good copy)")
+    ip.set_defaults(fn=cmd_intel_refresh)
+    ip = isub.add_parser("status", help="feed freshness, source version, last errors")
+    ip.set_defaults(fn=cmd_intel_status)
 
     sp = sub.add_parser("purge", help="purge artifacts past retention (default dry-run)")
     sp.add_argument("--execute", action="store_true", help="actually delete (omit for dry-run)")

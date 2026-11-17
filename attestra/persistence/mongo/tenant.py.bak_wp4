@@ -1,0 +1,64 @@
+"""Tenant scope helpers for Mongo repositories.
+
+``None`` means unrestricted (admin / explicit operator). An empty frozenset means
+no access. Missing tenant context for non-admin callers must not default to
+unrestricted when a repository requires a scope.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
+
+from pymongo.database import Database
+
+from attestra.persistence.mongo import collections as C
+
+TenantIds = frozenset[int] | None
+
+
+class TenantAccessDenied(LookupError):
+    """Raised when a row exists but is outside the caller's tenant scope.
+
+    Callers that mirror SQL ``LookupError`` "not found" semantics should treat
+    this the same as missing (do not leak cross-tenant existence).
+    """
+
+
+def normalize_tenant_ids(tenant_ids: Iterable[int] | None) -> TenantIds:
+    if tenant_ids is None:
+        return None
+    return frozenset(int(t) for t in tenant_ids)
+
+
+def require_tenant_access(tenant_id: int, allowed: TenantIds) -> None:
+    if allowed is None:
+        return
+    if int(tenant_id) not in allowed:
+        raise TenantAccessDenied("not found")
+
+
+def tenant_filter(field: str, allowed: TenantIds) -> dict[str, Any]:
+    """Mongo filter fragment for a direct tenant_id (or tenants.id) column."""
+    if allowed is None:
+        return {}
+    if not allowed:
+        return {field: {"$in": []}}
+    return {field: {"$in": sorted(allowed)}}
+
+
+def engagement_ids_for_tenants(db: Database, allowed: TenantIds) -> list[int] | None:
+    """Return engagement ids visible to ``allowed``, or None if unrestricted."""
+    if allowed is None:
+        return None
+    if not allowed:
+        return []
+    cur = db[C.ENGAGEMENTS].find({"tenant_id": {"$in": sorted(allowed)}}, {"_id": 1})
+    return [int(doc["_id"]) for doc in cur]
+
+
+def via_engagement_filter(db: Database, allowed: TenantIds, engagement_field: str = "engagement_id") -> dict[str, Any]:
+    ids = engagement_ids_for_tenants(db, allowed)
+    if ids is None:
+        return {}
+    return {engagement_field: {"$in": ids}}

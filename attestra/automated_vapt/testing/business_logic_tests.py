@@ -8,10 +8,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from attestra.automated_vapt.core.response_classifier import (
+    ResponseClass,
+    classify_pair,
+    is_blocking,
+    samples_to_json,
+    skip_reason_for,
+)
 from attestra.automated_vapt.testing._http import absolute, clear_cookies, login, request_json, request_pair
 from attestra.automated_vapt.testing._session import (
     SKIP_NO_AUTH_SESSION,
     is_substantive_json,
+    parse_json,
     probe_urls,
     ready_auth,
     request_auth,
@@ -19,6 +27,7 @@ from attestra.automated_vapt.testing._session import (
     scrub_pair,
     skip_result,
 )
+from attestra.automated_vapt.testing.tenant_isolation_tests import compare_identities, identity_values
 
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
@@ -35,46 +44,61 @@ def _login_ok(client, base_url: str, user: str, password: str) -> bool:
 
 
 def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, Any]:
-    """Confirm the engagement session can read in-scope resources (read-only)."""
+    """Confirm the engagement session can read in-scope resources (read-only).
+
+    D-04: "owner access works" needs an application ``APP_OK`` answer; WAF / challenge /
+    expired-session answers make the case BLOCKED and a plain denial INCONCLUSIVE,
+    never a finding. Foreign exposure is flagged only when the secondary profile sees
+    identity values (tenant / owner keys) that only the primary sees elsewhere,
+    i.e. a proven different identity, not merely an identical shared body.
+    """
     urls = probe_urls(base_url, kwargs, api=True, limit=6)
     if not urls:
         urls = probe_urls(base_url, kwargs, api=False, limit=6)
     secondary = ready_auth(kwargs, "_secondary_session_auth")
     evidence: list[Any] = []
     rows: list[dict[str, Any]] = []
+    samples = []
     owner_ok = False
     owner_status = None
-    foreign_exposed = False
     foreign_status = None
+    value_rows: list[tuple[set[str], set[str]]] = []
+    others: list[Any] = []
     for url in urls:
         pair = request_auth(client, "GET", url, auth, base_url)
+        c = classify_pair(pair, authed=True)
+        samples.append(c)
         status = int(pair.status or 0)
         if owner_status is None:
             owner_status = status
-        if status == 200:
+        if c.cls is ResponseClass.APP_OK:
             owner_ok = True
-        rows.append({"url": url, "primary_status": status})
+        rows.append({"url": url, "primary_status": status, "primary_class": c.cls.value})
         if secondary is not None:
             other = request_auth(client, "GET", url, secondary, base_url)
+            oc = classify_pair(other, authed=True)
+            samples.append(oc)
             ostatus = int(other.status or 0)
             foreign_status = ostatus if foreign_status is None else foreign_status
-            same = (
-                is_substantive_json(status, pair.response_body)
-                and is_substantive_json(ostatus, other.response_body)
-                and (pair.response_body or "").strip() == (other.response_body or "").strip()
+            a_sub = c.cls is ResponseClass.APP_OK and is_substantive_json(status, pair.response_body)
+            b_sub = oc.cls is ResponseClass.APP_OK and is_substantive_json(ostatus, other.response_body)
+            same = a_sub and b_sub and (pair.response_body or "").strip() == (other.response_body or "").strip()
+            value_rows.append(
+                (
+                    set(identity_values(parse_json(pair.response_body) if a_sub else None)),
+                    set(identity_values(parse_json(other.response_body) if b_sub else None)),
+                )
             )
+            others.append(other)
             rows[-1]["secondary_status"] = ostatus
+            rows[-1]["secondary_class"] = oc.cls.value
             rows[-1]["same_body"] = same
-            if same:
-                foreign_exposed = True
-                evidence.append(scrub_pair(other, auth, secondary))
-    if not owner_ok:
-        # Session was ready but no resource accepted it — report as not-ok, not a skip
-        # (unlike T03 which cannot assess enforcement). BIZ is "owner access works".
-        finding = True
-    else:
-        finding = foreign_exposed
-    return {
+    cmp = compare_identities(value_rows) if value_rows else {"distinct_identities": False, "cross_rows": []}
+    for i in cmp["cross_rows"]:
+        rows[i]["foreign_exposed"] = True
+        evidence.append(scrub_pair(others[i], auth, secondary))
+    foreign_exposed = bool(cmp["cross_rows"])
+    result: dict[str, Any] = {
         "test_id": "BIZ",
         "category": "authorization",
         "observations": {
@@ -83,12 +107,23 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
             "owner_status": owner_status,
             "foreign_status": foreign_status,
             "foreign_exposed": foreign_exposed,
+            "foreign_assessed": secondary is not None,
+            "distinct_identities": cmp["distinct_identities"],
             "probes": rows,
         },
-        "finding_candidate": finding,
+        "finding_candidate": foreign_exposed,
         "evidence_pairs": evidence,
         "evidence_hints": [f"GET {u} with engagement session" for u in urls],
+        "validity_samples": samples_to_json(samples),
     }
+    if not foreign_exposed and owner_ok and any(is_blocking(x) for x in samples):
+        result["status_hint"] = "BLOCKED"
+        result["skip_reason"] = skip_reason_for(samples)
+    elif not foreign_exposed and not owner_ok:
+        # Pre-D-04 this was a finding; an unusable session is not a vulnerability.
+        result["status_hint"] = "BLOCKED" if any(is_blocking(x) or x.cls is ResponseClass.AUTH_EXPIRED for x in samples) else "INCONCLUSIVE"
+        result["skip_reason"] = skip_reason_for(samples) if result["status_hint"] == "BLOCKED" else "owner_access_not_proven"
+    return result
 
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:

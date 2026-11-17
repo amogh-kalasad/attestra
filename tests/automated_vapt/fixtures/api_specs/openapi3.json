@@ -1,0 +1,23 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Probe API", "version": "1.0"},
+  "servers": [{"url": "https://{env}.example.test/api", "variables": {"env": {"default": "app"}}}],
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/users": {
+      "get": {"operationId": "listUsers", "parameters": [{"$ref": "#/components/parameters/Page"}], "responses": {"200": {"description": "ok"}}},
+      "post": {"operationId": "createUser", "requestBody": {"content": {"application/json": {}}}, "responses": {"201": {"description": "created", "links": {"self": {"operationId": "getUser"}}}}}
+    },
+    "/users/{id}": {
+      "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+      "get": {"operationId": "getUser", "responses": {"200": {"description": "ok"}}},
+      "delete": {"operationId": "deleteUser", "responses": {"204": {"description": "gone"}}}
+    },
+    "/import": {
+      "post": {"operationId": "importFeed", "parameters": [{"name": "source", "in": "query", "schema": {"type": "string", "format": "uri"}}], "requestBody": {"content": {"application/xml": {}}}, "callbacks": {"done": {}}, "responses": {"202": {"description": "accepted"}}}
+    },
+    "/health": {"get": {"responses": {"200": {"description": "ok"}}}},
+    "/ext": {"get": {"parameters": [{"$ref": "other.yaml#/components/parameters/X"}], "responses": {"200": {"description": "ok"}}}}
+  },
+  "components": {"parameters": {"Page": {"name": "page", "in": "query", "schema": {"type": "integer"}}}}
+}

@@ -43,3 +43,24 @@ def test_build_capture_urls_respects_cap(monkeypatch):
         scope=None,
     )
     assert len(urls) == 2
+
+
+def test_build_capture_urls_merges_safe_inventory_ops_only(monkeypatch):
+    """C-04 (WP2): GET/HEAD inventory ops join capture; mutating ops never do."""
+    from attestra.automated_vapt.api_inventory.model import ApiInventory, ApiOperation
+
+    monkeypatch.setenv("ATTESTRA_API_IMPORT_ENABLED", "1")
+    inv = ApiInventory(kind="openapi3")
+    inv.add_operation(ApiOperation(method="GET", path="/api/list"))
+    inv.add_operation(ApiOperation(method="POST", path="/api/list"))
+    inv.add_operation(ApiOperation(method="GET", path="/api/items/{id}"))
+    inv.add_operation(ApiOperation(method="GET", path="/api/logout"))
+    info: dict = {}
+    urls, source = build_capture_urls(
+        session=None, asset=None, target_base_url="https://demo.example/", scope=None, info=info, api_inventory=inv
+    )
+    assert "https://demo.example/api/list" in urls
+    assert source == "root-only+spec"
+    assert info["api_inventory"]["excluded_mutating"] == 1
+    assert info["api_inventory"]["excluded_templated"] == 1
+    assert info["api_inventory"]["excluded_unsafe_words"] == 1

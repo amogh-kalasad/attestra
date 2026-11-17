@@ -4,9 +4,7 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import json
 import re
 from datetime import date, timedelta
@@ -204,8 +202,10 @@ def tenant_ids_for(s: Session, principal) -> set[int] | None:
         return None
     # Memberships are owned by Mongo (users/settings port).
     from attestra.persistence.mongo.service_bridge import MongoUnitOfWork, tenant_ids_for_principal
+    from attestra.persistence.mongo.tenant import SYSTEM_SCOPE
 
-    got = tenant_ids_for_principal(MongoUnitOfWork(tenant_ids=None), principal)
+    # K-01: membership lookup is a platform-wide read; explicit SYSTEM_SCOPE (strict-mode safe).
+    got = tenant_ids_for_principal(MongoUnitOfWork(tenant_ids=SYSTEM_SCOPE), principal)
     return None if got is None else set(got)
 
 
@@ -1603,9 +1603,14 @@ def import_results(
             _apply_import_validation(f, nf, only_if_stronger=True)
             _apply_remediation_recommendation(f)
             if f.status == "fixed":
-                # Reappeared after being marked fixed: reopen.
+                # Reappeared after being marked fixed: reopen (H-01 keeps a regression link).
+                from attestra import retest as _retest
+
+                link = _retest.regression_link(
+                    f, previous_run_id=getattr(f, "last_fixed_run_id", None), current_run_id=run.id
+                )
                 f.status = "validated" if f.validated_by else "triaged"
-                audit.record(s, actor, "finding.reopened", "finding", f.id, import_run=run.id)
+                audit.record(s, actor, "finding.reopened", "finding", f.id, import_run=run.id, regression=link)
             if not group_origin:
                 updated += 1
             elif f.id not in run_new_ids and f.id not in run_updated_ids:
@@ -1859,20 +1864,20 @@ def rescore(f: Finding) -> None:
 
 
 def enrich(s: Session, *, kev_json: bytes | None = None, epss_csv: bytes | None = None, actor: str) -> dict:
-    """Apply CISA KEV (JSON) and FIRST EPSS (CSV) feeds downloaded by the operator."""
-    kev: set[str] = set()
-    if kev_json:
-        doc = json.loads(kev_json)
-        kev = {v["cveID"].upper() for v in doc.get("vulnerabilities", []) if v.get("cveID")}
-    epss: dict[str, float] = {}
-    if epss_csv:
-        text = epss_csv.decode("utf-8", errors="replace")
-        lines = [line for line in text.splitlines() if not line.startswith("#")]
-        for row in csv.DictReader(io.StringIO("\n".join(lines))):
-            try:
-                epss[row["cve"].upper()] = float(row["epss"])
-            except (KeyError, ValueError):
-                continue
+    """Apply CISA KEV (JSON) and FIRST EPSS (CSV) feeds downloaded by the operator.
+
+    G-03/G-04/G-06: feeds are validated (``intel.feed_store``); malformed input raises
+    ``FeedValidationError`` (a ``ValueError``) and is never applied. With no input, the last
+    validated on-disk snapshot is used. A missing EPSS score is left unknown, never 0.
+    """
+    from attestra.intel import feed_store
+
+    snap = None
+    if kev_json is None and epss_csv is None:
+        snap = feed_store.load_validated()  # never returns corrupt content
+        kev_json, epss_csv = snap.kev_json, snap.epss_csv
+    kev: set[str] = feed_store.parse_kev(kev_json)[0] if kev_json else set()
+    epss: dict[str, float] = feed_store.parse_epss(epss_csv)[0] if epss_csv else {}
     touched = 0
     for f in s.scalars(select(Finding)):
         cves = [c.upper() for c in (f.cves or [])]
@@ -1885,8 +1890,19 @@ def enrich(s: Session, *, kev_json: bytes | None = None, epss_csv: bytes | None 
             f.kev, f.epss = new_kev, new_epss
             rescore(f)
             touched += 1
-    audit.record(s, actor, "enrich.apply", "finding", None, kev_entries=len(kev), epss_entries=len(epss), updated=touched)
-    return {"kev_entries": len(kev), "epss_entries": len(epss), "findings_updated": touched}
+    intel_version = snap.source_version if snap is not None else "operator-supplied"
+    freshness = snap.freshness if snap is not None else {}
+    audit.record(
+        s, actor, "enrich.apply", "finding", None, kev_entries=len(kev), epss_entries=len(epss),
+        updated=touched, intel_source_version=intel_version,
+    )
+    return {
+        "kev_entries": len(kev),
+        "epss_entries": len(epss),
+        "findings_updated": touched,
+        "intel_source_version": intel_version,
+        "freshness": freshness,
+    }
 
 
 # ---------------------------------------------------------------- findings

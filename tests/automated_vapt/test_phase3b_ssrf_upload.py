@@ -66,3 +66,17 @@ def test_ssrf_upload_skip_when_disabled(monkeypatch, clients):
     _, vuln = clients
     assert ssrf_tests.run(vuln, BASE)["skip_reason"] == ssrf_tests.SKIP_DISABLED
     assert file_upload_tests.run(vuln, BASE)["skip_reason"] == file_upload_tests.SKIP_DISABLED
+
+
+# @lat: [[run-validity-and-policy#Intrusive policy]]
+def test_ssrf_upload_flag_on_without_policy_decision_is_denied(monkeypatch, clients):
+    """FND-02: APP_ENV no longer enables probes; the flag alone is not enough either."""
+    monkeypatch.setenv("ATTESTRA_AUTOMATED_VAPT_SSRF", "1")
+    monkeypatch.setenv("ATTESTRA_AUTOMATED_VAPT_UPLOAD", "1")
+    monkeypatch.setenv("APP_ENV", "local")
+    _, vuln = clients
+    s = ssrf_tests.run(vuln, BASE)
+    u = file_upload_tests.run(vuln, BASE)
+    assert s["skip_reason"] == ssrf_tests.SKIP_POLICY_DENIED
+    assert u["skip_reason"] == file_upload_tests.SKIP_POLICY_DENIED
+    assert s["policy_decision"]["reason"] == "no_policy_decision"

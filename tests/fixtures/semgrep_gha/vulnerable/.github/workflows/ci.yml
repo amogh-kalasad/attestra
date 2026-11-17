@@ -1,0 +1,18 @@
+# Deliberately vulnerable fixture for attestra GHA semgrep rules (never executed).
+name: vulnerable
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: someorg/some-action@v1
+      - name: greet
+        run: echo "Title is ${{ github.event.issue.title }}"

@@ -6,7 +6,6 @@
   <h2>Contents</h2>
   <ol>
     <li><a href="#document-control">Document control</a></li>
-    <li><a href="#distribution">Distribution list</a></li>
     {% if figures %}<li><a href="#list-of-figures">List of figures</a></li>{% endif %}
     <li><a href="#scope">Scope and authorization</a></li>
     <li><a href="#methodology">Methodology and data sources</a></li>
@@ -17,6 +16,7 @@
     <li><a href="#findings-overview">Findings overview</a></li>
     {% if passed_checks %}<li><a href="#status-checks">Status checks</a></li>{% endif %}
     {% if security_testing_coverage %}<li><a href="#security-testing-coverage">Security testing coverage</a></li>{% endif %}
+    {% if run_validity is defined and run_validity and run_validity.has_runs %}<li><a href="#run-validity">Run validity and coverage</a></li>{% endif %}
     {% if automated_coverage_limitations and automated_coverage_limitations.section %}<li><a href="#automated-coverage-limitations">Automated coverage and limitations</a></li>{% endif %}
     {% if auth_checklist_section %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
@@ -62,21 +62,7 @@
 <p class="meta">Tester / client contact: {{ contact_name or "—" }}{% if contact_email %} · {{ contact_email }}{% endif %}</p>
 {% endif %}
 
-{% set sec.n = sec.n + 1 %}<h2 id="distribution">{{ sec.n }}. Distribution list</h2>
-<p class="meta">This report is confidential. Distribute only to the parties below and other recipients authorized in writing by {{ tenant }}.</p>
-<table>
-  <tr><th>Role</th><th>Name / organization</th><th>Email</th><th>Copies</th></tr>
-  {% for d in distribution %}
-  <tr>
-    <td>{{ d.role }}</td>
-    <td>{{ d.name }}</td>
-    <td>{% if d.email and d.email != "—" %}<span class="mono">{{ d.email }}</span>{% else %}—{% endif %}</td>
-    <td>{{ d.copies }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="4">No distribution entries recorded. Limit circulation to authorized client contacts.</td></tr>
-  {% endfor %}
-</table>
+{# Distribution list removed (standing client-report rule); circulation is covered by the confidentiality note. #}
 
 {% if figures %}
 {% set sec.n = sec.n + 1 %}<h2 id="list-of-figures">{{ sec.n }}. List of figures</h2>
@@ -287,6 +273,8 @@ CVSS vector and version appear on individual findings when available.</p>
   <tr><td>Automated cases skipped</td><td>{{ security_testing_coverage.automated_cases_skipped }}</td></tr>
 </table>
 {% endif %}
+
+{% if run_validity is defined %}{% set rv_compact = False %}{% include "_run_validity.html.j2" %}{% endif %}
 
 {% if automated_coverage_limitations and automated_coverage_limitations.section %}
 {% set sec.n = sec.n + 1 %}<h2 id="automated-coverage-limitations">{{ sec.n }}. Automated coverage and limitations</h2>

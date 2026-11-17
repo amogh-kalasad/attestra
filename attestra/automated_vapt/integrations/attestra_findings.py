@@ -102,6 +102,9 @@ def document_finding_evidence(
     screenshots: list[tuple[str, bytes]] | None = None,
     render_two_panel: bool = True,
     source_tool: str = TOOL,
+    run_validity: Any = None,
+    execution_id: int | None = None,
+    validation_status: str = "",
 ) -> dict[str, Any]:
     """Attach HTTP pairs and image documents as finding evidence for HTML/PDF reports.
 
@@ -122,6 +125,7 @@ def document_finding_evidence(
             actor=actor,
             note="elite automated capture",
         )
+        _stamp_provenance(ev, source_tool, run_validity, execution_id, validation_status)
         attached["http_pair_ids"].append(ev.id)
         if not render_two_panel:
             continue
@@ -140,6 +144,7 @@ def document_finding_evidence(
                 note="Two-panel HTTP visual (Attestra-generated)",
                 source_tool=source_tool,
             )
+            _stamp_provenance(shot, source_tool, run_validity, execution_id, validation_status)
             attached["two_panel_ids"].append(shot.id)
             attached["screenshot_ids"].append(shot.id)
         except Exception:  # noqa: BLE001 — never block finding documentation
@@ -158,7 +163,31 @@ def document_finding_evidence(
                 note="Browser screenshot",
                 source_tool=source_tool,
             )
+            _stamp_provenance(shot, source_tool, run_validity, execution_id, validation_status)
             attached["screenshot_ids"].append(shot.id)
         except Exception:  # noqa: BLE001
             log.exception("elite screenshot attach failed for finding %s", finding_id)
     return attached
+
+
+def _stamp_provenance(
+    ev: Any, source_tool: str, run_validity: Any, execution_id: int | None, validation_status: str
+) -> None:
+    """H-02: value-free provenance on each evidence row (never blocks documentation)."""
+    if ev is None or not hasattr(ev, "provenance_json"):
+        return
+    try:
+        from attestra.finding_validation import provenance as _prov
+
+        ev.provenance_json = _prov.dumps(
+            _prov.build(
+                tool=source_tool,
+                captured_at=getattr(ev, "captured_at", None),
+                evidence_sha256=getattr(ev, "sha256", "") or "",
+                run_validity=run_validity or None,
+                execution_id=execution_id,
+                validation_status=validation_status or "",
+            )
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("evidence provenance stamp failed")

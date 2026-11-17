@@ -14,7 +14,13 @@ second terminal. Safety rules:
   couple of seconds, stops running scanners, puts those scans back in the queue and exits.
 
 The worker's output goes to ``DATA_DIR/worker.log``. The worker loads ``.env`` itself.
+
+I-02 (WP4): :func:`stuck_job_summary` gives the page a value-free "N stuck jobs" badge
+(running jobs whose heartbeat is older than ``ATTESTRA_JOB_STALE_HEARTBEAT_S``) plus
+whether any worker looks alive, so an operator can tell "queued and waiting" from
+"claimed by a worker that died".
 """
+# @lat: [[attack-surface-and-platform#Queue metrics and stuck jobs]]
 
 from __future__ import annotations
 
@@ -223,3 +229,38 @@ def stop_worker(*, actor: str = "ui", s=None) -> WorkerStatus:
     config.ensure_dirs()
     stop_path().write_text(f"{actor} {time.time()}\n", encoding="utf-8")
     return st
+
+
+def stuck_job_summary(s=None) -> dict:
+    """I-02: ``{"count", "jobs", "threshold_s", "worker_running", "hint"}``; never raises.
+
+    ``jobs`` holds at most 20 value-free rows (job id, scan run id, tool, heartbeat age).
+    """
+    out: dict = {
+        "count": 0,
+        "jobs": [],
+        "threshold_s": int(config.JOB_STALE_HEARTBEAT_S),
+        "worker_running": False,
+        "hint": "",
+    }
+    try:
+        from attestra.jobs.durable import stuck_jobs
+
+        rows = stuck_jobs(s)
+        out["count"] = len(rows)
+        out["jobs"] = rows[:20]
+    except Exception:  # noqa: BLE001 - status must never break the page
+        return out
+    try:
+        st = worker_status(s)
+        out["worker_running"] = bool(st.running)
+    except Exception:  # noqa: BLE001
+        pass
+    if out["count"]:
+        out["hint"] = (
+            "A worker claimed these scans but stopped sending heartbeats. A running worker "
+            "puts them back in the queue on its next housekeeping pass."
+            if out["worker_running"]
+            else "No worker is running: start `attestra worker` and the stuck scans are re-queued."
+        )
+    return out

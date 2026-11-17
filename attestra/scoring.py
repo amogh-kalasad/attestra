@@ -16,7 +16,8 @@ from datetime import date, timedelta
 from attestra import config
 
 # Soft shape check for CVSS 3.x and 4.0 vectors (empty allowed; garbage rejected).
-# Full official CVSS 4.0 calculator is optional — store vector + version + scanner score.
+# CVSS 4.0 vectors are scored by the pure-Python FIRST calculator in attestra.intel.cvss4
+# (G-03); CVSS 3.x keeps the scanner-provided score.
 # @lat: [[findings#CVSS vector]]
 _CVSS_VECTOR_RE = re.compile(r"^CVSS:(3\.\d+|4\.0)/[A-Za-z0-9:./_]+$")
 _CVSS_VERSION_RE = re.compile(r"^CVSS:(\d+(?:\.\d+)?)/", re.IGNORECASE)
@@ -39,6 +40,13 @@ KEV_FACTOR = 1.5
 #   info:     == 0.0
 BUSINESS_RISK_BANDS = ("critical", "high", "medium", "low", "info")
 
+# G-04: version of the explanation schema / formula. The numeric ``risk_score`` formula
+# is unchanged from the pre-versioned code ("risk-v1"); "risk-v1.1" only adds
+# provenance fields (epss_known, kev_known, stale_inputs, cvss calculator version).
+# @lat: [[intel-and-reporting#Explainable versioned risk]]
+SCORING_VERSION = "risk-v1.1"
+SCORING_FORMULA_VERSION = "risk-v1"
+
 
 def validate_cvss_vector(vector: str) -> str:
     """Return a normalized CVSS 3.x or 4.0 vector, or ``""`` when empty.
@@ -46,8 +54,8 @@ def validate_cvss_vector(vector: str) -> str:
     Accepts vectors that start with ``CVSS:3.`` or ``CVSS:4.0`` and contain ``/``
     metrics. Raises ``ValueError`` for garbage (including CVSS 2.x). Callers that
     set the field explicitly (API/UI) should raise; importers should catch and
-    clear instead of aborting. CVSS 4.0 is soft-accepted for storage/display only;
-    scores are not recalculated from the vector without an official calculator.
+    clear instead of aborting. CVSS 4.0 vectors can be scored with
+    :func:`cvss_score_for_vector` (FIRST reference calculator port).
     """
     v = (vector or "").strip()
     if not v:
@@ -74,6 +82,43 @@ def cvss_version_from_vector(vector: str | None) -> str:
     """Return the CVSS version prefix (e.g. ``3.1``, ``4.0``) or ``""`` when absent."""
     m = _CVSS_VERSION_RE.match((vector or "").strip())
     return m.group(1) if m else ""
+
+
+def cvss_score_for_vector(vector: str | None, provided_score: float | None = None) -> dict:
+    """Return the CVSS score of record for a vector, with how it was obtained.
+
+    * CVSS 4.0: computed by :mod:`attestra.intel.cvss4` (reproducible from vector +
+      ``calculator_version``). A malformed 4.0 vector falls back to ``provided_score``.
+    * CVSS 3.x / empty: the provided (scanner/tester) score is kept unchanged.
+
+    Returns ``{score, version, source, calculator_version, macro_vector, severity}``.
+    """
+    # @lat: [[intel-and-reporting#CVSS 4.0 calculator]]
+    v = (vector or "").strip()
+    version = cvss_version_from_vector(v)
+    out = {
+        "score": provided_score,
+        "version": version,
+        "source": "provided" if provided_score is not None else "none",
+        "calculator_version": "",
+        "macro_vector": "",
+        "severity": severity_from_cvss(float(provided_score)) if provided_score is not None else "",
+    }
+    if version == "4.0":
+        from attestra.intel import cvss4
+
+        res = cvss4.try_score(v)
+        if res is not None:
+            out.update(
+                score=res.score,
+                source="cvss4_calculator",
+                calculator_version=res.calculator_version,
+                macro_vector=res.macro_vector,
+                severity=res.severity,
+            )
+        else:
+            out["source"] = "provided_invalid_vector" if provided_score is not None else "invalid_vector"
+    return out
 
 
 @dataclass(frozen=True)
@@ -207,11 +252,22 @@ def explain_risk_modifiers(
     *,
     validation_status: str | None = None,
     informational_capped: bool | None = None,
+    epss_known: bool | None = None,
+    kev_known: bool | None = None,
+    stale_inputs: list[str] | tuple[str, ...] | None = None,
+    cvss_vector: str | None = None,
+    intel_source_version: str = "",
 ) -> dict:
     """Cheap, reproducible breakdown of priority/business risk modifiers.
 
     This explains ``risk_score`` only. CVSS score/vector remain the technical
     severity of record and are never rewritten here.
+
+    G-04: a missing EPSS value is reported as *unknown* (``epss: None``,
+    ``epss_known: False``), never as 0 %. The numeric score is unchanged for existing
+    inputs (unknown EPSS contributes no uplift, exactly as before). ``kev_known`` is
+    False unless the caller says the KEV feed was loaded (or ``kev`` is True).
+    ``stale_inputs`` lists feeds (``kev``/``epss``) that were stale or missing.
     """
     capped = (
         bool(informational_capped)
@@ -222,8 +278,11 @@ def explain_risk_modifiers(
     score_cvss = None if capped else cvss
     score_sev = "info" if capped else severity
     base, base_source = _risk_base(score_cvss, score_sev, exposure, in_cde)
+    epss_is_known = (epss is not None) if epss_known is None else bool(epss_known and epss is not None)
     epss_v = float(epss or 0.0)
     epss_factor = 1.0 + epss_v
+    kev_is_known = bool(kev) or bool(kev_known)
+    stale = sorted({str(x) for x in (stale_inputs or [])})
     kev_factor = KEV_FACTOR if kev else 1.0
     aw = asset_weight(criticality, weights)
     ew = exposure_weight(exposure, in_cde, weights)
@@ -236,14 +295,28 @@ def explain_risk_modifiers(
             "validation_status=informational: priority uses info base "
             "(not treated as a confirmed vulnerability)"
         )
+    if not epss_is_known:
+        notes.append("EPSS unknown (no score for these CVEs or feed not loaded): no uplift applied; not treated as 0%")
+    if not kev_is_known:
+        notes.append("KEV status unknown (feed not confirmed loaded): no KEV uplift applied")
+    if stale:
+        notes.append(f"stale or missing intel inputs: {', '.join(stale)}")
+    cvss_calc = cvss_score_for_vector(cvss_vector, cvss) if cvss_vector else None
     return {
+        "scoring_version": SCORING_VERSION,
+        "formula_version": SCORING_FORMULA_VERSION,
+        "epss_known": epss_is_known,
+        "kev_known": kev_is_known,
+        "stale_inputs": stale,
+        "intel_source_version": intel_source_version or "",
+        "cvss_calculation": cvss_calc,
         "base": base,
         "base_source": base_source,
         "cvss_score": cvss,
         "cvss_input": score_cvss,
         "severity": (severity or "").lower() or "info",
         "severity_input": score_sev,
-        "epss": epss_v,
+        "epss": epss_v if epss_is_known else None,
         "epss_factor": epss_factor,
         "kev": bool(kev),
         "kev_factor": kev_factor,

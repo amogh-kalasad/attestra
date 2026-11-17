@@ -1,19 +1,22 @@
 """Durable MongoDB-backed job queue for ScanRuns."""
+# @lat: [[attack-surface-and-platform#Queue metrics and stuck jobs]]
 
 from __future__ import annotations
 
 import hashlib
 import json
 import threading
+import time
 import uuid
 from collections.abc import Iterable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from attestra import audit, config, services
+from attestra import observability as obs
 from attestra.models import Job, ScanRun, utcnow
 from attestra.runner.authorization import scope_for_engagement
 from attestra.runner.gate import GateError, check
@@ -70,7 +73,80 @@ def claim_job(s: Session, worker_id: str, *, exclude_tools: Iterable[str] = ()) 
     doc = mongo_claim_job(worker_id, exclude_tools=exclude_tools)
     if not doc:
         return None
+    _safe_metric(obs.record_job_claimed, doc.get("tool") or "", queue_age_seconds(doc))
     return MongoJob(doc)
+
+
+# ---------------------------------------------------------------- I-01 / I-02 helpers
+
+
+def _safe_metric(fn, *args) -> None:
+    """Metrics must never break the queue."""
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _aware(dt):
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            return None
+    if not isinstance(dt, datetime):
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def queue_age_seconds(doc: dict, *, now: datetime | None = None) -> float | None:
+    """created/queued → claimed age for a job document, None when the doc has no enqueue time.
+
+    Older job documents carry no enqueue timestamp; INT may add ``queued_at`` at enqueue
+    (WIRING_WP4.md) and this starts reporting without further changes.
+    """
+    queued = _aware(doc.get("queued_at") or doc.get("created_at"))
+    if queued is None:
+        return None
+    now = _aware(now) or datetime.now(UTC)
+    return max(0.0, (now - queued).total_seconds())
+
+
+def is_stuck(job: object, *, now: datetime | None = None, stale_s: int | None = None) -> bool:
+    """I-02: a *running* job whose heartbeat is missing or older than ``JOB_STALE_HEARTBEAT_S``."""
+    get = job.get if isinstance(job, dict) else (lambda k, d=None: getattr(job, k, d))
+    if (get("status") or "") != "running":
+        return False
+    stale = int(stale_s if stale_s is not None else config.JOB_STALE_HEARTBEAT_S)
+    hb = _aware(get("heartbeat_at"))
+    if hb is None:
+        return True
+    now = _aware(now) or datetime.now(UTC)
+    return (now - hb).total_seconds() > stale
+
+
+def stuck_jobs(s: Session | None = None, *, now: datetime | None = None, stale_s: int | None = None) -> list[dict]:
+    """Running jobs with a stale heartbeat (value-free rows for the UI badge and the gauge)."""
+    from attestra.persistence.mongo.adapters import mongo_jobs_by_status
+
+    now = _aware(now) or datetime.now(UTC)
+    out: list[dict] = []
+    for d in mongo_jobs_by_status("running"):
+        if is_stuck(d, now=now, stale_s=stale_s):
+            hb = _aware(d.get("heartbeat_at"))
+            out.append(
+                {
+                    "job_id": int(d.get("id") or d.get("_id")),
+                    "scan_run_id": int(d.get("scan_run_id") or 0),
+                    "tool": d.get("tool") or "",
+                    "worker_id": d.get("worker_id") or "",
+                    "heartbeat_age_s": None if hb is None else round((now - hb).total_seconds(), 1),
+                }
+            )
+    _safe_metric(obs.record_stuck_jobs, len(out))
+    return out
 
 
 def touch_heartbeats(s: Session, job_ids: Iterable[int], worker_id: str) -> int:
@@ -116,6 +192,8 @@ def fail_job(s: Session, job: Job, error: str, *, retry: bool = True) -> None:
 
     doc = mongo_fail_job(job.id, error, retry=retry, worker_id=job.worker_id or "worker")
     if doc:
+        if doc.get("status") == "queued":
+            _safe_metric(obs.record_job_retry, getattr(job, "tool", "") or doc.get("tool") or "")
         job.status = doc["status"]
         job.error = doc.get("error") or ""
         job.worker_id = doc.get("worker_id") or ""
@@ -156,7 +234,22 @@ def resume_queued_jobs(s: Session, worker_id: str | None = None) -> int:
 
 
 def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) -> None:
-    """Execute adapter → hash raw → import → complete (or quarantine/fail)."""
+    """Execute adapter → hash raw → import → complete (or quarantine/fail).
+
+    I-01: wraps :func:`_run_one_job` with duration / outcome metrics (never raises from
+    the metrics path; the job outcome is unchanged).
+    """
+    start = time.perf_counter()
+    try:
+        _run_one_job(s, job, cancel=cancel)
+    finally:
+        tool = getattr(job, "tool", "") or ""
+        status = str(getattr(job, "status", "") or "unknown")
+        outcome = {"done": "done", "queued": "requeued"}.get(status, status)
+        _safe_metric(obs.record_job_finished, tool, outcome, time.perf_counter() - start)
+
+
+def _run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) -> None:
     run = s.get(ScanRun, job.scan_run_id)
     if not run:
         fail_job(s, job, "scan_run missing", retry=False)
@@ -247,6 +340,15 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
         if plan is not None:
             plan.cleanup()
 
+    # L-02: adapter + tool version in result.extra for every adapter, including the ones
+    # that override scan() (webcheck). INT persists it on the ScanRun (WIRING_WP4.md).
+    stamp = getattr(adapter, "stamp_result", None)
+    if callable(stamp):
+        try:
+            stamp(result)
+        except Exception:  # noqa: BLE001 - metadata only
+            pass
+
     # Mid-scan session guard outcome (auth-loss / re-login) → redacted ScanRun.auth_note so
     # checklist and reports never present post-loss coverage as authenticated.
     if plan is not None and isinstance(result.extra, dict) and result.extra.get("auth"):
@@ -282,6 +384,9 @@ def run_one_job(s: Session, job: Job, *, cancel: threading.Event | None = None) 
     run.raw_artifact_uri = str(result.raw_path)
     run.raw_sha256 = sha
     run.tool_version = result.tool_version
+    # L-02: adapter contract version (e.g. "zap/1+sdk1") from the adapter SDK.
+    if hasattr(run, "adapter_version"):
+        run.adapter_version = str((getattr(result, "extra", None) or {}).get("adapter_version") or "")[:100]
     run.image_digest = result.image_digest
     # C5: persist pass/fail check list from the scanner when present.
     check_rows = result.extra.get("checks") if isinstance(result.extra, dict) else None

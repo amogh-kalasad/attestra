@@ -1,0 +1,911 @@
+# Attestra checklist catalog v2 (WP1 / FND-05). Edit with care: tests/test_checklist_integrity.py validates it.
+catalog_version: wstg-4.2+asvs-4.0.3/attestra-1
+description: Attestra checklist catalog v2 (FND-05). Stable refs, automation levels, aliases and every scanner/automated-test mapping. Validated
+  by attestra.auth_web.checklist_catalog.validate_catalog and tests/test_checklist_integrity.py.
+items:
+- ref: WSTG-INFO-01
+  title: Conduct Search Engine Discovery Reconnaissance for Information Leakage
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INFO-02
+  title: Fingerprint Web Server
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INFO-03
+  title: Review Webserver Metafiles for Information Leakage
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INFO-04
+  title: Enumerate Applications on Webserver
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INFO-05
+  title: Review Webpage Content for Information Leakage
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INFO-06
+  title: Identify Application Entry Points
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INFO-07
+  title: Map Execution Paths Through Application
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INFO-08
+  title: Fingerprint Web Application Framework
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INFO-09
+  title: Fingerprint Web Application
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INFO-10
+  title: Map Application Architecture
+  standard: WSTG-v4.2
+  domain: information_gathering
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-01
+  title: Test Network Infrastructure Configuration
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-02
+  title: Test Application Platform Configuration
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-03
+  title: Test File Extensions Handling for Sensitive Information
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-04
+  title: Review Old Backup and Unreferenced Files for Sensitive Information
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CONF-05
+  title: Enumerate Infrastructure and Application Admin Interfaces
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-06
+  title: Test HTTP Methods
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CONF-07
+  title: Test HTTP Strict Transport Security
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CONF-08
+  title: Test RIA Cross Domain Policy
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-09
+  title: Test File Permission
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: n/a
+  applicability: web,api
+- ref: WSTG-CONF-10
+  title: Test for Subdomain Takeover
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CONF-11
+  title: Test Cloud Storage
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CONF-12
+  title: Test for Content Security Policy
+  standard: WSTG-v4.2
+  domain: configuration
+  automation: partial
+  applicability: web,api
+- ref: WSTG-IDNT-01
+  title: Test Role Definitions
+  standard: WSTG-v4.2
+  domain: identity
+  automation: manual
+  applicability: web,api
+- ref: WSTG-IDNT-02
+  title: Test User Registration Process
+  standard: WSTG-v4.2
+  domain: identity
+  automation: manual
+  applicability: web,api
+- ref: WSTG-IDNT-03
+  title: Test Account Provisioning Process
+  standard: WSTG-v4.2
+  domain: identity
+  automation: manual
+  applicability: web,api
+- ref: WSTG-IDNT-04
+  title: Testing for Account Enumeration and Guessable User Account
+  standard: WSTG-v4.2
+  domain: identity
+  automation: partial
+  applicability: web,api
+- ref: WSTG-IDNT-05
+  title: Testing for Weak or Unenforced Username Policy
+  standard: WSTG-v4.2
+  domain: identity
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-01
+  title: Testing for Credentials Transported over an Encrypted Channel
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHN-02
+  title: Testing for Default Credentials
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHN-03
+  title: Testing for Weak Lock Out Mechanism
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-04
+  title: Testing for Bypassing Authentication Schema
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHN-05
+  title: Testing for Vulnerable Remember Password
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-06
+  title: Testing for Browser Cache Weaknesses
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHN-07
+  title: Testing for Weak Password Policy
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-08
+  title: Testing for Weak Security Question Answer
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-09
+  title: Testing for Weak Password Change or Reset Functionalities
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHN-10
+  title: Testing for Weaker Authentication in Alternative Channel
+  standard: WSTG-v4.2
+  domain: authentication
+  automation: manual
+  applicability: web,api
+- ref: WSTG-ATHZ-01
+  title: Testing Directory Traversal File Include
+  standard: WSTG-v4.2
+  domain: authorization
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHZ-02
+  title: Testing for Bypassing Authorization Schema
+  standard: WSTG-v4.2
+  domain: authorization
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHZ-03
+  title: Testing for Privilege Escalation
+  standard: WSTG-v4.2
+  domain: authorization
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHZ-04
+  title: Testing for Insecure Direct Object References
+  standard: WSTG-v4.2
+  domain: authorization
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ATHZ-05
+  title: Testing for OAuth Weaknesses
+  standard: WSTG-v4.2
+  domain: authorization
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-01
+  title: Testing for Session Management Schema
+  standard: WSTG-v4.2
+  domain: session
+  automation: manual
+  applicability: web,api
+- ref: WSTG-SESS-02
+  title: Testing for Cookies Attributes
+  standard: WSTG-v4.2
+  domain: session
+  automation: automated
+  applicability: web,api
+- ref: WSTG-SESS-03
+  title: Testing for Session Fixation
+  standard: WSTG-v4.2
+  domain: session
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-04
+  title: Testing for Exposed Session Variables
+  standard: WSTG-v4.2
+  domain: session
+  automation: manual
+  applicability: web,api
+- ref: WSTG-SESS-05
+  title: Testing for Cross Site Request Forgery
+  standard: WSTG-v4.2
+  domain: session
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-06
+  title: Testing for Logout Functionality
+  standard: WSTG-v4.2
+  domain: session
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-07
+  title: Testing Session Timeout
+  standard: WSTG-v4.2
+  domain: session
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-08
+  title: Testing for Session Puzzling
+  standard: WSTG-v4.2
+  domain: session
+  automation: manual
+  applicability: web,api
+- ref: WSTG-SESS-09
+  title: Testing for Session Hijacking
+  standard: WSTG-v4.2
+  domain: session
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-01
+  title: Testing for Reflected Cross Site Scripting
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INPV-02
+  title: Testing for Stored Cross Site Scripting
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INPV-03
+  title: Testing for HTTP Verb Tampering
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-04
+  title: Testing for HTTP Parameter Pollution
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-05
+  title: Testing for SQL Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INPV-06
+  title: Testing for LDAP Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-07
+  title: Testing for XML Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-08
+  title: Testing for SSI Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-09
+  title: Testing for XPath Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-10
+  title: Testing for IMAP SMTP Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-11
+  title: Testing for Code Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-12
+  title: Testing for Command Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-13
+  title: Testing for Format String Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-14
+  title: Testing for Incubated Vulnerability
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-15
+  title: Testing for HTTP Splitting Smuggling
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-16
+  title: Testing for HTTP Incoming Requests
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: manual
+  applicability: web,api
+- ref: WSTG-INPV-17
+  title: Testing for Host Header Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INPV-18
+  title: Testing for Server-side Template Injection
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+- ref: WSTG-INPV-19
+  title: Testing for Server-Side Request Forgery
+  standard: WSTG-v4.2
+  domain: input_validation
+  automation: partial
+  applicability: web,api
+  aliases:
+  - WSTG-BUSL-09-legacy-ssrf
+  note: SSRF lives here (WSTG v4.2 INPV-19). Old engagement rows filed SSRF under WSTG-BUSL-09; their verdicts are mirrored here.
+- ref: WSTG-ERRH-01
+  title: Testing for Improper Error Handling
+  standard: WSTG-v4.2
+  domain: error_handling
+  automation: partial
+  applicability: web,api
+- ref: WSTG-ERRH-02
+  title: Testing for Stack Traces
+  standard: WSTG-v4.2
+  domain: error_handling
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CRYP-01
+  title: Testing for Weak Transport Layer Security
+  standard: WSTG-v4.2
+  domain: cryptography
+  automation: automated
+  applicability: web,api
+- ref: WSTG-CRYP-02
+  title: Testing for Padding Oracle
+  standard: WSTG-v4.2
+  domain: cryptography
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CRYP-03
+  title: Testing for Sensitive Information Sent via Unencrypted Channels
+  standard: WSTG-v4.2
+  domain: cryptography
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CRYP-04
+  title: Testing for Weak Encryption
+  standard: WSTG-v4.2
+  domain: cryptography
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-01
+  title: Test Business Logic Data Validation
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-02
+  title: Test Ability to Forge Requests
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: partial
+  applicability: web,api
+- ref: WSTG-BUSL-03
+  title: Test Integrity Checks
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-04
+  title: Test for Process Timing
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-05
+  title: Test Number of Times a Function Can Be Used Limits
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: partial
+  applicability: web,api
+- ref: WSTG-BUSL-06
+  title: Testing for the Circumvention of Work Flows
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-07
+  title: Test Defenses Against Application Misuse
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+- ref: WSTG-BUSL-08
+  title: Test Upload of Unexpected File Types
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: partial
+  applicability: web,api
+- ref: WSTG-BUSL-09
+  title: Test Upload of Malicious Files
+  standard: WSTG-v4.2
+  domain: business_logic
+  automation: manual
+  applicability: web,api
+  note: Upload of malicious files. Legacy engagements used this ref for SSRF (now WSTG-INPV-19); such rows are kept and annotated as a legacy
+    alias.
+- ref: WSTG-CLNT-01
+  title: Testing for DOM-Based Cross Site Scripting
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CLNT-02
+  title: Testing for JavaScript Execution
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-03
+  title: Testing for HTML Injection
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-04
+  title: Testing for Client-side URL Redirect
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CLNT-05
+  title: Testing for CSS Injection
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-06
+  title: Testing for Client-side Resource Manipulation
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-07
+  title: Testing Cross Origin Resource Sharing
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CLNT-08
+  title: Testing for Cross Site Flashing
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: n/a
+  applicability: web,api
+- ref: WSTG-CLNT-09
+  title: Testing for Clickjacking
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: partial
+  applicability: web,api
+- ref: WSTG-CLNT-10
+  title: Testing WebSockets
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-11
+  title: Testing Web Messaging
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-12
+  title: Testing Browser Storage
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-CLNT-13
+  title: Testing for Cross Site Script Inclusion
+  standard: WSTG-v4.2
+  domain: client_side
+  automation: manual
+  applicability: web,api
+- ref: WSTG-APIT-01
+  title: Testing GraphQL
+  standard: WSTG-v4.2
+  domain: api
+  automation: partial
+  applicability: web,api
+- ref: WSTG-SESS-10
+  title: Testing JSON Web Tokens
+  standard: WSTG-latest
+  domain: session
+  automation: partial
+  applicability: web,api
+  note: JWT testing (WSTG latest; offline structure/claims only in Attestra).
+- ref: ASVS-V2.1.1
+  title: Password Security Requirements (min length)
+  standard: ASVS-4.0.3
+  domain: authentication
+  automation: manual
+  applicability: web,api;level=L1
+- ref: ASVS-V2.2.1
+  title: Anti-automation controls
+  standard: ASVS-4.0.3
+  domain: authentication
+  automation: manual
+  applicability: web,api;level=L1
+- ref: ASVS-V3.2.1
+  title: New session token on user authentication
+  standard: ASVS-4.0.3
+  domain: session
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V3.3.1
+  title: Logout and expiration invalidate the session token
+  standard: ASVS-4.0.3
+  domain: session
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V3.3.2
+  title: Re-authentication / absolute session timeout
+  standard: ASVS-4.0.3
+  domain: session
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V3.4.1
+  title: Cookie-based session tokens have the Secure attribute
+  standard: ASVS-4.0.3
+  domain: session
+  automation: automated
+  applicability: web,api;level=L1
+- ref: ASVS-V3.4.2
+  title: Cookie-based session tokens have the HttpOnly attribute
+  standard: ASVS-4.0.3
+  domain: session
+  automation: automated
+  applicability: web,api;level=L1
+- ref: ASVS-V3.4.3
+  title: Cookie-based session tokens use the SameSite attribute
+  standard: ASVS-4.0.3
+  domain: session
+  automation: automated
+  applicability: web,api;level=L1
+- ref: ASVS-V3.5.3
+  title: Stateless session tokens use signatures and protect against tampering
+  standard: ASVS-4.0.3
+  domain: session
+  automation: partial
+  applicability: web,api;level=L2
+- ref: ASVS-V4.1.1
+  title: General Access Control Design
+  standard: ASVS-4.0.3
+  domain: authorization
+  automation: manual
+  applicability: web,api;level=L1
+- ref: ASVS-V4.1.3
+  title: Principle of least privilege
+  standard: ASVS-4.0.3
+  domain: authorization
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V4.2.1
+  title: Sensitive data and APIs protected against IDOR
+  standard: ASVS-4.0.3
+  domain: authorization
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V4.2.2
+  title: Strong anti-CSRF mechanism
+  standard: ASVS-4.0.3
+  domain: authorization
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V5.1.1
+  title: HTTP parameter pollution defenses
+  standard: ASVS-4.0.3
+  domain: input_validation
+  automation: manual
+  applicability: web,api;level=L1
+- ref: ASVS-V5.2.6
+  title: Protection against SSRF
+  standard: ASVS-4.0.3
+  domain: input_validation
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V5.3.3
+  title: Context-aware output escaping (XSS)
+  standard: ASVS-4.0.3
+  domain: input_validation
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V5.3.4
+  title: Parameterized queries (SQL injection)
+  standard: ASVS-4.0.3
+  domain: input_validation
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V8.3.1
+  title: Sensitive data not sent in URL query strings
+  standard: ASVS-4.0.3
+  domain: data_protection
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V9.1.1
+  title: TLS used for all client connectivity
+  standard: ASVS-4.0.3
+  domain: communications
+  automation: automated
+  applicability: web,api;level=L1
+- ref: ASVS-V12.5.2
+  title: Uploaded files are not served as executable HTML
+  standard: ASVS-4.0.3
+  domain: files
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V13.2.1
+  title: Only allowed HTTP methods are enabled
+  standard: ASVS-4.0.3
+  domain: api
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V14.4.3
+  title: Content-Security-Policy response header
+  standard: ASVS-4.0.3
+  domain: configuration
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V14.4.5
+  title: Strict-Transport-Security header
+  standard: ASVS-4.0.3
+  domain: configuration
+  automation: partial
+  applicability: web,api;level=L1
+- ref: ASVS-V14.5.3
+  title: CORS Access-Control-Allow-Origin uses a strict allow list
+  standard: ASVS-4.0.3
+  domain: configuration
+  automation: partial
+  applicability: web,api;level=L1
+mappings:
+  automated:
+    T03:
+    - WSTG-ATHN-04
+    T04:
+    - WSTG-ATHZ-04
+    T05:
+    - WSTG-ATHZ-02
+    T06:
+    - WSTG-ATHZ-02
+    T07:
+    - WSTG-ATHN-04
+    - WSTG-INFO-05
+    SESSION:
+    - WSTG-SESS-02
+    - WSTG-SESS-10
+    SESSLIFE:
+    - WSTG-SESS-03
+    - WSTG-SESS-06
+    - WSTG-SESS-07
+    OIDCMETA:
+    - WSTG-ATHZ-05
+    INJ:
+    - WSTG-INPV-05
+    XSS:
+    - WSTG-INPV-01
+    XSSDOM:
+    - WSTG-CLNT-01
+    XSSSTORE:
+    - WSTG-INPV-02
+    FILE:
+    - WSTG-ATHZ-01
+    BIZ:
+    - WSTG-ATHZ-04
+    ROLEDIFF:
+    - WSTG-ATHZ-02
+    SSRF:
+    - WSTG-INPV-19
+    UPLOAD:
+    - WSTG-BUSL-08
+    T19:
+    - WSTG-ATHN-04
+    T20:
+    - WSTG-ATHZ-04
+    T21:
+    - WSTG-INPV-05
+    - WSTG-INPV-01
+    T22:
+    - WSTG-ATHZ-04
+    CORS:
+    - WSTG-CLNT-07
+    HOSTHDR:
+    - WSTG-INPV-17
+    OREDIR:
+    - WSTG-CLNT-04
+    CACHE:
+    - WSTG-ATHN-06
+    SSIND:
+    - WSTG-INPV-18
+    GRAPHQL:
+    - WSTG-APIT-01
+    APIPOST:
+    - WSTG-BUSL-05
+  zap:
+    WSTG-CONF-12:
+      rules:
+      - '10038'
+      - '10055'
+      pass:
+      - '10038'
+      - '10055'
+    WSTG-SESS-02:
+      rules:
+      - '10010'
+      - '10011'
+      - '10054'
+      pass:
+      - '10010'
+      - '10011'
+      - '10054'
+    WSTG-INFO-02:
+      rules:
+      - '10036'
+      - '10037'
+    WSTG-INPV-01:
+      rules:
+      - '40012'
+      - '40014'
+      - '40016'
+      - '40017'
+      - '40026'
+    WSTG-INPV-05:
+      rules:
+      - '40018'
+      - '40019'
+      - '40020'
+      - '40021'
+      - '40022'
+      - '40024'
+      - '40027'
+      - '90018'
+    WSTG-SESS-05:
+      rules:
+      - '10202'
+      - '20012'
+    WSTG-ATHZ-01:
+      rules:
+      - '6'
+      - '7'
+    WSTG-INPV-19:
+      rules:
+      - '40046'
+  nuclei:
+  - ref: WSTG-CONF-12
+    pattern: (^|[-:])csp([-:]|$)|content-security-policy
+  - ref: WSTG-SESS-02
+    pattern: cookie
+  - ref: WSTG-INFO-02
+    pattern: version-(detect|disclosure)|server-version|x-powered-by|banner
+  - ref: WSTG-INPV-19
+    pattern: ssrf
+  - ref: WSTG-INPV-01
+    pattern: xss
+    exclude: xss-deprecated-header|x-xss-protection
+  - ref: WSTG-INPV-05
+    pattern: sqli|sql-injection
+  - ref: WSTG-ATHZ-01
+    pattern: (^|-)lfi(-|$)|path-traversal|directory-traversal
+  - ref: WSTG-ATHN-02
+    pattern: default-login
+  webcheck:
+    WSTG-SESS-02:
+    - cookie-flags
+    WSTG-CONF-12:
+    - csp-policy
+    WSTG-ATHN-01:
+    - http-no-redirect
+  testssl: WSTG-CRYP-01
+exceptions:
+  test_ids:
+    T01: capture pipeline (no checklist verdict)
+    T02: screenshot pipeline (no checklist verdict)
+    T08: 'Attestra self-test: validation engine'
+    T09: 'Attestra self-test: false-positive handling'
+    T10: 'Attestra self-test: screenshot annotation'
+    T11: 'Attestra self-test: evidence redaction'
+    T12: 'Attestra self-test: evidence integrity'
+    T13: 'Attestra self-test: finding mapping'
+    T14: 'Attestra self-test: report integration'
+    T15: 'Attestra self-test: Burp import (deferred)'
+    T16: 'Attestra self-test: scope enforcement (deferred)'
+    T17: 'Attestra self-test: tenant evidence isolation (deferred)'
+    T18: 'Attestra self-test: subscription enforcement (deferred)'
+    SCOPE_SMOKE: scope smoke check (no checklist verdict)
+  manual_targets: {}
+  unmapped_refs_ok: true

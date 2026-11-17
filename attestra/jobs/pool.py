@@ -7,7 +7,13 @@ its own database session. Claiming is atomic (see :func:`attestra.jobs.durable.c
 Ctrl+C stops the scanners that are running, removes their containers and puts those jobs
 back in the queue, so the next ``attestra worker`` picks them up again. A second Ctrl+C
 exits at once (stale heartbeats are recovered on the next start).
+
+I-01/I-03 (WP4): every pass publishes worker load gauges (active jobs, saturation) and the
+housekeeping pass runs the maintenance tick (:mod:`attestra.jobs.maintenance`), which is
+off unless ``ATTESTRA_MAINTENANCE_ENABLED`` is set and throttles each task by its own
+interval.
 """
+# @lat: [[attack-surface-and-platform#Queue metrics and stuck jobs]]
 
 from __future__ import annotations
 
@@ -22,8 +28,9 @@ from pathlib import Path
 from sqlalchemy.exc import OperationalError
 
 from attestra import db
+from attestra import observability as obs
 from attestra.jobs import durable
-from attestra.models import Job, ScanRun
+from attestra.models import ScanRun
 
 MAX_CONCURRENCY = 8
 # Tools that share on-disk state between runs and must not run twice at the same time:
@@ -31,6 +38,8 @@ MAX_CONCURRENCY = 8
 SERIAL_TOOLS = frozenset({"nuclei"})
 HEARTBEAT_EVERY_S = 30.0
 SHUTDOWN_JOIN_S = 90.0
+# Stuck-job scan (I-02) is a Mongo query; do it at most this often from housekeeping.
+STUCK_SCAN_EVERY_S = 60.0
 
 
 def resolve_concurrency(value: int | str | None = None) -> int:
@@ -70,6 +79,7 @@ class WorkerPool:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _shutdown_ids: set[int] = field(default_factory=set)
     _last_heartbeat: float = 0.0
+    _last_stuck_scan: float = 0.0
 
     # ------------------------------------------------------------------ main loop
     def run_forever(self) -> None:
@@ -102,7 +112,23 @@ class WorkerPool:
             if not claimed_auto:
                 break
             started += 1
+        self._publish_load()
         return started
+
+    def load_by_kind(self) -> dict[str, int]:
+        """Live jobs per kind (scan / automated) for the I-01 gauges."""
+        with self._lock:
+            out: dict[str, int] = {"scan": 0, "automated": 0}
+            for a in self._active.values():
+                if a.thread.is_alive():
+                    out[a.kind] = out.get(a.kind, 0) + 1
+            return out
+
+    def _publish_load(self) -> None:
+        try:
+            obs.record_worker_load(self.load_by_kind(), self.concurrency)
+        except Exception:  # noqa: BLE001 - metrics never stop the worker
+            pass
 
     def active_job_ids(self) -> list[int]:
         with self._lock:
@@ -139,6 +165,25 @@ class WorkerPool:
             except Exception:  # noqa: BLE001
                 pass
             services.enqueue_due_schedules(s, actor=f"worker:{self.worker_id}")
+        self._safe("stuck_scan", self._scan_stuck)
+        self._safe("maintenance", self._maintenance_tick)
+
+    def _scan_stuck(self) -> None:
+        """I-02: refresh the stuck-jobs gauge (throttled)."""
+        now = time.monotonic()
+        if now - self._last_stuck_scan < STUCK_SCAN_EVERY_S:
+            return
+        self._last_stuck_scan = now
+        stuck = durable.stuck_jobs()
+        if stuck:
+            ids = ", ".join(str(r["job_id"]) for r in stuck[:10])
+            self.log(f"{len(stuck)} job(s) look stuck (stale heartbeat): {ids}")
+
+    def _maintenance_tick(self) -> None:
+        """I-03: run due maintenance tasks (no-op unless maintenance is enabled)."""
+        from attestra.jobs import maintenance
+
+        maintenance.tick(log=self.log)
 
     def _heartbeat(self, force: bool = False) -> None:
         now = time.monotonic()

@@ -2,8 +2,14 @@
 
 One crt.sh JSON request per run. Results are suggestions only — never added to
 scope and never scanned or resolved.
+
+A-01 (WP4): when asset discovery is enabled (``ATTESTRA_DISCOVERY_ENABLED``), the same
+suggestions are also stored as ``pending`` discovery candidates with CT provenance
+(:func:`record_ct_candidates`). The return shape of :func:`suggestions_for_engagement` is
+unchanged and candidate storage failures never break the suggestion response.
 """
 # @lat: [[authorization#CT subdomain suggestions]]
+# @lat: [[attack-surface-and-platform#Passive discovery]]
 
 from __future__ import annotations
 
@@ -169,6 +175,7 @@ def suggestions_for_engagement(
         count=len(suggestions),
         requests=request_count,
     )
+    _safe_record_ct_candidates(eng, engagement_id, apex_l, suggestions, scope, actor=actor)
     # Re-read so callers can assert scope table unchanged.
     s.refresh(eng)
     return {
@@ -180,3 +187,61 @@ def suggestions_for_engagement(
         "asset_count": len(eng.assets),
         "asset_count_before": asset_count_before,
     }
+
+
+def record_ct_candidates(
+    db,
+    *,
+    tenant_id: int,
+    engagement_id: int,
+    apex: str,
+    suggestions: list[CtSuggestion],
+    scope: AuthorizedScope,
+    actor: str,
+) -> dict:
+    """A-01: store CT suggestions as pending discovery candidates (never assets)."""
+    from attestra.discovery import candidates as dc
+    from attestra.discovery import pipeline
+    from attestra.persistence.mongo.tenant import SYSTEM_SCOPE
+
+    merged = pipeline.merge_observations(
+        pipeline.observations_from_ct(suggestions),
+        apex=apex,
+        allowed_hosts=scope.allowed_hosts,
+        deny_hosts=scope.deny_hosts,
+    )
+    # The caller already resolved the engagement through the principal's tenant scope,
+    # so the write is pinned to that engagement's tenant explicitly.
+    counts = dc.upsert_candidates(
+        db,
+        tenant_id=int(tenant_id),
+        engagement_id=int(engagement_id),
+        candidates=merged.candidates,
+        actor=actor,
+        tenant_ids=SYSTEM_SCOPE,
+    )
+    return {**counts, **merged.summary()}
+
+
+def _safe_record_ct_candidates(eng, engagement_id: int, apex: str, suggestions, scope, *, actor: str) -> dict | None:
+    try:
+        from attestra.discovery import discovery_enabled
+
+        if not discovery_enabled() or not suggestions:
+            return None
+        from attestra.persistence.mongo.adapters import _db
+
+        tenant_id = getattr(eng, "tenant_id", None)
+        if tenant_id is None:
+            return None
+        return record_ct_candidates(
+            _db(),
+            tenant_id=int(tenant_id),
+            engagement_id=int(engagement_id),
+            apex=apex,
+            suggestions=suggestions,
+            scope=scope,
+            actor=actor,
+        )
+    except Exception:  # noqa: BLE001 - suggestions must keep working without candidates
+        return None

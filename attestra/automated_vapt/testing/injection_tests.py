@@ -4,6 +4,13 @@ Sends a few benign ``ATTSTRA_CANARY_*`` query values on common endpoints and fla
 ``finding_candidate`` only when the canary is clearly reflected **unencoded in an
 HTML context**. No time-based SQLi, no destructive commands, no LDAP/OS execution.
 
+Each probe row also carries its [[attestra/automated_vapt/testing/injection_catalog.py]]
+check id, payload class, location and tier, plus an ``outcome`` from
+[[attestra/automated_vapt/testing/injection_catalog.py#classify_outcome]] (reflected /
+error_signature / filtered / not_reflected / blocked / inconclusive). Every response is
+classified (FND-01) into ``validity_samples``; a run whose probes were all answered by a
+WAF / challenge / 429 gets ``status_hint`` BLOCKED instead of a silent pass.
+
 Catalogue mapping: not wired into the orchestrator — no deferred catalogue IDs for
 injection. Related API input checks live under catalogue ``T21``
 ([[attestra/automated_vapt/core/replay_checks.py]]). Call [[run]] directly or from a
@@ -16,7 +23,9 @@ import re
 from typing import Any
 from urllib.parse import urlencode
 
+from attestra.automated_vapt.testing import injection_catalog as _catalog
 from attestra.automated_vapt.testing._http import absolute, request_pair
+from attestra.automated_vapt.testing._probe_base import class_name, classify, status_from_samples
 from attestra.automated_vapt.testing._reflection import (
     detect_unencoded_reflection,
     injection_canary_payload,
@@ -34,6 +43,7 @@ from attestra.automated_vapt.testing._session import (
 )
 
 # @lat: [[architecture#Elite automated security testing#Safe non-destructive probes]]
+# @lat: [[web-api-probes#Injection catalogue]]
 
 # Few requests only — path + single query param each.
 _DEFAULT_PROBES: tuple[tuple[str, str], ...] = (
@@ -91,6 +101,16 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
 
     observations: list[dict[str, Any]] = []
     evidence = []
+    samples: list[Any] = []
+    statuses: list[int | None] = []
+    reflect_check = _catalog.get("INJ-REFLECT-QUERY")
+    bool_check = _catalog.get("INJ-SQLBOOL-QUERY")
+
+    def _classify(pair) -> str:
+        c = classify(pair.status, pair.response_headers, pair.response_body or "", authed=auth is not None)
+        samples.append(c)
+        statuses.append(pair.status)
+        return class_name(c)
     finding = False
     finding_detail = ""
 
@@ -122,6 +142,14 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             reflected_unencoded_in_html(marker, body, content_type=ctype)
         )
         error_sig = bool(_ERROR_SIG_RE.search(body))
+        rclass = _classify(pair)
+        outcome = _catalog.classify_outcome(
+            rclass,
+            reflected_unencoded=bool(unencoded_html),
+            error_signature=error_sig,
+            marker_present_encoded=(marker in body) and not detect_unencoded_reflection(payload, body),
+            reflected_non_html=detect_unencoded_reflection(payload, body) and not unencoded_html,
+        )
         row = {
             "path": path,
             "param": param,
@@ -131,6 +159,12 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "html_context": html_ctx,
             "unencoded_html": unencoded_html,
             "error_signature": error_sig,
+            "check_id": reflect_check.check_id if reflect_check else "INJ-REFLECT-QUERY",
+            "payload_class": reflect_check.payload_class if reflect_check else "reflection_canary",
+            "location": "query",
+            "tier": reflect_check.tier if reflect_check else "T1",
+            "response_class": rclass,
+            "outcome": outcome,
         }
         observations.append(row)
         if unencoded_html and not finding:
@@ -143,7 +177,9 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             evidence.append(pair)
 
     # One extra boolean-safe payload per first probe only (cap total requests).
-    if boolean_on and probes and not finding:
+    # Skip the boolean pair when the first probes were already blocked by the edge.
+    edge_blocked = any(class_name(c) in ("waf_block", "challenge", "rate_limited") for c in samples)
+    if boolean_on and probes and not finding and not edge_blocked:
         path, param = probes[0]
         for bp in _BOOLEAN_PAYLOADS[:2]:
             qs = urlencode({param: bp})
@@ -152,6 +188,9 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             full = f"{url}{sep}{qs}"
             pair = _get(full)
             body = pair.response_body or ""
+            bclass = _classify(pair)
+            if bclass in ("waf_block", "challenge", "rate_limited"):
+                break
             if _ERROR_SIG_RE.search(body):
                 finding = True
                 finding_detail = f"boolean-safe error signature for payload at {path}?{param}="
@@ -163,11 +202,18 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
                         "status": pair.status,
                         "boolean_payload": bp,
                         "error_signature": True,
+                        "check_id": bool_check.check_id if bool_check else "INJ-SQLBOOL-QUERY",
+                        "payload_class": "sql_error_boolean",
+                        "location": "query",
+                        "tier": bool_check.tier if bool_check else "T1",
+                        "response_class": bclass,
+                        "outcome": "error_signature",
                     }
                 )
                 break
 
-    return {
+    hint = status_from_samples(samples, finding=finding, statuses=statuses)
+    result: dict[str, Any] = {
         "test_id": "INJ",
         "category": "injection",
         "observations": {
@@ -176,9 +222,16 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "probes": observations,
             "probe_count": len(observations),
             "boolean_canaries": boolean_on,
+            "catalog_version": _catalog.CATALOG_VERSION,
+            "outcomes": sorted({str(r.get("outcome")) for r in observations if r.get("outcome")}),
+            "coverage": _catalog.coverage_rows(),
         },
         "finding_candidate": finding,
         "detail": finding_detail or "no unencoded HTML canary reflection",
         "evidence_hints": [f"GET {p}?{param}=ATTSTRA_CANARY_*" for p, param in probes],
         "evidence_pairs": evidence,
+        "validity_samples": samples,
     }
+    if hint in ("BLOCKED", "INCONCLUSIVE"):
+        result["status_hint"] = hint
+    return result

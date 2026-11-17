@@ -67,6 +67,7 @@ def build_capture_urls(
     scope: Any | None = None,
     info: dict[str, Any] | None = None,
     check_dns: bool = True,
+    api_inventory: Any | None = None,
 ) -> tuple[list[str], str]:
     """Return (urls, source_label). Always includes the target base URL first when valid.
 
@@ -74,6 +75,13 @@ def build_capture_urls(
     (``js_api_discovery``); capture-safe GET endpoints go right after the base URL and the
     source label gets a ``+js`` suffix. ``info`` (optional dict) receives ``zap_scan_id``,
     ``api_urls`` and a value-free ``js_api`` summary.
+
+    ``api_inventory`` (an imported OpenAPI / Postman / HAR inventory, C-04) is merged only
+    when ``ATTESTRA_API_IMPORT_ENABLED`` is on: its GET/HEAD operations without path
+    templates, inside the target origin and without state-changing words go right after
+    the JS API URLs. Mutating operations never enter capture or replay. ``info`` then
+    gets ``api_inventory`` counts (merged / excluded) and the source label a ``+spec``
+    suffix.
     """
     from attestra.automated_vapt.core import js_api_discovery as jsd
     from attestra.runner import nuclei_urls
@@ -83,6 +91,7 @@ def build_capture_urls(
     info.setdefault("zap_scan_id", None)
     info.setdefault("api_urls", [])
     info.setdefault("js_api", None)
+    info.setdefault("api_inventory", None)
 
     root = _normalize_root(target_base_url) or (target_base_url or "").strip()
     if not root:
@@ -120,9 +129,11 @@ def build_capture_urls(
         except Exception as exc:  # noqa: BLE001 - discovery is best effort
             info["js_api"] = {"error": type(exc).__name__}
 
+    spec_urls = _inventory_urls(api_inventory, root, info)
+
     seen: set[str] = set()
     urls: list[str] = []
-    for u in [root, *api_urls, *extras]:
+    for u in [root, *api_urls, *spec_urls, *extras]:
         key = (u or "").rstrip("/") or u
         if not key or key in seen:
             continue
@@ -131,16 +142,57 @@ def build_capture_urls(
         if len(urls) >= max_urls():
             break
 
-    api_set = {a.rstrip("/") for a in api_urls}
+    api_set = {a.rstrip("/") for a in [*api_urls, *spec_urls]}
     info["zap_scan_id"] = zap_id
     info["api_urls"] = [u for u in urls if u.rstrip("/") in api_set]
+    has_js = any(u.rstrip("/") in {a.rstrip("/") for a in api_urls} for u in urls)
+    has_spec = any(u.rstrip("/") in {a.rstrip("/") for a in spec_urls} for u in urls)
     if zap_id is not None and zap_lines:
-        source = f"zap-scan-{zap_id}" + ("+js" if info["api_urls"] else "")
+        source = f"zap-scan-{zap_id}" + ("+js" if has_js else "")
     elif seeds:
         source = "extra-start"
     else:
         source = "root-only"
+    if has_spec:
+        source += "+spec"
     return urls, source
+
+
+def _inventory_urls(api_inventory: Any | None, root: str, info: dict[str, Any]) -> list[str]:
+    """Replay-safe GET/HEAD URLs from an imported API inventory (C-04); [] when disabled."""
+    if api_inventory is None:
+        return []
+    from attestra.automated_vapt.testing._probe_base import api_import_enabled
+
+    if not api_import_enabled():
+        info["api_inventory"] = {"merged": 0, "disabled": True}
+        return []
+    from attestra.automated_vapt.core import js_api_discovery as jsd
+    from attestra.runner import nuclei_urls
+
+    ops = list(getattr(api_inventory, "operations", None) or [])
+    counts = {"operations": len(ops), "merged": 0, "excluded_mutating": 0, "excluded_templated": 0, "out_of_scope": 0, "excluded_unsafe_words": 0}
+    candidates: list[str] = []
+    for op in ops:
+        if getattr(op, "mutating", True) or str(getattr(op, "method", "")).upper() not in ("GET", "HEAD"):
+            counts["excluded_mutating"] += 1
+            continue
+        if getattr(op, "templated", False):
+            counts["excluded_templated"] += 1
+            continue
+        if not getattr(op, "in_scope", True):
+            counts["out_of_scope"] += 1
+            continue
+        url = op.url_for(root)
+        if jsd.is_unsafe_path(url):
+            counts["excluded_unsafe_words"] += 1
+            continue
+        candidates.append(url)
+    kept = nuclei_urls.filter_urls(candidates, root, None)  # same-origin only
+    counts["out_of_scope"] += len(candidates) - len(kept)
+    counts["merged"] = len(kept)
+    info["api_inventory"] = counts
+    return list(kept)
 
 
 def page_label(index: int, url: str) -> str:

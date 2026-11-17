@@ -1,0 +1,40 @@
+# F-03: pull_request_target runs with the base repository's secrets and write token.
+# Checking out and running the PR head in that context executes untrusted code.
+# @lat: [[intel-and-reporting#Semgrep GitHub Actions rules]]
+rules:
+  - id: attestra.gha.pull-request-target-checkout-head
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      Workflow triggered by pull_request_target checks out the pull request head
+      ($REF). Untrusted code then runs with repository secrets. Use pull_request, or
+      never build/run the checked-out head in this workflow.
+    metadata:
+      cwe: "CWE-829: Inclusion of Functionality from Untrusted Control Sphere"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+      category: security
+      attestra_rule_version: "gha-1"
+      references:
+        - https://securitylab.github.com/research/github-actions-preventing-pwn-requests/
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+    patterns:
+      - pattern-inside: |
+          on:
+            ...
+            pull_request_target: ...
+            ...
+          ...
+      - pattern-inside: |
+          uses: "$CHECKOUT"
+          ...
+      - metavariable-regex:
+          metavariable: $CHECKOUT
+          regex: ^actions/checkout@.*
+      - pattern: |
+          ref: $REF
+      - metavariable-regex:
+          metavariable: $REF
+          regex: .*github\.event\.pull_request\.head\.(sha|ref).*|.*github\.head_ref.*

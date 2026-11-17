@@ -1,0 +1,17 @@
+# Safe fixture for attestra GHA semgrep rules (never executed).
+name: safe
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: someorg/some-action@0123456789abcdef0123456789abcdef01234567
+      - name: greet
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: echo "Title is $TITLE"

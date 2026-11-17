@@ -1,0 +1,4 @@
+{"host":"www.example.com","input":"example.com","source":"crtsh","timestamp":"2026-11-10T10:00:00Z"}
+{"host":"api.example.com","input":"example.com","source":"alienvault","timestamp":"2026-11-10T10:00:01Z"}
+{"host":"www.example.com","input":"example.com","source":"crtsh","timestamp":"2026-11-10T10:00:02Z"}
+{"host":"WWW.Example.com.","input":"example.com","source":"hackertarget","timestamp":"2026-11-10T10:00:03Z"}

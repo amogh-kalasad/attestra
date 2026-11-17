@@ -102,6 +102,8 @@ class JobRepository(BaseRepository):
                 "cancel_requested": False,
                 "error": "",
                 "lease_token": None,
+                # I-01: queue age metric (attestra_job_queue_age_seconds).
+                "queued_at": utcnow(),
             },
             doc_id=doc_id,
         )

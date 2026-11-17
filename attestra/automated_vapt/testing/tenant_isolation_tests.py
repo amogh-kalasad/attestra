@@ -1,9 +1,24 @@
-"""Tenant isolation probes using Account A vs Account B project tenants."""
+"""Tenant isolation probes using Account A vs Account B project tenants.
+
+D-04: on a live engagement, T06 compares the *same* URLs as the primary and the
+secondary engagement profile (read-only GETs). Identity values (tenant / owner /
+user keys) that only one profile sees elsewhere prove the two identities differ; the
+other profile then seeing those values on the same object is cross-identity access.
+Without distinguishable identities the case is INCONCLUSIVE, never PASSED; WAF /
+challenge / rate-limit answers make it BLOCKED.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
+from attestra.automated_vapt.core.response_classifier import (
+    ResponseClass,
+    classify_pair,
+    is_blocking,
+    samples_to_json,
+    skip_reason_for,
+)
 from attestra.automated_vapt.testing._http import absolute, login, request_pair
 from attestra.automated_vapt.testing._session import (
     SKIP_NO_AUTH_SESSION,
@@ -21,24 +36,58 @@ from attestra.automated_vapt.testing._session import (
 # @lat: [[architecture#Elite automated security testing#Authz test modules]]
 
 _TENANT_KEYS = ("tenant", "tenant_id", "tenantId", "org", "org_id", "orgId", "account_id", "accountId")
+# Owner / user identity keys used for same-object comparison across identities (D-04).
+_OWNER_KEYS = (
+    "owner", "owner_id", "ownerId", "user_id", "userId", "created_by", "createdBy",
+    "username", "user_name", "userName", "email", "member_id", "memberId",
+)
 
 
-def _tenant_values(data: Any) -> list[str]:
+def identity_values(data: Any, keys: tuple[str, ...] = _TENANT_KEYS + _OWNER_KEYS, *, depth: int = 0) -> list[str]:
+    """Values of tenant/owner identity keys in a JSON body (kept in memory, never reported)."""
     found: list[str] = []
+    if depth > 6:
+        return found
     if isinstance(data, dict):
         for k, v in data.items():
-            if k in _TENANT_KEYS and v is not None and str(v).strip():
+            if k in keys and v is not None and not isinstance(v, (dict, list)) and str(v).strip():
                 found.append(str(v))
-            found.extend(_tenant_values(v))
+            found.extend(identity_values(v, keys, depth=depth + 1))
     elif isinstance(data, list):
         for item in data[:30]:
-            found.extend(_tenant_values(item))
-    # unique
+            found.extend(identity_values(item, keys, depth=depth + 1))
     out: list[str] = []
     for v in found:
         if v not in out:
             out.append(v)
     return out
+
+
+def compare_identities(rows: list[tuple[set[str], set[str]]]) -> dict[str, Any]:
+    """Same-object comparison across two identities (pure).
+
+    ``rows`` holds ``(primary_values, secondary_values)`` per URL (substantive bodies
+    only). Values seen only by one identity somewhere prove the identities differ;
+    the other identity seeing them on any URL is cross-identity access.
+    """
+    a_only: set[str] = set()
+    b_only: set[str] = set()
+    for a, b in rows:
+        a_only |= a - b
+        b_only |= b - a
+    distinct = bool(a_only and b_only)
+    cross_rows: list[int] = []
+    for i, (a, b) in enumerate(rows):
+        mixed = bool(a and b and (a & b) and (a ^ b))
+        leak = distinct and bool((b & a_only) or (a & b_only))
+        if mixed or leak:
+            cross_rows.append(i)
+    return {"distinct_identities": distinct, "cross_rows": cross_rows}
+
+
+def _tenant_values(data: Any) -> list[str]:
+    """Tenant-key values only (kept for callers of the pre-D-04 helper)."""
+    return identity_values(data, _TENANT_KEYS)
 
 
 def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, Any]:
@@ -55,42 +104,48 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
         urls = probe_urls(base_url, kwargs, api=False, limit=6)
     evidence: list[Any] = []
     rows: list[dict[str, Any]] = []
-    cross = False
+    samples = []
+    pairs: list[tuple[Any, Any]] = []
+    value_rows: list[tuple[set[str], set[str]]] = []
     last_status = None
     for url in urls:
         pair_a = request_auth(client, "GET", url, auth, base_url)
         pair_b = request_auth(client, "GET", url, secondary, base_url)
-        a_sub = is_substantive_json(pair_a.status, pair_a.response_body)
-        b_sub = is_substantive_json(pair_b.status, pair_b.response_body)
-        ten_a = _tenant_values(parse_json(pair_a.response_body) if a_sub else None)
-        ten_b = _tenant_values(parse_json(pair_b.response_body) if b_sub else None)
+        c_a = classify_pair(pair_a, authed=True)
+        c_b = classify_pair(pair_b, authed=True)
+        samples.extend([c_a, c_b])
+        a_sub = c_a.cls is ResponseClass.APP_OK and is_substantive_json(pair_a.status, pair_a.response_body)
+        b_sub = c_b.cls is ResponseClass.APP_OK and is_substantive_json(pair_b.status, pair_b.response_body)
+        val_a = set(identity_values(parse_json(pair_a.response_body) if a_sub else None))
+        val_b = set(identity_values(parse_json(pair_b.response_body) if b_sub else None))
+        value_rows.append((val_a, val_b))
+        pairs.append((pair_a, pair_b))
         last_status = int(pair_a.status or 0)
-        # Cross-tenant: A sees a tenant id that is exclusive to B (or vice versa) in the same call.
-        leaked = bool(ten_a and ten_b and set(ten_a) & set(ten_b) and set(ten_a) != set(ten_b))
-        # Stronger: A body contains a tenant value that B claims and A also claims a different one
-        # plus identical exclusive values mixed. Also flag when A and B get each other's
-        # exclusive tenant sets on the same URL (A has B-only values).
-        a_only = set(ten_a) - set(ten_b)
-        b_only = set(ten_b) - set(ten_a)
-        mixed = bool(ten_a and ten_b and (set(ten_a) & set(ten_b)) and (a_only or b_only))
-        row_cross = mixed
-        if row_cross:
-            cross = True
-            evidence.append(scrub_pair(pair_a, auth, secondary))
         rows.append(
             {
                 "url": url,
                 "primary_status": int(pair_a.status or 0),
                 "secondary_status": int(pair_b.status or 0),
-                "tenant_key_present": bool(ten_a or ten_b),
-                "cross_tenant": row_cross,
+                "primary_class": c_a.cls.value,
+                "secondary_class": c_b.cls.value,
+                "tenant_key_present": bool(val_a or val_b),
+                "cross_tenant": False,
             }
         )
-    return {
+    cmp = compare_identities(value_rows)
+    for i in cmp["cross_rows"]:
+        rows[i]["cross_tenant"] = True
+        pair_a, pair_b = pairs[i]
+        evidence.append(scrub_pair(pair_b, auth, secondary))
+    cross = bool(cmp["cross_rows"])
+    blocked = any(is_blocking(c) for c in samples)
+    result: dict[str, Any] = {
         "test_id": "T06",
         "category": "authorization",
         "observations": {
             "mode": "engagement_session",
+            "identities": [f"profile#{getattr(auth, 'profile_id', None)}", f"profile#{getattr(secondary, 'profile_id', None)}"],
+            "distinct_identities": cmp["distinct_identities"],
             "cross_tenant_status": last_status,
             "cross_tenant_access": cross,
             "probes": rows,
@@ -98,7 +153,16 @@ def _run_with_session(client, base_url: str, auth: Any, **kwargs) -> dict[str, A
         "finding_candidate": cross,
         "evidence_pairs": evidence,
         "evidence_hints": [f"GET {u} as primary vs secondary profile" for u in urls],
+        "validity_samples": samples_to_json(samples),
     }
+    if not cross:
+        if blocked:
+            result["status_hint"] = "BLOCKED"
+            result["skip_reason"] = skip_reason_for(samples)
+        elif not cmp["distinct_identities"]:
+            result["status_hint"] = "INCONCLUSIVE"
+            result["skip_reason"] = "identities_not_distinguishable"
+    return result
 
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:

@@ -979,6 +979,17 @@ def _automated_coverage_limitations_context(s: Session, eng: Engagement) -> dict
     }
 
 
+def _run_validity_context(s: Session, eng: Engagement, *, reportable_count: int | None = None) -> dict:
+    """J-01: run-validity + coverage disclosure shared by HTML/PDF/DOCX/Markdown/XLSX."""
+    # @lat: [[intel-and-reporting#Run validity in reports]]
+    try:
+        from attestra.reports.run_validity import section_for_engagement
+
+        return {"run_validity": section_for_engagement(s, eng.id, reportable_count=reportable_count)}
+    except Exception:  # noqa: BLE001 — optional section must never break reports
+        return {"run_validity": None}
+
+
 def _annotate_scope_exposure(assets) -> list:
     """Wrap assets so public https FQDNs never render Exposure as Internal."""
     # @lat: [[reports#Display labels]]
@@ -1213,6 +1224,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         **_auth_web_report_context(s, eng),
         **_security_testing_coverage_context(s, eng),
         **_automated_coverage_limitations_context(s, eng),
+        **_run_validity_context(s, eng, reportable_count=len(reportable)),
         **_safe_to_host_context(eng, open_critical_high),
         **_sebi_timeline_report_context(s, eng),
     }

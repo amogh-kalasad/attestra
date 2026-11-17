@@ -9,10 +9,11 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from attestra import audit
+from attestra import audit, config
 from attestra.automated_vapt.core import authorization_guard as guard
 from attestra.automated_vapt.core import execution_manager as exec_mgr
-from attestra.automated_vapt.core import scope_validator
+from attestra.automated_vapt.core import intrusive_policy, scope_validator
+from attestra.automated_vapt.core import run_validity as rv
 from attestra.automated_vapt.core.test_context import TestContext
 from attestra.automated_vapt.core.test_registry import get_test_case, list_test_cases
 from attestra.models import AutomatedTestExecution, utcnow
@@ -254,8 +255,9 @@ def create_execution(
     guard.require_feature_enabled()
     guard.require_write(principal)
     eng = guard.load_engagement(s, engagement_id, principal)
-    guard.assert_engagement_ready(eng)
     asset = guard.load_asset(s, eng, asset_id)
+    # FND-07: asset-aware readiness (authorization must cover the asset environment).
+    guard.assert_engagement_ready(eng, asset)
 
     ids = _normalize_test_ids(test_case_ids)
     target = (asset.identifier or "").strip()
@@ -365,10 +367,10 @@ def run_execution(
         raise ServiceError(f"execution status {ex.status} cannot be started")
 
     eng = guard.load_engagement(s, ex.engagement_id, principal)
-    guard.assert_engagement_ready(eng)
     asset = guard.load_asset(s, eng, ex.asset_id) if ex.asset_id else None
     if asset is None:
         raise ServiceError("execution asset missing")
+    guard.assert_engagement_ready(eng, asset)
 
     if not already_running:
         exec_mgr.transition(ex, "RUNNING")
@@ -385,6 +387,19 @@ def run_execution(
         allow_private=bool(ex.allow_private),
         extra=dict(extra or {}),
     )
+
+    # FND-02: intrusive cases (SSRF/UPLOAD/XSSSTORE/T22) are decided from the target asset's
+    # environment + flags + profile + cleanup plan. Absent decision => modules deny.
+    _decisions = intrusive_policy.decide_all(
+        s,
+        engagement_id=eng.id,
+        asset_id=asset.id,
+        test_ids=ctx.test_case_ids,
+        profile=ctx.profile,
+        extra=ctx.extra,
+    )
+    ctx.extra[intrusive_policy.CTX_KEY] = {tid: d.to_json() for tid, d in _decisions.items()}
+    _policy_public = intrusive_policy.public_decisions(_decisions)
 
     queued_auth = _hydrate_auth_profile_ids(ctx, ex)
     _ensure_httpx_client(ctx)
@@ -407,6 +422,8 @@ def run_execution(
         from attestra.automated_vapt.core.capture_urls import build_capture_urls
 
         capture_info: dict[str, Any] = {}
+        # C-03/C-04 (opt-in ATTESTRA_API_IMPORT_ENABLED): latest imported API spec feeds capture.
+        api_inv = _latest_api_inventory(ctx)
         capture_urls, capture_source = build_capture_urls(
             session=s,
             asset=asset,
@@ -414,7 +431,12 @@ def run_execution(
             scope=scope,
             info=capture_info,
             check_dns=not ctx.allow_private,
+            api_inventory=api_inv,
         )
+        if api_inv is not None:
+            from attestra.automated_vapt.api_inventory import store as api_inv_store
+
+            ctx.extra["_api_inventory_ops"] = api_inv_store.ops_for_ctx(api_inv)
         ctx.extra["_capture_urls"] = capture_urls or [ex.target_base_url]
         ctx.extra["_capture_url_source"] = capture_source
         ctx.extra["_capture_api_urls"] = list(capture_info.get("api_urls") or [])
@@ -461,13 +483,59 @@ def run_execution(
             merge_ledger,
         )
 
+        _case_validities: list[rv.CaseValidity] = []
+        _plan: dict[str, Any] | None = None
+        _plan_skipped: dict[str, str] = {}
+        if getattr(config, "PLANNER_ENABLED", False):
+            # I-05 (opt-in): order cases by tier and skip those whose preconditions are missing.
+            from attestra.automated_vapt.core import planner
+
+            _plan = planner.plan_cases(
+                ctx.test_case_ids,
+                planner.PlanFacts(
+                    has_session="_session_auth" in ctx.extra,
+                    has_secondary_session="_secondary_session_auth" in ctx.extra,
+                    cdn_detected=bool((ctx.extra.get("_waf") or {}).get("detected")),
+                    intrusive_decisions=ctx.extra.get(intrusive_policy.CTX_KEY),
+                ),
+            )
+            _plan_skipped = dict(_plan.get("skipped") or {})
+            ctx.test_case_ids = list(_plan["run"]) + list(_plan["deferred"]) + list(_plan_skipped)
+        _halt: tuple[str, str] | None = None  # (reason code, message) once readiness fails mid-run
+
         for tid in ctx.test_case_ids:
             pairs_before = len(ctx.extra.get("_http_pairs") or [])
             shots_before = set((ctx.extra.get("_screenshots") or {}).keys())
+            _tc = get_test_case(tid)
+            _cat = _tc.category if _tc is not None else ""
+            # FND-07: re-check readiness (halt, authorization, window, scope policy) before every
+            # case. Once it fails, this and every remaining case is NOT_TESTED (never run).
+            if _halt is None:
+                try:
+                    guard.assert_engagement_ready_for_case(s, eng, asset)
+                except guard.ReadinessError as exc:
+                    _halt = (guard.not_tested_reason(exc), str(exc))
+            if _halt is not None or tid in _plan_skipped:
+                reason, msg = _halt if _halt is not None else (_plan_skipped[tid], "planner precondition missing")
+                case_result = {
+                    "test_id": tid,
+                    "status": "NOT_TESTED",
+                    "skip_reason": reason,
+                    "detail": f"not tested: {msg}"[:400],
+                    "category": _cat,
+                    "validation": {},
+                }
+                results.append(case_result)
+                mid = {"cases": results, "coverage_ledger": coverage_ledger, "policy_decisions": _policy_public}
+                mid.update(queued_auth)
+                ex.result_json = json.dumps(mid, sort_keys=True)
+                s.flush()
+                continue
             # Mid-scan auth guard: re-verify the login before session-dependent cases; on
             # unrecoverable loss the case is BLOCKED with a reason (never run as "passed").
             blocked = _ensure_session_for_case(tid, ctx)
             case_result = blocked if blocked is not None else _run_case(tid, ctx)
+            _apply_case_validity(tid, case_result, ctx, _case_validities)
             if ctx.extra.get("_auth_events"):
                 case_result.setdefault("auth_events", list(ctx.extra["_auth_events"]))
             # Always keep proof of testing on disk, even when no finding is created.
@@ -514,6 +582,9 @@ def run_execution(
                         actor=actor,
                         http_pairs=pairs,
                         screenshots=shots,
+                        run_validity=(case_result.get("case_validity") or {}).get("state"),
+                        execution_id=ex.id,
+                        validation_status=str(validation.get("status") or ""),
                     )
             # Phase 4 ledger: extract while evidence_pairs still present, then strip.
             auth_ctx = None
@@ -538,20 +609,41 @@ def run_execution(
             case_result.pop("finding_evidence_pairs", None)
             results.append(case_result)
             # Persist cases + ledger after each case so FAILED mid-run still retains rows.
-            mid: dict[str, Any] = {"cases": results, "coverage_ledger": coverage_ledger}
+            mid: dict[str, Any] = {
+                "cases": results,
+                "coverage_ledger": coverage_ledger,
+                "policy_decisions": _policy_public,
+                "run_validity": _aggregate_validity(_case_validities, ctx).to_json(),
+            }
             mid.update(queued_auth)
             ex.result_json = json.dumps(mid, sort_keys=True)
             s.flush()
 
+        _run_valid = _aggregate_validity(_case_validities, ctx)
         sess_final = ctx.extra.pop("_session_auth", None)  # in-memory only; never persisted
         ctx.extra.pop("_secondary_session_auth", None)
-        summary: dict[str, Any] = {"cases": results, "coverage_ledger": coverage_ledger}
+        summary: dict[str, Any] = {
+            "cases": results,
+            "coverage_ledger": coverage_ledger,
+            "policy_decisions": _policy_public,
+            "run_validity": _run_valid.to_json(),
+            "run_validity_mode": getattr(config, "RUN_VALIDITY_MODE", rv.MODE_ENFORCE),
+            "checklist_version": _checklist_version(),
+        }
+        if _plan is not None:
+            summary["plan"] = _plan
+        if api_inv is not None:
+            summary["api_coverage"] = _api_coverage(api_inv, ctx)
         summary.update(queued_auth)
         if sess_final is not None and hasattr(sess_final, "public"):
             summary["auth"] = sess_final.public()
             if ctx.extra.get("_auth_events"):
                 summary["auth"]["events"] = list(ctx.extra["_auth_events"])[-20:]
         ex.result_json = json.dumps(summary, sort_keys=True)
+        if hasattr(ex, "run_validity"):
+            ex.run_validity = _run_valid.state
+        if hasattr(ex, "checklist_version"):
+            ex.checklist_version = summary["checklist_version"]
         exec_mgr.transition(ex, "COMPLETED")
         audit.record(
             s,
@@ -662,6 +754,8 @@ def execution_public_dict(ex: AutomatedTestExecution) -> dict[str, Any]:
         "allow_private": bool(ex.allow_private),
         "error": ex.error or "",
         "result": result,
+        "run_validity": rv.read_run_validity(result),
+        "policy_decisions": result.get("policy_decisions", []) if isinstance(result, dict) else [],
         "created_at": ex.created_at.isoformat() if ex.created_at else None,
         "started_at": ex.started_at.isoformat() if ex.started_at else None,
         "ended_at": ex.ended_at.isoformat() if ex.ended_at else None,
@@ -691,6 +785,8 @@ _SESSION_AUTH_CASES = frozenset({
     "T19", "T20", "T21", "T22",
     "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
     "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+    # INT: WP1 session lifecycle + WP2 probes that use the engagement login when present.
+    "SESSLIFE", "CACHE", "GRAPHQL", "CORS", "OREDIR", "HOSTHDR",
 })
 
 # Mid-scan liveness checks before these cases run (no-op when no ready session).
@@ -699,7 +795,107 @@ _SESSION_DEPENDENT = frozenset({
     "T19", "T20", "T21", "T22",
     "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
     "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+    "SESSLIFE", "CACHE", "GRAPHQL", "CORS", "OREDIR", "HOSTHDR",
 })
+
+# Cases routed to ``_run_authz_module`` (module contract ``run(client, base_url, *, ctx)``).
+_AUTHZ_MODULE_CASES = frozenset({
+    "T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
+    "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
+    "SESSLIFE", "OIDCMETA",
+    "CORS", "HOSTHDR", "OREDIR", "CACHE", "SSIND", "GRAPHQL", "APIPOST",
+})
+
+# FND-06 status vocabulary (PHASE2 §3.3).
+_NON_PASS_HINTS = ("BLOCKED", "INCONCLUSIVE", "NOT_TESTED", "DEFERRED", "SKIPPED")
+
+
+def _latest_api_inventory(ctx: TestContext) -> Any | None:
+    """Latest imported API inventory for this asset, only when API import is enabled."""
+    try:
+        from attestra.automated_vapt.testing._probe_base import api_import_enabled
+
+        if not api_import_enabled():
+            return None
+        from attestra.automated_vapt.api_inventory import store as api_inv_store
+
+        return api_inv_store.latest(
+            tenant_id=ctx.tenant_id, engagement_id=ctx.engagement_id, asset_id=ctx.asset_id
+        )
+    except Exception:  # noqa: BLE001 - an inventory problem must never fail the run
+        log.warning("api inventory lookup failed", exc_info=True)
+        return None
+
+
+def _api_coverage(inv: Any, ctx: TestContext) -> dict[str, Any]:
+    try:
+        from attestra.automated_vapt.api_inventory.model import compute_coverage
+
+        tested = [str(getattr(p, "url", "") or (p.get("url") if isinstance(p, dict) else "")) for p in
+                  (ctx.extra.get("_http_pairs") or [])]
+        cov = compute_coverage(inv, [u for u in tested if u], root=ctx.target_base_url)
+        return cov if isinstance(cov, dict) else getattr(cov, "to_json", lambda: {})()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": type(exc).__name__}
+
+
+def _checklist_version() -> str:
+    try:
+        from attestra.auth_web import checklist_catalog
+
+        return checklist_catalog.catalog_version()
+    except Exception:  # noqa: BLE001 - never fail a run on catalog load
+        return ""
+
+
+def _apply_case_validity(
+    tid: str, case_result: dict[str, Any], ctx: TestContext, acc: list[rv.CaseValidity]
+) -> None:
+    """FND-03/06: per-case validity, status gating and confirmed-cap. Runs before findings.
+
+    Only modules that emit ``validity_samples`` are gated on their own case state; legacy
+    handlers (T01/T02/T19-T22, meta cases) keep their status. Samples are dropped from the
+    persisted module dict (the case keeps a value-free ``case_validity`` summary).
+    """
+    module = case_result.get("module") if isinstance(case_result.get("module"), dict) else case_result
+    has_samples = "validity_samples" in module
+    auth_lost = tid in _SESSION_DEPENDENT and (
+        rv.guard_lost(ctx.extra.get("_session_auth"))
+        or (case_result.get("status") == "BLOCKED" and bool(case_result.get("auth")))
+    )
+    cv = rv.CaseValidity.from_result(tid, module, auth_lost=auth_lost)
+    if has_samples or auth_lost:
+        acc.append(cv)
+        case_result["case_validity"] = cv.to_json()
+    mode = getattr(config, "RUN_VALIDITY_MODE", rv.MODE_ENFORCE)
+    if case_result.get("status") in ("PASSED", "FINDING") and (has_samples or auth_lost):
+        case_result["status"] = rv.gate_case_status(
+            status_hint=module.get("status_hint"),
+            finding_candidate=bool(module.get("finding_candidate")),
+            case_state=cv.state,
+            mode=mode,
+            has_samples=has_samples,
+        )
+        if case_result["status"] not in ("PASSED", "FINDING"):
+            case_result["validation"] = {}
+            case_result["false_positive"] = {}
+            case_result["detail"] = (
+                f"{case_result['status'].lower()}: case validity {cv.state} "
+                f"({'; '.join(cv.to_json()['reasons'][:2]) or 'no usable responses'})"
+            )[:400]
+    v = case_result.get("validation") or {}
+    if v.get("status") and (has_samples or auth_lost) and mode == rv.MODE_ENFORCE:
+        v["status"], cap = rv.cap_validation_status(v["status"], cv.state)
+        if cap:
+            v["capped_reason"] = cap
+    if v:
+        v.setdefault("run_validity", cv.state if (has_samples or auth_lost) else rv.NOT_COMPUTED)
+    if isinstance(case_result.get("module"), dict):
+        case_result["module"].pop("validity_samples", None)
+
+
+def _aggregate_validity(cases: list[rv.CaseValidity], ctx: TestContext) -> rv.RunValidity:
+    return rv.aggregate_run(cases, auth_lost=rv.guard_lost(ctx.extra.get("_session_auth")))
 
 
 def _record_auth_event(ctx: TestContext, kind: str, note: str, *, test_id: str = "") -> None:
@@ -768,10 +964,7 @@ def _run_case(test_id: str, ctx: TestContext) -> dict[str, Any]:
         return _run_t01_http_capture(ctx, case.category)
     if case.id == "T02":
         return _run_t02_browser_capture(ctx, case.category)
-    if case.id in {
-        "T03", "T04", "T05", "T06", "T07", "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
-        "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
-    }:
+    if case.id in _AUTHZ_MODULE_CASES:
         return _run_authz_module(case.id, ctx, case.category)
     if case.id in {"T19", "T20", "T21", "T22"}:
         return _run_replay_check(case.id, ctx, case.category)
@@ -1162,15 +1355,24 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             "category": category,
         }
     from attestra.automated_vapt.testing import (
+        api_posture_tests,
         api_security_tests,
         authentication_tests,
         authorization_tests,
         business_logic_tests,
+        cache_posture_tests,
+        cors_tests,
         file_security_tests,
         file_upload_tests,
+        graphql_tests,
+        host_header_tests,
         idor_bola_tests,
         injection_tests,
+        oidc_metadata_tests,
+        open_redirect_tests,
         role_diff_tests,
+        server_side_indicators,
+        session_lifecycle,
         session_security_tests,
         ssrf_tests,
         tenant_isolation_tests,
@@ -1193,6 +1395,17 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "ROLEDIFF": role_diff_tests.run,
         "SSRF": ssrf_tests.run,
         "UPLOAD": file_upload_tests.run,
+        # WP1 D-01/D-03
+        "SESSLIFE": session_lifecycle.run,
+        "OIDCMETA": oidc_metadata_tests.run,
+        # WP2 safe probes (each self-gates on its flag: NOT_TESTED / disabled_by_flag)
+        "CORS": cors_tests.run,
+        "HOSTHDR": host_header_tests.run,
+        "OREDIR": open_redirect_tests.run,
+        "CACHE": cache_posture_tests.run,
+        "SSIND": server_side_indicators.run,
+        "GRAPHQL": graphql_tests.run,
+        "APIPOST": api_posture_tests.run,
     }
     try:
         result = runners[test_id](client, ctx.target_base_url, ctx=ctx)
@@ -1222,7 +1435,8 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
     vctx = {
         "executed": True,
         "in_scope": True,
-        "auth_valid": True,
+        # FND-06: real session state instead of a hard-coded True.
+        "auth_valid": not rv.guard_lost(ctx.extra.get("_session_auth")),
         "identity_ok": True,
         "expected_control_defined": True,
         "status_code": obs.get("account_a_proj_b_status")
@@ -1238,6 +1452,17 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
         "authorized_access": bool(obs.get("authorized_ok") and obs.get("unauthorized_blocked")),
     }
     validation = validate_result(vctx)
+    # WP2 2e: suspected (non-confirmed) probe findings are never CONFIRMED.
+    if (
+        result.get("finding_candidate")
+        and result.get("finding_confidence")
+        and result.get("finding_confidence") != "confirmed"
+        and isinstance(validation, dict)
+        and (validation.get("status") or "").upper() == "CONFIRMED"
+    ):
+        validation = {**validation, "status": "POTENTIAL", "capped_reason": "suspected probe result"}
+    if result.get("severity_hint") and isinstance(validation, dict) and validation:
+        validation = {**validation, "severity": validation.get("severity") or result["severity_hint"]}
     fp = check_false_positive(
         {
             "status_code": vctx.get("status_code"),
@@ -1246,7 +1471,14 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             "authorized_access": vctx["authorized_access"],
         }
     )
-    if result.get("status_hint") == "SKIPPED" or result.get("skip_reason"):
+    hint = str(result.get("status_hint") or "").upper()
+    if hint in _NON_PASS_HINTS:
+        # FND-06: honour the module's own non-pass status (never collapse BLOCKED into PASSED).
+        status = hint
+        detail = (result.get("observations") or {}).get("detail") or (
+            f"{hint.lower()}: {result.get('skip_reason') or 'see module observations'}"
+        )
+    elif result.get("skip_reason"):
         status = "SKIPPED"
         detail = (result.get("observations") or {}).get("detail") or f"skipped: {result.get('skip_reason')}"
     else:
@@ -1262,8 +1494,8 @@ def _run_authz_module(test_id: str, ctx: TestContext, category: str) -> dict[str
             for k, v in result.items()
             if k != "evidence_pairs"
         },
-        "validation": validation if status != "SKIPPED" else {},
-        "false_positive": fp if status != "SKIPPED" else {},
+        "validation": validation if status in ("PASSED", "FINDING") else {},
+        "false_positive": fp if status in ("PASSED", "FINDING") else {},
     }
     if result.get("skip_reason"):
         out["skip_reason"] = result["skip_reason"]

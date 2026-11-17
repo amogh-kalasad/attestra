@@ -3,6 +3,15 @@
 # to patching. Unknown CWEs fall back to `default`.
 # Each entry includes strength (full|partial) and rationale for library integrity.
 
+# G-06 mapping provenance: read by compliance/engine.py (mapping_metadata) and shown in
+# exports. Bump `version` and `effective` whenever a mapping changes; `reviewer` stays
+# pending until a QSA / ISO lead auditor signs off (see REVIEW.md).
+metadata:
+  source: 'MITRE CWE 4.15 view-1000 + OWASP Top 10 2021 / ASVS 4.0.3 / WSTG 4.2; Attestra control objectives'
+  version: 'cwe-map-2026.11.17'
+  effective: '2026-11-17'
+  reviewer: 'pending'
+
 default: ['vuln_identification']
 
 cwe:
@@ -241,3 +250,89 @@ cwe:
     objectives: ['ai_prompt_injection', 'secure_coding']
     strength: full
     rationale: 'Improper neutralisation of input used for LLM prompting (prompt injection, OWASP LLM01/LLM07) maps to AI verification and secure development controls.'
+  # --- G-06 additions: CWEs emitted by automated test modules, probes and importers.
+  113:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'HTTP response splitting / header injection is an injection weakness addressed by secure development and web application protection controls.'
+    source: 'G-06 2026-11-17'
+  119:
+    objectives: ['secure_coding', 'patching']
+    strength: partial
+    rationale: 'Memory-safety weaknesses reported by component and binary scanners are fixed by secure coding or patching; partial because exploitability depends on the component.'
+    source: 'G-06 2026-11-17'
+  298:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Improper certificate expiry validation weakens TLS protection of data in transit.'
+    source: 'G-06 2026-11-17'
+  299:
+    objectives: ['crypto_in_transit']
+    strength: full
+    rationale: 'Improper certificate revocation checking weakens TLS protection of data in transit.'
+    source: 'G-06 2026-11-17'
+  347:
+    objectives: ['authentication', 'secure_coding']
+    strength: full
+    rationale: 'Improper verification of cryptographic signatures (e.g. JWT alg=none or unverified tokens) breaks authentication integrity.'
+    source: 'G-06 2026-11-17'
+  434:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Unrestricted file upload maps to input validation and web application protection controls.'
+    source: 'G-06 2026-11-17'
+  506:
+    objectives: ['supply_chain', 'secure_coding']
+    strength: partial
+    rationale: 'Embedded malicious code found in source or dependencies partly evidences supply-chain and secure development controls.'
+    source: 'G-06 2026-11-17'
+  524:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive information in caches (cacheable authenticated responses) maps to data protection and secure configuration.'
+    source: 'G-06 2026-11-17'
+  538:
+    objectives: ['data_protection', 'secure_config']
+    strength: full
+    rationale: 'Sensitive information in externally accessible files or directories maps to data protection and secure configuration.'
+    source: 'G-06 2026-11-17'
+  613:
+    objectives: ['authentication']
+    strength: full
+    rationale: 'Insufficient session expiration maps to authentication and session management controls.'
+    source: 'G-06 2026-11-17'
+  644:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: partial
+    rationale: 'Improper neutralisation of HTTP headers (Host header poisoning) maps partly to secure coding and web protection controls.'
+    source: 'G-06 2026-11-17'
+  915:
+    objectives: ['access_control', 'secure_coding']
+    strength: full
+    rationale: 'Mass assignment of object attributes bypasses access restrictions and is fixed in application code.'
+    source: 'G-06 2026-11-17'
+  942:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Permissive cross-domain (CORS) policy with untrusted origins maps to secure configuration and web application protection.'
+    source: 'G-06 2026-11-17'
+  346:
+    objectives: ['secure_config', 'web_app_protection']
+    strength: full
+    rationale: 'Origin validation error (reflected or null CORS origin, missing Origin checks) maps to secure configuration and web application protection.'
+    source: 'G-06 2026-11-17'
+  1059:
+    objectives: ['secure_config']
+    strength: partial
+    rationale: 'Insufficient technical documentation (undocumented or unversioned API surface) weakens configuration and inventory control; partial because documentation alone is not a vulnerability.'
+    source: 'G-06 2026-11-17'
+  1336:
+    objectives: ['secure_coding', 'web_app_protection']
+    strength: full
+    rationale: 'Server-side template injection is an injection weakness addressed by secure development and web protection controls.'
+    source: 'G-06 2026-11-17'
+  1392:
+    objectives: ['authentication', 'secrets_management']
+    strength: full
+    rationale: 'Use of default credentials maps to authentication and credential management controls.'
+    source: 'G-06 2026-11-17'

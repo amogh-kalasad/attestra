@@ -61,6 +61,12 @@ TRUST_ACCESS_REQUESTS = "trust_access_requests"
 ARTIFACTS = "artifacts"
 ID_SEQUENCES = "id_sequences"
 SCHEMA_MIGRATIONS = "_schema_migrations"
+# Upgrade INT: WP2 API inventory, WP4 discovery / asset snapshots, WP3 optional feed state.
+API_INVENTORIES = "api_inventories"
+DISCOVERY_CANDIDATES = "discovery_candidates"
+ASSET_SNAPSHOTS = "asset_snapshots"
+ASSET_CHANGE_EVENTS = "asset_change_events"
+INTEL_FEED_STATE = "intel_feed_state"
 
 # Domain collections that participate in normal CRUD (excludes meta).
 DOMAIN_COLLECTIONS: tuple[str, ...] = (
@@ -120,4 +126,8 @@ DOMAIN_COLLECTIONS: tuple[str, ...] = (
     TRUST_ITEMS,
     TRUST_ACCESS_REQUESTS,
     ARTIFACTS,
+    API_INVENTORIES,
+    DISCOVERY_CANDIDATES,
+    ASSET_SNAPSHOTS,
+    ASSET_CHANGE_EVENTS,
 )

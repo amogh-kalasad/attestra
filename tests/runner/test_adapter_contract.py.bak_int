@@ -1,0 +1,182 @@
+"""L-01/L-02/F-02: every registered + new adapter passes the SDK contract (no tool run).
+
+Covers metadata validity, never-raising probes, garbage-report rejection, argv safety for
+the discovery adapters, digest pinning, run_process cancel/timeout, adapter_version
+stamping, the scaffold script, and Prowler's permission disclosure.
+"""
+# @lat: [[attack-surface-and-platform#Adapter SDK]]
+
+from __future__ import annotations
+
+import sys
+import threading
+import types
+from pathlib import Path
+
+import pytest
+
+from attestra.runner.authorization import AuthorizationError
+from attestra.runner.scanners import sdk
+from attestra.runner.scanners.base import ScannerAdapter, ScannerResult, run_process
+from attestra.runner.scanners.dnsx import DnsxAdapter
+from attestra.runner.scanners.httpx_probe import HttpxProbeAdapter
+from attestra.runner.scanners.registry import _ADAPTERS
+from attestra.runner.scanners.subfinder import SubfinderAdapter
+
+NEW_ADAPTERS = [SubfinderAdapter(), DnsxAdapter(), HttpxProbeAdapter()]
+ALL = list(_ADAPTERS.values()) + NEW_ADAPTERS
+
+
+@pytest.fixture(autouse=True)
+def _no_tools(monkeypatch):
+    """available() with no tool installed: every which() lookup misses."""
+    import attestra.runner.scanners.base as base
+
+    monkeypatch.setattr(base.shutil, "which", lambda name: None)
+    for mod in list(sys.modules.values()):
+        if getattr(mod, "__name__", "").startswith("attestra.runner.scanners.") and hasattr(mod, "which"):
+            monkeypatch.setattr(mod, "which", lambda name: None, raising=False)
+
+
+def test_eleven_existing_adapters_have_default_meta():
+    assert set(_ADAPTERS) <= set(sdk.DEFAULT_META)
+    assert len(_ADAPTERS) == 11
+
+
+@pytest.mark.parametrize("adapter", ALL, ids=lambda a: a.name)
+def test_adapter_contract(adapter, tmp_path):
+    assert sdk.contract_problems(adapter, tmp_dir=tmp_path) == []
+
+
+@pytest.mark.parametrize("adapter", ALL, ids=lambda a: a.name)
+def test_available_false_without_tool_and_health_is_value_free(adapter):
+    meta = sdk.meta_for(adapter)
+    if meta.licence != "internal":  # webcheck is pure Python and always available
+        assert adapter.available() is False
+    h = adapter.health()
+    assert set(h) >= {"name", "adapter_version", "ready", "safety_tier", "meta_problems"}
+    assert h["meta_problems"] == []
+    assert "password" not in repr(h).lower() and "token" not in repr(h).lower()
+
+
+def test_adapter_version_format():
+    assert sdk.adapter_version(SubfinderAdapter()) == "subfinder/1.0+sdk1"
+    assert sdk.adapter_version(_ADAPTERS["zap"]) == "zap/1.0+sdk1"
+
+
+def test_stamp_result_records_versions():
+    sr = ScannerResult(tool="dnsx", tool_version="dnsx 1.2")
+    DnsxAdapter().stamp_result(sr)
+    assert sr.extra["adapter_version"] == "dnsx/1.0+sdk1"
+    assert sr.extra["tool_version"] == "dnsx 1.2"
+
+
+def test_base_scan_stamps_even_when_tool_unavailable(tmp_path, monkeypatch):
+    from attestra import config
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    res = SubfinderAdapter().scan("example.com", out_dir=tmp_path / "out")
+    assert res.error  # no tool, no docker
+    assert res.extra["adapter_version"].startswith("subfinder/")
+
+
+def test_meta_problems_detected():
+    bad = sdk.AdapterMeta(capabilities=(), asset_kinds=("x",), safety_tier="T9", network_egress="moon", licence="")
+    probs = " ".join(bad.problems())
+    for word in ("capabilities", "safety_tier", "network_egress", "licence", "output_schema"):
+        assert word in probs
+
+
+@pytest.mark.parametrize("bad", ["example.com;rm -rf /", "a b.example.com", "$(id).example.com", "*", "10.0.0.1"])
+def test_discovery_adapters_refuse_unsafe_or_invalid_targets(bad, tmp_path):
+    for adapter in NEW_ADAPTERS:
+        with pytest.raises((ValueError, AuthorizationError)):
+            adapter.build_argv(bad, out_file=tmp_path / adapter.out_name)
+
+
+def test_list_adapters_bound_host_count(tmp_path):
+    hosts = ",".join(f"h{i}.example.com" for i in range(501))
+    with pytest.raises(ValueError):
+        DnsxAdapter().build_argv(hosts, out_file=tmp_path / "dnsx-out.jsonl")
+
+
+def test_image_pinning_via_env_for_new_adapters(monkeypatch):
+    a = SubfinderAdapter()
+    monkeypatch.delenv("ATTESTRA_IMAGE_SUBFINDER", raising=False)
+    assert a.image_configured() is False
+    monkeypatch.setenv("ATTESTRA_IMAGE_SUBFINDER", "projectdiscovery/subfinder:latest")
+    assert a.image_configured() is False
+    with pytest.raises(ValueError):
+        a.image_ref()
+    monkeypatch.setenv("ATTESTRA_IMAGE_SUBFINDER", "projectdiscovery/subfinder@sha256:" + "ab" * 32)
+    assert a.image_configured() is True
+    assert a.image_ref().endswith("ab" * 32)
+
+
+def test_run_process_timeout_and_cancel(tmp_path):
+    script = tmp_path / "sleeper.py"
+    script.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    sleeper = [sys.executable, str(script)]
+    r = run_process(sleeper, timeout=1)
+    assert r.timed_out is True
+    ev = threading.Event()
+    threading.Timer(0.5, ev.set).start()
+    r2 = run_process(sleeper, timeout=30, cancel=ev)
+    assert r2.cancelled is True
+
+
+def test_run_process_rejects_unsafe_arg():
+    with pytest.raises(AuthorizationError):
+        run_process(["echo", "a;b"], timeout=2)
+
+
+def test_new_adapter_without_core_changes(tmp_path, monkeypatch):
+    """L-01 acceptance: a scaffolded adapter passes the contract without touching core files."""
+    spec = Path(__file__).resolve().parents[2] / "scripts" / "new_adapter.py"
+    ns: dict = {"__name__": "new_adapter_script", "__file__": str(spec)}
+    exec(compile(spec.read_text(encoding="utf-8"), str(spec), "exec"), ns)
+    args = ns["parse_args"](["demo_tool", "--licence", "MIT", "--tier", "T1"])
+    files = ns["render"](args)
+    adapter_src = next(text for path, text in files.items() if path.name == "demo_tool.py" and "scanners" in str(path))
+    for text in files.values():
+        compile(text, "<scaffold>", "exec")
+    mod = types.ModuleType("attestra.runner.scanners.demo_tool")
+    exec(compile(adapter_src, "<demo_tool>", "exec"), mod.__dict__)
+    adapter = mod.DemoToolAdapter()
+    assert isinstance(adapter, ScannerAdapter)
+    assert sdk.contract_problems(adapter, tmp_dir=tmp_path) == []
+    with pytest.raises(ValueError):
+        adapter.build_argv("https://x.invalid/", out_file=tmp_path / "o.json")
+
+
+def test_scaffold_refuses_missing_licence():
+    spec = Path(__file__).resolve().parents[2] / "scripts" / "new_adapter.py"
+    ns: dict = {"__name__": "new_adapter_script", "__file__": str(spec)}
+    exec(compile(spec.read_text(encoding="utf-8"), str(spec), "exec"), ns)
+    with pytest.raises(SystemExit):
+        ns["parse_args"](["demo_tool"])
+
+
+# ---------------------------------------------------------------- F-02
+
+
+def test_prowler_permission_disclosure_is_read_only_and_value_free():
+    from attestra.runner.scanners.prowler import PROVIDERS, permission_disclosure
+
+    for p in PROVIDERS:
+        d = permission_disclosure(p)
+        assert d["write_access"] is False
+        assert d["grants"] and p in d["summary"]
+        assert "does not store" in d["summary"]
+    with pytest.raises(ValueError):
+        permission_disclosure("oracle")
+
+
+def test_prowler_scan_attaches_disclosure(tmp_path, monkeypatch):
+    from attestra import config
+    from attestra.runner.scanners.prowler import ProwlerAdapter
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+    res = ProwlerAdapter().scan("aws", out_dir=tmp_path / "out")
+    assert res.extra["permission_disclosure"]["provider"] == "aws"
+    assert res.extra["adapter_version"].startswith("prowler/")

@@ -27,6 +27,7 @@ class CweMapping:
     objectives: tuple[str, ...]
     strength: str  # full | partial
     rationale: str
+    source: str = ""
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,8 @@ class Library:
     titles: dict
     cwe_map: dict[int, CweMapping]
     default_objectives: tuple
+    # G-06: mapping provenance from cwe_map.yaml ``metadata`` (source/version/effective/reviewer).
+    cwe_metadata: dict = field(default_factory=dict)
 
 
 def _parse_cwe_entry(value) -> CweMapping:
@@ -46,6 +49,7 @@ def _parse_cwe_entry(value) -> CweMapping:
         objectives=objs,
         strength=str(value.get("strength") or ""),
         rationale=str(value.get("rationale") or "").strip(),
+        source=str(value.get("source") or "").strip(),
     )
 
 
@@ -84,7 +88,57 @@ def load_library() -> Library:
         titles=titles,
         cwe_map={int(k): _parse_cwe_entry(v) for k, v in (cwe.get("cwe") or {}).items()},
         default_objectives=tuple(cwe.get("default", ["vuln_identification"])),
+        cwe_metadata=dict(cwe.get("metadata") or {}),
     )
+
+
+# @lat: [[intel-and-reporting#Compliance mapping provenance]]
+MAPPING_METADATA_KEYS = ("source", "version", "effective", "reviewer")
+VALID_STRENGTHS = frozenset({"full", "partial"})
+# J-04: rules whose controls can only be satisfied by assessor evidence. The engine may
+# propose "partial" / "not_assessed" for them but never "met" / "no_exceptions".
+ASSESSOR_ONLY_RULES = frozenset({"assessor_evidence", "has_risk_assessment"})
+_AUTO_COMPLIANT = frozenset({"met", "no_exceptions"})
+
+
+def mapping_metadata(lib: Library | None = None) -> dict:
+    """Provenance of the CWE -> objective mapping (always has the four keys)."""
+    lib = lib or load_library()
+    meta = dict(lib.cwe_metadata or {})
+    return {k: str(meta.get(k) or "") for k in MAPPING_METADATA_KEYS}
+
+
+def validate_library(lib: Library | None = None) -> list[str]:
+    """Integrity errors in the mapping library (empty list = valid). Used by CI tests."""
+    lib = lib or load_library()
+    errors: list[str] = []
+    meta = mapping_metadata(lib)
+    for k in MAPPING_METADATA_KEYS:
+        if not meta[k]:
+            errors.append(f"cwe_map metadata missing {k!r}")
+    for obj in lib.default_objectives:
+        if obj not in lib.objectives:
+            errors.append(f"default objective {obj!r} is not defined in controls.yaml")
+    for cwe, m in sorted(lib.cwe_map.items()):
+        if not m.objectives:
+            errors.append(f"CWE-{cwe}: no objectives")
+        for obj in m.objectives:
+            if obj not in lib.objectives:
+                errors.append(f"CWE-{cwe}: unknown objective {obj!r}")
+        if m.strength not in VALID_STRENGTHS:
+            errors.append(f"CWE-{cwe}: invalid strength {m.strength!r}")
+        if not m.rationale:
+            errors.append(f"CWE-{cwe}: missing rationale")
+    return errors
+
+
+def is_assessor_only(objective: dict) -> bool:
+    """True when an objective needs assessor evidence (flag or rule), never automation."""
+    if not isinstance(objective, dict):
+        return False
+    if objective.get("assessor_only"):
+        return True
+    return objective.get("kind") == "process" and objective.get("rule") in ASSESSOR_ONLY_RULES
 
 
 def clear_library_cache() -> None:
@@ -159,6 +213,8 @@ class ControlResult:
     mapping_strength: str = ""
     mapping_rationale: str = ""
     mappings: list[dict] = field(default_factory=list)
+    assessor_only: bool = False
+    mapping_provenance: dict = field(default_factory=dict)
 
     @property
     def status(self) -> str:
@@ -323,6 +379,15 @@ def evaluate(
                 if order[status] > order[cur.proposed]:
                     cur.proposed = status
                 _apply_mappings(cur, maps)
+
+    # J-04: assessor-only controls are never auto-compliant; only an assessor confirms them.
+    provenance = mapping_metadata(lib)
+    for r in results.values():
+        r.mapping_provenance = dict(provenance)
+        r.assessor_only = any(is_assessor_only(lib.objectives.get(k) or {}) for k in r.objectives)
+        if r.assessor_only and r.proposed in _AUTO_COMPLIANT:
+            r.proposed = "not_assessed"
+            r.reason += " [assessor-only control: automated evidence cannot mark it compliant]"
 
     for a in assessments:
         if a.framework == framework and a.control_ref in results:

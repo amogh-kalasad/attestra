@@ -1,0 +1,20 @@
+# F-03: `permissions: write-all` hands every job a token that can push code, edit
+# releases and change settings. Grant only the scopes each job needs.
+# @lat: [[intel-and-reporting#Semgrep GitHub Actions rules]]
+rules:
+  - id: attestra.gha.permissions-write-all
+    languages: [yaml]
+    severity: WARNING
+    message: >-
+      Workflow grants `permissions: write-all`. Declare least-privilege permissions
+      (for example contents: read) and add write scopes only to jobs that need them.
+    metadata:
+      cwe: "CWE-250: Execution with Unnecessary Privileges"
+      owasp: "A01:2021 - Broken Access Control"
+      category: security
+      attestra_rule_version: "gha-1"
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+    pattern: "permissions: write-all"

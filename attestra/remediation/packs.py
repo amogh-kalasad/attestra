@@ -1087,3 +1087,76 @@ def pack_for_concept(concept: str) -> Pack | None:
     if pack is None and key != concept:
         pack = REMEDIATION_PACKS.get(str(concept).strip())
     return dict(pack) if pack else None
+
+
+# ---------------------------------------------------------------------------
+# H-05: structured remediation metadata linked to a verified fix.
+# @lat: [[intel-and-reporting#Structured remediation]]
+# Packs above stay text-first for reports; these helpers expose a stable, versioned
+# structure (for API/exports/tickets) and only mark a fix *verified* when a retest
+# outcome of ``confirmed_fixed`` on a VALID (or legacy, not computed) run backs it.
+
+PACK_METADATA_VERSION = "rp1"
+_EFFORT_RANK = {"easy": 1, "medium": 2, "hard": 3}
+_SERVER_KEYS = ("nginx", "apache", "iis", "cloudflare", "node")
+
+
+def _steps(text: Any) -> list[str]:
+    if not text:
+        return []
+    if isinstance(text, (list, tuple)):
+        return [str(t).strip() for t in text if str(t).strip()]
+    parts = [p.strip() for p in str(text).replace("\n", " ").split(". ") if p.strip()]
+    return [p if p.endswith(".") else p + "." for p in parts]
+
+
+def structured_metadata(pack: Pack | None) -> dict:
+    """Stable structured view of a remediation pack (no free-form HTML)."""
+    if not pack:
+        return {}
+    examples = pack.get("config_examples") or {}
+    effort = str(pack.get("effort") or "").strip()
+    return {
+        "version": PACK_METADATA_VERSION,
+        "concept": pack.get("concept") or "",
+        "importance": str(pack.get("importance") or ""),
+        "effort": effort,
+        "effort_rank": _EFFORT_RANK.get(effort.lower()),
+        "platforms": sorted(k for k in examples if k in _SERVER_KEYS) + sorted(
+            k for k in examples if k not in _SERVER_KEYS
+        ),
+        "has_code_example": bool(pack.get("code_example")),
+        "verification_steps": _steps(pack.get("verification_steps")),
+        "retest_instructions": _steps(pack.get("retest_instructions")),
+    }
+
+
+def link_verified_fix(
+    pack: Pack | None,
+    *,
+    retest_outcome: str = "",
+    retest_id: int | None = None,
+    scan_run_id: int | None = None,
+    run_validity: Any = None,
+    verified_at: str = "",
+) -> dict:
+    """Attach fix-verification state to a pack's structured metadata.
+
+    ``verified`` is True only for ``confirmed_fixed`` (legacy ``fixed`` is mapped) in a
+    VALID or not-computed run; every other outcome is recorded but never verifies.
+    """
+    meta = structured_metadata(pack)
+    outcome = (retest_outcome or "").strip().lower()
+    outcome = {"fixed": "confirmed_fixed", "still_open": "still_present"}.get(outcome, outcome)
+    state = run_validity.get("state") if isinstance(run_validity, dict) else run_validity
+    state = str(state or "").strip().upper() or "NOT_COMPUTED"
+    verified = outcome == "confirmed_fixed" and state in ("VALID", "NOT_COMPUTED")
+    meta["fix_verification"] = {
+        "verified": verified,
+        "retest_outcome": outcome or "not_retested",
+        "retest_id": retest_id,
+        "scan_run_id": scan_run_id,
+        "run_validity": state,
+        "verified_at": verified_at if verified else "",
+    }
+    return meta

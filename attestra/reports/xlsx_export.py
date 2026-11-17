@@ -107,6 +107,22 @@ def render_engagement_xlsx(s: Session, engagement_id: int) -> bytes:
     ws_evidence = wb.create_sheet("Evidence")
     _write_sheet(ws_evidence, EVIDENCE_COLUMNS, _evidence_rows(s, engagement_id))
 
+    # J-01: "Run validity" sheet only when the engagement has automated runs, so legacy
+    # engagements keep exactly three sheets.
+    # @lat: [[intel-and-reporting#Run validity in reports]]
+    try:
+        from attestra.reports.run_validity import XLSX_COLUMNS, section_for_engagement, xlsx_rows
+
+        section = section_for_engagement(s, engagement_id, reportable_count=len(findings))
+    except Exception:  # noqa: BLE001
+        section = None
+    if section and section.get("has_runs"):
+        ws_rv = wb.create_sheet("Run validity")
+        rows = [[csv_cell(c) for c in row] for row in xlsx_rows(section)]
+        rows.append([csv_cell("overall"), csv_cell(section["overall_label"]), csv_cell(section["overall_meaning"]),
+                     "", csv_cell(section.get("notice") or ""), "", "", csv_cell(section.get("version") or "")])
+        _write_sheet(ws_rv, XLSX_COLUMNS, rows)
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

@@ -1,0 +1,29 @@
+# F-03: GitHub Actions script injection. Untrusted event fields interpolated straight
+# into a `run:` shell script let an attacker run commands in the workflow.
+# @lat: [[intel-and-reporting#Semgrep GitHub Actions rules]]
+rules:
+  - id: attestra.gha.run-script-injection
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      Untrusted GitHub context `$CTX` is interpolated into a run: script. Pass it via an
+      environment variable (env: VALUE: $${{ ... }}) and quote "$VALUE" in the script.
+    metadata:
+      cwe: "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+      owasp: "A03:2021 - Injection"
+      category: security
+      attestra_rule_version: "gha-1"
+      references:
+        - https://securitylab.github.com/research/github-actions-untrusted-input/
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+        - "**/action.yml"
+        - "**/action.yaml"
+    patterns:
+      - pattern-inside: "steps: [...]"
+      - pattern: "run: $SHELL"
+      - metavariable-regex:
+          metavariable: $SHELL
+          regex: (?s).*\$\{\{\s*(?P<CTX>github\.event\.(issue\.title|issue\.body|pull_request\.title|pull_request\.body|comment\.body|review\.body|review_comment\.body|pages\.[^}]*\.page_name|commits\.[^}]*\.(message|author\.(email|name))|head_commit\.(message|author\.(email|name))|pull_request\.head\.(ref|label|repo\.default_branch)|discussion\.(title|body)|workflow_run\.(head_branch|head_commit\.message|display_title))|github\.head_ref)\s*\}\}.*

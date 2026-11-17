@@ -220,5 +220,5 @@ def test_nuclei_template_mapping_is_conservative():
     assert refs("csp-script-src-wildcard") == {"WSTG-CONF-12"}
     assert refs("xss-deprecated-header") == set()
     assert refs("http-missing-security-headers:cross-origin-opener-policy") == set()
-    assert refs("generic-ssrf-detect") == {"WSTG-BUSL-09"}
-    assert refs("cookies-without-secure") == {"WSTG-SESS-02"}
+    assert refs("generic-ssrf-detect") == {"WSTG-INPV-19"}  # INT: SSRF moved to INPV-19 (catalog)
+    assert refs("cookies-without-secure") == {"WSTG-SESS-02"}

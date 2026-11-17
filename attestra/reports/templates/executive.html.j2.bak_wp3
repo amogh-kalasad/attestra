@@ -1,0 +1,56 @@
+{% extends "_base.html.j2" %}
+{% block title %}Executive summary{% endblock %}
+{% block body %}
+<h2>Executive summary</h2>
+<p class="meta"><b>{{ eng.name|words_title }}</b> · {{ type_label }} · Window {{ eng.window_start or "n/a" }} to {{ eng.window_end or "n/a" }}</p>
+
+{% set crit_high = by_sev.get("critical", 0) + by_sev.get("high", 0) %}
+<p class="note">
+{% if crit_high == 0 %}
+  No Critical or High-severity issues remain open. {{ plural(open_findings|length, "lower-severity item") }} {{ "is" if open_findings|length == 1 else "are" }} tracked for remediation.
+{% else %}
+  {{ plural(crit_high, "Critical or High-severity issue") }} {{ "remains" if crit_high == 1 else "remain" }} open{% if kev_open %}, including {{ plural(kev_open|length, "item") }} listed in CISA KEV (known exploited){% endif %}.
+  Remediate these before the next audit window.
+{% endif %}
+</p>
+{% if ai_summary %}
+<p>{{ ai_summary.text }}</p>
+<div class="meta">AI-assisted narrative, reviewed and approved by {{ ai_summary.approved_by }}.</div>
+{% endif %}
+
+<div class="summary-posture">
+<div class="kpis">
+  {% for s in severities %}
+  <div class="kpi"><span class="sev sev-{{ s }}">{{ s|severity_label }}</span><b>{{ by_sev.get(s, 0) }}</b>open</div>
+  {% endfor %}
+</div>
+{% if trend_svg %}
+<div class="chart-block">
+  <p class="meta chart-caption">Open findings by severity (this engagement vs prior when available).{% if prev_by_sev is not none %} Solid bars: this engagement. Faded bars: previous engagement for the same client.{% else %} No prior engagement for this client — chart shows current open counts only.{% endif %}</p>
+  {{ trend_svg|safe }}
+</div>
+{% endif %}
+</div>
+
+<h2>Top risks</h2>
+<table>
+  <tr><th>Finding</th><th>Severity</th><th>Asset / location</th><th>Fix by</th></tr>
+  {% for f in top %}
+  <tr><td>{{ flabel(f) }} {{ f.title }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td><td class="mono">{{ f.location[:90]|param_label }}</td><td>{{ f.sla_due|format_date if f.sla_due else "" }}</td></tr>
+  {% else %}<tr><td colspan="4">No open findings.</td></tr>{% endfor %}
+</table>
+
+<h2>Compliance readiness</h2>
+<table>
+  <tr><th>Framework</th><th>Met</th><th>No exceptions</th><th>Partial</th><th>Not met</th><th>Not assessed</th></tr>
+  {% for key, fw in frameworks.items() %}
+  <tr><td>{{ fw.name }}</td><td>{{ fw.counts.get("met", 0) }}</td><td>{{ fw.counts.get("no_exceptions", 0) }}</td><td>{{ fw.counts.get("partial", 0) }}</td><td>{{ fw.counts.get("not_met", 0) }}</td><td>{{ fw.counts.get("not_assessed", 0) + fw.counts.get("not_applicable", 0) }}</td></tr>
+  {% else %}<tr><td colspan="6">No frameworks selected for this engagement.</td></tr>{% endfor %}
+</table>
+<p class="meta">Control statuses are proposed from test evidence and confirmed by a named assessor. They indicate readiness for the
+controls the security testing evidence supports, not certification against the full framework. <b>No exceptions</b> means testing found
+nothing against the control; it does not by itself show the control is in place.</p>
+{% if auth_coverage and auth_coverage.checklist and auth_coverage.checklist.total %}
+<p class="meta">Authenticated security testing checklist: {{ auth_coverage.checklist.passed }} of {{ auth_coverage.checklist.total }} passed. Skipped and blocked items are not counted as passed.</p>
+{% endif %}
+{% endblock %}

@@ -60,6 +60,7 @@ if observability.METRICS_ENABLED:
     app.add_middleware(observability.MetricsMiddleware)
 observability.configure_json_logging()
 observability.setup_otel(app)
+observability.instrument_engine()  # WP4: no-op unless OTel + pymongo instrumentation are present
 
 
 def get_principal(request: Request) -> Principal:
@@ -236,6 +237,37 @@ def _observation_dict(o) -> dict:
     }
 
 
+_INTEL_META_CACHE: dict = {"at": 0.0, "meta": None}
+_INTEL_META_TTL_S = 300.0
+
+
+def _intel_meta() -> dict:
+    """Value-free KEV/EPSS feed metadata for risk explanations, cached (G-01/G-06).
+
+    Loading the validated snapshot parses the EPSS file, so it is cached for a few minutes
+    instead of being read per finding. Any problem degrades to "unknown", never an error.
+    """
+    import time
+
+    now = time.monotonic()
+    cached = _INTEL_META_CACHE.get("meta")
+    if cached is not None and now - float(_INTEL_META_CACHE.get("at") or 0.0) < _INTEL_META_TTL_S:
+        return cached
+    try:
+        from attestra.intel import feed_store
+
+        snap = feed_store.load_validated()
+        meta = {
+            "kev_known": snap.kev_known,
+            "stale_inputs": list((snap.freshness or {}).get("stale_inputs") or []),
+            "intel_source_version": snap.source_version,
+        }
+    except Exception:  # noqa: BLE001
+        meta = {"kev_known": None, "stale_inputs": [], "intel_source_version": ""}
+    _INTEL_META_CACHE.update(at=now, meta=meta)
+    return meta
+
+
 def _finding_dict(f, fix: dict | None = None) -> dict:
     from attestra.library.fix_snippets import empty_fix_fields
     from attestra import scoring
@@ -252,6 +284,12 @@ def _finding_dict(f, fix: dict | None = None) -> dict:
         a.exposure if a else None,
         a.in_cde if a else False,
         validation_status=validation,
+        # EPSS "known" stays per finding (None = auto: f.epss present) so operator-supplied
+        # scores are not hidden when no feed snapshot is on disk (INT decision).
+        kev_known=_intel_meta()["kev_known"],
+        stale_inputs=_intel_meta()["stale_inputs"],
+        cvss_vector=getattr(f, "cvss_vector", None) or None,
+        intel_source_version=_intel_meta()["intel_source_version"],
     )
     business_risk = (
         getattr(f, "business_risk", None)
@@ -981,6 +1019,9 @@ def compliance(
                 "mapping_strength": r.mapping_strength,
                 "mapping_rationale": r.mapping_rationale,
                 "mappings": r.mappings,
+                # WP3 E-03: assessor-only controls and CWE mapping provenance (additive fields).
+                "assessor_only": bool(getattr(r, "assessor_only", False)),
+                "mapping_provenance": dict(getattr(r, "mapping_provenance", {}) or {}),
             }
             for r in results
         ]
@@ -1925,6 +1966,11 @@ from attestra.alerts.routes import ui_router as alerts_ui_router  # noqa: E402
 
 app.include_router(alerts_api_router)
 app.include_router(alerts_ui_router)
+
+# WP4 passive discovery candidate review (every route 404s while ATTESTRA_DISCOVERY_ENABLED is off).
+from attestra.discovery.routes import router as discovery_router  # noqa: E402
+
+app.include_router(discovery_router)
 
 from attestra.certification.routes import api_router as ca_api_router  # noqa: E402
 from attestra.certification.routes import ui_router as ca_ui_router  # noqa: E402

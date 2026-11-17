@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -295,3 +295,118 @@ def ui_cancel_execution(request: Request, eid: int, xid: int):
             f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",
             status_code=303,
         )
+
+
+# ---------------------------------------------------------------- API spec import (C-04)
+# @lat: [[web-api-probes#API spec upload route]]
+# Upload an OpenAPI 3.x / Swagger 2.0, Postman v2.1 or HAR 1.2 file for one asset. The file
+# is size-capped, validated and stored as a versioned inventory (sha256 dedup) in
+# ``api_inventories``. Nothing is requested from the target here. Behind
+# ``ATTESTRA_API_IMPORT_ENABLED`` (default off) and ``asset.write``.
+
+
+def _api_spec_import(s, *, eid: int, aid: int, principal, filename: str, data: bytes) -> dict:
+    from attestra.automated_vapt.api_inventory import SpecError, parse_spec
+    from attestra.automated_vapt.api_inventory import store as inv_store
+    from attestra.automated_vapt.testing._probe_base import api_import_enabled
+
+    if not api_import_enabled():
+        raise services.ServiceError("API spec import is disabled (ATTESTRA_API_IMPORT_ENABLED=0)")
+    eng = services.get_engagement(s, eid, principal)
+    asset = services.get_asset(s, aid, principal)
+    if asset.engagement_id != eid:
+        raise LookupError(f"target {aid} not found")
+    if getattr(asset, "kind", "") not in ("web_app", "api"):
+        raise services.ServiceError("API specs can only be attached to web app or API targets")
+    allowed = [str(asset.identifier or "")]
+    if getattr(asset, "api_base_url", ""):
+        allowed.append(str(asset.api_base_url))
+    try:
+        inv = parse_spec(data, filename, allowed_origins=allowed)
+    except SpecError as exc:
+        raise services.ServiceError(f"invalid API spec: {exc}") from None
+    actor = getattr(principal, "actor", None) or getattr(principal, "username", "") or "api"
+    saved = inv_store.save(inv, tenant_id=eng.tenant_id, engagement_id=eid, asset_id=aid, actor=str(actor))
+    try:
+        from attestra import audit
+
+        audit.record(
+            s,
+            str(actor),
+            "api_spec.import",
+            "asset",
+            aid,
+            sha256=inv.sha256,
+            kind=inv.kind,
+            version=saved.version,
+            duplicate=saved.duplicate,
+            operations=len(inv.operations),
+        )
+    except Exception:  # noqa: BLE001 - audit failure must not lose the upload
+        pass
+    return saved.public()
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    from attestra.automated_vapt.api_inventory.model import max_spec_bytes
+
+    cap = max_spec_bytes()
+    data = await file.read(cap + 1)
+    if len(data) > cap:
+        raise services.ServiceError(f"API spec larger than {cap} bytes")
+    return data
+
+
+@api_router.post("/engagements/{eid}/assets/{aid}/api-spec", status_code=201)
+async def upload_api_spec(eid: int, aid: int, file: UploadFile = File(...), principal=Depends(_principal)):
+    if not has_permission(principal.role, "asset.write"):
+        raise HTTPException(403, "permission denied: asset.write")
+    try:
+        data = await _read_upload(file)
+        with db.session() as s:
+            return _api_spec_import(s, eid=eid, aid=aid, principal=principal, filename=file.filename or "", data=data)
+    except (services.ServiceError, LookupError) as e:
+        raise _err(e) from e
+
+
+@api_router.get("/engagements/{eid}/assets/{aid}/api-spec")
+def list_api_specs(eid: int, aid: int, principal=Depends(_principal)):
+    if not has_permission(principal.role, "engagement.read"):
+        raise HTTPException(403, "permission denied: engagement.read")
+    from attestra.automated_vapt.api_inventory import store as inv_store
+
+    try:
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            asset = services.get_asset(s, aid, principal)
+            if asset.engagement_id != eid:
+                raise LookupError(f"target {aid} not found")
+            rows = inv_store.list_versions(tenant_id=eng.tenant_id, engagement_id=eid, asset_id=aid)
+            return {"asset_id": aid, "versions": [r.public() for r in rows]}
+    except (services.ServiceError, LookupError) as e:
+        raise _err(e) from e
+
+
+@ui_router.post("/engagements/{eid}/targets/{aid}/api-spec")
+async def ui_upload_api_spec(request: Request, eid: int, aid: int, file: UploadFile = File(...)):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    back = f"/engagements/{eid}/targets/{aid}"
+    if not has_permission(principal.role, "asset.write"):
+        return RedirectResponse(f"{back}?error=not+allowed#api-spec", status_code=303)
+    try:
+        data = await _read_upload(file)
+        with db.session() as s:
+            out = _api_spec_import(s, eid=eid, aid=aid, principal=principal, filename=file.filename or "", data=data)
+        summ = out.get("summary") or {}
+        note = "unchanged (same file)" if out.get("duplicate") else f"version {out.get('version')}"
+        msg = f"API spec imported: {summ.get('operations', 0)} operations, {note}"
+        from urllib.parse import quote_plus
+
+        return RedirectResponse(f"{back}?msg={quote_plus(msg)}#api-spec", status_code=303)
+    except (services.ServiceError, LookupError) as e:
+        from urllib.parse import quote_plus
+
+        return RedirectResponse(f"{back}?error={quote_plus(str(e)[:180])}#api-spec", status_code=303)

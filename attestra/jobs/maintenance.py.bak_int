@@ -1,0 +1,189 @@
+"""Maintenance tick: a small registry of periodic callables run by the worker (I-03).
+
+The worker's housekeeping pass calls :func:`tick` every loop. Nothing runs unless
+maintenance is enabled (``config.MAINTENANCE_ENABLED`` once INT wires it, else
+``ATTESTRA_MAINTENANCE_ENABLED``; default **off**). Each task has its own interval and
+its own enable switch, so a tick is idempotent: calling it again before a task is due
+does nothing. A failing task is logged and counted, never raised into the worker, and
+its timer still advances so a broken task cannot hammer a remote feed.
+
+Built-in registrations are by *name* so this module never imports optional packages at
+import time:
+
+* ``intel.feed_refresh`` — WP3's hardened feed store (``attestra.intel.feed_store``),
+  gated on ``INTEL_AUTO_REFRESH`` (``ATTESTRA_INTEL_AUTO_REFRESH``, default off). The
+  CLI refresh keeps working either way.
+"""
+# @lat: [[attack-surface-and-platform#Maintenance tick]]
+
+from __future__ import annotations
+
+import importlib
+import logging
+import os
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+log = logging.getLogger("attestra.maintenance")
+
+_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def _flag(attr: str, env: str, default: bool = False) -> bool:
+    try:
+        from attestra import config
+
+        val = getattr(config, attr, None)
+    except Exception:  # noqa: BLE001
+        val = None
+    if val is not None:
+        return bool(val)
+    raw = os.environ.get(env)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _TRUE
+
+
+def maintenance_enabled() -> bool:
+    return _flag("MAINTENANCE_ENABLED", "ATTESTRA_MAINTENANCE_ENABLED")
+
+
+def intel_auto_refresh_enabled() -> bool:
+    return _flag("INTEL_AUTO_REFRESH", "ATTESTRA_INTEL_AUTO_REFRESH")
+
+
+@dataclass
+class Task:
+    name: str
+    fn: Callable[[], object]
+    interval_s: float
+    enabled: Callable[[], bool] = field(default=lambda: True)
+    description: str = ""
+
+
+_TASKS: dict[str, Task] = {}
+_LAST_RUN: dict[str, float] = {}
+_TICK_LOCK = threading.Lock()
+
+
+def register(
+    name: str,
+    fn: Callable[[], object],
+    *,
+    interval_s: float,
+    enabled: Callable[[], bool] | None = None,
+    description: str = "",
+) -> Task:
+    """Register (or replace) a periodic task. Re-registering the same name is idempotent."""
+    if not name or interval_s <= 0:
+        raise ValueError("task needs a name and a positive interval")
+    task = Task(name=name, fn=fn, interval_s=float(interval_s), enabled=enabled or (lambda: True), description=description)
+    _TASKS[name] = task
+    return task
+
+
+def unregister(name: str) -> None:
+    _TASKS.pop(name, None)
+    _LAST_RUN.pop(name, None)
+
+
+def registered() -> list[str]:
+    return sorted(_TASKS)
+
+
+def reset_state() -> None:
+    """Forget last-run times (tests)."""
+    _LAST_RUN.clear()
+
+
+def _record(task: str, outcome: str) -> None:
+    try:
+        from attestra import observability as obs
+
+        obs.record_maintenance(task, outcome)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def tick(*, now: float | None = None, log: Callable[[str], None] | None = None, force: bool = False) -> dict[str, str]:
+    """Run every enabled task that is due. Returns ``{task: outcome}`` for tasks considered.
+
+    Outcomes: ``ok``, ``error``, ``not_due``, ``disabled``, ``unavailable``. Returns ``{}``
+    when maintenance is off or another thread is already ticking.
+    """
+    if not force and not maintenance_enabled():
+        return {}
+    if not _TICK_LOCK.acquire(blocking=False):
+        return {}
+    emit = log or (lambda m: None)
+    results: dict[str, str] = {}
+    try:
+        t = time.monotonic() if now is None else float(now)
+        for name in sorted(_TASKS):
+            task = _TASKS[name]
+            try:
+                on = bool(task.enabled())
+            except Exception:  # noqa: BLE001
+                on = False
+            if not on:
+                results[name] = "disabled"
+                continue
+            last = _LAST_RUN.get(name)
+            if last is not None and t - last < task.interval_s:
+                results[name] = "not_due"
+                continue
+            _LAST_RUN[name] = t
+            try:
+                task.fn()
+                results[name] = "ok"
+            except TaskUnavailable as exc:
+                results[name] = "unavailable"
+                emit(f"maintenance {name}: unavailable ({exc})")
+            except Exception as exc:  # noqa: BLE001 - never break the worker
+                results[name] = "error"
+                emit(f"maintenance {name} failed: {type(exc).__name__}: {str(exc)[:200]}")
+                log_exc = logging.getLogger("attestra.maintenance")
+                log_exc.warning("maintenance task %s failed", name, exc_info=True)
+            _record(name, results[name])
+    finally:
+        _TICK_LOCK.release()
+    return results
+
+
+class TaskUnavailable(RuntimeError):
+    """The callable behind a by-name registration is not installed (yet)."""
+
+
+def call_by_name(dotted: str, *candidates: str) -> Callable[[], object]:
+    """Resolve ``module`` + first existing attribute lazily at run time."""
+
+    def _run() -> object:
+        try:
+            mod = importlib.import_module(dotted)
+        except ImportError as exc:
+            raise TaskUnavailable(f"{dotted} not installed") from exc
+        for attr in candidates:
+            fn = getattr(mod, attr, None)
+            if callable(fn):
+                return fn()
+        raise TaskUnavailable(f"{dotted} has none of {candidates}")
+
+    return _run
+
+
+FEED_REFRESH_INTERVAL_S = float(os.environ.get("ATTESTRA_INTEL_REFRESH_INTERVAL_S", str(6 * 3600)) or 6 * 3600)
+
+
+def register_builtin_tasks() -> None:
+    register(
+        "intel.feed_refresh",
+        call_by_name("attestra.intel.feed_store", "refresh_all", "refresh"),
+        interval_s=max(600.0, FEED_REFRESH_INTERVAL_S),
+        enabled=intel_auto_refresh_enabled,
+        description="KEV/EPSS feed refresh through WP3's validated feed store",
+    )
+
+
+register_builtin_tasks()

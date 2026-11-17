@@ -33,7 +33,10 @@ def _ca_repo():
     from attestra.persistence.mongo.adapters import _db
     from attestra.persistence.mongo.repositories.settings import CertificationAuthorityRepository
 
-    return CertificationAuthorityRepository(_db(), tenant_ids=None)
+    # Platform-wide CA settings (not tenant data): explicit SYSTEM_SCOPE (K-01).
+    from attestra.persistence.mongo.tenant import SYSTEM_SCOPE
+
+    return CertificationAuthorityRepository(_db(), tenant_ids=SYSTEM_SCOPE)
 
 
 def _ca_row(doc):

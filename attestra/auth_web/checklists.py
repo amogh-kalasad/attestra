@@ -6,30 +6,14 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from attestra.auth_web import checklist_catalog
 from attestra.models import CHECKLIST_STATUSES, AuthChecklistItem, utcnow
 from attestra.services import ServiceError
 
-# Built-in subset — seed only; engagements may extend later via other modules.
-DEFAULT_CHECKLIST: tuple[tuple[str, str, str], ...] = (
-    ("WSTG-INFO-02", "Fingerprint Web Server", "WSTG-v4.2"),
-    ("WSTG-CONF-01", "Test Network Infrastructure Configuration", "WSTG-v4.2"),
-    ("WSTG-CONF-12", "Test Content Security Policy Headers", "WSTG-v4.2"),
-    ("WSTG-ATHN-01", "Credentials Transported over an Encrypted Channel", "WSTG-v4.2"),
-    ("WSTG-ATHN-02", "Default Credentials", "WSTG-v4.2"),
-    ("WSTG-ATHN-04", "Bypassing Authentication Schema", "WSTG-v4.2"),
-    ("WSTG-ATHN-07", "Weak Password Policy / Account Lockout", "WSTG-v4.2"),
-    ("WSTG-ATHZ-01", "Directory Traversal / File Include", "WSTG-v4.2"),
-    ("WSTG-ATHZ-02", "Bypassing Authorization Schema", "WSTG-v4.2"),
-    ("WSTG-ATHZ-04", "Insecure Direct Object References", "WSTG-v4.2"),
-    ("WSTG-SESS-02", "Cookies Attributes", "WSTG-v4.2"),
-    ("WSTG-SESS-05", "Cross Site Request Forgery", "WSTG-v4.2"),
-    ("WSTG-INPV-01", "Reflected Cross Site Scripting", "WSTG-v4.2"),
-    ("WSTG-INPV-05", "SQL Injection", "WSTG-v4.2"),
-    ("WSTG-CRYP-01", "Weak Transport Layer Security", "WSTG-v4.2"),
-    ("WSTG-BUSL-09", "Server-Side Request Forgery", "WSTG-v4.2"),
-    ("ASVS-V2.1.1", "Password Security Requirements", "ASVS-4.0"),
-    ("ASVS-V4.1.1", "General Access Control Design", "ASVS-4.0"),
-)
+# FND-05: the checklist is sourced from the versioned catalog (WSTG v4.2 + ASVS 4.0.3).
+# ``DEFAULT_CHECKLIST`` stays as the backward-compatible ``(ref, title, mapping_version)`` view.
+DEFAULT_ITEMS: tuple[tuple[str, str, str], ...] = checklist_catalog.default_items()
+DEFAULT_CHECKLIST: tuple[tuple[str, str, str], ...] = DEFAULT_ITEMS
 
 
 def ensure_checklist(session: Session, engagement_id: int, tenant_id: int) -> list[AuthChecklistItem]:
@@ -41,9 +25,12 @@ def ensure_checklist(session: Session, engagement_id: int, tenant_id: int) -> li
         ).all()
     }
     created: list[AuthChecklistItem] = []
+    version = checklist_catalog.catalog_version()
+    cat = checklist_catalog.load_catalog()
     for ref, title, mapping_version in DEFAULT_CHECKLIST:
         if ref in existing:
             continue
+        ci = cat.item(ref)
         item = AuthChecklistItem(
             tenant_id=tenant_id,
             engagement_id=engagement_id,
@@ -55,6 +42,9 @@ def ensure_checklist(session: Session, engagement_id: int, tenant_id: int) -> li
             evidence_ids=[],
             finding_ids=[],
         )
+        if hasattr(item, "catalog_version"):
+            item.catalog_version = version
+            item.aliases = list(ci.aliases) if ci is not None else []
         session.add(item)
         created.append(item)
     if created:

@@ -1,5 +1,12 @@
-"""Download and cache CISA KEV / FIRST EPSS feeds for enrich --refresh."""
+"""Download and cache CISA KEV / FIRST EPSS feeds for enrich --refresh.
+
+G-01: downloads are validated by :mod:`attestra.intel.feed_store` *before* they are
+written; writes are atomic and the last good copy is kept, so a broken or partial
+download never erases existing enrichment. ``catalog.json`` is still maintained for
+report templates that read :func:`load_catalog_meta`.
+"""
 # @lat: [[architecture#Engagement flow]]
+# @lat: [[intel-and-reporting#Feed store and freshness]]
 
 from __future__ import annotations
 
@@ -10,6 +17,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from attestra import config
+from attestra.intel import feed_store
 
 
 class FeedError(Exception):
@@ -37,56 +45,90 @@ def load_catalog_meta() -> dict:
         return {}
 
 
+def _header(resp, name: str) -> str:
+    headers = getattr(resp, "headers", None)
+    try:
+        return str(headers.get(name) or "") if headers is not None else ""
+    except Exception:  # noqa: BLE001 — fake/odd response objects
+        return ""
+
+
+def _download(url: str) -> tuple[bytes, str, str]:
+    with urlopen(url, timeout=60) as resp:  # noqa: S310 — operator-configured feed URL
+        return resp.read(), _header(resp, "ETag"), _header(resp, "Last-Modified")
+
+
+def _epss_bytes(raw: bytes, url: str) -> bytes:
+    if raw[:2] == b"\x1f\x8b":
+        return gzip.decompress(raw)
+    if url.endswith(".gz"):
+        try:
+            return gzip.decompress(raw)
+        except OSError:
+            return raw  # some mirrors serve plain CSV at a .gz URL
+    return raw
+
+
 def refresh_feeds(*, kev_url: str | None = None, epss_url: str | None = None) -> dict:
-    """Download KEV JSON and EPSS CSV into DATA_DIR/feeds/; update catalog.json dates."""
+    """Download, validate and atomically store KEV JSON and EPSS CSV; update catalog.json.
+
+    Each feed is handled independently: a failure on one (network or validation) keeps
+    its last good file and is recorded in ``feed_state.json``; the other feed still
+    refreshes. :class:`FeedError` is raised at the end if any feed failed.
+    """
     kev_url = kev_url or config.KEV_URL
     epss_url = epss_url or config.EPSS_URL
     now = datetime.now(UTC).isoformat()
     meta = load_catalog_meta()
+    directory = feeds_dir()
+    errors: list[str] = []
 
-    with urlopen(kev_url, timeout=60) as resp:  # noqa: S310 — operator-configured feed URL
-        kev_bytes = resp.read()
-    kev_path = feeds_dir() / "kev.json"
-    kev_path.write_bytes(kev_bytes)
     try:
-        doc = json.loads(kev_bytes)
-        meta["kev_date"] = doc.get("dateReleased") or doc.get("catalogVersion") or now
-    except json.JSONDecodeError as exc:
-        raise FeedError(f"KEV feed is not valid JSON: {exc}") from exc
-    meta["kev_fetched_at"] = now
-    meta["kev_path"] = str(kev_path)
+        kev_bytes, etag, last_mod = _download(kev_url)
+        entry = feed_store.store_feed(
+            "kev", kev_bytes, source=kev_url, etag=etag, last_modified=last_mod, directory=directory, now=now
+        )
+        kmeta = entry.get("meta") or {}
+        meta["kev_date"] = kmeta.get("date_released") or kmeta.get("catalog_version") or now
+        meta["kev_fetched_at"] = now
+        meta["kev_path"] = str(directory / feed_store.FILENAMES["kev"])
+    except feed_store.FeedValidationError as exc:
+        errors.append(f"KEV feed rejected (last good copy kept): {exc}")
+    except Exception as exc:  # noqa: BLE001 — network/HTTP failure
+        feed_store.record_failure("kev", f"{type(exc).__name__}: {exc}", source=kev_url, directory=directory)
+        errors.append(f"KEV download failed (last good copy kept): {type(exc).__name__}")
 
-    with urlopen(epss_url, timeout=60) as resp:  # noqa: S310
-        raw = resp.read()
-    if raw[:2] == b"\x1f\x8b":
-        epss_bytes = gzip.decompress(raw)
-    elif epss_url.endswith(".gz"):
-        try:
-            epss_bytes = gzip.decompress(raw)
-        except OSError:
-            epss_bytes = raw  # some mirrors serve plain CSV at a .gz URL
-    else:
-        epss_bytes = raw
-    epss_path = feeds_dir() / "epss.csv"
-    epss_path.write_bytes(epss_bytes)
-    # FIRST CSV often has a comment line with score date
-    catalog_date = now
-    for line in epss_bytes.decode("utf-8", errors="replace").splitlines()[:5]:
-        if "score_date" in line.lower() or line.startswith("#"):
-            catalog_date = line.lstrip("#").strip()
-            break
-    meta["epss_date"] = catalog_date
-    meta["epss_fetched_at"] = now
-    meta["epss_path"] = str(epss_path)
+    try:
+        raw, etag, last_mod = _download(epss_url)
+        epss_bytes = _epss_bytes(raw, epss_url)
+        entry = feed_store.store_feed(
+            "epss", epss_bytes, source=epss_url, etag=etag, last_modified=last_mod, directory=directory, now=now
+        )
+        emeta = entry.get("meta") or {}
+        catalog_date = emeta.get("score_date") or now
+        # Backward compatible: FIRST CSV comment line carries the score date.
+        if not emeta.get("score_date"):
+            for line in epss_bytes.decode("utf-8", errors="replace").splitlines()[:5]:
+                if "score_date" in line.lower() or line.startswith("#"):
+                    catalog_date = line.lstrip("#").strip()
+                    break
+        meta["epss_date"] = catalog_date
+        meta["epss_fetched_at"] = now
+        meta["epss_path"] = str(directory / feed_store.FILENAMES["epss"])
+    except feed_store.FeedValidationError as exc:
+        errors.append(f"EPSS feed rejected (last good copy kept): {exc}")
+    except Exception as exc:  # noqa: BLE001
+        feed_store.record_failure("epss", f"{type(exc).__name__}: {exc}", source=epss_url, directory=directory)
+        errors.append(f"EPSS download failed (last good copy kept): {type(exc).__name__}")
 
-    catalog_meta_path().write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    meta["intel_source_version"] = feed_store.intel_source_version(feed_store.load_state(directory))
+    feed_store.atomic_write(catalog_meta_path(), json.dumps(meta, indent=2).encode("utf-8"))
+    if errors:
+        raise FeedError("; ".join(errors))
     return meta
 
 
 def load_cached_feeds() -> tuple[bytes | None, bytes | None]:
-    """Return (kev_json, epss_csv) from local cache if present."""
-    kev_p = feeds_dir() / "kev.json"
-    epss_p = feeds_dir() / "epss.csv"
-    kev = kev_p.read_bytes() if kev_p.is_file() else None
-    epss = epss_p.read_bytes() if epss_p.is_file() else None
-    return kev, epss
+    """Return (kev_json, epss_csv) from local cache if present and valid (last good copy)."""
+    snap = feed_store.load_validated(feeds_dir())
+    return snap.kev_json, snap.epss_csv

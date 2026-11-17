@@ -348,12 +348,13 @@ def test_front_back_matter_distribution_signoff_appendix(loaded):
         r = generate_report(s, loaded, kind="technical", actor="author.one")
         body = Path(r.path).read_text(encoding="utf-8")
 
-    assert 'id="distribution"' in body
-    assert 'href="#distribution"' in body
-    assert "Distribution list" in body
-    assert "Ada Client" in body
+    # Standing client-report rule: no Distribution List section (or TOC entry).
+    assert 'id="distribution"' not in body
+    assert 'href="#distribution"' not in body
+    assert "Distribution list" not in body
+    assert "Ada Client" in body  # still shown on the Document Control contact line
     assert "ada@client.example" in body
-    assert "Authorized recipients" in body
+    assert "Powered by Attestra" not in body
     assert 'id="sign-off"' in body
     assert 'href="#sign-off"' in body
     assert "QA reviewer" in body

@@ -1,0 +1,3 @@
+{"input":"www.example.com","url":"http://www.example.com","scheme":"http","status_code":301,"title":"","webserver":"nginx","timestamp":"2026-11-10T10:06:00Z"}
+{"input":"www.example.com","url":"https://www.example.com","scheme":"https","status_code":200,"title":"Example Domain","tech":["Nginx","HSTS"],"webserver":"nginx","cdn":true,"cdn_name":"cloudflare","timestamp":"2026-11-10T10:06:01Z"}
+{"input":"api.example.com","url":"https://api.example.com","scheme":"https","status_code":401,"title":"Unauthorized","timestamp":"2026-11-10T10:06:02Z"}

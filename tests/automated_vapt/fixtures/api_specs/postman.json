@@ -1,0 +1,16 @@
+{
+  "info": {"name": "Probe collection", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
+  "variable": [{"key": "baseUrl", "value": "https://app.example.test"}],
+  "event": [{"listen": "prerequest", "script": {"exec": ["console.log(1)"]}}],
+  "auth": {"type": "bearer"},
+  "item": [
+    {"name": "Folder", "item": [
+      {"name": "List projects", "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/projects?page=1", "query": [{"key": "page", "value": "1"}]}}},
+      {"name": "Get project", "request": {"method": "GET", "url": "{{baseUrl}}/api/projects/:projectId"}},
+      {"name": "Delete project", "request": {"method": "DELETE", "url": "{{baseUrl}}/api/projects/:projectId"}}
+    ]},
+    {"name": "GraphQL", "request": {"method": "POST", "url": "{{baseUrl}}/graphql", "body": {"mode": "graphql", "graphql": {"query": "{ me { id } }"}}}},
+    {"name": "Other host", "request": {"method": "GET", "url": "https://evil.example.org/api/x"}},
+    {"name": "List projects again", "request": {"method": "GET", "url": "{{baseUrl}}/api/projects"}}
+  ]
+}

@@ -1,0 +1,26 @@
+swagger: "2.0"
+info:
+  title: Legacy API
+  version: "0.9"
+host: app.example.test
+basePath: /v1
+schemes: [https]
+consumes: [application/json]
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      parameters:
+        - {name: status, in: query, type: string}
+      responses: {"200": {description: ok}}
+    put:
+      operationId: replaceOrders
+      parameters:
+        - {name: body, in: body, schema: {type: object}}
+      responses: {"200": {description: ok}}
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      parameters:
+        - {name: orderId, in: path, required: true, type: string}
+      responses: {"200": {description: ok}}

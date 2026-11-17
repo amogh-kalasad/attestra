@@ -35,79 +35,29 @@ _OPENABLE = ("not_started", "not_tested", "blocked")
 _PRIORITY = {"failed": 3, "blocked": 2, "passed": 1}
 
 # ------------------------------------------------------------------ mapping tables
+# FND-05: every scanner / automated-test mapping lives in the versioned checklist catalog
+# (auth_web/data/checklist_catalog.yaml, validated by tests/test_checklist_integrity.py).
+# The module-level names below are derived views kept for backward compatibility.
+#
 # ZAP plugin ids (alert pluginid / checks_json "zap/<id>").  ``pass`` lists catalog rules that
-# ZAP Baseline always runs (see checks.ZAP_BASELINE_CHECK_CATALOG); an item is passed only
-# when *all* of them ran with no alert.  Items without ``pass`` can only fail (active rules or
-# non-catalog passive rules: we cannot prove they ran).
-ZAP_MAP: dict[str, dict[str, tuple[str, ...]]] = {
-    "WSTG-CONF-12": {"rules": ("10038", "10055"), "pass": ("10038", "10055")},
-    "WSTG-SESS-02": {"rules": ("10010", "10011", "10054"), "pass": ("10010", "10011", "10054")},
-    "WSTG-INFO-02": {"rules": ("10036", "10037")},
-    "WSTG-INPV-01": {"rules": ("40012", "40014", "40016", "40017", "40026")},
-    "WSTG-INPV-05": {"rules": ("40018", "40019", "40020", "40021", "40022", "40024", "40027", "90018")},
-    "WSTG-SESS-05": {"rules": ("10202", "20012")},
-    "WSTG-ATHZ-01": {"rules": ("6", "7")},
-    "WSTG-BUSL-09": {"rules": ("40046",)},
-}
+# ZAP Baseline always runs; an item is passed only when *all* of them ran with no alert.
+# Nuclei template ids are fail-only.  webcheck rows pass when ``passed``.  testssl: any non-info
+# finding fails the TLS item; a scanned report with none passes it.  T03-T07 are fail-only.
+from attestra.auth_web import checklist_catalog  # noqa: E402
 
-# Nuclei template ids (finding original_id, ``template`` or ``template:matcher``).  Fail-only:
-# nuclei reports matches, not which templates ran clean.
-NUCLEI_MAP: tuple[tuple[str, re.Pattern[str], re.Pattern[str] | None], ...] = (
-    ("WSTG-CONF-12", re.compile(r"(^|[-:])csp([-:]|$)|content-security-policy"), None),
-    ("WSTG-SESS-02", re.compile(r"cookie"), None),
-    ("WSTG-INFO-02", re.compile(r"version-(detect|disclosure)|server-version|x-powered-by|banner"), None),
-    ("WSTG-BUSL-09", re.compile(r"ssrf"), None),
-    ("WSTG-INPV-01", re.compile(r"xss"), re.compile(r"xss-deprecated-header|x-xss-protection")),
-    ("WSTG-INPV-05", re.compile(r"sqli|sql-injection"), None),
-    ("WSTG-ATHZ-01", re.compile(r"(^|-)lfi(-|$)|path-traversal|directory-traversal"), None),
-    ("WSTG-ATHN-02", re.compile(r"default-login"), None),
-    (
-        "WSTG-CRYP-01",
-        re.compile(r"weak-cipher|deprecated-tls|expired-ssl|self-signed-ssl|mismatched-ssl|untrusted-root|revoked-ssl"),
-        None,
-    ),
-)
+ZAP_MAP: dict[str, dict[str, tuple[str, ...]]] = checklist_catalog.zap_map()
+NUCLEI_MAP: tuple[tuple[str, re.Pattern[str], re.Pattern[str] | None], ...] = checklist_catalog.nuclei_map()
+WEBCHECK_MAP: dict[str, tuple[str, ...]] = checklist_catalog.webcheck_map()
+TESTSSL_REF: str = checklist_catalog.testssl_ref()
+AUTOMATED_MAP: dict[str, tuple[str, ...]] = checklist_catalog.automated_map()
+# Never set automatically (catalog automation level ``manual``).
+MANUAL_ONLY: tuple[str, ...] = checklist_catalog.manual_only()
 
-# webcheck check ids (checks_json rows) -> item; pass when the row is ``passed``.
-WEBCHECK_MAP: dict[str, tuple[str, ...]] = {
-    "WSTG-SESS-02": ("cookie-flags",),
-    "WSTG-CONF-12": ("csp-policy",),
-    "WSTG-ATHN-01": ("http-no-redirect",),
-}
-
-# testssl: any non-info finding fails CRYP-01; a scanned report with none passes it.
-TESTSSL_REF = "WSTG-CRYP-01"
-
-# Automated VAPT case -> items.  T03-T07 are harness modules: fail-only.
-AUTOMATED_MAP: dict[str, tuple[str, ...]] = {
-    "T19": ("WSTG-ATHN-04",),
-    "T20": ("WSTG-ATHZ-04",),
-    "T21": ("WSTG-INPV-05", "WSTG-INPV-01"),
-    "T22": ("WSTG-ATHZ-04",),
-    "T03": ("WSTG-ATHN-04",),
-    "T04": ("WSTG-ATHZ-04",),
-    "T05": ("WSTG-ATHZ-02",),
-    "T06": ("WSTG-ATHZ-02",),
-    "SESSION": ("WSTG-SESS-02",),
-    "INJ": ("WSTG-INPV-05",),
-    "XSS": ("WSTG-INPV-01",),
-    "FILE": ("WSTG-ATHZ-01",),
-    "BIZ": ("WSTG-ATHZ-04",),
-    "ROLEDIFF": ("WSTG-ATHZ-02",),
-    "SSRF": ("WSTG-INPV-19",),
-    "UPLOAD": ("WSTG-BUSL-08",),
-    "XSSDOM": ("WSTG-INPV-01",),
-    "XSSSTORE": ("WSTG-INPV-02",),
-}
-
-# Never set automatically (need a human / no tool coverage today).
-MANUAL_ONLY: tuple[str, ...] = (
-    "WSTG-CONF-01",
-    "WSTG-ATHN-07",
-    "WSTG-ATHZ-02",
-    "ASVS-V2.1.1",
-    "ASVS-V4.1.1",
-)
+# FND-06: case statuses that can never become a checklist ``passed``.
+NON_PASS_CASE_STATUSES = ("SKIPPED", "FAILED", "DEFERRED", "BLOCKED", "INCONCLUSIVE", "NOT_TESTED")
+# Safe probe cases that may pass a checklist row only when their own case validity is VALID.
+_VALIDITY_PASS_CASES = ("CORS", "HOSTHDR", "OREDIR", "CACHE", "SESSLIFE", "OIDCMETA")
+_RUN_STATE_VALID = "VALID"
 
 
 @dataclass
@@ -318,6 +268,10 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
     if (getattr(ex, "status", "") or "").upper() != "COMPLETED":
         return []
     out: list[Verdict] = []
+    run_state, run_samples = _run_validity(ex)
+    # Downgrade passes when the run is not VALID. Runs where no case emitted validity samples
+    # (legacy-only handlers) keep their old behaviour (INT decision, see FINAL notes).
+    run_invalid = bool(run_state) and run_state != _RUN_STATE_VALID and run_samples > 0
     for case in _cases(ex):
         tid = str(case.get("test_id") or "")
         refs = AUTOMATED_MAP.get(tid)
@@ -331,15 +285,24 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
         real = tid in (
             "T19", "T20", "T21", "T22", "SESSION", "INJ", "XSS", "XSSDOM", "XSSSTORE", "FILE",
             "BIZ", "ROLEDIFF", "SSRF", "UPLOAD",
-        )
-        # SKIPPED / FAILED / DEFERRED / BLOCKED (mid-scan auth loss) never become checklist
-        # passed — record blocked with reason.
-        if status in ("SKIPPED", "FAILED", "DEFERRED", "BLOCKED"):
+        ) + _VALIDITY_PASS_CASES + ("SSIND", "GRAPHQL", "APIPOST")
+        # SKIPPED / FAILED / DEFERRED / BLOCKED / INCONCLUSIVE / NOT_TESTED never become
+        # checklist passed — record blocked with reason.
+        if status in NON_PASS_CASE_STATUSES:
             if real and tid != "T22":
-                prefix = "deferred" if status == "DEFERRED" else "blocked"
+                prefix = {"DEFERRED": "deferred", "NOT_TESTED": "not tested"}.get(status, "blocked")
+                if status == "INCONCLUSIVE":
+                    prefix = "blocked: inconclusive"
                 note = f"{prefix}: {detail}" if detail else f"{prefix}: {tid} {status.lower()} — not executed as full coverage"
+                if not note.startswith(("blocked", "deferred", "not tested")):
+                    note = f"blocked: {note}"
                 for ref in refs:
                     out.append(Verdict(ref, "blocked", "automated_vapt", label, note, [], ev))
+            continue
+        if status == "PASSED" and run_invalid and real:
+            note = f"blocked: run validity {run_state} — a pass cannot be trusted ({detail})"[:300]
+            for ref in refs:
+                out.append(Verdict(ref, "blocked", "automated_vapt", label, note, [], ev))
             continue
         if tid == "T21":
             out.extend(_t21_verdicts(s, case, label, ev, fids))
@@ -395,8 +358,42 @@ def verdicts_for_automated(s: Session, ex: Any) -> list[Verdict]:
                     ev,
                 )
             )
+        elif tid in _VALIDITY_PASS_CASES:
+            state = str((case.get("case_validity") or {}).get("state") or "")
+            if state == _RUN_STATE_VALID:
+                for ref in refs:
+                    out.append(
+                        Verdict(ref, "passed", "automated_vapt", label, f"safe probe ran clean, no issues ({detail})", [], ev)
+                    )
+            else:
+                for ref in refs:
+                    out.append(
+                        Verdict(
+                            ref, "blocked", "automated_vapt", label,
+                            f"blocked: case validity {state or 'not computed'} ({detail})"[:300], [], ev,
+                        )
+                    )
         # T22 PASSED alone never proves ATHZ-04 (it only replays one mutation).
+        # SSIND / GRAPHQL / APIPOST passes are informational only (never a checklist pass).
     return out
+
+
+def _run_validity(ex: Any) -> tuple[str, int]:
+    """``(state, sample_count)`` of the run validity stored on the execution ("" when absent)."""
+    try:
+        data = json.loads(ex.result_json or "{}")
+    except (TypeError, ValueError):
+        return "", 0
+    rv = data.get("run_validity") if isinstance(data, dict) else None
+    if not isinstance(rv, dict):
+        return "", 0
+    return str(rv.get("state") or ""), int(rv.get("sample_count") or 0)
+
+
+def unmapped_audit(ex: Any) -> list[dict[str, str]]:
+    """FND-05: value-free rows for case ids with no checklist mapping (never dropped silently)."""
+    ids = [str(c.get("test_id") or "") for c in _cases(ex) if c.get("test_id")]
+    return checklist_catalog.audit_unmapped(ids)
 
 
 def _t21_verdicts(s: Session, case: dict[str, Any], label: str, ev: list[str], fids: list[int]) -> list[Verdict]:
@@ -583,10 +580,28 @@ def apply_verdicts(
         if i.tenant_id == eng.tenant_id and i.engagement_id == engagement_id
     }
     results: list[dict[str, Any]] = []
-    for v in _combine(verdicts):
+    combined = _combine(verdicts)
+    # WSTG-INPV-19 (SSRF) verdicts are mirrored onto a legacy ``WSTG-BUSL-09`` row only when that
+    # row is the old SSRF item (pre-catalog engagements); the catalog's BUSL-09 is file upload.
+    legacy = items.get(checklist_catalog.LEGACY_SSRF_REF)
+    if legacy is not None and "request forgery" in (legacy.title or "").lower():
+        combined += [
+            Verdict(checklist_catalog.LEGACY_SSRF_REF, v.status, v.source, v.label,
+                    f"{v.text} (mirrored from {checklist_catalog.SSRF_REF})", list(v.finding_ids), list(v.evidence))
+            for v in combined
+            if v.ref == checklist_catalog.SSRF_REF
+        ]
+    for v in combined:
         item = items.get(v.ref)
         if item is None:
-            continue
+            # FND-05: never drop a verdict silently — upsert the row and record the audit.
+            item = _upsert_item(s, eng, v.ref)
+            items[v.ref] = item
+            results.append({"ref": v.ref, "from": "", "to": "not_started", "source": v.label,
+                            "action": "checklist_audit_created"})
+            if record_audit:
+                audit.record(s, AUTO_ACTOR, "checklist.audit_created", "auth_checklist_item", item.id,
+                             engagement_id=engagement_id, ref=v.ref, source=v.label)
         rec = {"ref": v.ref, "from": item.status, "to": item.status, "source": v.label, "action": "unchanged"}
         if is_manual(item):
             rec["action"] = "skipped_manual"
@@ -675,6 +690,28 @@ def apply_verdicts(
     return results
 
 
+def _upsert_item(s: Session, eng: Any, ref: str) -> Any:
+    from attestra.models import AuthChecklistItem
+
+    ci = checklist_catalog.load_catalog().item(ref)
+    item = AuthChecklistItem(
+        tenant_id=eng.tenant_id,
+        engagement_id=eng.id,
+        ref=ref,
+        title=(ci.title if ci else ref)[:300],
+        mapping_version=(ci.standard if ci else "custom")[:40],
+        status="not_started",
+        notes="",
+        evidence_ids=[],
+        finding_ids=[],
+    )
+    if hasattr(item, "catalog_version"):
+        item.catalog_version = checklist_catalog.catalog_version()
+    s.add(item)
+    s.flush()
+    return item
+
+
 def apply_import_run(s: Session, run: Any, *, record_audit: bool = True) -> list[dict[str, Any]]:
     return apply_verdicts(s, run.engagement_id, verdicts_for_import(s, run), record_audit=record_audit)
 
@@ -685,7 +722,16 @@ def apply_automated_run(s: Session, ex: Any, *, record_audit: bool = True) -> li
     eng = s.get(Engagement, ex.engagement_id)
     if eng is None or (getattr(ex, "tenant_id", None) and eng.tenant_id and ex.tenant_id != eng.tenant_id):
         return []
-    return apply_verdicts(s, ex.engagement_id, verdicts_for_automated(s, ex), record_audit=record_audit)
+    results = apply_verdicts(s, ex.engagement_id, verdicts_for_automated(s, ex), record_audit=record_audit)
+    unmapped = unmapped_audit(ex)
+    if unmapped:
+        results = list(results) + [{"action": "checklist_audit", **row} for row in unmapped]
+        if record_audit:
+            from attestra import audit
+
+            audit.record(s, AUTO_ACTOR, "checklist.unmapped", "automated_test_execution", ex.id,
+                         engagement_id=ex.engagement_id, rows=unmapped[:50])
+    return results
 
 
 def _safely(fn, s: Session, obj: Any) -> list[dict[str, Any]] | None:

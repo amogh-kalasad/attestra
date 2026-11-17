@@ -412,6 +412,8 @@ class ScanRun(Base):
     auth_profile_id: Mapped[int | None] = mapped_column(ForeignKey("auth_credential_profiles.id"))
     authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
     auth_note: Mapped[str] = mapped_column(String(500), default="")  # redacted status only; never secrets
+    # L-02 (WP4): adapter contract version, e.g. "zap/1+sdk1" (from ScanResult.extra).
+    adapter_version: Mapped[str] = mapped_column(String(100), default="")
 
     engagement: Mapped[Engagement] = relationship()
     asset: Mapped[Asset] = relationship()
@@ -577,6 +579,8 @@ class Evidence(Base):
     capture_status: Mapped[str] = mapped_column(String(20), default="success")  # success | failed | unavailable | n/a
     capture_failure_reason: Mapped[str] = mapped_column(String(500), default="")
     annotation_meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    # H-02 (WP3): value-free provenance record "prov1" (tool, capture time, sha256, run validity).
+    provenance_json: Mapped[str] = mapped_column(Text, default="")
 
     finding: Mapped[Finding] = relationship(back_populates="evidence")
     parent: Mapped[Evidence | None] = relationship(remote_side=[id], foreign_keys=[parent_evidence_id])
@@ -770,6 +774,8 @@ class Retest(Base):
     asset_reached: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # H-01 (WP3): rich outcome "rt1" + reasons; ``result`` keeps the legacy values.
+    outcome_detail_json: Mapped[str] = mapped_column(Text, default="")
 
     finding: Mapped[Finding] = relationship()
     scan_run: Mapped[ScanRun | None] = relationship()
@@ -1155,6 +1161,9 @@ class AuthChecklistItem(Base):
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_by: Mapped[str] = mapped_column(String(200), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # FND-05: checklist catalog version that seeded this row, and legacy aliases (BUSL-09 SSRF).
+    catalog_version: Mapped[str] = mapped_column(String(80), default="")
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class TenantCreditAccount(Base):
@@ -1230,6 +1239,9 @@ class AutomatedTestExecution(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # FND-03: mirror of result_json.run_validity.state ("" for pre-upgrade rows) + catalog version.
+    run_validity: Mapped[str] = mapped_column(String(40), default="")
+    checklist_version: Mapped[str] = mapped_column(String(80), default="")
 
     engagement: Mapped[Engagement] = relationship()
     asset: Mapped[Asset | None] = relationship()

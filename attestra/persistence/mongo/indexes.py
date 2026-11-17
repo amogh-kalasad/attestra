@@ -58,6 +58,7 @@ def ensure_indexes(db: Database) -> None:
     db[C.JOBS].create_index([("status", ASCENDING), ("_id", ASCENDING)])
     db[C.JOBS].create_index([("status", ASCENDING), ("heartbeat_at", ASCENDING)])
     db[C.SCAN_RUNS].create_index("engagement_id")
+    ensure_upgrade_indexes(db)
     db[C.IMPORT_RUNS].create_index("engagement_id")
     db[C.AUDIT_EVENTS].create_index([("ts", ASCENDING)])
     db[C.AUDIT_EVENTS].create_index([("entity", ASCENDING), ("entity_id", ASCENDING)])
@@ -100,3 +101,33 @@ def ensure_indexes(db: Database) -> None:
     db[C.AUTOMATED_TEST_EXECUTIONS].create_index([("status", ASCENDING), ("_id", ASCENDING)])
     db[C.REPORTS].create_index("engagement_id")
     db[C.REPORTS].create_index([("engagement_id", ASCENDING), ("kind", ASCENDING), ("version", DESCENDING)])
+
+
+def ensure_upgrade_indexes(db: Database) -> None:
+    """Upgrade INT (WP2/WP4/FND-03) indexes. Idempotent; also applied to existing databases by
+    migration ``0004_upgrade_int_indexes`` (new collections are empty, so unique builds are safe)."""
+    # WP4 discovery / snapshots (tenant-first compound indexes)
+    db[C.DISCOVERY_CANDIDATES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("status", ASCENDING)]
+    )
+    db[C.DISCOVERY_CANDIDATES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("name", ASCENDING)], unique=True
+    )
+    db[C.ASSET_SNAPSHOTS].create_index(
+        [("tenant_id", ASCENDING), ("asset_key", ASCENDING), ("seq", ASCENDING)], unique=True
+    )
+    db[C.ASSET_SNAPSHOTS].create_index([("tenant_id", ASCENDING), ("engagement_id", ASCENDING)])
+    db[C.ASSET_CHANGE_EVENTS].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("created_at", ASCENDING)]
+    )
+    db[C.ASSET_CHANGE_EVENTS].create_index("dedup_key", unique=True)
+    # WP2 API inventory (one row per spec version; same spec content is stored once)
+    db[C.API_INVENTORIES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("asset_id", ASCENDING), ("sha256", ASCENDING)],
+        unique=True,
+    )
+    db[C.API_INVENTORIES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("asset_id", ASCENDING), ("version", DESCENDING)]
+    )
+    # FND-03: query executions by run validity
+    db[C.AUTOMATED_TEST_EXECUTIONS].create_index([("tenant_id", ASCENDING), ("run_validity", ASCENDING)])

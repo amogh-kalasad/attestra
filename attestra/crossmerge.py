@@ -500,21 +500,82 @@ def recompute(s: Session, engagement_id: int, *, actor: str = "system") -> dict:
         cur = (f.merged_into_id, f.merge_rationale or "") if f.merged_into_id else None
         if target == cur:
             continue
+        event = history_event(f.id, cur, target)
         if target is None:
             prev = f.merged_into_id
             f.merged_into_id = None
             f.merge_rationale = ""
             unlinked += 1
-            audit.record(s, actor, "finding.cross_unmerge", "finding", f.id, previous_primary=prev)
+            audit.record(s, actor, "finding.cross_unmerge", "finding", f.id, previous_primary=prev, history=event)
         else:
             f.merged_into_id, f.merge_rationale = target
             linked += 1
             audit.record(
                 s, actor, "finding.cross_merge", "finding", f.id,
-                primary=target[0], rationale=target[1],
+                primary=target[0], rationale=target[1], history=event,
             )
     s.flush()
     return {"groups": len(groups), "related": len(want), "linked": linked, "unlinked": unlinked}
+
+
+# H-04: merge/split audit history. Fingerprints are never changed by merges; history is
+# reconstructed from the hash-chained audit trail (finding.cross_merge / cross_unmerge).
+# @lat: [[intel-and-reporting#Merge and split history]]
+MERGE_HISTORY_VERSION = "mh1"
+
+
+def history_event(finding_id: int, current: tuple[int, str] | None, target: tuple[int, str] | None) -> dict:
+    """Describe one link change: ``merge`` (new link), ``split`` (link removed) or
+    ``relink`` (moved to another primary / rationale changed)."""
+    if current is None and target is not None:
+        kind = "merge"
+    elif target is None:
+        kind = "split"
+    else:
+        kind = "relink"
+    return {
+        "version": MERGE_HISTORY_VERSION,
+        "kind": kind,
+        "finding_id": finding_id,
+        "from_primary": current[0] if current else None,
+        "from_rationale": current[1] if current else "",
+        "to_primary": target[0] if target else None,
+        "to_rationale": target[1] if target else "",
+        "fingerprint_changed": False,
+    }
+
+
+def merge_history(s: Session | None, finding_id: int) -> list[dict]:
+    """Chronological merge/split history for one finding (as member or as primary)."""
+    from attestra import audit
+
+    out: list[dict] = []
+    for action in ("finding.cross_merge", "finding.cross_unmerge"):
+        try:
+            events = audit.find_events(s, action=action)
+        except Exception:  # noqa: BLE001 — history is advisory; never break callers
+            continue
+        for ev in events:
+            d = dict(getattr(ev, "details", None) or {})
+            member = getattr(ev, "entity_id", None)
+            primary = d.get("primary") if action.endswith("cross_merge") else d.get("previous_primary")
+            if member != finding_id and primary != finding_id:
+                continue
+            hist = d.get("history") or {}
+            out.append(
+                {
+                    "ts": str(getattr(ev, "ts", "") or ""),
+                    "actor": getattr(ev, "actor", "") or "",
+                    "action": action,
+                    "kind": hist.get("kind") or ("merge" if action.endswith("cross_merge") else "split"),
+                    "member_id": member,
+                    "primary_id": primary,
+                    "from_primary": hist.get("from_primary"),
+                    "rationale": d.get("rationale") or hist.get("to_rationale") or "",
+                }
+            )
+    out.sort(key=lambda e: e["ts"])
+    return out
 
 
 def recompute_safely(s: Session, engagement_id: int, *, actor: str = "system") -> dict | None:

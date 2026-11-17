@@ -1,0 +1,70 @@
+# Passive subdomain-takeover fingerprints (A-05). Used only to label a candidate as
+# "suspected"; Attestra never registers or claims anything. Keep entries conservative:
+# a body fingerprint only counts when the CNAME chain also points at the provider.
+version: 1
+providers:
+  - id: github_pages
+    name: GitHub Pages
+    cname_suffixes: [github.io]
+    fingerprints: ["There isn't a GitHub Pages site here."]
+    nxdomain_indicates: false
+    http_status: [404]
+  - id: heroku
+    name: Heroku
+    cname_suffixes: [herokuapp.com, herokudns.com, herokussl.com]
+    fingerprints: ["No such app", "herokucdn.com/error-pages/no-such-app.html"]
+    nxdomain_indicates: false
+  - id: aws_s3
+    name: AWS S3 website / bucket
+    cname_suffixes: [s3.amazonaws.com]
+    # Regional endpoints: <bucket>.s3.<region>.amazonaws.com / <bucket>.s3-website-<region>.amazonaws.com
+    cname_contains: [".s3.", ".s3-website"]
+    contains_suffix: amazonaws.com
+    fingerprints: ["<Code>NoSuchBucket</Code>", "The specified bucket does not exist"]
+    nxdomain_indicates: false
+    http_status: [404]
+  - id: azure
+    name: Microsoft Azure
+    cname_suffixes: [azurewebsites.net, cloudapp.net, cloudapp.azure.com, trafficmanager.net, blob.core.windows.net, azureedge.net, azure-api.net, azurefd.net]
+    fingerprints: []
+    nxdomain_indicates: true
+  - id: shopify
+    name: Shopify
+    cname_suffixes: [myshopify.com, shops.myshopify.com]
+    fingerprints: ["Sorry, this shop is currently unavailable."]
+    nxdomain_indicates: false
+  - id: fastly
+    name: Fastly
+    cname_suffixes: [fastly.net]
+    fingerprints: ["Fastly error: unknown domain"]
+    nxdomain_indicates: false
+  - id: zendesk
+    name: Zendesk
+    cname_suffixes: [zendesk.com]
+    fingerprints: ["Help Center Closed"]
+    nxdomain_indicates: false
+  - id: bitbucket
+    name: Bitbucket
+    cname_suffixes: [bitbucket.io]
+    fingerprints: ["Repository not found"]
+    nxdomain_indicates: false
+  - id: pantheon
+    name: Pantheon
+    cname_suffixes: [pantheonsite.io]
+    fingerprints: ["The gods are wise, but do not know of the site which you seek."]
+    nxdomain_indicates: false
+  - id: surge
+    name: Surge.sh
+    cname_suffixes: [surge.sh]
+    fingerprints: ["project not found"]
+    nxdomain_indicates: false
+  - id: readme
+    name: ReadMe
+    cname_suffixes: [readme.io]
+    fingerprints: ["Project doesnt exist... yet!"]
+    nxdomain_indicates: false
+  - id: tumblr
+    name: Tumblr
+    cname_suffixes: [domains.tumblr.com]
+    fingerprints: ["Whatever you were looking for doesn't currently exist at this address."]
+    nxdomain_indicates: false

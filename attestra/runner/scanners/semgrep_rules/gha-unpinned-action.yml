@@ -1,0 +1,26 @@
+# F-03: third-party actions pinned to a mutable tag/branch can be replaced upstream.
+# Pin to a full 40-character commit SHA. First-party actions/* and github/* are allowed.
+# @lat: [[intel-and-reporting#Semgrep GitHub Actions rules]]
+rules:
+  - id: attestra.gha.third-party-action-not-pinned
+    languages: [yaml]
+    severity: WARNING
+    message: >-
+      Third-party action `$ACTION` is not pinned to a full commit SHA. Pin it
+      (uses: owner/action@<40-hex-sha>) to prevent supply-chain tampering.
+    metadata:
+      cwe: "CWE-829: Inclusion of Functionality from Untrusted Control Sphere"
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+      category: security
+      attestra_rule_version: "gha-1"
+    paths:
+      include:
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+        - "**/action.yml"
+        - "**/action.yaml"
+    patterns:
+      - pattern: "uses: $ACTION"
+      - metavariable-regex:
+          metavariable: $ACTION
+          regex: ^(?!(actions|github)/)(?!\./)(?!docker://)[^@\s]+@(?![0-9a-f]{40}$).+$

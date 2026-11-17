@@ -843,6 +843,103 @@ def check_approval_status(ctx: QaContext) -> None:
         )
 
 
+# ---------------------------------------------------------------- J-02 validity gate
+# @lat: [[intel-and-reporting#QA validity gate]]
+
+
+def _run_validity_section(ctx: QaContext) -> dict:
+    cached = getattr(ctx, "_rv_section", None)
+    if cached is not None:
+        return cached
+    try:
+        from attestra.reports.run_validity import section_for_engagement
+
+        section = section_for_engagement(ctx.s, ctx.engagement.id, reportable_count=len(ctx.reportable))
+    except Exception:  # noqa: BLE001 — optional subsystem must never break QA
+        section = {}
+    try:
+        object.__setattr__(ctx, "_rv_section", section)
+    except Exception:  # noqa: BLE001
+        pass
+    return section
+
+
+def _html_has_run_validity(html: str) -> bool:
+    low = (html or "").lower()
+    return 'id="run-validity"' in low or "id='run-validity'" in low or 'id="run-validity-summary"' in low
+
+
+def check_run_validity_disclosed(ctx: QaContext) -> None:
+    """A computed, non-VALID automated run must be disclosed in technical/executive reports."""
+    if ctx.kind not in ("technical", "executive", ""):
+        return
+    section = _run_validity_section(ctx)
+    if not section or not section.get("has_runs") or not section.get("incomplete"):
+        return
+    if _html_has_run_validity(ctx.html):
+        return
+    ctx.add(
+        "run_validity_not_disclosed",
+        "critical",
+        f"Automated testing run validity is {section.get('overall_label')} but the report does not "
+        "contain the Run validity and coverage section; regenerate the report",
+        details={"overall_state": section.get("overall_state"),
+                 "execution_ids": [r.get("execution_id") for r in section.get("runs") or []]},
+    )
+
+
+def check_blocked_not_clean(ctx: QaContext) -> None:
+    """A blocked / challenged / rate-limited / auth-expired run can never read as clean."""
+    if ctx.kind not in ("technical", "executive", ""):
+        return
+    section = _run_validity_section(ctx)
+    if not section or not section.get("incomplete"):
+        return
+    if ctx.open_vulns:
+        return
+    disclosed = _html_has_run_validity(ctx.html)
+    notice_present = "testing was incomplete" in (ctx.html or "").lower()
+    if not disclosed or not notice_present:
+        ctx.add(
+            "blocked_run_presented_clean",
+            "critical",
+            f"No open findings while automated run validity is {section.get('overall_label')}; the report "
+            "would present an incomplete (blocked) test as clean",
+            details={"overall_state": section.get("overall_state"), "disclosed": disclosed},
+        )
+        return
+    ctx.add(
+        "zero_findings_incomplete_run",
+        "warning",
+        f"Zero open findings with run validity {section.get('overall_label')}: confirm the conclusion "
+        "wording states testing was incomplete",
+        details={"overall_state": section.get("overall_state")},
+    )
+
+
+def check_checklist_version(ctx: QaContext) -> None:
+    """Automated runs should record which checklist catalog version mapped their verdicts."""
+    if ctx.kind not in ("technical", ""):
+        return
+    section = _run_validity_section(ctx)
+    if not section or not section.get("has_runs"):
+        return
+    versions = section.get("checklist_versions") or []
+    if not versions:
+        ctx.add(
+            "checklist_version_missing",
+            "info",
+            "Automated runs do not record a checklist catalog version (runs predate catalog versioning)",
+        )
+    elif len(versions) > 1:
+        ctx.add(
+            "checklist_version_mixed",
+            "warning",
+            f"Automated runs used different checklist catalog versions: {', '.join(versions)}",
+            details={"versions": versions},
+        )
+
+
 ALL_CHECKS: list[Callable[[QaContext], None]] = [
     check_html_shell,
     check_finding_counts,
@@ -866,5 +963,8 @@ ALL_CHECKS: list[Callable[[QaContext], None]] = [
     check_missing_screenshots,
     check_background_scans_running,
     check_authz_manual_testing_gap,
+    check_run_validity_disclosed,
+    check_blocked_not_clean,
+    check_checklist_version,
     check_approval_status,
 ]

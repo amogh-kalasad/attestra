@@ -285,3 +285,37 @@ def test_find_body_id_fields_null_project_name():
     new, changed = bm.swap_body_ids(body, "OtherProj")
     assert '"projectName": "OtherProj"' in new
     assert "projectName" in changed
+
+
+# @lat: [[run-validity-and-policy#Intrusive policy]]
+def test_t22_flag_on_without_policy_decision_never_sends(monkeypatch, patch_capture):
+    """FND-02: the mutation flag alone is not enough; no stored decision => dry run."""
+    monkeypatch.setattr(bm, "mutation_flag_enabled", lambda: True)
+    url = ROOT + "api/projects/update-meta"
+    captures = [{"method": "PUT", "url": url, "body": '{"projectId": 10, "title": "mine"}'}]
+    ctx = _ctx(write_captures=captures, responses={url: [(200, "{}"), (200, "{}")]})
+    calls = patch_capture(ctx)
+    result = bm.run_object_mutation(ctx, clock_sleep=lambda _s: None, dry_run=False)
+    assert calls == []
+    assert result["status"] == "SKIPPED"
+    assert result["skip_reason"] == bm.SKIP_POLICY_DENIED
+    assert result["mutation"]["dry_run"] is True
+    assert result["mutation"]["policy_decision"]["allow"] is False
+
+
+def test_t22_sends_with_flag_and_allowed_decision(monkeypatch, patch_capture):
+    from attestra.automated_vapt.core import intrusive_policy as ip
+
+    monkeypatch.setattr(bm, "mutation_flag_enabled", lambda: True)
+    monkeypatch.setenv("ATTESTRA_AUTOMATED_VAPT_MUTATION", "1")
+    url = ROOT + "api/projects/update-meta"
+    captures = [{"method": "PUT", "url": url, "body": '{"projectId": 10, "title": "mine"}'}]
+    responses = {url: [(200, '{"projectId": 10, "ok": true}'), (403, '{"error": "forbidden"}')]}
+    ctx = _ctx(write_captures=captures, responses=responses)
+    ctx.extra[ip.CTX_KEY] = {"T22": {"allow": True, "reason": "allowed", "facts": {"asset_environment": "dev"}}}
+    calls = patch_capture(ctx)
+    result = bm.run_object_mutation(ctx, clock_sleep=lambda _s: None)
+    assert len(calls) >= 1
+    assert result["mutation"]["policy_decision"]["allow"] is True
+    # The decision does not leak outside the run.
+    assert bm.mutation_sends_allowed() is False

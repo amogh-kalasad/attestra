@@ -1,7 +1,14 @@
-"""Compare security headers between two saved scan results (no new network)."""
+"""Compare security headers between two saved scan results (no new network).
+
+I-04 (WP4): :func:`change_dedup_key` gives each header change a stable key so the asset
+change monitor and the header-change alert do not report the same change twice, and
+:func:`header_changes_as_events` converts header diffs into the asset change-event shape.
+"""
+# @lat: [[attack-surface-and-platform#Asset change alerts]]
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -132,4 +139,34 @@ def diff_headers(previous: dict[str, str], current: dict[str, str]) -> list[dict
             continue
         seen.add(ch["name"])
         out.append(ch)
+    return out
+
+
+def change_dedup_key(asset_key: str, change: dict[str, str]) -> str:
+    """Stable key for one header change on one asset (name + before + after)."""
+    raw = json.dumps(
+        [str(asset_key).lower(), "header", change.get("name", ""), change.get("before", ""), change.get("after", "")],
+        sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def header_changes_as_events(asset_key: str, changes: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """``diff_headers`` output → asset change events (category ``header``)."""
+    out: list[dict[str, Any]] = []
+    for ch in changes or []:
+        before = None if ch.get("before") in ("", "(absent)") else ch.get("before")
+        after = None if ch.get("after") in ("", "(absent)") else ch.get("after")
+        kind = "added" if before is None else ("removed" if after is None else "changed")
+        out.append(
+            {
+                "asset_key": str(asset_key).lower(),
+                "category": "header",
+                "kind": kind,
+                "item": ch.get("name", ""),
+                "before": before,
+                "after": after,
+                "dedup_key": change_dedup_key(asset_key, ch),
+            }
+        )
     return out

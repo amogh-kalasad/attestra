@@ -3,7 +3,13 @@
 Components alone are an inventory, not findings; only listed vulnerabilities
 become findings. Vulnerabilities whose VEX analysis says ``not_affected``,
 ``false_positive`` or ``resolved`` are skipped.
+
+F-04: when ``ATTESTRA_LICENSE_POLICY`` is set (``default`` or a policy file path),
+components whose licences the policy denies or flags for review also become findings
+(tool ``cyclonedx``, rule ``license-policy:<decision>``). Off by default, so existing
+imports produce exactly the same findings as before.
 """
+# @lat: [[intel-and-reporting#Licence policy]]
 
 from __future__ import annotations
 
@@ -69,4 +75,37 @@ def parse(raw: bytes) -> list[NormalizedFinding]:
                     package=pkg,
                 )
             )
+    out.extend(license_findings(doc, root_name))
+    return out
+
+
+def license_findings(doc: dict, root_name: str = "sbom", policy: dict | None = None,
+                     *, force: bool = False) -> list[NormalizedFinding]:
+    """Licence-policy findings for a parsed CycloneDX doc (opt-in unless ``force``)."""
+    from attestra.supply_chain import license_policy as lp
+
+    if not force and not lp.enabled():
+        return []
+    pol = policy or lp.load_policy()
+    out: list[NormalizedFinding] = []
+    for d in lp.violations(lp.evaluate_bom(doc, pol)):
+        if d.decision == "unknown" and pol.get("unknown") == "allow":
+            continue
+        lic = ", ".join(d.licenses) or "none declared"
+        out.append(
+            NormalizedFinding(
+                tool="cyclonedx",
+                rule_id=f"license-policy:{d.decision}",
+                title=f"Licence policy {d.decision}: {d.component}" + (f"@{d.version}" if d.version else ""),
+                severity=lp.SEVERITY.get(d.decision, "info"),
+                location=f"{root_name}::{d.purl or d.ref or d.component}",
+                description=(
+                    f"Component {d.component} {d.version} declares licence(s): {lic}. "
+                    f"Policy {pol.get('name')} ({pol.get('version')}) decision: {d.decision} ({d.reason})."
+                ),
+                recommendation="Review the licence obligations with legal, replace the component, or record an approved exception.",
+                package=f"{d.component}@{d.version}" if d.version else d.component,
+                variant=f"license:{d.decision}",
+            )
+        )
     return out

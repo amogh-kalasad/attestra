@@ -1,4 +1,11 @@
-"""Process runner and scanner adapter base."""
+"""Process runner and scanner adapter base.
+
+L-01/L-02 (WP4): adapters may declare ``meta`` (an :class:`attestra.runner.scanners.sdk.AdapterMeta`)
+and get a default :meth:`ScannerAdapter.health`; every :class:`ScannerResult` produced by
+:meth:`ScannerAdapter.scan` carries ``extra["adapter_version"]``. Existing adapters keep
+working unchanged (their metadata defaults live in ``sdk.DEFAULT_META``).
+"""
+# @lat: [[attack-surface-and-platform#Adapter SDK]]
 
 from __future__ import annotations
 
@@ -327,9 +334,37 @@ class ScannerAdapter(ABC):
     tool_log_name: str = ""
     tool_log_streams: tuple[str, ...] = ("stderr",)
     empty_report_ok: bool = False  # an empty report with exit code 0 means "no findings"
+    # L-01: optional adapter metadata (capabilities, safety tier, resource profile, licence…).
+    # None means "use sdk.DEFAULT_META[name]" so the 11 existing adapters need no edit.
+    meta = None
+    # L-02: bump when the adapter's argv/parsing contract changes; recorded per run.
+    adapter_version: str = ""
 
     @abstractmethod
     def available(self) -> bool: ...
+
+    def effective_meta(self):
+        """``self.meta`` or the SDK default for this adapter name (None when unknown)."""
+        from attestra.runner.scanners import sdk
+
+        return sdk.meta_for(self)
+
+    def health(self) -> dict:
+        """Value-free readiness report (never runs the tool against a target)."""
+        from attestra.runner.scanners import sdk
+
+        return sdk.default_health(self)
+
+    def stamp_result(self, result: ScannerResult) -> ScannerResult:
+        """L-02: record adapter and tool version in ``result.extra`` (idempotent)."""
+        from attestra.runner.scanners import sdk
+
+        if not isinstance(result.extra, dict):
+            result.extra = {}
+        result.extra.setdefault("adapter_version", sdk.adapter_version(self))
+        if result.tool_version:
+            result.extra.setdefault("tool_version", result.tool_version)
+        return result
 
     @abstractmethod
     def version(self) -> str: ...
@@ -350,13 +385,23 @@ class ScannerAdapter(ABC):
 
     # -------------------------------------------------------------- docker mode
 
+    def configured_image(self) -> str:
+        """``config.SCANNER_IMAGES[image_key]``, else ``ATTESTRA_IMAGE_<KEY>`` (new adapters
+        whose key INT has not added to config yet). Empty string when unset."""
+        if not self.image_key:
+            return ""
+        image = config.SCANNER_IMAGES.get(self.image_key)
+        if image is None:
+            image = os.environ.get(f"ATTESTRA_IMAGE_{self.image_key.upper()}", "")
+        return (image or "").strip()
+
     def image_ref(self) -> str:
-        return require_digest_image(config.SCANNER_IMAGES[self.image_key])
+        return require_digest_image(self.configured_image())
 
     def image_configured(self) -> bool:
-        if not self.image_key or self.image_key not in config.SCANNER_IMAGES:
+        image = self.configured_image()
+        if not image:
             return False
-        image = config.SCANNER_IMAGES[self.image_key]
         return "@sha256:" in image and not config.image_is_placeholder(image)
 
     def uses_docker(self) -> bool:
@@ -379,7 +424,7 @@ class ScannerAdapter(ABC):
         # Covers uid-mismatched images (e.g. testssl uid 1000 vs worker 10001).
         prepare_docker_bind_mounts(mounts)
         return docker_run_argv(
-            config.SCANNER_IMAGES[self.image_key],
+            self.image_ref(),
             name=name or new_container_name(self.name),
             mounts=mounts,
             add_hosts=hosts,
@@ -411,6 +456,17 @@ class ScannerAdapter(ABC):
         return None
 
     def scan(
+        self,
+        pin: PinnedTarget | str,
+        *,
+        out_dir: Path,
+        cancel: threading.Event | None = None,
+        profile: str = "baseline",
+        **opts,
+    ) -> ScannerResult:
+        return self.stamp_result(self._scan(pin, out_dir=out_dir, cancel=cancel, profile=profile, **opts))
+
+    def _scan(
         self,
         pin: PinnedTarget | str,
         *,

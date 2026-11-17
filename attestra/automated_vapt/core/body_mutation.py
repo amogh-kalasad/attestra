@@ -1,12 +1,16 @@
 """T22 body-level object manipulation (BOLA / mass-assignment on write methods).
 
 OFF by default. Actual POST/PUT/PATCH sends require ATTESTRA_AUTOMATED_VAPT_MUTATION=1
-and an allowlisted APP_ENV (local/test/development). Never DELETE. Cap + rate-limit.
-Dry-run (mutation disabled or dry_run=True) only records what would be sent.
+and an allowing FND-02 target-environment decision for this execution
+(``ctx.extra["_intrusive_policy"]["T22"]``: active profile, scope policy, asset
+environment in the dev/demo allowlist; production never). Attestra's own environment
+setting is not consulted. Never DELETE. Cap + rate-limit.
+Dry-run (mutation disabled, policy denied, or dry_run=True) only records what would be sent.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import time
@@ -14,12 +18,12 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
+from attestra.automated_vapt.core import intrusive_policy
 from attestra.automated_vapt.core import js_api_discovery as jsd
 from attestra.automated_vapt.core.replay_checks import (
     CaptureResult,
     EndpointOutcome,
     DEFAULT_SLEEP_S,
-    SKIP_APP_ENV_BLOCKED,
     SKIP_MUTATION_DISABLED,
     SKIP_NO_AUTH_SESSION,
     SKIP_NO_WRITE_TEMPLATES,
@@ -66,15 +70,24 @@ def mutation_flag_enabled() -> bool:
     return bool(getattr(config, "AUTOMATED_VAPT_MUTATION", False))
 
 
-def mutation_sends_allowed() -> bool:
-    """True only when mutation flag is on AND APP_ENV is local/test/development."""
+SKIP_POLICY_DENIED = "policy_denied"
+
+# FND-02 decision for the T22 run in progress. Default False: callers outside
+# run_object_mutation (e.g. scope_validator.validate_method) can never enable sends.
+_T22_POLICY_ALLOWS: contextvars.ContextVar[bool] = contextvars.ContextVar("t22_policy_allows", default=False)
+
+
+def mutation_sends_allowed(ctx: Any | None = None) -> bool:
+    """True only when the mutation flag is on AND the FND-02 policy allowed T22.
+
+    With ``ctx`` the decision is read from ``ctx.extra["_intrusive_policy"]``; without it
+    the decision of the T22 run currently executing in this context is used.
+    """
     if not mutation_flag_enabled():
         return False
-    from attestra import config
-
-    env = config.parse_app_env() if hasattr(config, "parse_app_env") else getattr(config, "APP_ENV", None)
-    allow = getattr(config, "_APP_ENV_BYPASS_ALLOWLIST", frozenset({"local", "test", "development"}))
-    return env in allow
+    if ctx is not None:
+        return intrusive_policy.decision_from_ctx(ctx, "T22").allow
+    return bool(_T22_POLICY_ALLOWS.get())
 
 
 def find_body_id_fields(text: str) -> list[tuple[str, str, str]]:
@@ -292,13 +305,39 @@ def run_object_mutation(
         secondary.public() if secondary is not None else {"profile_id": None, "status": "none", "note": "not configured"}
     )
 
+    policy_decision = intrusive_policy.decision_from_ctx(ctx, "T22")
+    _token = _T22_POLICY_ALLOWS.set(bool(policy_decision.allow))
+    try:
+        return _run_object_mutation(
+            ctx, auth, auth_info, secondary, secondary_info, policy_decision,
+            cap=cap, sleep_s=sleep_s, clock_sleep=clock_sleep, dry_run=dry_run,
+        )
+    finally:
+        _T22_POLICY_ALLOWS.reset(_token)
+
+
+def _run_object_mutation(
+    ctx: Any,
+    auth: SessionAuth | None,
+    auth_info: dict[str, Any],
+    secondary: SessionAuth | None,
+    secondary_info: dict[str, Any],
+    policy_decision: Any,
+    *,
+    cap: int,
+    sleep_s: float,
+    clock_sleep: Callable[[float], None],
+    dry_run: bool | None,
+) -> dict[str, Any]:
     sends_ok = mutation_sends_allowed()
-    if dry_run is None:
-        dry_run = not sends_ok
+    if dry_run is None or not sends_ok:
+        # dry_run=False can never force live sends past the flag + FND-02 policy.
+        dry_run = not sends_ok if dry_run is None else True
 
     base_meta = {
         "mutation_flag": mutation_flag_enabled(),
         "mutation_sends_allowed": sends_ok,
+        "policy_decision": policy_decision.to_json(),
         "dry_run": dry_run,
         "secondary_auth": secondary_info,
         "idor_confidence_note": (
@@ -338,12 +377,12 @@ def run_object_mutation(
         if not mutation_flag_enabled():
             detail += (
                 "; ATTESTRA_AUTOMATED_VAPT_MUTATION is disabled (default) — "
-                "enable =1 with APP_ENV=local|test|development to allow sends"
+                "sends also need an allowing target-environment policy (dev/demo asset, active profile)"
             )
             reason = SKIP_MUTATION_DISABLED if not write_eps else SKIP_NO_WRITE_TEMPLATES
         elif not sends_ok:
-            detail += "; APP_ENV is not in local/test/development allowlist"
-            reason = SKIP_APP_ENV_BLOCKED
+            detail += f"; target-environment policy denied T22 ({policy_decision.reason})"
+            reason = SKIP_POLICY_DENIED
         else:
             reason = SKIP_NO_WRITE_TEMPLATES
         return {
@@ -425,7 +464,7 @@ def run_object_mutation(
             )
             continue
 
-        # Live send path (mutation enabled + allowlisted env)
+        # Live send path (mutation flag on + FND-02 policy allowed T22)
         scope = _build_scope(ctx, [url])
         headers = dict(tmpl.get("headers") or {})
         # overlay session auth for target origin
@@ -517,13 +556,13 @@ def run_object_mutation(
         )
         if not mutation_flag_enabled():
             detail += (
-                ". ATTESTRA_AUTOMATED_VAPT_MUTATION is disabled — set to 1 with "
-                "APP_ENV=local|test|development and restart serve/worker to enable sends"
+                ". ATTESTRA_AUTOMATED_VAPT_MUTATION is disabled — sends need the flag plus an "
+                "allowing target-environment policy (dev/demo asset, intrusive_allowed, active profile)"
             )
             skip_reason = SKIP_MUTATION_DISABLED
         elif not sends_ok:
-            detail += ". mutation flag on but APP_ENV is not in local/test/development allowlist"
-            skip_reason = SKIP_APP_ENV_BLOCKED
+            detail += f". mutation flag on but target-environment policy denied T22 ({policy_decision.reason})"
+            skip_reason = SKIP_POLICY_DENIED
         else:
             skip_reason = SKIP_MUTATION_DISABLED
         validation: dict[str, Any] = {}

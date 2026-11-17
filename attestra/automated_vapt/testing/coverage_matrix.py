@@ -140,17 +140,31 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
         },
         {
             "capability": "session_fixation",
-            "module": None,
-            "test_ids": [],
-            "status": "deferred",
-            "notes": "Needs pre-login cookie injection fixture",
+            "module": "session_lifecycle",
+            "test_ids": ["SESSLIFE"],
+            "status": "partial",
+            "notes": "Session id rotation on login (lab); passive on engagements",
         },
         {
             "capability": "session_expiration_invalidation_rotation",
             "module": "attestra.auth_web.session_guard",
-            "test_ids": ["SESSION"],
+            "test_ids": ["SESSION", "SESSLIFE"],
             "status": "partial",
-            "notes": "Mid-scan expiry detection, bounded re-login, and optional JSON/cookie refresh via session_guard; full timed logout/invalidation catalogue still limited",
+            "notes": "SESSLIFE logout invalidation (lab) + passive expiry/JWT lifetime; mid-scan expiry detection, bounded re-login, and optional JSON/cookie refresh via session_guard; full timed logout/invalidation catalogue still limited",
+        },
+        {
+            "capability": "session_lifecycle",
+            "module": "session_lifecycle",
+            "test_ids": ["SESSLIFE"],
+            "status": "partial",
+            "notes": "Rotation on login, invalidation on logout (lab), passive expiry/JWT lifetime on engagements",
+        },
+        {
+            "capability": "jwt_posture",
+            "module": "jwt_posture",
+            "test_ids": ["SESSION"],
+            "status": "implemented",
+            "notes": "Passive JWT header/claims review (alg, exp, lifetime); never forges tokens",
         },
     ],
     "injection": [
@@ -180,7 +194,14 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "module": "ssrf_tests",
             "test_ids": ["SSRF"],
             "status": "partial",
-            "notes": "Scoped URL-fetcher canary; blocked metadata hosts; local/test/dev gated",
+            "notes": "Scoped URL-fetcher canary; blocked metadata hosts; target-environment policy (dev/demo) + flag",
+        },
+        {
+            "capability": "server_side_sink_indicators",
+            "module": "server_side_indicators",
+            "test_ids": ["SSIND"],
+            "status": "partial",
+            "notes": "Passive SSRF/XXE/SSTI suspicion from captured traffic; never a confirmed finding",
         },
     ],
     "xss": [
@@ -198,6 +219,13 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "status": "partial",
             "notes": "DOM sink source check + lab stored guestbook canary with cleanup",
         },
+        {
+            "capability": "open_redirect",
+            "module": "open_redirect_tests",
+            "test_ids": ["OREDIR"],
+            "status": "implemented",
+            "notes": "Redirect params to a non-routable marker; never followed off-site; off unless ATTESTRA_PROBES_WEB_SAFE=1",
+        },
     ],
     "api_security": [
         {
@@ -209,10 +237,38 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
         },
         {
             "capability": "graphql_oauth_mass_assignment_rate_limit",
-            "module": None,
+            "module": "graphql_tests",
+            "test_ids": ["GRAPHQL", "APIPOST"],
+            "status": "partial",
+            "notes": "GraphQL introspection/field exposure + rate-limit headers; OAuth/mass-assignment still deferred",
+        },
+        {
+            "capability": "graphql",
+            "module": "graphql_tests",
+            "test_ids": ["GRAPHQL"],
+            "status": "implemented",
+            "notes": "Detection + one bounded introspection; mutations never sent; off unless ATTESTRA_GRAPHQL_PROBE=1",
+        },
+        {
+            "capability": "api_rate_limit_headers",
+            "module": "api_posture_tests",
+            "test_ids": ["APIPOST"],
+            "status": "implemented",
+            "notes": "Passive rate-limit / version header review",
+        },
+        {
+            "capability": "api_spec_coverage",
+            "module": "api_inventory",
             "test_ids": [],
-            "status": "deferred",
-            "notes": "Target-specific; not in default catalogue",
+            "status": "implemented",
+            "notes": "OpenAPI/Swagger/Postman/HAR import; spec endpoint coverage in result_json.api_coverage; ATTESTRA_API_IMPORT_ENABLED=1",
+        },
+        {
+            "capability": "oidc_metadata",
+            "module": "oidc_metadata_tests",
+            "test_ids": ["OIDCMETA"],
+            "status": "partial",
+            "notes": "One anonymous GET of the OIDC discovery document",
         },
     ],
     "business_logic": [
@@ -237,6 +293,13 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "status": "deferred",
             "notes": "App-specific workflows",
         },
+        {
+            "capability": "guided_business_flows",
+            "module": "attestra.automated_vapt.guided",
+            "test_ids": [],
+            "status": "deferred",
+            "notes": "Guided manual plans (ATTESTRA_GUIDED_PLANS=1); tester records results, no automated sends",
+        },
     ],
     "file_security": [
         {
@@ -251,7 +314,7 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "module": "file_upload_tests",
             "test_ids": ["UPLOAD"],
             "status": "partial",
-            "notes": "Safe HTML marker upload; local/test/dev or ATTESTRA_AUTOMATED_VAPT_UPLOAD=1",
+            "notes": "Safe HTML marker upload; ATTESTRA_AUTOMATED_VAPT_UPLOAD=1 + dev/demo asset + cleanup plan",
         },
     ],
     "infrastructure": [
@@ -268,6 +331,27 @@ PHASE3_COVERAGE: dict[str, list[dict[str, Any]]] = {
             "test_ids": ["T07"],
             "status": "implemented",
             "notes": "Observation-only; does not set finding_candidate alone",
+        },
+        {
+            "capability": "cors_validation",
+            "module": "cors_tests",
+            "test_ids": ["CORS"],
+            "status": "implemented",
+            "notes": "Origin variation + one preflight; finding only for credentialed cross-origin read; ATTESTRA_PROBES_WEB_SAFE=1",
+        },
+        {
+            "capability": "host_header",
+            "module": "host_header_tests",
+            "test_ids": ["HOSTHDR"],
+            "status": "implemented",
+            "notes": "Host / X-Forwarded-Host to an .invalid marker; destination pinned; ATTESTRA_PROBES_WEB_SAFE=1",
+        },
+        {
+            "capability": "cache_posture",
+            "module": "cache_posture_tests",
+            "test_ids": ["CACHE"],
+            "status": "implemented",
+            "notes": "Authenticated cache headers; ATTESTRA_PROBES_WEB_SAFE=1",
         },
     ],
     "disclosure": [
@@ -313,3 +397,14 @@ def deferred_capabilities() -> list[dict[str, Any]]:
             if row.get("status") == "deferred":
                 rows.append({"category": category, **row})
     return rows
+
+
+def injection_catalog_rows() -> list[dict[str, Any]]:
+    """WP2 B-05 injection catalogue rows (own vocabulary: ``assessed`` / ``not_assessed``).
+
+    Rendered separately from :data:`PHASE3_COVERAGE` so its status vocabulary stays
+    ``implemented | partial | deferred`` (INT decision).
+    """
+    from attestra.automated_vapt.testing.injection_catalog import coverage_rows
+
+    return coverage_rows()

@@ -51,7 +51,8 @@ _CASES: tuple[TestCase, ...] = (
         "xss",
         "Stored XSS canary",
         "Post a canary to lab guestbook, confirm unencoded HTML reflection, then delete. "
-        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_STORED_XSS=1.",
+        "Needs ATTESTRA_AUTOMATED_VAPT_STORED_XSS=1, an active profile, a dev/demo asset and a "
+        "cleanup plan (server-side policy; APP_ENV is not used).",
     ),
     TestCase(
         "FILE",
@@ -94,7 +95,8 @@ _CASES: tuple[TestCase, ...] = (
         "API object mutation (BOLA write)",
         "Body-level object-id swap on captured POST/PUT/PATCH (never DELETE). "
         "Off by default (ATTESTRA_AUTOMATED_VAPT_MUTATION=0); when disabled the case is SKIPPED "
-        "with a dry-run plan. Requires APP_ENV=local|test|development to send. "
+        "with a dry-run plan. Sends only with the flag on, an active profile, a dev/demo asset and "
+        "a cleanup plan (server-side policy; APP_ENV is not used). "
         "Prefer a secondary (non-admin) login profile for confident IDOR.",
     ),
     TestCase(
@@ -114,14 +116,78 @@ _CASES: tuple[TestCase, ...] = (
         "injection",
         "Scoped SSRF canary",
         "Probe URL-fetcher params with an Attestra canary; finding only with canary reflection. "
-        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_SSRF=1.",
+        "Needs ATTESTRA_AUTOMATED_VAPT_SSRF=1, an active profile and a dev/demo asset "
+        "(server-side policy; APP_ENV is not used).",
     ),
     TestCase(
         "UPLOAD",
         "file",
         "Safe file-upload probe",
         "Upload a benign HTML marker and check anonymous fetch of the stored URL. "
-        "Off outside local/test/development unless ATTESTRA_AUTOMATED_VAPT_UPLOAD=1.",
+        "Needs ATTESTRA_AUTOMATED_VAPT_UPLOAD=1, an active profile, a dev/demo asset and a "
+        "cleanup plan (server-side policy; APP_ENV is not used).",
+    ),
+    # WP1 (D-01/D-03): session lifecycle and OIDC metadata.
+    TestCase(
+        "SESSLIFE",
+        "session",
+        "Session lifecycle",
+        "Session id rotation on login, invalidation on logout (lab), passive expiry/JWT lifetime on engagements.",
+    ),
+    TestCase(
+        "OIDCMETA",
+        "authentication",
+        "OIDC metadata review",
+        "One anonymous GET of /.well-known/openid-configuration; flags implicit/ROPC, missing PKCE S256, "
+        "wildcard redirects.",
+    ),
+    # WP2 safe web/API probes. Categories reuse the existing coverage groups (INT decision).
+    TestCase(
+        "CORS",
+        "infrastructure",
+        "CORS validation matrix",
+        "T1 read-only Origin variation + one preflight (<=6 req). Finding only for a reproducible "
+        "credentialed cross-origin read. Off unless ATTESTRA_PROBES_WEB_SAFE=1.",
+    ),
+    TestCase(
+        "HOSTHDR",
+        "infrastructure",
+        "Host / forwarded-host handling",
+        "T1 header-only variation to an .invalid marker; destination stays pinned (<=5 req). "
+        "Off unless ATTESTRA_PROBES_WEB_SAFE=1.",
+    ),
+    TestCase(
+        "OREDIR",
+        "xss",
+        "Open redirect",
+        "T1 redirect params to a non-routable marker; never followed off-site (<=12 req). "
+        "Off unless ATTESTRA_PROBES_WEB_SAFE=1.",
+    ),
+    TestCase(
+        "CACHE",
+        "session",
+        "Authenticated cache posture",
+        "T1 cache headers on authenticated pages; no poisoning (<=6 req). Needs a login profile. "
+        "Off unless ATTESTRA_PROBES_WEB_SAFE=1.",
+    ),
+    TestCase(
+        "SSIND",
+        "injection",
+        "Server-side sink indicators (SSRF/XXE/SSTI)",
+        "T0 passive suspicions from captured traffic; no payloads. Never a confirmed finding.",
+    ),
+    TestCase(
+        "GRAPHQL",
+        "api_security",
+        "GraphQL detection and introspection",
+        "T1 detection + one bounded introspection, two-identity field check; mutations never sent "
+        "(<=10 req). Off unless ATTESTRA_GRAPHQL_PROBE=1.",
+    ),
+    TestCase(
+        "APIPOST",
+        "api_security",
+        "API rate-limit headers and versions",
+        "T0 passive header review from captured traffic (<=3 GETs with ATTESTRA_PROBES_WEB_SAFE=1).",
     ),
     TestCase(
         "SCOPE_SMOKE",

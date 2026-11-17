@@ -88,8 +88,21 @@ def export_engagement_markdown(s: Session, engagement_id: int, *, actor: str) ->
         "",
     ]
 
+    # J-01: run validity + coverage, so zero findings is never mistaken for clean.
+    # @lat: [[intel-and-reporting#Run validity in reports]]
+    try:
+        from attestra.reports.run_validity import markdown_lines, section_for_engagement
+
+        rv_section = section_for_engagement(s, engagement_id, reportable_count=len(findings))
+        lines.extend(markdown_lines(rv_section))
+    except Exception:  # noqa: BLE001 — optional section must never break exports
+        rv_section = None
+
     if not findings:
-        lines.append("No reportable findings.")
+        if rv_section and rv_section.get("incomplete"):
+            lines.append("No reportable findings, but testing was incomplete (see Run validity and coverage).")
+        else:
+            lines.append("No reportable findings.")
     for f in findings:
         asset = ""
         if f.asset is not None:

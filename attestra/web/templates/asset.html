@@ -99,6 +99,43 @@
 </div>
 {% endif %}
 
+{# C-04 API spec import (WP2). Shown only when INT passes api_import_enabled=True from ui.target_page. #}
+{% if asset.kind in ("web_app", "api") and api_import_enabled is defined and api_import_enabled %}
+<div class="card" id="api-spec">
+  <h2>API Specification</h2>
+  <p class="meta">Upload an OpenAPI 3.x / Swagger 2.0 (JSON or YAML), Postman v2.1 collection or HAR 1.2 file. It is validated and stored as a versioned inventory; nothing is sent to the target. Automated testing only ever requests its GET/HEAD operations without path parameters; write operations are listed for coverage and never replayed. HAR header, cookie and body values are discarded.</p>
+  {% if api_inventories is defined and api_inventories %}
+  <table>
+    <thead><tr><th>Version</th><th>Format</th><th>File</th><th>Operations</th><th>Safe GET</th><th>Write (not replayed)</th><th>Unsupported</th><th>Imported</th></tr></thead>
+    <tbody>
+    {% for v in api_inventories %}
+      <tr>
+        <td>{{ v.version }}</td>
+        <td>{{ v.kind }}</td>
+        <td class="mono">{{ v.filename or "-" }}</td>
+        <td>{{ v.summary.operations if v.summary else "-" }}</td>
+        <td>{{ v.summary.replay_safe_ops if v.summary else "-" }}</td>
+        <td>{{ v.summary.mutating_ops if v.summary else "-" }}</td>
+        <td>{{ v.summary.unsupported if v.summary else "-" }}</td>
+        <td class="meta">{{ v.created_at or "-" }}{% if v.created_by %} by {{ v.created_by }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">No API specification imported for this target.</p>
+  {% endif %}
+  {% if can(prole, "asset.write") %}
+  <form method="post" action="/engagements/{{ e.id }}/targets/{{ asset.id }}/api-spec" enctype="multipart/form-data">
+    <label for="api_spec_file">Specification File</label>
+    <input type="file" id="api_spec_file" name="file" accept=".json,.yaml,.yml,.har,application/json,application/x-yaml" required>
+    <div class="hint">Max 5 MB by default. Servers outside this target&#39;s origin (or its API Base URL) are kept as inventory only.</div>
+    <div class="form-actions"><button type="submit">Import API Spec</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if cert_status %}
 <div class="card" id="certificate">
   <h2>Certificate</h2>

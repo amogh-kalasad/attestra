@@ -286,3 +286,86 @@ def test_run_authz_module_skips_plain_httpx_without_session():
         assert out["skip_reason"] == SKIP_NO_AUTH_SESSION
     finally:
         raw.close()
+
+
+# ---------------------------------------------------------------- D-04 (WP1)
+# Same-object comparison across two engagement identities (T06 / BIZ).
+from starlette.responses import HTMLResponse  # noqa: E402
+
+from attestra.automated_vapt.testing.tenant_isolation_tests import compare_identities  # noqa: E402
+
+D04_A, D04_B = "tok-a", "tok-b"
+
+
+def _d04_app(mode: str):
+    def who(request: Request) -> str:
+        h = request.headers.get("authorization") or ""
+        return h.split(" ", 1)[1] if " " in h else ""
+
+    async def me(request):
+        if mode == "waf":
+            return HTMLResponse("<title>Attention Required! | Cloudflare</title>Sorry, you have been blocked", status_code=403, headers={"server": "cloudflare"})
+        t = who(request)
+        return JSONResponse({"id": "me", "tenant_id": "ten-a" if t == D04_A else "ten-b"})
+
+    async def item(request):
+        if mode == "waf":
+            return HTMLResponse("<title>Attention Required! | Cloudflare</title>Sorry, you have been blocked", status_code=403, headers={"server": "cloudflare"})
+        t = who(request)
+        if mode == "leak" or t == D04_A:
+            return JSONResponse({"id": "1", "tenant_id": "ten-a", "owner": "alice"})
+        return JSONResponse({"detail": "not found"}, status_code=404)
+
+    async def shared(request):
+        return JSONResponse({"id": "cfg", "theme": "dark"})
+
+    return Starlette(routes=[Route("/api/me", me), Route("/api/items/1", item), Route("/api/config", shared)])
+
+
+def _d04_ctx(client):
+    mk = lambda tok, pid: SessionAuth(profile_id=pid, status="ready", note="t", headers={"Authorization": f"Bearer {tok}"}, redact_values=(tok,))  # noqa: E731
+    return _test_context.TestContext(
+        engagement_id=1, tenant_id=1, asset_id=1, target_base_url=BASE, test_case_ids=["T06"], profile="baseline",
+        actor="t", allow_private=True,
+        extra={"httpx_client": client, "_capture_api_urls": [BASE + "api/me", BASE + "api/items/1", BASE + "api/config"],
+               "_session_auth": mk(D04_A, 1), "_secondary_session_auth": mk(D04_B, 2)},
+    )
+
+
+def _d04_run(mod, mode):
+    c = TestClient(_d04_app(mode), base_url=BASE)
+    return mod.run(c, BASE, ctx=_d04_ctx(c))
+
+
+# @lat: [[run-validity-and-policy#Identity comparison]]
+def test_compare_identities_pure():
+    assert compare_identities([({"a"}, {"b"}), ({"a"}, {"a"})])["cross_rows"] == [1]
+    assert compare_identities([({"a"}, {"b"}), ({"a"}, set())])["cross_rows"] == []
+    assert compare_identities([({"x"}, {"x"})])["distinct_identities"] is False
+
+
+def test_t06_flags_cross_identity_object():
+    r = _d04_run(tenant_isolation_tests, "leak")
+    assert r["finding_candidate"] is True and r["observations"]["distinct_identities"] is True
+    assert D04_A not in repr(r["observations"]) and D04_B not in repr(r["observations"])
+
+
+def test_t06_isolated_passes():
+    r = _d04_run(tenant_isolation_tests, "isolated")
+    assert r["finding_candidate"] is False and r.get("status_hint") is None
+
+
+def test_t06_waf_is_blocked():
+    r = _d04_run(tenant_isolation_tests, "waf")
+    assert r["finding_candidate"] is False and r["status_hint"] == "BLOCKED"
+
+
+def test_biz_shared_config_not_a_finding_but_leak_is():
+    ok = _d04_run(business_logic_tests, "isolated")
+    assert ok["finding_candidate"] is False  # identical shared /api/config body is not exposure
+    assert _d04_run(business_logic_tests, "leak")["finding_candidate"] is True
+
+
+def test_biz_unusable_session_is_blocked_not_finding():
+    r = _d04_run(business_logic_tests, "waf")
+    assert r["finding_candidate"] is False and r["status_hint"] == "BLOCKED" and r["skip_reason"]

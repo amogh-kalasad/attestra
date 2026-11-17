@@ -1,8 +1,11 @@
 """Scoped SSRF canary (catalogue SSRF).
 
 Probes in-scope URL-fetcher parameters with an Attestra-controlled canary marker.
-Never targets cloud metadata / link-local by default as the *payload destination*
-for production APP_ENV. Lab fixtures may reflect a canary when they fetch the
+Never targets cloud metadata / link-local as the *payload destination*. Runs only
+when the FND-02 target-environment policy allowed it for this execution
+(``ctx.extra["_intrusive_policy"]["SSRF"]``, see
+[[attestra/automated_vapt/core/intrusive_policy.py]]); Attestra's own environment
+setting plays no part. Lab fixtures may reflect a canary when they fetch the
 supplied URL; findings require canary reflection or a clear fetch-error proof.
 """
 
@@ -13,9 +16,12 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from attestra.automated_vapt.core import intrusive_policy
+from attestra.automated_vapt.core.response_classifier import classify_pair, mark_blocked_if_needed, samples_to_json
 from attestra.automated_vapt.testing._http import absolute, request_pair
 from attestra.automated_vapt.testing._session import (
     SKIP_NO_AUTH_SESSION,
+    is_lab_client,
     request_auth,
     resolve_mode,
     skip_result,
@@ -36,21 +42,18 @@ _URL_PARAM_NAMES = ("url", "uri", "target", "src", "source", "webhook", "callbac
 _MAX_PROBES = 6
 
 SKIP_DISABLED = "ssrf_probe_disabled"
+SKIP_POLICY_DENIED = "policy_denied"
 SKIP_NO_FETCHER = "no_ssrf_fetcher_param"
 
 
-def probe_enabled() -> bool:
-    """Active SSRF probes require allowlisted APP_ENV or explicit ATTESTRA_AUTOMATED_VAPT_SSRF=1."""
-    raw = (os.environ.get("ATTESTRA_AUTOMATED_VAPT_SSRF") or "").strip().lower()
-    if raw in ("0", "false", "no", "off"):
-        return False
-    if raw in ("1", "true", "yes", "on"):
-        return True
-    from attestra import config
+def probe_enabled(ctx: Any | None = None) -> bool:
+    """True only when the FND-02 decision for this execution allows SSRF (absent => False)."""
+    return intrusive_policy.decision_from_ctx(ctx, "SSRF").allow
 
-    env = config.parse_app_env() if hasattr(config, "parse_app_env") else getattr(config, "APP_ENV", None)
-    allow = getattr(config, "_APP_ENV_BYPASS_ALLOWLIST", frozenset({"local", "test", "development"}))
-    return env in allow
+
+def _forced(client: Any, kwargs: dict[str, Any]) -> bool:
+    """``force=True`` is a unit-test hook honoured only for in-process lab mock clients."""
+    return bool(kwargs.get("force")) and is_lab_client(client)
 
 
 def is_blocked_ssrf_destination(url: str) -> bool:
@@ -113,16 +116,9 @@ def _candidate_urls(base_url: str, ctx: Any | None, *, include_lab_default: bool
 
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     ctx = kwargs.get("ctx")
-    if not probe_enabled() and not kwargs.get("force"):
-        return {
-            "test_id": "SSRF",
-            "category": "injection",
-            "status_hint": "SKIPPED",
-            "skip_reason": SKIP_DISABLED,
-            "observations": {"detail": "SSRF canary disabled outside local/test/development (set ATTESTRA_AUTOMATED_VAPT_SSRF=1)"},
-            "finding_candidate": False,
-            "evidence_hints": [],
-        }
+    decision = intrusive_policy.decision_from_ctx(ctx, "SSRF")
+    if not decision.allow and not _forced(client, kwargs):
+        return intrusive_policy.skip_payload("SSRF", "injection", decision, disabled_reason=SKIP_DISABLED)
 
     mode, auth = resolve_mode(client, kwargs)
     if mode == "skip":
@@ -160,6 +156,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
 
     observations: list[dict[str, Any]] = []
     evidence = []
+    samples = []
     finding = False
     for endpoint, param in candidates:
         probe = _with_param(endpoint, param, canary)
@@ -168,6 +165,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         else:
             pair = request_pair(client, "GET", probe, follow_redirects=False)
         body = pair.response_body or ""
+        samples.append(classify_pair(pair, authed=auth is not None))
         reflected = CANARY_TOKEN in body or "attestra-ssrf-canary" in body.lower()
         # Lab vulnerable fetcher echoes body with canary= from our token query.
         lab_proof = "canary=" in body and CANARY_TOKEN.split("-")[-1] in body
@@ -178,6 +176,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             "status": pair.status,
             "canary_reflected": reflected or lab_proof,
             "param": param,
+            "response_class": samples[-1].cls.value,
         }
         observations.append(row)
         if reflected or lab_proof:
@@ -185,7 +184,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
             evidence.append(pair)
             break
 
-    return {
+    result = {
         "test_id": "SSRF",
         "category": "injection",
         "observations": {
@@ -196,4 +195,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         "finding_candidate": finding,
         "evidence_pairs": evidence,
         "evidence_hints": [f"SSRF canary via {p}" for _, p in candidates[:3]],
+        "policy_decision": decision.to_json(),
+        "validity_samples": samples_to_json(samples),
     }
+    return mark_blocked_if_needed(result, samples)

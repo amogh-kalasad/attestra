@@ -73,6 +73,24 @@ MIGRATIONS.append(
 )
 
 
+def _m0004_upgrade_int_indexes(db: Database) -> None:
+    """Upgrade INT: create the WP2/WP4 collections and their indexes on existing databases.
+
+    Additive only: new empty collections plus non-destructive index builds; nothing is dropped.
+    """
+    from attestra.persistence.mongo.indexes import ensure_upgrade_indexes
+
+    for name in (C.API_INVENTORIES, C.DISCOVERY_CANDIDATES, C.ASSET_SNAPSHOTS, C.ASSET_CHANGE_EVENTS):
+        db[name]  # touch / create empty
+    ensure_upgrade_indexes(db)
+
+
+MIGRATIONS.append(
+    ("0004_upgrade_int_indexes", "Upgrade INT collections + indexes (api inventory, discovery, snapshots)",
+     _m0004_upgrade_int_indexes)
+)
+
+
 def applied_revisions(db: Database) -> set[str]:
     return {doc["_id"] for doc in db[C.SCHEMA_MIGRATIONS].find({}, {"_id": 1})}
 

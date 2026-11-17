@@ -15,7 +15,9 @@ from attestra.importers import (
     checkov,
     cyclonedx,
     dependency_track,
+    dnsx,
     gitleaks,
+    httpx_probe,
     kube_bench,
     naabu,
     nessus,
@@ -24,6 +26,7 @@ from attestra.importers import (
     prowler,
     sarif,
     ssllabs,
+    subfinder,
     testssl,
     trivy,
     webcheck,
@@ -50,7 +53,14 @@ PARSERS: dict[str, Callable[[bytes], list[NormalizedFinding]]] = {
     "ssllabs": ssllabs.parse,
     "burp": burp.parse,
     "nessus": nessus.parse,
+    # WP4 discovery importers: always return [] (observations go through attestra.discovery)
+    "subfinder": subfinder.parse,
+    "dnsx": dnsx.parse,
+    "httpx_probe": httpx_probe.parse,
 }
+
+# Parsers that never produce findings (discovery observations only); hidden from import pickers.
+DISCOVERY_PARSERS: frozenset[str] = frozenset({"subfinder", "dnsx", "httpx_probe"})
 
 
 def parse(tool: str, raw: bytes) -> list[NormalizedFinding]:
@@ -61,4 +71,4 @@ def parse(tool: str, raw: bytes) -> list[NormalizedFinding]:
     return parser(raw)
 
 
-__all__ = ["NormalizedFinding", "PARSERS", "parse"]
+__all__ = ["DISCOVERY_PARSERS", "NormalizedFinding", "PARSERS", "parse"]

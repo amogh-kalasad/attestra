@@ -1,4 +1,11 @@
-"""Email alert settings and event handlers (new high, header change, SLA missed)."""
+"""Email alert settings and event handlers (new high, header change, SLA missed, asset change).
+
+I-04 (WP4): ``notify_asset_changes`` sends one grouped email for DNS / certificate / port /
+technology changes detected between asset snapshots, deduplicated per change through the
+same send-once store as the other alerts. It rides on the tenant's existing
+``notify_header_change`` switch (no new setting/schema).
+"""
+# @lat: [[attack-surface-and-platform#Asset change alerts]]
 
 from __future__ import annotations
 
@@ -30,6 +37,7 @@ log = logging.getLogger(__name__)
 EVENT_NEW_HIGH = "finding.new_high"
 EVENT_HEADER_CHANGE = "header.changed"
 EVENT_SLA_MISSED = "sla.missed"
+EVENT_ASSET_CHANGE = "asset.changed"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -51,8 +59,10 @@ def _mdb():
 
 def _settings_repo():
     from attestra.persistence.mongo.repositories.settings import EmailAlertSettingsRepository
+    from attestra.persistence.mongo.tenant import SYSTEM_SCOPE
 
-    return EmailAlertSettingsRepository(_mdb(), tenant_ids=None)
+    # K-01: the alert sender is a system job (explicit platform scope, not "missing").
+    return EmailAlertSettingsRepository(_mdb(), tenant_ids=SYSTEM_SCOPE)
 
 
 def _settings_row(doc):
@@ -63,8 +73,9 @@ def _settings_row(doc):
 
 def _sent_repo():
     from attestra.persistence.mongo.repositories.settings import EmailAlertSentRepository
+    from attestra.persistence.mongo.tenant import SYSTEM_SCOPE
 
-    return EmailAlertSentRepository(_mdb(), tenant_ids=None)
+    return EmailAlertSentRepository(_mdb(), tenant_ids=SYSTEM_SCOPE)
 
 
 def public_base_url() -> str:
@@ -198,6 +209,8 @@ def _recipients_for(s: Session, tenant_id: int, *, event: str) -> list[str]:
         EVENT_NEW_HIGH: row.notify_new_high,
         EVENT_HEADER_CHANGE: row.notify_header_change,
         EVENT_SLA_MISSED: row.notify_sla_missed,
+        # Asset (DNS/cert/port/tech) changes share the header-change switch.
+        EVENT_ASSET_CHANGE: row.notify_header_change,
     }.get(event, False)
     if not enabled:
         return []
@@ -433,6 +446,90 @@ def notify_header_change(s: Session, run: ScanRun, *, actor: str = "system") -> 
         entity_type="scan_run",
         entity_id=run.id,
     )
+
+
+def draft_asset_change_email(
+    *,
+    tenant_id: int,
+    engagement_id: int,
+    engagement_name: str,
+    target: str,
+    events: list[dict],
+    link: str = "",
+) -> dict | None:
+    """Subject/text/html for an asset-change alert (no send). Values are already public
+    scan observations (records, ports, tech names, header values); nothing secret."""
+    if not events:
+        return None
+    from attestra.alerts.asset_changes import describe_event
+
+    lines = [describe_event(e) for e in events]
+    subject = f"Attestra: {len(events)} change(s) detected on {target}"
+    text = (
+        f"Engagement #{engagement_id}: {engagement_name}\n"
+        f"Target: {target}\n"
+        + (f"Link: {link}\n" if link else "")
+        + "\nChanges:\n"
+        + "\n".join(f"- {line}" for line in lines)
+        + "\n"
+    )
+    html = (
+        f"<p><strong>Engagement #{engagement_id}</strong>: {escape(engagement_name)}</p>"
+        + (f"<p>Target: <a href=\"{escape(link)}\">{escape(target)}</a></p>" if link else f"<p>Target: {escape(target)}</p>")
+        + "<p>Changes:</p><ul>"
+        + "".join(f"<li>{escape(line)}</li>" for line in lines)
+        + "</ul>"
+    )
+    return {"tenant_id": int(tenant_id), "subject": subject, "text": text, "html": html, "count": len(events)}
+
+
+def notify_asset_changes(
+    s: Session | None,
+    *,
+    tenant_id: int,
+    engagement_id: int,
+    engagement_name: str,
+    target: str,
+    events: list[dict],
+    actor: str = "system",
+    link: str = "",
+) -> dict:
+    """I-04: one email for the not-yet-alerted changes; each change is alerted once."""
+    from attestra.alerts.asset_changes import alert_entity_id
+
+    fresh = []
+    dup = 0
+    for e in events or []:
+        if _already_sent(s, EVENT_ASSET_CHANGE, "asset_change", alert_entity_id(e)):
+            dup += 1
+        else:
+            fresh.append(e)
+    draft = draft_asset_change_email(
+        tenant_id=tenant_id,
+        engagement_id=engagement_id,
+        engagement_name=engagement_name,
+        target=target,
+        events=fresh,
+        link=link,
+    )
+    if draft is None:
+        return {"sent": False, "count": 0, "duplicates": dup}
+    ok = _send(
+        s,
+        tenant_id=int(tenant_id),
+        event=EVENT_ASSET_CHANGE,
+        subject=draft["subject"],
+        text=draft["text"],
+        html=draft["html"],
+        actor=actor,
+        count=draft["count"],
+        entity_type="engagement",
+        entity_id=int(engagement_id),
+    )
+    if ok:
+        for e in fresh:
+            _mark_sent(s, int(tenant_id), EVENT_ASSET_CHANGE, "asset_change", alert_entity_id(e))
+    return {"sent": bool(ok), "count": len(fresh), "duplicates": dup}
 
 
 def safe_notify_header_change(s: Session, run: ScanRun, *, actor: str = "system") -> None:

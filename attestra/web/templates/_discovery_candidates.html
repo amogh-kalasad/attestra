@@ -1,0 +1,69 @@
+{# Discovery candidates review (A-07). Included by engagement.html only when discovery is enabled (INT).
+   Needs `e` (engagement) in context; data is loaded from the JSON API so the page render stays cheap.
+   Candidates are suggestions: approving one adds a target with intrusive testing OFF; it is
+   scanned only after the usual authorization/ownership checks. #}
+<div class="card" id="discovery-candidates" data-eid="{{ e.id }}">
+  <h2>Discovered subdomains (review)</h2>
+  <p class="meta">
+    Names found by passive sources (certificate logs, public DNS datasets) under domains in your signed scope.
+    Nothing here is scanned. Approve a name to add it as a target, or reject it.
+  </p>
+  <table class="table" id="discovery-candidates-table">
+    <thead>
+      <tr><th>Name</th><th>Sources</th><th>Confidence</th><th>DNS</th><th>Takeover</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody><tr><td colspan="7" class="meta">Loading…</td></tr></tbody>
+  </table>
+  <p class="hint" id="discovery-candidates-msg" role="status"></p>
+</div>
+<script>
+(function () {
+  var box = document.getElementById("discovery-candidates");
+  if (!box) return;
+  var eid = box.getAttribute("data-eid");
+  var base = "/api/engagements/" + eid + "/discovery/candidates";
+  var tbody = box.querySelector("tbody");
+  var msg = document.getElementById("discovery-candidates-msg");
+  function cell(text) { var td = document.createElement("td"); td.textContent = text == null ? "" : String(text); return td; }
+  function act(cid, what) {
+    msg.textContent = "Working…";
+    fetch(base + "/" + encodeURIComponent(cid) + "/" + what, {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"}, body: "{}"
+    }).then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
+      .then(function (res) {
+        msg.textContent = res[0] < 300 ? (what === "approve" ? "Added as a target (intrusive testing off)." : "Rejected.") : (res[1].detail || "Failed");
+        load();
+      }).catch(function () { msg.textContent = "Request failed"; });
+  }
+  function load() {
+    fetch(base, {credentials: "same-origin"}).then(function (r) { return r.ok ? r.json() : {candidates: []}; })
+      .then(function (j) {
+        tbody.innerHTML = "";
+        var rows = j.candidates || [];
+        if (!rows.length) { var tr = document.createElement("tr"); var td = cell("No candidates yet."); td.colSpan = 7; tr.appendChild(td); tbody.appendChild(tr); return; }
+        rows.forEach(function (c) {
+          var tr = document.createElement("tr");
+          tr.appendChild(cell(c.name));
+          tr.appendChild(cell((c.sources || []).join(", ")));
+          tr.appendChild(cell(Math.round((c.confidence || 0) * 100) + "%"));
+          tr.appendChild(cell(c.resolution));
+          tr.appendChild(cell((c.takeover && c.takeover.status === "suspected") ? "suspected (" + (c.takeover.provider || "?") + ")" : ""));
+          tr.appendChild(cell(c.status));
+          var td = document.createElement("td");
+          if (c.status === "pending") {
+            ["approve", "reject"].forEach(function (what) {
+              var b = document.createElement("button"); b.type = "button"; b.className = "btn small";
+              b.textContent = what === "approve" ? "Approve" : "Reject";
+              b.addEventListener("click", function () { act(c.id, what); });
+              td.appendChild(b);
+            });
+          }
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+        });
+      }).catch(function () { msg.textContent = "Could not load candidates"; });
+  }
+  load();
+})();
+</script>

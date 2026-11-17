@@ -26,7 +26,7 @@ from attestra.persistence.mongo.repositories.ops import (
     CreditRepository,
     JobRepository,
 )
-from attestra.persistence.mongo.tenant import TenantIds, normalize_tenant_ids
+from attestra.persistence.mongo.tenant import SYSTEM_SCOPE, TenantIds, normalize_tenant_ids
 
 
 @dataclass
@@ -108,7 +108,8 @@ def tenant_ids_for_principal(uow: MongoUnitOfWork, principal: Any) -> TenantIds:
         ids.add(int(home))
     user_id = getattr(principal, "user_id", None)
     if user_id is not None:
-        for m in MembershipRepository(uow.db, tenant_ids=None).list_for_user(int(user_id)):
+        # K-01: membership lookup is platform-wide by design (explicit, strict-mode safe).
+        for m in MembershipRepository(uow.db, tenant_ids=SYSTEM_SCOPE).list_for_user(int(user_id)):
             ids.add(int(m["tenant_id"]))
     if not ids:
         if role == "client_viewer":
@@ -121,5 +122,10 @@ def uow_for_principal(principal: Any = None, *, tenant_ids: TenantIds | object =
     ensure_mongo_ready()
     if tenant_ids is not ...:
         return MongoUnitOfWork(tenant_ids=normalize_tenant_ids(tenant_ids))  # type: ignore[arg-type]
-    bootstrap = MongoUnitOfWork(tenant_ids=None)
-    return MongoUnitOfWork(tenant_ids=tenant_ids_for_principal(bootstrap, principal))
+    bootstrap = MongoUnitOfWork(tenant_ids=SYSTEM_SCOPE)
+    got = tenant_ids_for_principal(bootstrap, principal)
+    if got is None:
+        # Admins and unassigned platform staff are unrestricted: say so explicitly so
+        # ATTESTRA_TENANT_STRICT=1 does not turn their view into "deny everything".
+        return MongoUnitOfWork(tenant_ids=SYSTEM_SCOPE)
+    return MongoUnitOfWork(tenant_ids=got)

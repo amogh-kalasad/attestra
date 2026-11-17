@@ -13,6 +13,7 @@
   Remediate these before the next audit window.
 {% endif %}
 </p>
+{% if run_validity is defined %}{% set rv_compact = True %}{% include "_run_validity.html.j2" %}{% endif %}
 {% if ai_summary %}
 <p>{{ ai_summary.text }}</p>
 <div class="meta">AI-assisted narrative, reviewed and approved by {{ ai_summary.approved_by }}.</div>

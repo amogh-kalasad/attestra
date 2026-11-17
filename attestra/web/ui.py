@@ -21,7 +21,7 @@ from attestra.auth.roles import has_permission
 from attestra.auth.session import COOKIE_NAME as COOKIE
 from attestra.compliance import load_library
 from attestra.dedup import detected_by_label
-from attestra.importers import PARSERS
+from attestra.importers import DISCOVERY_PARSERS, PARSERS
 from attestra.models import (
     ASSET_KINDS,
     DISPLAY_LABELS,
@@ -597,6 +597,10 @@ def _elite_executions(s, eid: int, principal) -> list[dict]:
             d["status_class"] = run_evidence.status_class(d.get("status"))
             d["cases_view"] = run_evidence.case_rows(d.get("result"), eid, r.id)
             d["result_pretty"] = run_evidence.pretty_result(d.get("result"))
+            # FND-03: run validity badge (legacy rows read NOT_COMPUTED, never VALID).
+            d["run_validity_state"] = (d.get("run_validity") or {}).get("state") or ""
+            d["run_validity_reasons"] = list((d.get("run_validity") or {}).get("reasons") or [])[:3]
+            d["guided_results"] = list((d.get("result") or {}).get("guided") or [])[-20:]
             rows.append(d)
         return rows
     except Exception:  # noqa: BLE001
@@ -697,7 +701,7 @@ def _engagement_ctx(
         "default_tests": {
             kind: default_tests_for(kind, e.type) for kind in ASSET_KINDS
         },
-        "import_formats": sorted(PARSERS),
+        "import_formats": sorted(k for k in PARSERS if k not in DISCOVERY_PARSERS),
         "today": date.today(),
         "ct_apexes": _ct_apexes_for(s, eid),
         "ct_suggestions": ct_suggestions or [],
@@ -710,7 +714,40 @@ def _engagement_ctx(
         "org_credits": _org_credits_for(principal, s, e.tenant_id),
         "elite_test_cases": _elite_test_cases() if config.AUTOMATED_VAPT_ENABLED else [],
         "elite_executions": _elite_executions(s, eid, principal) if config.AUTOMATED_VAPT_ENABLED else [],
+        # WP4: passive discovery review card + stuck-scan badge (both off/empty by default).
+        "discovery_enabled": _discovery_enabled(),
+        "stuck_jobs": _stuck_jobs(s),
+        # WP1 D-05 (opt-in): guided manual test plans.
+        "guided_plans_enabled": bool(getattr(config, "GUIDED_PLANS_ENABLED", False)),
+        "guided_plans": _guided_plans() if getattr(config, "GUIDED_PLANS_ENABLED", False) else [],
     }
+
+
+def _discovery_enabled() -> bool:
+    try:
+        from attestra.discovery import discovery_enabled
+
+        return bool(discovery_enabled())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _stuck_jobs(s) -> dict:
+    try:
+        from attestra.jobs.launcher import stuck_job_summary
+
+        return stuck_job_summary(s)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _guided_plans() -> list[dict]:
+    try:
+        from attestra.automated_vapt.guided import plans
+
+        return plans.list_plans()
+    except Exception:  # noqa: BLE001
+        return []
 
 
 @router.get("/engagements/{eid}", response_class=HTMLResponse)
@@ -954,8 +991,65 @@ def target_page(request: Request, eid: int, aid: int):
                 "can_manage_auth": has_permission(principal.role, "auth_profile.manage"),
                 "auth_profiles": _auth_profiles_for(s, eid, principal),
                 "auth_methods": AUTH_PROFILE_METHODS,
+                **_api_inventory_ctx(e, asset),
             },
         )
+
+
+def _api_inventory_ctx(e, asset) -> dict:
+    """WP2 C-04: API spec card on the target page (only when ATTESTRA_API_IMPORT_ENABLED=1)."""
+    try:
+        from attestra.automated_vapt.testing._probe_base import api_import_enabled
+
+        if not api_import_enabled():
+            return {"api_import_enabled": False, "api_inventories": []}
+        from attestra.automated_vapt.api_inventory import store as api_inv_store
+
+        rows = api_inv_store.list_versions(tenant_id=e.tenant_id, engagement_id=e.id, asset_id=asset.id)
+        return {"api_import_enabled": True, "api_inventories": [v.public() for v in rows]}
+    except Exception:  # noqa: BLE001 - the card must never break the target page
+        return {"api_import_enabled": False, "api_inventories": []}
+
+
+@router.post("/engagements/{eid}/automated-vapt/executions/{xid}/guided")
+async def guided_result_ui(request: Request, eid: int, xid: int):
+    """WP1 D-05: record a guided (manual) plan result on an automated run. Off unless
+    ATTESTRA_GUIDED_PLANS=1. Results need evidence ids for PASSED/FINDING; no requests are sent."""
+    principal, redirect = _require_login(request)
+    if redirect:
+        return redirect
+    url, anchor = f"/engagements/{eid}", "#automated-testing"
+    if not getattr(config, "GUIDED_PLANS_ENABLED", False):
+        raise HTTPException(404, "not found")
+    form = await request.form()
+    try:
+        from attestra.automated_vapt.core import authorization_guard as guard
+        from attestra.automated_vapt.core import orchestrator as orch
+        from attestra.automated_vapt.guided import plans
+
+        evidence = [x.strip() for x in str(form.get("evidence_ids") or "").replace(",", " ").split() if x.strip()]
+        rec = plans.record_result(
+            str(form.get("plan_id") or ""), str(form.get("status") or ""),
+            evidence_ids=evidence, note=str(form.get("note") or ""),
+        )
+        with data_access.session() as s:
+            guard.require_write(principal)
+            ex = orch.get_execution(s, xid, principal=principal)
+            if ex.engagement_id != eid:
+                raise LookupError("run not found")
+            import json as _json
+
+            data = _json.loads(ex.result_json or "{}")
+            rec.update(recorded_by=principal.actor, recorded_at=date.today().isoformat())
+            data.setdefault("guided", []).append(rec)
+            ex.result_json = _json.dumps(data, sort_keys=True)
+            from attestra import audit as _audit
+
+            _audit.record(s, principal.actor, "automated_vapt.guided_result", "automated_test_execution", ex.id,
+                          engagement_id=eid, plan_id=rec["plan_id"], status=rec["status"])
+    except (ValueError, LookupError, services.ServiceError) as exc:
+        return _back(url, error=str(exc)[:180], anchor=anchor)
+    return _back(url, msg="Guided result recorded.", anchor=anchor)
 
 
 @router.post("/engagements/{eid}/targets")

@@ -38,6 +38,10 @@ BASE = {
     "rate_limit": 10,
     "asset_kind": "web_app",
     "ownership_verified": True,
+    # FND-08: policy.REQUIRED_FIELDS gained these two; without them every case was
+    # "invalid policy input" and the parity table stopped exercising the policy.
+    "ownership_required": True,
+    "authorization_required": True,
 }
 
 # (id, patch, expected reason; "" means allow)
@@ -60,6 +64,10 @@ CASES = [
     ("repo_skips_owner", {"ownership_verified": False, "asset_kind": "repo"}, ""),
     ("order_halted_first", {"engagement_status": "halted", "today": "2026-11-30"}, "engagement is halted"),
     ("wrong_type", {"recent_scan_count": "0"}, policy.INVALID_INPUT),
+    # FND-08: the two requirement toggles (signed authorization / ownership verification).
+    ("auth_not_required_wrong_env", {"authorization_required": False, "asset_environment": "production"}, ""),
+    ("owner_not_required", {"ownership_required": False, "ownership_verified": False}, ""),
+    ("auth_flag_wrong_type", {"authorization_required": "yes"}, policy.INVALID_INPUT),
 ]
 
 
@@ -74,6 +82,13 @@ def test_python_mirror(patch, reason):
     d = policy.evaluate_python(_inp(patch))
     assert d.allow is (reason == "")
     assert d.reason == reason
+
+
+# @lat: [[run-validity-and-policy#Policy parity tests]]
+def test_base_has_every_required_field():
+    """Guard against the FND-08 drift: BASE must satisfy REQUIRED_FIELDS."""
+    assert set(policy.REQUIRED_FIELDS) <= set(BASE)
+    assert policy.evaluate_python(BASE) == policy.Decision(True, "")
 
 
 def test_python_mirror_empty_and_missing_field_deny():
