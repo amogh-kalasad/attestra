@@ -344,8 +344,19 @@ def responses_similar(auth: CaptureResult, probe: CaptureResult) -> bool:
     return True
 
 
-def input_finding(status: int | None, body: str, payload: str) -> tuple[bool, str]:
-    """Return ``(is_finding, reason)`` for an input-validation probe response."""
+def input_finding(
+    status: int | None,
+    body: str,
+    payload: str,
+    *,
+    baseline_status: int | None = None,
+) -> tuple[bool, str]:
+    """Return ``(is_finding, reason)`` for an input-validation probe response.
+
+    A probe 5xx is not a finding when the authenticated baseline was already 5xx.
+    """
+    if baseline_status is not None and int(baseline_status) >= 500:
+        return False, ""
     if status is not None and status >= 500:
         return True, f"server returned HTTP {status}"
     text = body or ""
@@ -511,9 +522,9 @@ def run_auth_bypass(
             ))
             continue
 
-        # (a) no auth
+        # (a) no auth — strip credentials but keep Extra Headers (WAF bypass, portal host).
         none_cap = _do_get(
-            url, headers={}, scope=scope, profile=ctx.profile,
+            url, headers=_strip_auth_headers(base_headers), scope=scope, profile=ctx.profile,
             client=client, check_dns=not ctx.allow_private, auth=auth,
         )
         clock_sleep(sleep_s)
@@ -1004,6 +1015,13 @@ def run_input_validation(
                     auth_status=base_cap.status, meta={"endpoint": ep.path, "param": param},
                 ))
                 continue
+            if base_cap.status is not None and int(base_cap.status) >= 500:
+                outcomes.append(EndpointOutcome(
+                    url=seed_url, check="input", status="SKIPPED",
+                    detail=f"baseline already HTTP {base_cap.status}; not treating probe 5xx as input failure",
+                    auth_status=base_cap.status, meta={"endpoint": ep.path, "param": param},
+                ))
+                continue
 
             hit = None
             for label, payload in INPUT_PAYLOADS:
@@ -1023,7 +1041,9 @@ def run_input_validation(
                 )
                 requests_left -= 1
                 clock_sleep(sleep_s)
-                bad, reason = input_finding(probe_cap.status, probe_cap.body, payload)
+                bad, reason = input_finding(
+                    probe_cap.status, probe_cap.body, payload, baseline_status=base_cap.status
+                )
                 if bad:
                     hit = (label, payload, probe_cap, reason)
                     break

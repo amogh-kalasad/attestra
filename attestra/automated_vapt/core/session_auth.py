@@ -13,6 +13,26 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
+_AUTH_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "cookie",
+        "proxy-authorization",
+        "x-auth-token",
+        "x-access-token",
+        "x-api-key",
+    }
+)
+
+
+def _non_auth_header_map(headers: dict[str, str] | list[tuple[str, str]] | None) -> dict[str, str]:
+    """Keep Extra Headers (WAF bypass, portal host, UA); drop auth credentials."""
+    if not headers:
+        return {}
+    items = headers.items() if isinstance(headers, dict) else headers
+    return {str(k): str(v) for k, v in items if str(k).lower() not in _AUTH_HEADER_NAMES}
+
+
 
 @dataclass
 class SessionAuth:
@@ -20,6 +40,8 @@ class SessionAuth:
     status: str = "none"  # none | ready | failed
     note: str = ""
     headers: dict[str, str] = field(default_factory=dict, repr=False)
+    # Profile Extra Headers that are not credentials; sent even on unauthenticated probes.
+    non_auth_headers: dict[str, str] = field(default_factory=dict, repr=False)
     redact_values: tuple[str, ...] = field(default=(), repr=False)
     # Mid-scan guard (attestra.auth_web.session_guard.SessionGuard) or None when no verify
     # path exists. Holds secret closures; never serialised.
@@ -91,6 +113,21 @@ class SessionAuth:
             return {}
         return dict(self.headers)
 
+    def extra_headers_for(self, url: str, root: str) -> dict[str, str]:
+        """Non-auth Extra Headers for the target or allowed API origin.
+
+        Unlike ``headers_for``, this stays available when auth is stripped (and even
+        when the session is not ``ready``, if extras were parsed). Never includes
+        Authorization / Cookie.
+        """
+        extras = dict(self.non_auth_headers) or _non_auth_header_map(self.headers)
+        if not extras:
+            return {}
+        o = _origin(url)
+        if o != _origin(root) and o not in self.extra_origins:
+            return {}
+        return extras
+
     def scrub(self, text: str) -> str:
         out = text or ""
         for v in self.redact_values:
@@ -156,6 +193,7 @@ def load_session_auth(
         extra = xh.parse_extra_headers(
             getattr(profile, "extra_headers", "") or "", own_header_name=xh.own_header_name(method, cfg)
         )
+        out.non_auth_headers = _non_auth_header_map(extra)
         extra_cookies = sa._load_extra_cookies(profile, method, cfg)
         allowed = sa._allowed_hosts(profile, target_url)
         if http_post is None:

@@ -166,3 +166,40 @@ def test_orchestrator_t01_with_asgi_client(fresh_db, elite_flag, asgi_clients):
         assert t01["test_id"] == "T01"
         assert t01["status"] == "PASSED"
         assert t01["capture"]["status"] == 200
+
+
+def test_capture_request_handles_unread_streaming_request_body():
+    """httpx raises RequestNotRead on some GET request.content; capture must not fail."""
+
+    class _StreamReq:
+        url = "https://app.example.test/admin"
+        headers = {"user-agent": "test"}
+
+        @property
+        def content(self):
+            raise RuntimeError(
+                "Attempted to access streaming request content, without having called `read()`."
+            )
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "text/html"}
+        text = "<html>ok</html>"
+        request = _StreamReq()
+
+        def read(self):
+            return b"<html>ok</html>"
+
+    class _Client:
+        def request(self, *args, **kwargs):
+            return _Resp()
+
+    tx = capture_request(
+        "GET",
+        "https://app.example.test/admin",
+        client=_Client(),
+        check_dns=False,
+    )
+    assert tx.pair.status == 200
+    assert "ok" in tx.pair.response_body
+    assert tx.pair.request_body == ""

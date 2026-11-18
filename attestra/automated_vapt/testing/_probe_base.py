@@ -302,6 +302,10 @@ class ProbeSession:
         if use_auth and hasattr(self.auth, "headers_for"):
             for k, v in (self.auth.headers_for(url, self.base_url) or {}).items():
                 hdrs.setdefault(k, v)
+        elif self.auth is not None and hasattr(self.auth, "extra_headers_for"):
+            # Unauthenticated probe: keep WAF / routing Extra Headers, not credentials.
+            for k, v in (self.auth.extra_headers_for(url, self.base_url) or {}).items():
+                hdrs.setdefault(k, v)
         self.sent += 1
         self._last = time.monotonic()
         try:
@@ -401,9 +405,12 @@ def finish(
     evidence: list[Any] | None = None,
     hints: list[str] | None = None,
     status_hint: str | None = None,
+    validity_samples: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Build the standard module dict (+ status_hint, validity_samples, probe meta)."""
     samples = list(ps.samples) if ps is not None else []
+    if not samples and validity_samples:
+        samples = list(validity_samples)
     statuses = [r.get("status") for r in ps.requests_log] if ps is not None else []
     hint = status_hint if status_hint is not None else status_from_samples(samples, finding=finding, statuses=statuses)
     obs = dict(observations)

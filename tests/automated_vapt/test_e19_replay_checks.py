@@ -143,6 +143,9 @@ def test_input_finding_detects_5xx_stack_and_xss():
     ok, _ = rc.input_finding(200, f"hello {rc._REFLECT_SCRIPT} world", rc._REFLECT_SCRIPT)
     assert ok
     assert not rc.input_finding(200, '{"ok":true}', "'")[0]
+    # Baseline already 5xx: probe 500 is not a finding.
+    assert not rc.input_finding(500, "oops", "'", baseline_status=500)[0]
+    assert rc.input_finding(500, "oops", "'", baseline_status=200)[0]
 
 
 # ------------------------------------------------------------------ T19
@@ -367,3 +370,71 @@ def test_record_harvest_into_ctx_promotes_api_url():
     assert n >= 1
     assert "proj-a" in ctx.extra["_harvested_ids"]["project_id"]
     assert ROOT + "api/projects" in ctx.extra["_capture_api_urls"]
+
+
+def test_t19_no_auth_probe_keeps_extra_headers(patch_capture, monkeypatch):
+    url = ROOT + "api/admin/get-all-clients"
+    body = '{"status":"Success","data":[{"client_id":1}]}'
+    ctx = _ctx(
+        api_urls=[url],
+        responses={
+            url: [
+                (200, body),
+                (401, '{"message":"Unauthorized"}'),
+                (401, '{"message":"Unauthorized"}'),
+            ],
+        },
+    )
+    ctx.extra["_session_auth"].headers = {
+        "Authorization": "Bearer SECRETtokenXYZ",
+        "X-VAPT-Test": "bypass",
+        "x-portal-host": "demo.example",
+    }
+    ctx.extra["_session_auth"].non_auth_headers = {
+        "X-VAPT-Test": "bypass",
+        "x-portal-host": "demo.example",
+    }
+    seen: list[dict[str, str]] = []
+    queues = {u: list(v) for u, v in ctx.extra["_fake_responses"].items()}
+
+    def recording_capture(method, url, **kwargs):
+        hdrs = dict(kwargs.get("headers") or {})
+        seen.append({str(k).lower(): v for k, v in hdrs.items()})
+        q = queues.setdefault(url, [])
+        status, body = q.pop(0) if q else (404, '{"status":"error"}')
+        auth_h = hdrs.get("Authorization") or hdrs.get("authorization")
+        return FakeTx(_pair(url, status, body, auth_header=auth_h))
+
+    monkeypatch.setattr(
+        "attestra.automated_vapt.capture.http_capture.capture_request",
+        recording_capture,
+    )
+    out = rc.run_auth_bypass(ctx, sleep_s=0)
+    assert out["status"] == "PASSED"
+    assert len(seen) >= 3
+    authed, no_auth, bad = seen[0], seen[1], seen[2]
+    assert "authorization" in authed
+    assert no_auth.get("x-vapt-test") == "bypass"
+    assert no_auth.get("x-portal-host") == "demo.example"
+    assert "authorization" not in no_auth
+    assert bad.get("x-vapt-test") == "bypass"
+    assert "authorization" in bad  # invalid bearer still present
+
+
+def test_t21_skips_when_baseline_already_5xx(patch_capture):
+    ep = _ep("/api/projects/get-invite-stake-holders", dynamic=True, path_param=True)
+    seed = ROOT + "api/projects/get-invite-stake-holders/1"
+    ctx = _ctx(
+        api_urls=[],
+        endpoints=[ep],
+        responses={
+            seed: [(500, '{"message":"server error"}')],
+        },
+    )
+    patch_capture(ctx)
+    out = rc.run_input_validation(ctx, sleep_s=0, cap=20)
+    assert out["finding_count"] == 0
+    assert out["endpoints"]
+    assert all(not e.get("finding") for e in out["endpoints"])
+    assert out["endpoints"][0]["status"] == "SKIPPED"
+    assert "baseline already HTTP 500" in out["endpoints"][0]["detail"]

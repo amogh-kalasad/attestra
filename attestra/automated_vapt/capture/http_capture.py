@@ -114,15 +114,30 @@ def capture_request(
     if resp is None:
         raise ServiceError("HTTP capture failed before a response was received")
 
+    # Some httpx responses/requests are streamed; read first so .text / .content are safe.
+    if hasattr(resp, "read"):
+        try:
+            resp.read()
+        except Exception:
+            pass
+
     req = resp.request
+    if content is not None:
+        req_body_src: str | bytes = content
+    else:
+        try:
+            req_body_src = req.content
+        except Exception:
+            # GET or other streamed request: no buffered body (httpx RequestNotRead).
+            req_body_src = b""
     pair = HttpPair(
         method=method_u,
-        url=str(req.url),
-        request_headers={k: v for k, v in req.headers.items()},
-        request_body=_body_text(content if content is not None else req.content),
+        url=str(req.url) if req is not None else absolute,
+        request_headers={k: v for k, v in (getattr(req, "headers", None) or {}).items()},
+        request_body=_body_text(req_body_src),
         status=resp.status_code,
         response_headers={k: v for k, v in resp.headers.items()},
-        response_body=resp.text[:200_000],
+        response_body=(getattr(resp, "text", None) or "")[:200_000],
         source="automated_vapt_httpx",
     )
     return CapturedTransaction(

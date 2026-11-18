@@ -29,6 +29,10 @@ def test_headers_from_existing_traffic_only():
     assert "deprecated_api_version_advertised" in obs["informational"]
     assert out["finding_candidate"] is False
     assert "status_hint" not in out
+    samples = out.get("validity_samples") or []
+    assert samples, "captured traffic must populate validity_samples"
+    classes = {(s["cls"] if isinstance(s, dict) else s.cls.value) for s in samples}
+    assert "app_ok" in classes
 
 
 def test_missing_headers_informational_only():
@@ -51,3 +55,83 @@ def test_bounded_gets_only_when_flag_on(monkeypatch):
 
 def test_version_parsing():
     assert ap.versions_in_url("https://x/api/v2/users?api-version=2024-01-01") == ["v2", "query:2024-01-01"]
+
+
+def _sample_cls(s):
+    return s["cls"] if isinstance(s, dict) else s.cls.value
+
+
+def test_validity_samples_ignore_unauth_probes_and_html_pages():
+    """T19 401s and HTML app pages must not drive APIPOST run validity."""
+    spa = "<!doctype html><html><head><title>App</title></head><body>" + ("x" * 5000) + "Just a moment..." + ("y" * 2000)
+    pairs = [
+        HttpPair(
+            method="GET",
+            url="http://testserver/",
+            status=200,
+            response_headers={"content-type": "text/html"},
+            response_body=spa,
+        ),
+        HttpPair(
+            method="GET",
+            url="http://testserver/api/v1/me",
+            status=200,
+            request_headers={"Authorization": "Bearer session-token"},
+            response_headers={"X-RateLimit-Limit": "10", "content-type": "application/json"},
+            response_body='{"ok":true}',
+        ),
+        HttpPair(
+            method="GET",
+            url="http://testserver/api/v1/me",
+            status=401,
+            request_headers={},
+            response_headers={"content-type": "application/json"},
+            response_body='{"detail":"unauthorized"}',
+        ),
+        HttpPair(
+            method="GET",
+            url="http://testserver/api/v1/me",
+            status=401,
+            request_headers={"Authorization": "Bearer INVALID_TOKEN_attestra_replay_check_do_not_use"},
+            response_headers={"content-type": "application/json"},
+            response_body="denied",
+        ),
+        HttpPair(
+            method="GET",
+            url="http://testserver/api/v1/me",
+            status=401,
+            request_headers={"Authorization": "[REDACTED]"},
+            response_headers={"content-type": "application/json"},
+            response_body="denied",
+        ),
+        HttpPair(
+            method="GET",
+            url="http://testserver/api/v1/other",
+            status=400,
+            request_headers={"Authorization": "Bearer session-token"},
+            response_headers={"content-type": "application/json"},
+            response_body='{"error":"bad"}',
+        ),
+    ]
+    out = ap.run(probe_client(), BASE, ctx=ctx(_http_pairs=pairs))
+    samples = out.get("validity_samples") or []
+    classes = [_sample_cls(s) for s in samples]
+    assert "auth_expired" not in classes
+    assert "challenge" not in classes
+    assert "app_ok" in classes
+    assert len(samples) == 2
+
+
+def test_validity_samples_include_inventoried_api_urls():
+    pairs = [
+        HttpPair(method="GET", url="http://testserver/users", status=200, request_headers={"Authorization": "Bearer t"}, response_body="[]"),
+        HttpPair(method="GET", url="http://testserver/page", status=200, response_body="<html>ok</html>"),
+    ]
+    out = ap.run(
+        probe_client(),
+        BASE,
+        ctx=ctx(_http_pairs=pairs, _capture_api_urls=["http://testserver/users"]),
+    )
+    classes = [_sample_cls(s) for s in (out.get("validity_samples") or [])]
+    assert classes == ["app_ok"]
+

@@ -122,7 +122,7 @@ def test_rebase_leaves_other_origins():
 
 
 def test_replay_checks_and_probe_urls_use_api_root():
-    ep = jsd.ApiEndpoint.from_dict({"path": "/api/admin/get-admin-details", "capture_safe": True})
+    ep = jsd.ApiEndpoint.from_dict({"path": "/api/admin/get-admin-details", "methods": ["GET"]})
     ctx = SimpleNamespace(target_base_url=FRONT, extra={"_api_base_url": API,
                                                         "_js_api": {"endpoints_list": [ep.to_dict()]}})
     assert rc._abs(rc._api_root(ctx), ep.path) == API + "/api/admin/get-admin-details"
@@ -131,3 +131,51 @@ def test_replay_checks_and_probe_urls_use_api_root():
     # without a resolved base: unchanged frontend behaviour
     ctx2 = SimpleNamespace(target_base_url=FRONT, extra={"_js_api": {"endpoints_list": [ep.to_dict()]}})
     assert probe_urls(FRONT, {"ctx": ctx2}, api=True) == ["https://app.example.test/api/admin/get-admin-details"]
+
+
+def test_probe_urls_prefers_t01_200_and_skips_unsafe_js():
+    from attestra.proof.pair import HttpPair
+
+    safe = jsd.ApiEndpoint.from_dict({"path": "/api/token/get-clients", "methods": ["GET"]})
+    unsafe = [
+        jsd.ApiEndpoint.from_dict({"path": "/api/auth/logout", "methods": ["POST"]}),
+        jsd.ApiEndpoint.from_dict({"path": "/api/auth/refresh-token"}),
+        jsd.ApiEndpoint.from_dict({"path": "/api/auth/register", "methods": ["POST"]}),
+        jsd.ApiEndpoint.from_dict({"path": "/api/auth/heartbeat"}),  # methods unknown: not capture_safe
+    ]
+    captured_ok = API + "/api/admin/get-admin-details"
+    ctx = SimpleNamespace(
+        target_base_url=FRONT,
+        extra={
+            "_api_base_url": API,
+            "_capture_api_urls": [captured_ok],
+            "_http_pairs": [
+                HttpPair(method="GET", url=captured_ok, status=200, response_body="{}"),
+                HttpPair(method="GET", url=FRONT + "admin", status=200, response_body="<html>"),
+                HttpPair(method="GET", url=API + "/api/token/get-clients", status=403, response_body=""),
+            ],
+            "_js_api": {"endpoints_list": [safe.to_dict(), *[e.to_dict() for e in unsafe]]},
+        },
+    )
+    urls = probe_urls(FRONT, {"ctx": ctx}, api=True)
+    assert urls[0] == captured_ok
+    assert API + "/api/token/get-clients" in urls  # capture_safe JS GET
+    assert all("/api/auth/" not in u for u in urls)
+
+
+def test_extra_headers_for_keeps_bypass_on_api_origin():
+    auth = SessionAuth(
+        profile_id=1,
+        status="ready",
+        headers={"Authorization": "Bearer T", "X-VAPT-Test": "yes", "x-portal-host": "app.example.test"},
+        non_auth_headers={"X-VAPT-Test": "yes", "x-portal-host": "app.example.test"},
+    )
+    auth.allow_origin(API)
+    extras = auth.extra_headers_for(API + "/api/me", FRONT)
+    assert extras == {"X-VAPT-Test": "yes", "x-portal-host": "app.example.test"}
+    assert "Authorization" not in extras
+    assert auth.extra_headers_for("https://evil.test/api/me", FRONT) == {}
+    # Derives extras from headers when non_auth_headers is empty.
+    auth2 = SessionAuth(status="ready", headers={"Authorization": "Bearer T", "X-VAPT-Test": "yes"})
+    auth2.allow_origin(API)
+    assert auth2.extra_headers_for(API + "/x", FRONT) == {"X-VAPT-Test": "yes"}

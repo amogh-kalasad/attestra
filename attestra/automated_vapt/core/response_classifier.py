@@ -181,8 +181,20 @@ def _challenge_marker(hdrs: dict[str, str], text: str, code: int) -> str | None:
     if hdrs.get("x-amzn-waf-action", "").strip().lower() in ("captcha", "challenge"):
         return "header:x-amzn-waf-action"
     sample = text[:30_000]
+    # 2xx app pages (especially large SPA HTML/JS) can mention challenge phrases
+    # deep in a bundle. Only treat a success response as an interstitial when a
+    # strong marker is in the early document (title / first paint). Challenge
+    # headers already won above.
+    if 200 <= code < 300:
+        if _CHALLENGE_BODY_RE.search(text[:4_000]):
+            return "body:challenge_marker"
+        return None
     if _CHALLENGE_BODY_RE.search(sample):
         return "body:challenge_marker"
+    # 404/410 pages often embed a captcha widget or generic CF wording without being
+    # a challenge interstitial. Only strong markers / challenge headers count there.
+    if code in (404, 410):
+        return None
     if code >= 400 and _WEAK_CHALLENGE_BODY_RE.search(sample):
         return "body:captcha_marker"
     if code >= 400 and _GUARD_CHALLENGE_RE is not None and _GUARD_CHALLENGE_RE.search(sample):

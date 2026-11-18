@@ -20,6 +20,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from attestra.automated_vapt.core.response_classifier import classify_pair
 from attestra.automated_vapt.testing._probe_base import (
     ProbeMeta,
     ProbeSession,
@@ -28,7 +29,7 @@ from attestra.automated_vapt.testing._probe_base import (
     probes_web_safe_enabled,
     scope_ok,
 )
-from attestra.automated_vapt.testing._session import ctx_extra, probe_urls
+from attestra.automated_vapt.testing._session import _is_api_probe_url, ctx_extra, probe_urls
 
 # @lat: [[web-api-probes#API posture]]
 
@@ -83,6 +84,87 @@ def _major(v: str) -> str:
     return f"v{m.group(1)}" if m else v
 
 
+
+_AUTH_HEADER_NAMES = frozenset({"authorization", "cookie", "proxy-authorization"})
+_INVALID_BEARER_MARK = "INVALID_TOKEN_attestra_replay_check"
+_NEGATIVE_AUTH_STATUSES = frozenset({401, 403})
+
+
+def _request_headers_lower(pair: Any) -> dict[str, str]:
+    raw = getattr(pair, "request_headers", None) or {}
+    return {str(k).lower(): str(v) for k, v in raw.items()}
+
+
+def _is_invalid_bearer_request(pair: Any) -> bool:
+    auth = _request_headers_lower(pair).get("authorization", "")
+    return _INVALID_BEARER_MARK in auth
+
+
+def _request_carried_session_auth(pair: Any) -> bool:
+    """True when the captured request still looks like it carried a session.
+
+    T19's invalid-token probe may keep an Authorization header (sometimes later
+    redacted), so this cannot be the only filter: 401/403 pairs are excluded
+    from APIPOST validity samples separately.
+    """
+    if _is_invalid_bearer_request(pair):
+        return False
+    hdrs = _request_headers_lower(pair)
+    for name in _AUTH_HEADER_NAMES:
+        if (hdrs.get(name) or "").strip():
+            return True
+    return False
+
+
+def _is_api_relevant_pair(pair: Any, base_url: str, kwargs: dict[str, Any] | None) -> bool:
+    """API inventory /api/ or GraphQL paths, or a distinct configured API host."""
+    url = str(getattr(pair, "url", "") or "")
+    extra = ctx_extra(kwargs)
+    api_root = str(extra.get("_api_base_url") or "")
+    api_set = {str(u).rstrip("/") for u in (extra.get("_capture_api_urls") or []) if u}
+    if _is_api_probe_url(url, api_root, api_set):
+        return True
+    if not url or not api_root:
+        return False
+    u, r, t = urlsplit(url), urlsplit(api_root), urlsplit(base_url or "")
+    if not u.netloc or not r.netloc:
+        return False
+    same_api_host = u.netloc.lower() == r.netloc.lower() and (u.scheme or "https").lower() == (r.scheme or "https").lower()
+    if not same_api_host:
+        return False
+    # If the API base shares the SPA/target host, require /api/ or the inventory.
+    if t.netloc and u.netloc.lower() == t.netloc.lower():
+        return False
+    return True
+
+
+def captured_validity_samples(
+    pairs: list[Any], base_url: str, kwargs: dict[str, Any] | None
+) -> list[Any]:
+    """Classify API-relevant captured pairs for run validity.
+
+    Intentionally unauthenticated or bad-token 401/403 probes (T19) are
+    excluded so they cannot be counted as ``auth_expired``. HTML app pages
+    are not sampled.
+    """
+    samples: list[Any] = []
+    for p in pairs:
+        if not _is_api_relevant_pair(p, base_url, kwargs):
+            continue
+        try:
+            status = int(getattr(p, "status", 0) or 0)
+        except (TypeError, ValueError):
+            status = 0
+        if status in _NEGATIVE_AUTH_STATUSES:
+            continue
+        if _is_invalid_bearer_request(p):
+            continue
+        samples.append(classify_pair(p, authed=_request_carried_session_auth(p)))
+        if len(samples) >= 40:
+            break
+    return samples
+
+
 def run(client, base_url: str, **kwargs) -> dict[str, Any]:
     extra = ctx_extra(kwargs)
     pairs = [p for p in list(extra.get("_http_pairs") or []) if scope_ok(str(getattr(p, "url", "")), base_url, kwargs)]
@@ -134,6 +216,9 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         if rl_rows
         else "no captured API traffic to observe"
     )
+    captured_samples = []
+    if ps is None and pairs:
+        captured_samples = captured_validity_samples(pairs, base_url, kwargs)
     out = finish(
         META,
         ps,
@@ -147,6 +232,7 @@ def run(client, base_url: str, **kwargs) -> dict[str, Any]:
         detail=detail,
         hints=["passive header review of captured traffic"],
         status_hint=None if rl_rows else "NOT_TESTED",
+        validity_samples=captured_samples or None,
     )
     if ps is None and rl_rows:
         out.pop("status_hint", None)

@@ -110,6 +110,49 @@ def same_origin(url: str, root: str) -> bool:
     return origin(url) == origin(root)
 
 
+def _js_endpoint_probe_ok(ep: Any) -> bool:
+    """True only for JS-discovered paths that are GET-safe to replay (capture_safe + gettable)."""
+    if ep is None:
+        return False
+    if isinstance(ep, dict):
+        if "capture_safe" in ep or "gettable" in ep:
+            return bool(ep.get("capture_safe")) and bool(ep.get("gettable", True))
+        try:
+            from attestra.automated_vapt.core.js_api_discovery import ApiEndpoint
+
+            obj = ApiEndpoint.from_dict(ep)
+        except Exception:
+            return False
+        return bool(obj.capture_safe and obj.gettable)
+    return bool(getattr(ep, "capture_safe", False) and getattr(ep, "gettable", False))
+
+
+def _pair_url_status(pair: Any) -> tuple[str, int | None]:
+    if pair is None:
+        return "", None
+    if isinstance(pair, dict):
+        url = str(pair.get("url") or "").strip()
+        status = pair.get("status")
+    else:
+        url = str(getattr(pair, "url", "") or "").strip()
+        status = getattr(pair, "status", None)
+    try:
+        code = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        code = None
+    return url, code
+
+
+def _is_api_probe_url(url: str, api_root: str, api_captured: set[str]) -> bool:
+    """True for inventoried API URLs or paths that look like API routes (not HTML pages)."""
+    if not url:
+        return False
+    if url.rstrip("/") in api_captured:
+        return True
+    path = (urlsplit(url).path or "/").lower()
+    return path.startswith("/api/") or path == "/api" or "/graphql" in path
+
+
 def probe_urls(
     base_url: str,
     kwargs: dict[str, Any] | None,
@@ -117,7 +160,12 @@ def probe_urls(
     api: bool = False,
     limit: int = 8,
 ) -> list[str]:
-    """Same-origin capture URLs, falling back to the target base."""
+    """Same-origin capture URLs, falling back to the target base.
+
+    For API probes, prefer URLs T01 already captured with HTTP 200, then other
+    ``_capture_api_urls``. JS-discovered paths are added only when they are
+    ``capture_safe`` and ``gettable`` (no logout / refresh / register GETs).
+    """
     extra = ctx_extra(kwargs)
     # Resolved API base (asset API Base URL / same-site refresh origin), else the target.
     api_root = str(extra.get("_api_base_url") or base_url or "")
@@ -132,15 +180,26 @@ def probe_urls(
         seen.append(u)
 
     if api:
-        for u in extra.get("_capture_api_urls") or []:
+        api_captured = [str(u).strip() for u in (extra.get("_capture_api_urls") or []) if str(u).strip()]
+        api_set = {u.rstrip("/") for u in api_captured}
+        # 1. T01-captured 200 API responses first.
+        for pair in extra.get("_http_pairs") or []:
+            u, code = _pair_url_status(pair)
+            if code == 200 and _is_api_probe_url(u, api_root, api_set):
+                add(u)
+        # 2. Other inventoried API capture URLs.
+        for u in api_captured:
             add(u)
+        # 3. JS-discovered GET-safe endpoints only.
         js = extra.get("_js_api") or {}
         if isinstance(js, dict):
+            from attestra.automated_vapt.testing._http import absolute
+
             for ep in js.get("endpoints_list") or []:
+                if not _js_endpoint_probe_ok(ep):
+                    continue
                 path = ep.get("path") if isinstance(ep, dict) else getattr(ep, "path", "")
                 if path:
-                    from attestra.automated_vapt.testing._http import absolute
-
                     add(absolute(api_root or base_url, str(path)))
     else:
         for u in extra.get("_capture_urls") or []:
@@ -153,10 +212,36 @@ def probe_urls(
 
 
 def request_plain(client: Any, method: str, url: str, **kwargs: Any) -> Any:
-    """Unauthenticated request; default to not following redirects."""
+    """Unauthenticated request; default to not following redirects.
+
+    Session credentials are omitted, but non-auth Extra Headers (WAF bypass, portal
+    host, UA) are kept when ``auth`` + ``root`` are provided (or can be read from ``ctx``).
+    """
     kwargs.setdefault("follow_redirects", False)
     # Drop any leftover auth the caller may have put on the client jar.
     headers = {str(k): str(v) for k, v in dict(kwargs.pop("headers", None) or {}).items()}
+    auth = kwargs.pop("auth", None)
+    root = str(kwargs.pop("root", "") or "")
+    if auth is None or not root:
+        extra = ctx_extra({"ctx": kwargs["ctx"]} if kwargs.get("ctx") is not None else {})
+        if auth is None:
+            auth = extra.get("_session_auth")
+        if not root:
+            ctx = kwargs.get("ctx")
+            root = str(getattr(ctx, "target_base_url", "") or extra.get("_api_base_url") or "")
+    kwargs.pop("ctx", None)
+    if auth is not None:
+        extras: dict[str, str] = {}
+        if hasattr(auth, "extra_headers_for") and root:
+            extras = auth.extra_headers_for(url, root) or {}
+        elif root and hasattr(auth, "headers_for"):
+            extras = {
+                str(k): str(v)
+                for k, v in (auth.headers_for(url, root) or {}).items()
+                if str(k).lower() not in _AUTH_HEADER_NAMES
+            }
+        for k, v in extras.items():
+            headers.setdefault(k, v)
     # Do not inherit an Authorization default from the shared client if we can replace.
     return request_pair(client, method, url, headers=headers or None, **kwargs)
 

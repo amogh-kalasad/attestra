@@ -75,6 +75,15 @@ def test_misc_classes():
     assert classify_response(200, {"cf-ray": "abc", "server": "cloudflare"}, "<h1>ok</h1>").cls is RC.APP_OK
     # A login page that embeds a captcha widget (200) is not a challenge.
     assert classify_response(200, {}, '<form><div class="g-recaptcha"></div></form>').cls is RC.APP_OK
+    # Plain 404 behind Cloudflare (cf-ray / server only, or a captcha widget) is not a challenge.
+    cf = {"server": "cloudflare", "cf-ray": "abc123"}
+    assert classify_response(404, cf, '{"message":"not found"}').cls is RC.NOT_FOUND
+    assert classify_response(404, cf, "<html><title>Not Found</title></html>").cls is RC.NOT_FOUND
+    assert classify_response(404, cf, '<div class="g-recaptcha"></div>not found').cls is RC.NOT_FOUND
+    # Real challenge markers still win at 404.
+    assert classify_response(
+        404, {"cf-mitigated": "challenge", "server": "cloudflare"}, "Just a moment..."
+    ).cls is RC.CHALLENGE
 
 
 def test_proves_enforcement_needs_app_denial_and_authed_ok():
@@ -97,3 +106,14 @@ def test_to_dict_is_value_free():
     c = classify_response(403, {"set-cookie": "sid=SECRETVALUE"}, "SECRETBODY")
     blob = str(c.to_dict())
     assert "SECRETVALUE" not in blob and "SECRETBODY" not in blob
+
+
+def test_large_html_200_is_not_challenge_without_real_markers():
+    buried = "<!doctype html><html><head><title>App</title></head><body>" + ("n" * 5000) + "Just a moment..."
+    assert classify_response(200, {"cf-ray": "abc", "server": "cloudflare"}, buried).cls is RC.APP_OK
+    # A real interstitial has the marker in the early document.
+    interstitial = "<html><head><title>Just a moment...</title></head><body>Checking your browser before you continue</body></html>"
+    assert classify_response(200, {"server": "cloudflare"}, interstitial).cls is RC.CHALLENGE
+    # Challenge headers still win on a large 200, even without an early body marker.
+    assert classify_response(200, {"cf-mitigated": "challenge"}, buried).cls is RC.CHALLENGE
+
