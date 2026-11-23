@@ -45,6 +45,7 @@ FINDING_ASSIGNMENTS = "finding_assignments"
 CERT_EXPIRY_ALERTS = "cert_expiry_alerts"
 EMAIL_ALERT_SETTINGS = "email_alert_settings"
 EMAIL_ALERT_SENT = "email_alert_sent"
+AI_SETTINGS = "ai_settings"
 AUTH_CREDENTIAL_PROFILES = "auth_credential_profiles"
 AUTH_ROUTE_INVENTORY = "auth_route_inventory"
 AUTH_ELEMENT_INVENTORY = "auth_element_inventory"
@@ -118,6 +119,7 @@ DOMAIN_COLLECTIONS: tuple[str, ...] = (
     CERT_EXPIRY_ALERTS,
     EMAIL_ALERT_SETTINGS,
     EMAIL_ALERT_SENT,
+    AI_SETTINGS,
     AUTH_CREDENTIAL_PROFILES,
     AUTH_ROUTE_INVENTORY,
     AUTH_ELEMENT_INVENTORY,

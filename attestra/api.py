@@ -1967,6 +1967,12 @@ from attestra.alerts.routes import ui_router as alerts_ui_router  # noqa: E402
 app.include_router(alerts_api_router)
 app.include_router(alerts_ui_router)
 
+from attestra.ai_settings.routes import api_router as ai_settings_api_router  # noqa: E402
+from attestra.ai_settings.routes import ui_router as ai_settings_ui_router  # noqa: E402
+
+app.include_router(ai_settings_api_router)
+app.include_router(ai_settings_ui_router)
+
 # WP4 passive discovery candidate review (every route 404s while ATTESTRA_DISCOVERY_ENABLED is off).
 from attestra.discovery.routes import router as discovery_router  # noqa: E402
 

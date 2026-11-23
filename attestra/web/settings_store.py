@@ -1,13 +1,14 @@
-"""Thin route helpers for tenant email-alert and Certification Authority settings.
+"""Thin route helpers for tenant email-alert, AI provider, and Certification Authority settings.
 
-``attestra.alerts.service`` / ``attestra.certification.service`` own the Mongo/SQL switch
-(Mongo settings repositories); this module only adds the tenant pickers the routes need and
-returns ``settings_dict`` payloads. ``s`` is always ``None`` (``identity_session``).
+``attestra.alerts.service`` / ``attestra.certification.service`` / ``attestra.ai_settings.service``
+own Mongo persistence; this module adds the tenant pickers the routes need and returns
+``settings_dict`` payloads. ``s`` is always ``None`` (``identity_session``).
 """
 
 from __future__ import annotations
 
 from attestra import services
+from attestra.ai_settings import service as ai_cfg
 from attestra.alerts import service as alerts
 from attestra.certification import service as ca
 
@@ -79,7 +80,38 @@ def ca_update(s, principal, **fields) -> dict:
     return ca.settings_dict(ca.update_settings(s, principal, **fields))
 
 
+# ---------------------------------------------------------------- AI provider settings
+
+
+def ai_default_tenant(s, principal) -> int:
+    """Tenant for AI settings when the caller did not pass tenant_id."""
+    try:
+        return alert_default_tenant(s, principal)
+    except alerts.AlertError as e:
+        raise ai_cfg.AiSettingsError(
+            "no tenant in scope for AI provider settings — create a tenant first"
+        ) from e
+
+
+def ai_tenants(s, principal) -> list[dict]:
+    return alert_tenants(s, principal)
+
+
+def ai_check_tenant(s, principal, tenant_id: int) -> None:
+    ai_cfg._check_tenant(s, principal, tenant_id)
+
+
+def ai_settings(s, tenant_id: int) -> dict:
+    return ai_cfg.settings_dict(ai_cfg.get_settings(s, tenant_id), tenant_id)
+
+
+def ai_update(s, principal, tenant_id: int, **fields) -> dict:
+    """Validated partial update; returns ``settings_dict``. Raises LookupError / AiSettingsError."""
+    return ai_cfg.settings_dict(ai_cfg.update_settings(s, principal, tenant_id, **fields), tenant_id)
+
+
 __all__ = [
+    "ai_check_tenant", "ai_default_tenant", "ai_settings", "ai_tenants", "ai_update",
     "alert_check_tenant", "alert_default_tenant", "alert_known_emails", "alert_settings", "alert_tenant_ids",
     "alert_tenants", "alert_update", "ca_settings", "ca_update",
 ]

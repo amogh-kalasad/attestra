@@ -130,7 +130,40 @@ def test_providers_use_injected_transport_and_secret_store(monkeypatch):
 
 
 def test_bad_config_rejected():
+    from attestra.ai_providers import AIProviderError
+
     with pytest.raises(ai.AINarrativesError):
         ai.provider_from_env({"ATTESTRA_AI_NARRATIVES": "on", "ATTESTRA_AI_PROVIDER": "nope"})
-    with pytest.raises(ai.AINarrativesError):
+    with pytest.raises(AIProviderError):
         ai.OllamaProvider("file:///etc/passwd")
+
+
+def test_anthropic_and_catalog_providers(monkeypatch):
+    from attestra.ai_providers import AnthropicProvider, build_provider
+
+    sent = []
+
+    def post(url, headers, body):
+        sent.append((url, dict(headers), body))
+        if "messages" in url and "chat" not in url:
+            return {"content": [{"type": "text", "text": "claude text"}]}
+        return {"choices": [{"message": {"content": "compat text"}}]}
+
+    env = {
+        "ATTESTRA_AI_NARRATIVES": "on",
+        "ATTESTRA_AI_PROVIDER": "anthropic",
+        "ATTESTRA_AI_MODEL": "claude-sonnet-4-5",
+        "ATTESTRA_AI_API_KEY": "sk-ant-test-key",
+    }
+    p = ai.provider_from_env(env, http_post=post)
+    assert isinstance(p, AnthropicProvider)
+    assert p.complete("sys", "user") == "claude text"
+    assert sent[-1][0] == "https://api.anthropic.com/v1/messages"
+    assert sent[-1][1]["x-api-key"] == "sk-ant-test-key"
+    assert "anthropic-version" in sent[-1][1]
+    assert "sk-ant-test-key" not in repr(p)
+
+    x = build_provider(provider="xai", model="grok-2-latest", api_key="xk", http_post=post)
+    assert x.complete("s", "u") == "compat text"
+    assert sent[-1][0] == "https://api.x.ai/v1/chat/completions"
+    assert sent[-1][1]["Authorization"] == "Bearer xk"

@@ -1,17 +1,17 @@
 """Optional AI-drafted narratives (Step 8.5). OFF by default.
 
-    ATTESTRA_AI_NARRATIVES=off | on          (default off: no provider is built, no network calls)
-    ATTESTRA_AI_PROVIDER=ollama | openai     (openai = any OpenAI-compatible /v1/chat/completions)
-    ATTESTRA_AI_BASE_URL=http://localhost:11434   (ollama default) or https://host/v1
-    ATTESTRA_AI_MODEL=llama3.1
-    ATTESTRA_AI_TENANTS_OFF=3,7              (per-tenant off switch)
+    ATTESTRA_AI_NARRATIVES=off | on          (bootstrap when no per-tenant Mongo UI settings)
+    ATTESTRA_AI_PROVIDER=ollama | openai | anthropic | xai | openrouter | openai-compatible
+    ATTESTRA_AI_BASE_URL=…                  (optional; catalog defaults apply when blank)
+    ATTESTRA_AI_MODEL=…
+    ATTESTRA_AI_TENANTS_OFF=3,7              (per-tenant off switch; still honored with UI settings)
 
-The API key for the openai provider is read from the secret store (key ``ai_api_key``),
-falling back to ``ATTESTRA_AI_API_KEY``. Only redacted finding metadata is sent: never
-evidence, descriptions, locations, hostnames, URLs, IPs, emails or secrets.
+Prefer Settings → AI provider (admin/lead) for per-tenant Mongo config and pasted API keys
+(Fernet ``api_key_enc``). Env remains bootstrap for local/CI. Compose api/worker share Mongo +
+``ATTESTRA_CREDENTIAL_FERNET_KEY``, so UI saves apply without rewriting container env.
 
-Every output is stored as an ``AI draft``. It cannot reach a report until a tester
-approves it (:func:`approved_text` is the only report-facing accessor).
+Only redacted finding metadata is sent: never evidence, descriptions, locations, hostnames,
+URLs, IPs, emails or secrets. Every output is an ``AI draft`` until a tester approves it.
 """
 
 from __future__ import annotations
@@ -20,12 +20,21 @@ import json
 import os
 import re
 import threading
-import urllib.request
+import urllib.request  # noqa: F401 - tests patch ai.urllib.request; keep attribute
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
+
+from attestra.ai_providers import (
+    AIProviderError,
+    AnthropicProvider,
+    HttpPost,
+    OllamaProvider,
+    OpenAICompatProvider,
+    build_provider,
+)
 
 AI_DRAFT_LABEL = "AI draft"
 APPROVER_ROLES = frozenset({"tester", "lead", "admin"})
@@ -78,102 +87,86 @@ class Provider(Protocol):
     def complete(self, system: str, prompt: str) -> str: ...
 
 
-HttpPost = Callable[[str, dict[str, str], dict[str, Any]], dict[str, Any]]
+def _tenant_settings_row(tenant_id: int) -> dict[str, Any] | None:
+    """Best-effort live Mongo read; ``None`` when unavailable or no document."""
+    try:
+        from attestra.ai_settings import service as ai_settings
+
+        return ai_settings.get_raw(int(tenant_id))
+    except Exception:
+        return None
 
 
-def _http_post(url: str, headers: dict[str, str], body: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - scheme checked in __init__
-        return json.loads(resp.read(2_000_000).decode("utf-8"))
-
-
-def _check_url(url: str) -> str:
-    if not url.lower().startswith(("http://", "https://")):
-        raise AINarrativesError("ATTESTRA_AI_BASE_URL must be an http(s) URL")
-    return url.rstrip("/")
-
-
-class OllamaProvider:
-    name = "ollama"
-
-    def __init__(
-        self, base_url: str = "http://localhost:11434", model: str = "llama3.1", *, http_post: HttpPost | None = None
-    ):
-        self.url = _check_url(base_url) + "/api/chat"
-        self.model = model
-        self._post = http_post or _http_post
-
-    def complete(self, system: str, prompt: str) -> str:
-        body = {
-            "model": self.model,
-            "stream": False,
-            "options": {"temperature": 0.2},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        }
-        doc = self._post(self.url, {"Content-Type": "application/json"}, body)
-        return str(((doc or {}).get("message") or {}).get("content", "")).strip()
-
-
-class OpenAICompatProvider:
-    name = "openai"
-
-    def __init__(self, base_url: str, model: str, api_key: str, *, http_post: HttpPost | None = None):
-        if not api_key:
-            raise AINarrativesError("AI API key missing (secret 'ai_api_key' or ATTESTRA_AI_API_KEY)")
-        self.url = _check_url(base_url) + "/chat/completions"
-        self.model = model
-        self._api_key = api_key
-        self._headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-        self._post = http_post or _http_post
-
-    def __repr__(self) -> str:  # never show the key
-        return f"OpenAICompatProvider(url={self.url!r}, model={self.model!r})"
-
-    def _scrub(self, text: str) -> str:
-        key = self._api_key
-        out = str(text or "")
-        if key:
-            out = out.replace(key, "[redacted]")
-            out = out.replace(f"Bearer {key}", "Bearer [redacted]")
-        return out
-
-    def complete(self, system: str, prompt: str) -> str:
-        body = {
-            "model": self.model,
-            "temperature": 0.2,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-        }
-        try:
-            doc = self._post(self.url, dict(self._headers), body)
-        except Exception as exc:  # noqa: BLE001 - scrub key from any transport error text
-            raise AINarrativesError(self._scrub(str(exc)) or "AI provider request failed") from None
-        choices = (doc or {}).get("choices") or [{}]
-        return str((choices[0].get("message") or {}).get("content", "")).strip()
+def _env_narratives_on(env: dict[str, str]) -> bool:
+    return env.get("ATTESTRA_AI_NARRATIVES", "off").strip().lower() in ("on", "1", "true", "yes")
 
 
 def is_enabled(env: dict[str, str] | None = None, tenant_id: int | None = None) -> bool:
+    """True when AI may run for ``tenant_id``.
+
+    Per-tenant Mongo UI settings win when a document exists. Otherwise the env
+    bootstrap switch applies. ``ATTESTRA_AI_TENANTS_OFF`` always kills a tenant.
+    """
     env = os.environ if env is None else env
-    if env.get("ATTESTRA_AI_NARRATIVES", "off").strip().lower() not in ("on", "1", "true", "yes"):
-        return False
     off = {t.strip() for t in env.get("ATTESTRA_AI_TENANTS_OFF", "").split(",") if t.strip()}
-    return tenant_id is None or str(tenant_id) not in off
+    if tenant_id is not None and str(tenant_id) in off:
+        return False
+    if tenant_id is not None:
+        row = _tenant_settings_row(int(tenant_id))
+        if row is not None:
+            return bool(row.get("enabled"))
+    return _env_narratives_on(env)
+
+
+def _api_key_from_env(env: dict[str, str]) -> str:
+    from attestra.secret_store import get_secret
+
+    return get_secret("ai_api_key", env.get("ATTESTRA_AI_API_KEY", ""))
 
 
 def provider_from_env(env: dict[str, str] | None = None, *, http_post: HttpPost | None = None) -> Provider | None:
-    """Returns ``None`` when the feature is off (nothing is constructed, nothing is contacted)."""
+    """Build from env bootstrap. Returns ``None`` when env narratives are off."""
     env = os.environ if env is None else env
-    if not is_enabled(env):
+    if not _env_narratives_on(env):
         return None
-    kind = env.get("ATTESTRA_AI_PROVIDER", "ollama").strip().lower()
-    model = env.get("ATTESTRA_AI_MODEL", "llama3.1")
-    if kind == "ollama":
-        return OllamaProvider(env.get("ATTESTRA_AI_BASE_URL", "http://localhost:11434"), model, http_post=http_post)
-    if kind in ("openai", "openai-compatible"):
-        from attestra.secret_store import get_secret
+    kind = env.get("ATTESTRA_AI_PROVIDER", "ollama").strip().lower() or "ollama"
+    model = env.get("ATTESTRA_AI_MODEL", "")
+    base = env.get("ATTESTRA_AI_BASE_URL", "")
+    try:
+        return build_provider(
+            provider=kind,
+            model=model,
+            base_url=base,
+            api_key=_api_key_from_env(env) if kind != "ollama" else "",
+            http_post=http_post,
+        )
+    except AIProviderError as exc:
+        raise AINarrativesError(str(exc)) from None
 
-        key = get_secret("ai_api_key", env.get("ATTESTRA_AI_API_KEY", ""))
-        return OpenAICompatProvider(env.get("ATTESTRA_AI_BASE_URL", ""), model, key, http_post=http_post)
-    raise AINarrativesError(f"unknown ATTESTRA_AI_PROVIDER {kind!r}")
+
+def provider_from_tenant(
+    tenant_id: int, *, env: dict[str, str] | None = None, http_post: HttpPost | None = None
+) -> Provider | None:
+    """Live resolve: Mongo UI settings for the tenant, else env bootstrap."""
+    env = os.environ if env is None else env
+    if not is_enabled(env, tenant_id=tenant_id):
+        return None
+    row = _tenant_settings_row(int(tenant_id))
+    if row is not None:
+        try:
+            from attestra.ai_settings import service as ai_settings
+
+            key = ai_settings.decrypt_api_key(row) if row.get("api_key_enc") else ""
+            return build_provider(
+                provider=str(row.get("provider") or "ollama"),
+                model=str(row.get("model") or ""),
+                base_url=str(row.get("base_url") or ""),
+                api_key=key,
+                http_post=http_post,
+            )
+        except AIProviderError as exc:
+            raise AINarrativesError(str(exc)) from None
+    return provider_from_env(env, http_post=http_post)
 
 
 # ---------------------------------------------------------------- drafts
@@ -284,9 +277,14 @@ def set_provider(provider: Provider | None) -> None:
 
 
 def get_provider(tenant_id: int | None = None) -> Provider | None:
-    if not is_enabled(tenant_id=tenant_id):
+    """Resolve provider for a tenant. Prefers live Mongo UI settings; no process-wide settings cache."""
+    if _provider_override is not None:
+        return _provider_override if is_enabled(tenant_id=tenant_id) else None
+    if tenant_id is not None:
+        return provider_from_tenant(int(tenant_id))
+    if not is_enabled():
         return None
-    return _provider_override or provider_from_env()
+    return provider_from_env()
 
 
 def approved_text(store: DraftStore, engagement_id: int, kind: str, finding_id: int | None = None) -> str | None:

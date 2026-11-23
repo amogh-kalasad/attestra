@@ -1091,6 +1091,30 @@ Private destination URLs are refused at create time; a deactivated endpoint fail
 
 [[attestra/webhooks/formats.py#verify]] returns false for a wrong MAC, wrong secret, mutated body, non-digit timestamp, or timestamp outside the tolerance window.
 
+## AI settings
+
+Per-tenant AI provider UI/API (`ai.configure`), Fernet-encrypted pasted keys in Mongo, and live resolve for Compose api/worker ([[tests/test_ai_settings.py]], [[tests/test_ai_narratives.py]]).
+
+### Paste key encrypted
+
+Saving a pasted API key stores Fernet `api_key_enc` on the tenant `ai_settings` doc; `settings_dict` exposes only `has_api_key` and never plaintext or ciphertext.
+
+### Empty key preserves
+
+An empty API key field on update leaves the existing ciphertext unchanged; `clear_api_key` removes it.
+
+### Tester denied
+
+Testers cannot update AI settings (`AiSettingsError` / HTTP 403); admin and lead can.
+
+### Live Mongo resolve
+
+With Mongo settings `enabled=true` and no env narratives flag, [[attestra/ai_narratives.py#get_provider]] builds the tenant provider (e.g. Anthropic Messages); disabling in Mongo returns `None`.
+
+### Routes role gate
+
+`GET/PUT /api/ai/settings` and `/settings/ai` allow lead/admin; tester is denied; HTML never echoes the pasted key.
+
 ## Phase 5 evidence hardening
 
 Masking corpus, storage immutability, retention purge, append-only audit, backup manifests, and offline feed refresh.

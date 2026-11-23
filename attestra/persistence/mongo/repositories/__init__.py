@@ -26,6 +26,7 @@ from attestra.persistence.mongo.repositories.ops import (
 )
 from attestra.persistence.mongo.repositories.reports import ReportRepository
 from attestra.persistence.mongo.repositories.settings import (
+    AiSettingsRepository,
     CertificationAuthorityRepository,
     EmailAlertSentRepository,
     EmailAlertSettingsRepository,
@@ -38,6 +39,7 @@ from attestra.persistence.mongo.repositories.webhooks import (
 )
 
 __all__ = [
+    "AiSettingsRepository",
     "ApiKeyAdminRepository",
     "CertificationAuthorityRepository",
     "EmailAlertSentRepository",

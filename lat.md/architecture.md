@@ -219,9 +219,9 @@ Packages added after the core flow. Each one calls the shared services and recor
 
 ## AI drafts
 
-Optional narratives via [[attestra/ai_narratives.py]], off unless `ATTESTRA_AI_NARRATIVES=on`. Keys never appear in drafts, logs, or errors.
+Optional narratives with multi-provider support; admin/lead UI settings and Fernet keys in Mongo; env bootstrap when unset.
 
-Default provider is local Ollama when `ATTESTRA_AI_PROVIDER` is unset. OpenAI-compatible needs a key from the secret store or `ATTESTRA_AI_API_KEY`. Tester (or lead/admin) approval is required before any draft reaches a report.
+[[attestra/ai_narratives.py]] and [[attestra/ai_providers.py]] cover ollama, openai, anthropic (Messages API), xai, openrouter, and openai-compatible. Per-tenant settings use [[attestra/ai_settings/service.py]] and `/settings/ai` (`ai.configure`). Pasted API keys are Fernet `api_key_enc` (never echoed). [[attestra/ai_narratives.py#get_provider]] reads live Mongo for a tenant, else env. Keys never appear in drafts, logs, or errors. Tester (or lead/admin) approval is required before any draft reaches a report.
 
 ## GRC evidence push
 

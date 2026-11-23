@@ -28,6 +28,17 @@ EMAIL_ALERT_DEFAULTS: dict[str, Any] = {
 }
 EMAIL_ALERT_FIELDS = frozenset({"notify_new_high", "notify_header_change", "notify_sla_missed", "recipients"})
 
+AI_SETTINGS_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "provider": "ollama",
+    "base_url": "",
+    "model": "llama3.1",
+    "api_key_enc": None,
+    "updated_by": "",
+    "updated_at": None,
+}
+AI_SETTINGS_FIELDS = frozenset({"enabled", "provider", "base_url", "model", "api_key_enc"})
+
 CA_SINGLETON_ID = 1
 CA_FIELDS = (
     "legal_name", "signer_name", "signer_title", "authorization_statement", "logo",
@@ -107,6 +118,48 @@ class EmailAlertSentRepository(BaseRepository):
             return False
 
 
+class AiSettingsRepository(BaseRepository):
+    """Per-tenant AI provider settings. API keys stored only as ``api_key_enc`` (Fernet)."""
+
+    collection_name = C.AI_SETTINGS
+
+    def get(self, tenant_id: int) -> dict[str, Any] | None:
+        require_tenant_access(int(tenant_id), self.tenant_ids)
+        doc = self.col.find_one({"tenant_id": int(tenant_id)})
+        return with_id(doc) if doc else None
+
+    def ensure(self, tenant_id: int) -> dict[str, Any]:
+        doc = self.get(tenant_id)
+        if doc is not None:
+            return doc
+        try:
+            return self.insert_with_id({"tenant_id": int(tenant_id), **AI_SETTINGS_DEFAULTS})
+        except DuplicateKeyError:
+            return self.get(tenant_id)  # type: ignore[return-value]
+
+    def update(self, tenant_id: int, *, actor: str, **fields: Any) -> dict[str, Any]:
+        bad = set(fields) - AI_SETTINGS_FIELDS
+        if bad:
+            raise ValueError(f"unknown ai settings fields: {sorted(bad)}")
+        self.ensure(tenant_id)
+        sets: dict[str, Any] = {}
+        if "enabled" in fields and fields["enabled"] is not None:
+            sets["enabled"] = bool(fields["enabled"])
+        if "provider" in fields and fields["provider"] is not None:
+            sets["provider"] = str(fields["provider"]).strip().lower()
+        if "base_url" in fields and fields["base_url"] is not None:
+            sets["base_url"] = str(fields["base_url"]).strip()
+        if "model" in fields and fields["model"] is not None:
+            sets["model"] = str(fields["model"]).strip()
+        if "api_key_enc" in fields:
+            sets["api_key_enc"] = fields["api_key_enc"]
+        sets.update({"updated_by": actor, "updated_at": utcnow()})
+        doc = self.col.find_one_and_update(
+            {"tenant_id": int(tenant_id)}, {"$set": sets}, return_document=ReturnDocument.AFTER
+        )
+        return with_id(doc)
+
+
 class CertificationAuthorityRepository(BaseRepository):
     """Platform singleton (``_id`` = 1). Writes require an unscoped (super-admin) caller."""
 
@@ -134,6 +187,9 @@ class CertificationAuthorityRepository(BaseRepository):
 
 
 __all__ = [
+    "AI_SETTINGS_DEFAULTS",
+    "AI_SETTINGS_FIELDS",
+    "AiSettingsRepository",
     "CA_FIELDS",
     "CertificationAuthorityRepository",
     "EmailAlertSentRepository",

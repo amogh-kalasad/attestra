@@ -80,8 +80,10 @@ def test_openai_key_never_in_drafts_logs_or_errors(tmp_path, monkeypatch, caplog
     def boom(url, headers, body):
         raise RuntimeError(f"upstream 401 Authorization: Bearer {secret}")
 
+    from attestra.ai_providers import AIProviderError
+
     p2 = ai.provider_from_env(http_post=boom)
-    with pytest.raises(ai.AINarrativesError) as exc:
+    with pytest.raises((ai.AINarrativesError, AIProviderError)) as exc:
         p2.complete("s", "u")
     assert secret not in str(exc.value)
     assert "Bearer [redacted]" in str(exc.value) or "[redacted]" in str(exc.value)

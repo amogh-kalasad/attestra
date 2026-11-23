@@ -94,6 +94,7 @@ def ensure_indexes(db: Database) -> None:
         unique=True,
     )
     db[C.EMAIL_ALERT_SETTINGS].create_index("tenant_id", unique=True)
+    db[C.AI_SETTINGS].create_index("tenant_id", unique=True)
     db[C.ARTIFACTS].create_index("uri", unique=True)
     db[C.ARTIFACTS].create_index("sha256")
     db[C.ARTIFACTS].create_index("tenant_id")

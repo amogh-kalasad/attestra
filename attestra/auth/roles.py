@@ -40,6 +40,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "audit.read": frozenset({"admin", "lead", "auditor"}),
     "user.manage": frozenset({"admin"}),
     "webhook.manage": frozenset({"admin", "lead"}),
+    # Per-tenant AI provider / API key (Settings → AI provider).
+    "ai.configure": frozenset({"admin", "lead"}),
     "share.create": frozenset({"admin", "lead", "tester"}),
     "share.manage": frozenset({"admin", "lead", "tester"}),
     # Organization test-run credits (master Phase 2).
