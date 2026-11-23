@@ -1221,6 +1221,7 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "distribution": _distribution_list(eng),
         "ca": _ca_report_context(s),
         **_ai_context(engagement_id, eng.tenant_id),
+        **_aasi_report_context(s, eng, reportable),
         **_auth_web_report_context(s, eng),
         **_security_testing_coverage_context(s, eng),
         **_automated_coverage_limitations_context(s, eng),
@@ -1299,6 +1300,19 @@ def _ai_context(engagement_id: int, tenant_id: int | None) -> dict:
     from attestra.ai_narratives import approved_for_report
 
     return approved_for_report(engagement_id, tenant_id)
+
+
+def _aasi_report_context(s: Session, eng: Engagement, findings: list) -> dict:
+    """AASI Phase 7 sections; empty when AASI is off or the engagement has no runs."""
+    # @lat: [[reports#AASI reporting sections (Phase 7)]]
+    try:
+        from attestra.reports.aasi_sections import aasi_context_for_engagement
+
+        return aasi_context_for_engagement(s, eng, findings=findings)
+    except Exception:  # noqa: BLE001 — never break classic reports when AASI is unavailable
+        from attestra.reports.aasi_sections import empty_aasi_payload
+
+        return {"aasi": empty_aasi_payload()}
 
 
 def _feed_catalog() -> dict:

@@ -129,7 +129,7 @@ def owner_confirm_host(kind: str, identifier: str) -> str:
     Public IPs, domain names and BLOCKED_CIDRS never do; they must prove control with DNS or the file.
     """
     ident = (identifier or "").strip()
-    if kind in ("web_app", "api"):
+    if kind in ("web_app", "api", "ai_app"):
         parts = urlsplit(ident)
         if parts.scheme not in ("http", "https"):
             return ""
@@ -164,7 +164,7 @@ def _classify_asset(
     notes = (a.notes or "").lower()
     allow_priv = "allow_private" in notes or ident.startswith("http://127.0.0.1") or ident.startswith("https://127.0.0.1")
 
-    if kind in ("web_app", "api", "url"):
+    if kind in ("web_app", "api", "url", "ai_app"):
         parts = urlsplit(ident)
         if parts.scheme and parts.netloc:
             host = parts.hostname or parts.netloc.split("@")[-1].split(":")[0]
@@ -206,7 +206,7 @@ def _load_deny_rules(
 def authorize_target(scope: AuthorizedScope, target: str, kind: str) -> None:
     """Raise AuthorizationError if target is not in scope. Deny rules win over allow."""
     kind = kind.lower()
-    if kind in ("url", "web_app", "api", "http"):
+    if kind in ("url", "web_app", "api", "http", "ai_app"):
         validate_url_target(scope, target)
     elif kind in ("path", "repo", "fs"):
         validate_path_target(scope, target)

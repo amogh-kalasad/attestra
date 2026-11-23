@@ -19,6 +19,9 @@
     {% if run_validity is defined and run_validity and run_validity.has_runs %}<li><a href="#run-validity">Run validity and coverage</a></li>{% endif %}
     {% if automated_coverage_limitations and automated_coverage_limitations.section %}<li><a href="#automated-coverage-limitations">Automated coverage and limitations</a></li>{% endif %}
     {% if auth_checklist_section %}<li><a href="#auth-checklist">Authenticated security testing checklist</a></li>{% endif %}
+    {% if aasi and aasi.present %}<li><a href="#aasi-technical">AI security (AASI)</a></li>{% endif %}
+    {% if aasi and aasi.present and aasi.coverage_matrix %}<li><a href="#aasi-coverage">AI coverage matrix</a></li>{% endif %}
+    {% if aasi and aasi.present and aasi.traceability %}<li><a href="#aasi-traceability">AASI traceability</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
     <li><a href="#findings">Detailed findings</a></li>
@@ -314,6 +317,72 @@ CVSS vector and version appear on individual findings when available.</p>
   {% endfor %}
 </table>
 {% endif %}
+{% endif %}
+
+{% if aasi and aasi.present and aasi.technical %}
+{% set sec.n = sec.n + 1 %}<h2 id="aasi-technical">{{ sec.n }}. AI security (AASI)</h2>
+<p class="meta">Recommend-only AASI decisions mapped to registered tests. AI confidence is never treated as confirmed severity. Framework version: {{ aasi.technical.framework_version }}.</p>
+{% if aasi.technical.rows %}
+<table>
+  <tr><th>Test ID</th><th>Hypothesis</th><th>Recommendation</th><th>Planner / execution</th><th>Evidence</th><th>Validation</th><th>Uncertainty</th><th>Remediation</th></tr>
+  {% for row in aasi.technical.rows %}
+  <tr>
+    <td class="mono">{{ row.test_id }}</td>
+    <td>{{ row.hypothesis_id }}: {{ row.hypothesis }}</td>
+    <td>{{ row.recommendation }}</td>
+    <td class="mono">{{ row.planner_outcome or "—" }} / {{ row.execution_outcome or "—" }}</td>
+    <td class="mono">{{ row.evidence_hash or "—" }}</td>
+    <td>{{ row.validation or "—" }}</td>
+    <td class="meta">{{ row.uncertainty if row.uncertainty is not none else "—" }}</td>
+    <td>{{ row.remediation or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="meta">No AASI recommendation rows for this engagement.</p>
+{% endif %}
+{% endif %}
+
+{% if aasi and aasi.present and aasi.coverage_matrix %}
+{% set sec.n = sec.n + 1 %}<h2 id="aasi-coverage">{{ sec.n }}. AI coverage matrix</h2>
+<p class="meta">{{ aasi.coverage_matrix.honesty }}</p>
+{% for group_name, group_label in [("owasp_llm", "OWASP LLM Top 10 (2025)"), ("owasp_agentic", "OWASP Agentic Top 10"), ("tools", "AI tools")] %}
+{% set rows = aasi.coverage_matrix.get(group_name) %}
+{% if rows %}
+<p><b>{{ group_label }}</b></p>
+<table>
+  <tr><th>ID</th><th>Name</th><th>Status</th><th>Notes</th></tr>
+  {% for row in rows %}
+  <tr>
+    <td class="mono">{{ row.id }}</td>
+    <td>{{ row.name }}</td>
+    <td>{{ row.status }}</td>
+    <td class="meta">{{ row.notes }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if aasi and aasi.present and aasi.traceability and aasi.traceability.chains %}
+{% set sec.n = sec.n + 1 %}<h2 id="aasi-traceability">{{ sec.n }}. AASI traceability appendix</h2>
+<p class="meta">Hypothesis → recommendation → planner/execution → conclusion → finding, with real id fields.</p>
+<table class="appendix-table">
+  <tr><th>Run</th><th>Hypothesis</th><th>Recommendation</th><th>Planner</th><th>Conclusion</th><th>Finding</th><th>Evidence IDs</th><th>Test</th></tr>
+  {% for c in aasi.traceability.chains %}
+  <tr>
+    <td class="mono">{{ c.run_id or "—" }}</td>
+    <td class="mono">{{ c.hypothesis_id or "—" }}</td>
+    <td class="mono">{{ c.recommendation_id or "—" }}</td>
+    <td class="mono">{{ c.planner_outcome_id or "—" }}</td>
+    <td class="mono">{{ c.conclusion_id or "—" }}</td>
+    <td class="mono">{{ c.finding_id or "—" }}</td>
+    <td class="mono">{{ (c.evidence_ids or [])|join(", ") or "—" }}</td>
+    <td class="mono">{{ c.registered_test_id or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
 {% endif %}
 
 {% if auth_checklist_section %}

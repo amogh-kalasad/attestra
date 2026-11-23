@@ -6,6 +6,10 @@
 #
 # Scanner digests (ZAP/Nuclei/testssl/Naabu): defaults match docker/scanner-digests.env.
 # Override via root `.env`. One-shot `scanner-pull` validates + pulls them on up.
+#
+# AASI AI scanners (Garak/Promptfoo/SafeLabs; PyRIT later): NOT pulled by default.
+# See docs/ai_security/AASI_DOCKER_DEPLOYMENT.md and the commented aasi-scanner-pull
+# block at the bottom of this file. Keep ATTESTRA_AASI=off until real digests exist.
 
 services:
   mongo:
@@ -303,6 +307,49 @@ services:
     restart: unless-stopped
     networks:
       - attestra
+
+  # ---------------------------------------------------------------------------
+  # OPTIONAL (commented) — AASI AI scanner pull. Do NOT uncomment until
+  # ATTESTRA_IMAGE_GARAK / PROMPTFOO / SAFELABS in `.env` are real @sha256: pins
+  # (placeholders / REPLACE_AFTER_INSPECT are refused). Does not replace
+  # scanner-pull (web tools). Do not add worker depends_on unless intentional.
+  # Docs: docs/ai_security/AASI_DOCKER_DEPLOYMENT.md
+  # validate: python scripts/aasi/validate_aasi_env.py --require-ai-images
+  #
+  # aasi-scanner-pull:
+  #   image: docker:27-cli
+  #   environment:
+  #     ATTESTRA_IMAGE_GARAK: ${ATTESTRA_IMAGE_GARAK:-}
+  #     ATTESTRA_IMAGE_PROMPTFOO: ${ATTESTRA_IMAGE_PROMPTFOO:-}
+  #     ATTESTRA_IMAGE_SAFELABS: ${ATTESTRA_IMAGE_SAFELABS:-}
+  #     ATTESTRA_IMAGE_PYRIT: ${ATTESTRA_IMAGE_PYRIT:-}
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   entrypoint: ["/bin/sh", "-ec"]
+  #   command:
+  #     - |
+  #       zeros=0000000000000000000000000000000000000000000000000000000000000000
+  #       pull_one() {
+  #         name=$$1; img=$$2
+  #         case "$$img" in
+  #           "") echo "ERROR: ATTESTRA_IMAGE_$${name} is empty" >&2; exit 1 ;;
+  #           *"@sha256:$${zeros}") echo "ERROR: ATTESTRA_IMAGE_$${name} is still a placeholder digest" >&2; exit 1 ;;
+  #           *"REPLACE"*) echo "ERROR: ATTESTRA_IMAGE_$${name} still has REPLACE placeholder" >&2; exit 1 ;;
+  #           *"@sha256:"*) ;;
+  #           *) echo "ERROR: ATTESTRA_IMAGE_$${name} must be digest-pinned (repo@sha256:...)" >&2; exit 1 ;;
+  #         esac
+  #         echo "Pulling $${name}"
+  #         docker pull "$$img"
+  #       }
+  #       pull_one GARAK "$$ATTESTRA_IMAGE_GARAK"
+  #       pull_one PROMPTFOO "$$ATTESTRA_IMAGE_PROMPTFOO"
+  #       pull_one SAFELABS "$$ATTESTRA_IMAGE_SAFELABS"
+  #       pull_one PYRIT "$$ATTESTRA_IMAGE_PYRIT"
+  #       echo "AASI scanner images ready."
+  #   restart: "no"
+  #   networks:
+  #     - attestra
+  # ---------------------------------------------------------------------------
 
 volumes:
   mongo-data:

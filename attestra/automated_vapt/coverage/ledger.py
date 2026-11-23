@@ -23,6 +23,32 @@ from attestra.models import AutomatedTestExecution
 _STATUS_MAP = frozenset({"PASSED", "FINDING", "FAILED", "SKIPPED", "DEFERRED"})
 _INCOMPLETE = frozenset({"SKIPPED", "DEFERRED"})
 
+ORIGIN_CATALOGUE = "catalogue"
+ORIGIN_AASI = "aasi"
+ALLOWED_ORIGINS = frozenset({ORIGIN_CATALOGUE, ORIGIN_AASI})
+# Risk categories for AI/LLM and agentic coverage rows (AASI Phase 2).
+AI_COVERAGE_CATEGORIES = frozenset({"ai_llm", "ai_agent"})
+
+
+def normalize_origin(raw: Any) -> str:
+    """Return ``catalogue`` or ``aasi``; unknown / empty values become ``catalogue``."""
+    s = str(raw or "").strip().lower()
+    return s if s in ALLOWED_ORIGINS else ORIGIN_CATALOGUE
+
+
+def is_ai_coverage_category(category: Any) -> bool:
+    """True when ``category`` is an AI ledger risk category (``ai_llm`` / ``ai_agent``)."""
+    return str(category or "").strip().lower() in AI_COVERAGE_CATEGORIES
+
+
+def normalize_coverage_category(category: Any) -> str:
+    """Preserve non-AI categories; lowercase known AI risk categories."""
+    s = str(category or "").strip()
+    low = s.lower()
+    if low in AI_COVERAGE_CATEGORIES:
+        return low
+    return s
+
 
 @dataclass
 class CoverageLedgerEntry:
@@ -43,6 +69,11 @@ class CoverageLedgerEntry:
     engagement_id: int = 0
     execution_id: int = 0
     asset_id: int | None = None
+    origin: str = ORIGIN_CATALOGUE
+
+    def __post_init__(self) -> None:
+        self.origin = normalize_origin(self.origin)
+        self.category = normalize_coverage_category(self.category)
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-friendly dict for result_json / aggregation APIs."""
@@ -351,7 +382,8 @@ def entries_from_case_result(
     if not isinstance(case_result, dict):
         return []
     test_id = str(case_result.get("test_id") or "").strip() or "unknown"
-    category = str(case_result.get("category") or "").strip()
+    category = normalize_coverage_category(case_result.get("category"))
+    origin = normalize_origin(case_result.get("origin"))
     status = _map_status(case_result.get("status"))
     when = _iso_now(executed_at)
     auth = _normalize_auth_context(auth_context, case_result)
@@ -400,6 +432,7 @@ def entries_from_case_result(
                 engagement_id=int(engagement_id),
                 execution_id=int(execution_id),
                 asset_id=asset_id,
+                origin=origin,
             )
         )
     return entries
@@ -411,8 +444,10 @@ def merge_ledger(
 ) -> list[dict[str, Any]]:
     """Append ``new`` ledger dicts onto ``existing``, de-duplicating identical keys.
 
-    Dedup key: (execution_id, test_id, target_endpoint, http_method, auth_context).
-    Later rows win when the key matches so per-case rewrites stay current.
+    Dedup key (Phase 4 + AASI Phase 2): execution_id, test_id, target_endpoint
+    (surface), http_method, auth_context, asset_id, category (risk area), origin.
+    Empty category / missing origin (legacy rows → ``catalogue``) keep prior
+    Phase 4 merge behaviour for catalogue-only runs. Later rows win on match.
     """
     out: list[dict[str, Any]] = []
     index: dict[tuple[Any, ...], int] = {}
@@ -420,17 +455,24 @@ def merge_ledger(
     def _as_dict(item: CoverageLedgerEntry | dict[str, Any]) -> dict[str, Any]:
         if isinstance(item, CoverageLedgerEntry):
             return item.to_dict()
-        return dict(item)
+        d = dict(item)
+        d["origin"] = normalize_origin(d.get("origin"))
+        d["category"] = normalize_coverage_category(d.get("category"))
+        return d
 
     def _key(d: dict[str, Any]) -> tuple[Any, ...]:
         auth = d.get("auth_context")
         auth_k = json.dumps(auth, sort_keys=True, default=str) if isinstance(auth, dict) else str(auth or "")
+        asset = d.get("asset_id")
         return (
             d.get("execution_id"),
             str(d.get("test_id") or ""),
             str(d.get("target_endpoint") or ""),
             (str(d.get("http_method") or "").upper() or None),
             auth_k,
+            asset if asset is not None else None,
+            normalize_coverage_category(d.get("category")),
+            normalize_origin(d.get("origin")),
         )
 
     for src in (existing or [], new or []):

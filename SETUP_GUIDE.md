@@ -56,6 +56,23 @@ python -m attestra.cli --user <username> scan <engagement_id> <asset_id> --tool 
 
 `--profile` is `baseline`, `active`, or `intrusive`.
 
+### Optional: AASI (AI / LLM security)
+
+Off by default. Leave `ATTESTRA_AASI` unset or `off` unless you are exercising the recommend-only `/api/aasi` API. Asset kind `ai_app` and offline imports for `garak` / `promptfoo` / `safelabs` / `pyrit` work through the normal engagement and import paths when authorized.
+
+For in-app AI scanners, pin real digests first (placeholders are refused):
+
+```powershell
+# After docker inspect — do not use REPLACE_AFTER_INSPECT / all-zero digests
+# $env:ATTESTRA_IMAGE_GARAK = "docker.io/nvidia/garak@sha256:<real-digest>"
+# $env:ATTESTRA_IMAGE_PROMPTFOO = "ghcr.io/promptfoo/promptfoo@sha256:<real-digest>"
+# $env:ATTESTRA_IMAGE_SAFELABS = "docker.io/agentsafelabs/safelabs-eval@sha256:<real-digest>"
+# $env:ATTESTRA_IMAGE_PYRIT = "docker.io/attestra/pyrit-worker@sha256:<real-digest>"
+# $env:ATTESTRA_AASI = "on"   # only when you intend to call /api/aasi
+```
+
+Status tracker: [docs/ai_security/AASI_IMPLEMENTATION_STATUS.md](docs/ai_security/AASI_IMPLEMENTATION_STATUS.md). README overview: [README.md § AASI](README.md#attestra-agentic-security-intelligence-aasi).
+
 ## 5. Start the app
 Window 1 (the web app):
 

@@ -25,6 +25,13 @@ Synthetic data used by both `attestra/cli.py cmd_demo` and the test suite lives 
 | `burp/xxe_billion_laughs.xml` | Hostile entity-expansion XML that must be refused |
 | `nessus/sample.nessus` | Hand-made Nessus v2: TRACE + SSL + service info + 19506 note; one out-of-scope host |
 | `nessus/xxe_billion_laughs.nessus` | Hostile entity-expansion Nessus XML that must be refused |
+| `ai/promptfoo/results_failed.json` | Promptfoo v3 export: failed red-team assertions (+ ERROR row skipped) |
+| `ai/promptfoo/results_passed.json` | Promptfoo v3 export: all assertions passed |
+| `ai/promptfoo/results_malformed.json` | Unsupported promptfoo shape (no results array) |
+| `ai/safelabs/report.json` | safelabs-eval CLI JSON: vulnerable + fail (+ uncertain/pass/missing/error skipped) |
+| `ai/safelabs/eval_records.json` | safelabs-eval EvalResult `records[]` with nested `scoring_result` |
+| `ai/pyrit/attack_results.json` | PyRIT attack-result export: one success + failure/error/undetermined |
+| `ai/pyrit/attack_results.jsonl` | PyRIT JSONL: one success + one failure |
 
 ## conftest.py
 
@@ -2145,6 +2152,378 @@ PT engagements default planned tests to `manual_pt` and reject scanner-only type
 
 `POST /engagements/{eid}/edit` renames and updates frameworks; the engagement page opens `#edit` via [[attestra/web/static/attestra.js]] because CSP blocks inline script.
 
+## AASI Phase 1 asset types
+
+Unit coverage for AI catalogues in [[attestra/models.py]] (`tests/test_aasi_asset_types.py`). See [[aasi#Phase 1 asset types]].
+
+### AI catalogues registered
+
+Asserts `ai_app` in [[attestra/models.py#ASSET_KINDS]], `ai_llm` / `ai_agent` in [[attestra/models.py#TEST_TYPES]] with standards and import lists, and matching [[attestra/models.py#DISPLAY_LABELS]] keys.
+
+### ai_app defaults
+
+[[attestra/models.py#DEFAULT_TESTS]] and [[attestra/models.py#default_tests_for]] for `ai_app` under VA / VA+PT return only `ai_llm` and `ai_agent`.
+
+### VA includes AI tests
+
+[[attestra/models.py#VA_TEST_TYPES]] and [[attestra/models.py#allowed_test_types_for]] for `va` include `ai_llm` and `ai_agent`.
+
+### PT excludes AI tests
+
+[[attestra/models.py#PT_TEST_TYPES]] and [[attestra/models.py#allowed_test_types_for]] for `pt` omit `ai_llm` / `ai_agent` and keep only `manual_pt`.
+
+## AASI Phase 2 coverage origin
+
+Ledger ``origin`` / AI categories and AI-tool ``NOT_TESTED`` mapping (`tests/automated_vapt/test_aasi_coverage_origin.py`). See [[aasi#Phase 2 coverage and AI-tool validity]].
+
+### Origin defaults to catalogue
+
+[[attestra/automated_vapt/coverage/ledger.py#CoverageLedgerEntry]] defaults ``origin`` to ``catalogue`` when omitted.
+
+### Origin aasi accepted
+
+Constructing or building entries with ``origin=aasi`` keeps ``aasi`` after normalization.
+
+### Invalid origin normalized
+
+[[attestra/automated_vapt/coverage/ledger.py#normalize_origin]] maps empty or unknown values to ``catalogue``.
+
+### AI tool failures are NOT_TESTED
+
+[[attestra/automated_vapt/core/run_validity.py#ai_tool_outcome_to_status]] returns ``NOT_TESTED`` for error / empty / refused / rate-limited / failed signals and never ``PASSED``.
+
+## AASI Phase 3 provider
+
+Mock-only coverage for [[attestra/aasi/provider.py#AasiProvider]] / [[attestra/aasi/provider.py#build_provider]] (`tests/aasi/test_provider.py`). See [[aasi#Phase 3 provider and context]].
+
+### Tenant off disables provider
+
+With the tenant on `ATTESTRA_AI_TENANTS_OFF`, [[attestra/aasi/provider.py#build_provider]] raises [[attestra/aasi/provider.py#AasiProviderDisabled]] and does not call the inner provider.
+
+### Narratives off disables provider
+
+When `ATTESTRA_AI_NARRATIVES` is off, [[attestra/aasi/provider.py#build_provider]] raises [[attestra/aasi/provider.py#AasiProviderDisabled]] without network use.
+
+### AASI flag off disables provider
+
+With [[attestra/config.py#AASI_ENABLED]] false, [[attestra/aasi/provider.py#build_provider]] raises [[attestra/aasi/provider.py#AasiProviderDisabled]].
+
+### Redaction strips URLs and hosts
+
+[[attestra/aasi/provider.py#AasiProvider#complete_json]] redacts URLs and hostnames from outbound prompts before the fake provider sees them.
+
+### Schema validation and retries
+
+Invalid JSON or missing required keys are retried up to [[attestra/config.py#AASI_RETRY_LIMIT]] before success.
+
+### Schema failure exhausts retries
+
+Persistent missing required keys raise [[attestra/aasi/provider.py#AasiProviderError]] after retries are exhausted.
+
+### Fence JSON accepted
+
+Markdown-fenced JSON responses are parsed into the validated object.
+
+## AASI Phase 3 context
+
+Bounded trust-labelled [[attestra/aasi/context.py#ContextPacket]] assembly (`tests/aasi/test_context.py`). See [[aasi#Phase 3 provider and context]].
+
+### Packet serializes and prefers ai_app
+
+[[attestra/aasi/context.py#build_context_packet]] orders `ai_app` assets first, redacts objective/identifiers, and serializes via [[attestra/aasi/context.py#ContextPacket#to_dict]].
+
+### Omits evidence credentials and code
+
+Packet metadata never includes ownership tokens, crawl seeds, API base URLs, finding descriptions, or secret material.
+
+### Registry and AI adapters listed
+
+When enabled, available test ids include catalogue cases plus `garak` / `promptfoo` / `safelabs` from [[attestra/runner/scanners/registry.py#list_adapters]].
+
+## AASI Phase 3 routes
+
+RBAC, feature-flag 404s, idempotency, and approval audit for `/api/aasi` (`tests/aasi/test_routes.py`). See [[aasi#Phase 3 FastAPI routes]].
+
+### Status reports enabled flag
+
+`GET /api/aasi/status` returns `{enabled: true|false}` from the AASI feature flag without 404 when off.
+
+### Mutating routes 404 when off
+
+With AASI disabled, start/get/decisions/approve/cancel return 404 and do not call the orchestrator.
+
+### Idempotent start
+
+Duplicate `Idempotency-Key` header or body key yields a single run id from the mocked orchestrator.
+
+### Viewers read writers mutate
+
+`client_viewer` / `reviewer` / `auditor` may read; only tester/lead/admin may start, approve, or cancel, with audit on approve/cancel.
+
+## AASI Phase 3 store
+
+Unit coverage for [[attestra/aasi/store.py#AasiStore]] with an in-memory fake Mongo (`tests/aasi/test_store.py`). See [[aasi#Phase 3 Mongo persistence]].
+
+### Create and get are tenant-scoped
+
+``create_run`` persists ``schema_version`` and ``get_run`` returns the run only for the matching ``tenant_id``.
+
+### Idempotency returns existing run
+
+Reusing the same ``(tenant_id, idempotency_key)`` returns the original run; the same key under another tenant creates a distinct run.
+
+### Decisions are append-only
+
+``append_decision`` inserts new rows only; prior decision payloads and ``audit_hash`` values stay unchanged when listing after further appends.
+
+### CoT keys are stripped
+
+[[attestra/aasi/store.py#sanitize_payload]] drops chain-of-thought style keys so decision payloads store structured summaries only.
+
+## AASI Phase 6 attack-path graph
+
+Unit coverage for [[attestra/aasi/graph.py#AasiGraphStore]] with an in-memory fake Mongo (`tests/aasi/test_graph.py`). See [[aasi#Phase 6 attack-path graph]].
+
+### Migration 0006 registered
+
+Migration `0006_aasi_graph` is registered after `0005_aasi_collections`; graph collection constants are in `DOMAIN_COLLECTIONS`.
+
+### Nodes and edges are tenant-scoped
+
+Node/edge reads return data only for the matching `tenant_id`; edges persist provenance, citations, source, and timestamps.
+
+### Inferred labelled; demonstrated needs proof
+
+Inferred edges store `provenance=inferred`; demonstrated edges without `proof_refs` raise [[attestra/aasi/graph.py#GraphValidationError]].
+
+### Risk ignores inferred edge count
+
+[[attestra/aasi/graph.py#aggregate_path_risk]] and [[attestra/aasi/graph.py#risk_delta_for_edge]] keep inferred contribution at zero so path risk is not raised from inferred cardinality alone.
+
+## AASI Phase 6 GitHub PR proposals
+
+Draft remediation PR workflow tests with HTTP mocks (`tests/integrations/test_github_pr.py`). See [[aasi#Phase 6 GitHub remediation PR proposals]].
+
+### Propose requires approval before draft PR
+
+[[attestra/integrations/github_pr.py#GitHubPRProposalClient#propose]] stays local until [[attestra/integrations/github_pr.py#GitHubPRProposalClient#approve]]; only then may [[attestra/integrations/github_pr.py#GitHubPRProposalClient#create_draft_pr]] POST a `draft: true` pull request.
+
+### Tenant authorization enforced
+
+Unauthorized tenants are rejected by the injectable authorizer before propose/approve/create.
+
+### Never merge; closure needs retest_passed
+
+No merge endpoints are called; [[attestra/integrations/github_pr.py#GitHubPRProposalClient#close_on_retest_passed]] requires `finding_status="retest_passed"` and records audit history.
+
+### Separate from Issues client
+
+[[attestra/integrations/github_pr.py#GitHubPRProposalClient]] is distinct from [[attestra/integrations/github.py#GitHubIssuesClient]].
+
+### Refuse non-draft remote response
+
+If GitHub returns `draft: false`, create is refused and the proposal is not tracked as open.
+
+## AASI Phase 3 context
+
+Bounded, redacted, trust-labelled context packets for AASI roles (`tests/aasi/test_context.py`).
+
+### Packet serializes and prefers ai_app
+
+[[attestra/aasi/context.py#build_context_packet]] JSON-serializes and prefers `ai_app` assets when mixed kinds are present.
+
+### Omits evidence credentials and code
+
+Context packets omit evidence bodies, credentials, and source code; untrusted fields stay wrapped.
+
+### Registry and AI adapters listed
+
+Authorized catalogue / AI adapter identifiers appear in the packet for role planning.
+
+## AASI Phase 3 provider
+
+AASI provider wrapper over narratives providers with tenant/flag gates and schema retries (`tests/aasi/test_provider.py`).
+
+### Tenant off disables provider
+
+`ATTESTRA_AI_TENANTS_OFF` matching the tenant raises disabled and makes no provider calls.
+
+### Narratives off disables provider
+
+With `ATTESTRA_AI_NARRATIVES` off, [[attestra/aasi/provider.py#build_provider]] stays disabled.
+
+### AASI flag off disables provider
+
+When [[attestra/config.py#AASI_ENABLED]] is false, provider construction is refused.
+
+### Redaction strips URLs and hosts
+
+Prompts passed through the wrapper redact URLs, hostnames, and similar identifiers.
+
+### Schema validation and retries
+
+Malformed JSON responses are retried until a schema-valid payload is obtained.
+
+### Schema failure exhausts retries
+
+Persistent schema failures raise after the retry budget is spent.
+
+### Fence JSON accepted
+
+Markdown-fenced JSON completions are accepted when the inner object validates.
+
+## AASI Phase 3 orchestrator
+
+Recommend-only orchestrator: budgets, approval gate, scope checks (`tests/aasi/test_orchestrator.py`).
+
+### Disabled when flag off
+
+With AASI disabled, runs report `DISABLED` / raise [[attestra/aasi/orchestrator.py#AasiDisabledError]] when required.
+
+### Stub run awaiting approval
+
+A stub provider path ends in awaiting-approval without executing scanners.
+
+### Approval gate ignores model claim
+
+Model output claiming approval does not bypass the human approval gate.
+
+### Unregistered test rejected
+
+Recommendations with unregistered test IDs are rejected.
+
+### Unauthorized asset rejected
+
+Recommendations targeting assets outside authorization are rejected.
+
+### Budget stops role sequence
+
+Exhausting an injected budget gate ([[attestra/aasi/orchestrator.py#SimpleBudget]] in unit tests) stops further role calls cleanly.
+
+### Cancellation stops cleanly
+
+Cancel signals end the loop without orphaned provider work.
+
+### Registered id helpers
+
+Helpers enumerate and validate registered test IDs for the engagement.
+
+### Validate strips model approval
+
+Validation strips forged approval fields from model payloads before persistence.
+
+## AASI Phase 3 roles
+
+Logical role stubs (strategist, hypothesis, AI-security, evidence, quality) with optional provider (`tests/aasi/test_roles.py`).
+
+### Strategist stub outline
+
+Strategist without a live provider returns objectives covering authorized AI assets and gaps.
+
+### Hypothesis empty without observations
+
+Hypothesis role emits no hypotheses when observations are empty.
+
+### Hypothesis from observations
+
+Observations produce structured hypotheses with citations.
+
+### AI security catalogue-gap stubs
+
+Catalogue / adapter gaps yield AI-security recommendations for registered IDs.
+
+### AI security empty without gaps
+
+No AI-security recommendations when coverage gaps are empty.
+
+### Evidence missing notes
+
+Evidence reviewer notes missing evidence IDs without inventing findings.
+
+### Quality completeness
+
+Quality reviewer emits a completeness statement for the run context.
+
+### Provider complete_json path
+
+When a provider is injected, roles use `complete_json` instead of pure stubs.
+
+## AASI Phase 4 evidence gate
+
+Forged or out-of-scope conclusion citations are rejected with an auditable reason (`tests/aasi/test_evidence_gate.py`). See [[aasi#Phase 4 evidence intelligence]].
+
+### Valid citations pass
+
+Same-tenant, same-engagement, accessible evidence/proof/finding IDs pass the gate.
+
+### Missing citation rejected
+
+Unknown citation IDs raise `EvidenceGateError` with reason `not_found`.
+
+### Tenant mismatch rejected
+
+Citations belonging to another tenant are rejected.
+
+### Engagement mismatch rejected
+
+Citations from another engagement are rejected.
+
+### Deleted or expired rejected
+
+Deleted or expired citation records are rejected.
+
+### Not accessible rejected
+
+Records marked inaccessible are rejected.
+
+### Orchestrator persist_conclusion gates
+
+`persist_conclusion` records accepted conclusions and `conclusion_rejected` decisions for gate failures.
+
+## AASI Phase 4 task tree
+
+Parent/child task helpers on AASI run state (`tests/aasi/test_task_tree.py`). See [[aasi#Phase 4 evidence intelligence]].
+
+### Ensure and add tasks
+
+`ensure_task_tree` / `add_task` maintain `run["tasks"]` with unique ids.
+
+### Dependencies and retries
+
+Dependency satisfaction and retry_count / result_refs updates work offline.
+
+### Completion summary propagation
+
+When all children are terminal, parent status and summary roll up.
+
+### Failed child rolls up
+
+A failed child marks the parent failed after propagation.
+
+### Orchestrator attaches tasks
+
+Orchestrator runs persist a root task and per-role child tasks on run state.
+
+## AASI Phase 4 prioritize
+
+Recommendation ranking for planner handoff (`tests/aasi/test_prioritize.py`). See [[aasi#Phase 4 evidence intelligence]].
+
+### Coverage gap ranks highest
+
+Candidates matching coverage-gap tokens sort before adjacency and default.
+
+### Confirmed adjacency over default
+
+Recommendations on assets with confirmed findings outrank unrelated defaults.
+
+### Stable for equal scores
+
+Equal scores preserve input order.
+
+### Mapping and contract field aliases
+
+Both roles (`test_id`) and contracts (`registered_test_id`) field names score correctly.
+
 ## Framework recommendations
 
 Master Phase 5: industry/country catalogues and catalogue-only framework recommendations (`tests/test_framework_recommend.py`).
@@ -2775,7 +3154,7 @@ DEFERRED and SKIPPED ledger rows always include a limitation explaining incomple
 
 ### Merge and engagement collect
 
-[[attestra/automated_vapt/coverage/ledger.py#merge_ledger]] dedupes by execution/test/endpoint/method/auth; [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]] aggregates COMPLETED/FAILED `coverage_ledger` blobs.
+[[attestra/automated_vapt/coverage/ledger.py#merge_ledger]] dedupes by execution/test/endpoint/method/auth plus asset_id, category, and origin; [[attestra/automated_vapt/coverage/ledger.py#collect_engagement_ledger]] aggregates COMPLETED/FAILED `coverage_ledger` blobs.
 
 ## World-class Phase 5 risk scoring
 
@@ -3773,3 +4152,323 @@ Once signed, the "this generation" Document control/Sign-off rows show the real 
 
 [[attestra/reports/render.py#_polish_signed_placeholders]] leaves an *other*, still-unsigned prior version's own history row untouched even though it is baked into the same signed report's HTML.
 
+## AASI Phase 2 Promptfoo adapter
+
+Unit coverage for [[attestra/runner/scanners/promptfoo.py#PromptfooAdapter]] (meta, docker `-e` lockdown, config write, digest pin) without pulling an image; see `tests/runner/test_promptfoo_adapter.py`.
+
+### Meta and contract
+
+Adapter metadata (`ai_app`, T2, target egress, MIT, `ATTESTRA_IMAGE_PROMPTFOO`) has no `problems()`, and SDK `contract_problems` is empty.
+
+### Docker argv disables remote features
+
+`build_docker_argv` includes `-e` for `PROMPTFOO_DISABLE_REMOTE_GENERATION`, `TELEMETRY`, `SHARING`, and `UPDATE`, plus `--add-host` for the pinned target.
+
+## AASI Phase 5 PyRIT adapter
+
+Unit coverage for [[attestra/runner/scanners/pyrit.py#PyRITAdapter]] (meta, scenario allowlist, judge lockdown, usage attach) without pulling an image; see `tests/runner/test_pyrit_adapter.py`.
+
+### Meta and contract
+
+Adapter metadata (`ai_app`, T2, target egress, MIT, `ATTESTRA_IMAGE_PYRIT`, `pyrit-json`) has no `problems()`, and SDK `contract_problems` is empty.
+
+### Scenario allowlist
+
+Only `crescendo` / `pair` / `tree_of_attacks` / `red_teaming` / `many_shot` (plus aliases) resolve; unknown scenarios and unrestricted `command`/`argv` opts raise.
+
+### Docker argv and judge lockdown
+
+Default `build_docker_argv` includes `-e` for `PYRIT_DISABLE_EXTERNAL_JUDGE` / `ADVERSARIAL_EGRESS`, `--add-host`, and fixed `--scenario`; external judge opt-in omits the disable env and sets config `judge.mode=external`.
+
+### Usage and transcripts
+
+After scan, usage/cost from the report JSON are copied into `ScannerResult.extra`; attack results keep `transcript` turns for the importer/evidence path.
+
+## AASI Phase 2 SafeLabs adapter
+
+Unit coverage for the SafeLabs scanner adapter (`tests/runner/test_safelabs_adapter.py`) without a real image.
+
+### Contract and metadata
+
+`meta.problems()` and SDK `contract_problems` are empty; name, image key, tier T2, and `ATTESTRA_IMAGE_SAFELABS` match the adapter contract.
+
+### Argv and docker_args
+
+Fixed `safelabs run` argv includes target URL, category, and JSON output; docker paths use `/out`; unpinned targets are rejected.
+
+### Report validation
+
+Valid fixture bytes pass `validate_report`; garbage bytes return an error string.
+
+### No real image required
+
+Without a local CLI or configured image, `available()` is false and `health()` stays value-free with `ready` false.
+
+## AASI Phase 1 promptfoo importer
+
+[[attestra/importers/promptfoo.py#parse]] turns promptfoo `results.json` failed assertions into findings; covered by `tests/test_importer_promptfoo.py` and fixtures under `tests/fixtures/ai/promptfoo/`.
+
+### Failed assertion becomes finding
+
+A failed red-team assertion (`success: false`) yields a `NormalizedFinding` with `tool="promptfoo"`, plugin id on `rule_id`, and strategy id on `variant` / `original_id`.
+
+### All-pass yields no findings
+
+When every row has `success: true`, the importer returns an empty list (coverage later).
+
+### Malformed raises ValueError
+
+Exports missing `results.results[]` (or a bare summary `results[]`) raise `ValueError`.
+
+## AASI Phase 1 SafeLabs importer
+
+[[attestra/importers/safelabs.py#parse]] turns safelabs-eval positive verdicts into findings; covered by `tests/test_importer_safelabs.py` and fixtures under `tests/fixtures/ai/safelabs/`.
+
+### Positive verdicts become findings
+
+`vulnerable` and `fail` rows yield `tool="safelabs"` findings with prompt id, detector, indicators, heuristic confidence (`validation=potential`), and SafeLabs ASI-source taxonomy labels.
+
+### Uncertain pass and errors skipped
+
+`uncertain`, `pass`, `missing_infrastructure`, and error-only rows emit no findings.
+
+### Malformed raises ValueError
+
+Invalid JSON or a non object/array top-level value raises `ValueError`.
+
+## AASI Phase 1 PyRIT importer
+
+[[attestra/importers/pyrit.py#parse]] turns successful PyRIT attack-result exports into findings; covered by `tests/test_importer_pyrit.py` and fixtures under `tests/fixtures/ai/pyrit/`.
+
+### Successful attack becomes finding
+
+`outcome=success` / `success: true` yields `tool="pyrit"` with conversation id, scenario id, and score evidence preserved.
+
+### Failed empty yield nothing
+
+Failure, error, undetermined, and empty exports return an empty list (no false findings).
+
+### Malformed raises ValueError
+
+Invalid JSON or a non object/array top-level value raises `ValueError`.
+
+
+## AI taxonomy mapping
+
+Loads `attestra/compliance/data/ai_taxonomy.yaml` and asserts required sources, tools, categories, and pack-only CWEs (`tests/test_ai_taxonomy.py`).
+
+### Required keys and sources
+
+Top-level `version`, `sources`, `tools`, and `categories` exist; sources include OWASP LLM 2025, OWASP Agentic, and ISO 42001; tools include garak, promptfoo, safelabs, and pyrit with probe/plugin/test/scenario blocks.
+
+### Categories and ISO pack tool refs
+
+`categories.ai_llm` and `ai_agent` declare primary taxonomies; ISO pack `llm_top10` `assessment_tools` and top-level `assessment_tools` only name known tools; every tool `cwe` list is a subset of pack `cwe_from_iso_pack`.
+
+## AASI Phase 7 reporting
+
+Unit coverage for AASI report section builders and QA helpers (`tests/test_aasi_reporting.py`). See [[reports#AASI reporting sections (Phase 7)]] / [[aasi#Phase 7 reporting sections]].
+
+### Empty when disabled
+
+[[attestra/reports/aasi_sections.py#aasi_report_context]] returns `present=False` when AASI is disabled even if runs are injected.
+
+### Empty when no runs
+
+With AASI enabled but an empty run list, the payload matches [[attestra/reports/aasi_sections.py#empty_aasi_payload]].
+
+### Executive posture and inventory
+
+[[attestra/reports/aasi_sections.py#build_executive_section]] lists `ai_app` inventory and counts potential from `validation_status`, with an explicit confidence disclaimer.
+
+### Technical rows
+
+[[attestra/reports/aasi_sections.py#build_technical_section]] emits test id, hypothesis, recommendation, evidence hash, validation, and `confidence_is_not_severity=True`.
+
+### Traceability chain ids
+
+[[attestra/reports/aasi_sections.py#build_traceability_appendix]] chains real hypothesis / recommendation / conclusion / finding / evidence ids.
+
+### Coverage never missing as pass
+
+[[attestra/reports/aasi_sections.py#build_coverage_matrix]] defaults untouched LLM cells to `not_assessed` and unused tools to `not_tested` — never pass.
+
+### Not tested stays not tested
+
+Planner `NOT_TESTED` outcomes mark LLM and tool cells `not_tested`.
+
+### QA invalid evidence ref
+
+[[attestra/reports/aasi_sections.py#aasi_qa_issues]] raises critical `aasi_invalid_evidence_ref` when cites are outside known evidence ids.
+
+### QA unreproduced confirmed
+
+Confirmed technical rows without an evidence hash yield critical `aasi_unreproduced_confirmed`.
+
+### QA cross tenant
+
+Foreign `tenant_id` on an AASI run yields critical `aasi_cross_tenant`.
+
+### Unresolved hypotheses
+
+Hypotheses without a linked conclusion appear under executive `unresolved_hypotheses`.
+
+### Full context present
+
+Injected runs/decisions produce executive, technical, traceability, and coverage payloads with `present=True`.
+
+### Render hook empty off
+
+[[attestra/reports/render.py#_aasi_report_context]] returns an empty payload when AASI is off.
+
+## AASI Phase 12 security
+
+Offline security and regression coverage for AASI gates, budgets, importers, digests, and disabled-flag behaviour (`tests/aasi/test_aasi_security.py`).
+
+### Prompt injection in scanner output
+
+Untrusted scanner-like strings are redacted or trust-labelled so injection payloads do not become trusted provider instructions.
+
+### Prompt injection in retrieved documents
+
+Retrieved document text is treated as untrusted context and cannot override system or role instructions.
+
+### Unauthorized AI asset rejected
+
+Targets outside signed authorization or wrong asset kind are rejected before recommend-only planning proceeds.
+
+### Cross-tenant evidence citation rejected
+
+Evidence IDs belonging to another tenant fail the evidence gate and are not accepted as conclusion citations.
+
+### Unregistered test ID rejected
+
+Recommendations naming test IDs outside the registry and AI adapter set are rejected by the orchestrator.
+
+### Scope escalation blocked
+
+Model-proposed scope expansion fields or out-of-scope hosts are refused; planner payloads stay within engagement scope.
+
+### Arbitrary command request rejected
+
+Attempts to smuggle shell or unrestricted command execution through recommendations or adapter opts are rejected.
+
+### Secret leakage prevented in provider prompts
+
+Outbound provider prompts are redacted so credentials and secret-like material are not sent to the model.
+
+### Unbounded agent loop stopped by budget
+
+Iteration ceilings on [[attestra/aasi/budget.py#Budget]] stop the orchestrator when max iterations would be exceeded.
+
+### Excessive model calls stopped by budget
+
+Model-call budget exhaustion raises a budget error and halts further provider invocations for the run.
+
+### Approval bypass ineffective
+
+Model claims of approval do not clear intrusive recommendations; human approve remains required when configured.
+
+### Forged evidence ID rejected
+
+Invented or inaccessible evidence IDs fail [[attestra/aasi/evidence_gate.py#assert_citations_valid]] with an auditable reason.
+
+### Malformed tool output rejected by importers
+
+Broken Garak/Promptfoo/SafeLabs/PyRIT exports yield no findings or safe parse failures rather than forged confirmed issues.
+
+### Duplicate run idempotency
+
+Creating a run with an existing `(tenant_id, idempotency_key)` returns the original run instead of duplicating state.
+
+### AI-disabled regression
+
+With AASI disabled, status reports enabled false and mutate routes remain unavailable (404), matching discovery norms.
+
+### Failed scanner output not treated as passed
+
+Empty, refused, or failed AI-tool outcomes map to NOT_TESTED / skipped coverage — never silent pass.
+
+### Report claims without evidence fail QA
+
+[[attestra/reports/aasi_sections.py#aasi_qa_issues]] flags confirmed or cited claims that lack valid evidence references.
+
+### Unpinned scanner image rejection
+
+Placeholder or `REPLACE_AFTER_INSPECT` AI scanner digests are refused so adapters cannot run unpinned images.
+
+## AASI Phase 12 security
+
+Offline security and regression coverage for AASI trust boundaries (`tests/aasi/test_aasi_security.py`). See [[aasi#Phase 12 security and regression tests]].
+
+### Prompt injection in scanner output
+
+Importer-shaped findings with injection payloads are redacted in [[attestra/aasi/context.py#build_context_packet]]; evidence bodies stay out of context.
+
+### Prompt injection in retrieved documents
+
+Objectives and prior summaries are labelled untrusted and redacted before model context assembly.
+
+### Unauthorized AI asset rejected
+
+[[attestra/aasi/orchestrator.py#AasiOrchestrator#validate_recommendation]] rejects recommendations targeting assets outside authorization.
+
+### Cross-tenant evidence citation rejected
+
+[[attestra/aasi/evidence_gate.py#assert_citations_valid]] rejects citations whose tenant_id does not match the engagement tenant.
+
+### Unregistered test ID rejected
+
+Recommendations with unregistered test IDs are rejected by the orchestrator allowlist.
+
+### Scope escalation blocked
+
+Recommendations that introduce banned host/url/new_asset fields are rejected as `scope_escalation`.
+
+### Arbitrary command request rejected
+
+PyRIT refuses unrestricted `command`/`argv`/`shell` opts; Garak keeps a fixed argv that does not incorporate agent command strings.
+
+### Secret leakage prevented in provider prompts
+
+[[attestra/aasi/provider.py#redact_prompt]] / [[attestra/aasi/provider.py#AasiProvider#complete_json]] strip secrets, URLs, and hosts from outbound prompts.
+
+### Unbounded agent loop stopped by budget
+
+Exhausting [[attestra/aasi/orchestrator.py#SimpleBudget]] role slots or [[attestra/aasi/budget.py#Budget]] iterations blocks further agent work.
+
+### Excessive model calls stopped by budget
+
+Call ceilings on SimpleBudget / Budget stop excessive model invocations.
+
+### Approval bypass ineffective
+
+Model-claimed `approved` / non-intrusive flags do not clear the human approval gate for intrusive AI adapters.
+
+### Forged evidence ID rejected
+
+Missing or forged evidence citations fail the evidence gate and `persist_conclusion`.
+
+### Malformed tool output rejected by importers
+
+Garak / Promptfoo / SafeLabs / PyRIT parsers raise `ValueError` on malformed tool output.
+
+### Duplicate run idempotency
+
+[[attestra/aasi/store.py#AasiStore#create_run]] returns the existing run for the same `(tenant_id, idempotency_key)`.
+
+### AI-disabled regression
+
+With AASI off, status reports `enabled: false` and mutating routes return 404; orchestrator reports `DISABLED`.
+
+### Failed scanner output not treated as passed
+
+[[attestra/automated_vapt/core/run_validity.py#ai_tool_outcome_to_status]] maps empty/refused/failed AI-tool outcomes to `NOT_TESTED`, never `PASSED`.
+
+### Report claims without evidence fail QA
+
+[[attestra/reports/aasi_sections.py#aasi_qa_issues]] flags unreproduced confirmed rows and unknown evidence refs.
+
+### Unpinned scanner image rejection
+
+[[attestra/config.py#require_image_digest]] refuses floating tags; placeholder digests leave adapters `image_configured() is False`.

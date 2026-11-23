@@ -75,6 +75,7 @@ ASSET_KINDS = {
     "image": "Container image",
     "cloud_account": "Cloud account",
     "mobile_app": "Mobile app",
+    "ai_app": "AI application / LLM endpoint",
 }
 
 # Test types a client can authorize per target: label, OWASP / standard reference,
@@ -89,6 +90,16 @@ TEST_TYPES = {
     "sast": {"label": "Source code and secrets (SAST)", "standard": "OWASP ASVS", "imports": ["sarif", "gitleaks"]},
     "iac_cloud": {"label": "Cloud / IaC configuration", "standard": "CIS Benchmarks", "imports": ["trivy", "sarif", "checkov", "prowler", "kube_bench"]},
     "mobile": {"label": "Mobile app assessment", "standard": "OWASP MASVS", "imports": ["sarif"]},
+    "ai_llm": {
+        "label": "LLM vulnerability assessment",
+        "standard": "OWASP LLM Top 10 (2025)",
+        "imports": ["garak", "promptfoo", "pyrit"],
+    },
+    "ai_agent": {
+        "label": "Agentic AI security assessment",
+        "standard": "OWASP Agentic Applications",
+        "imports": ["safelabs", "promptfoo", "garak"],
+    },
 }
 
 # Short display names for common snake_case keys in UI chips and reports.
@@ -108,6 +119,9 @@ DISPLAY_LABELS = {
     "data_protection": "Data protection",
     "secrets_management": "Secrets management",
     "supply_chain": "Supply chain",
+    "ai_app": "AI application / LLM endpoint",
+    "ai_llm": "LLM vulnerability assessment",
+    "ai_agent": "Agentic AI security assessment",
     "ai_excessive_agency": "AI excessive agency",
     "ai_data_integrity": "AI data integrity",
     "ai_resource_limits": "AI resource limits",
@@ -135,6 +149,7 @@ DEFAULT_TESTS = {
     "image": ["sca_container"],
     "cloud_account": ["iac_cloud"],
     "mobile_app": ["mobile", "manual_pt"],
+    "ai_app": ["ai_llm", "ai_agent"],
 }
 
 # Workflow mapping: VA = automated scanners; PT = manual penetration test; VA+PT = both.

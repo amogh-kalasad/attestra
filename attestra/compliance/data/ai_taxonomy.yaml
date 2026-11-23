@@ -1,0 +1,720 @@
+# AASI Phase 1 — AI security taxonomy mapping (Attestra).
+# Source-backed probe/plugin → OWASP LLM Top 10 2025 / OWASP Agentic / CWE / ISO 42001.
+# Honesty rules:
+# - Do not invent CWE IDs. CWEs here are copied only from packs/iso_42001_2023.yaml llm_top10
+#   (engineering judgement already documented there; neither ISO nor OWASP publishes an official map).
+# - Garak's internal owasp:llmNN tags follow the 2023 LLM Top 10 numbering; map by behaviour to 2025.
+# - SafeLabs ASI01–ASI10 labels are OWASP-inspired and are NOT the official OWASP Agentic Top 10.
+# - Uncertain or third-party crosswalks use confidence: low or status: unverified / provisional.
+# - Categories without a dedicated shipped test are marked unmapped / not_covered — never "covered".
+
+version: "1"
+
+sources:
+  owasp_llm_top10_2025:
+    name: OWASP Top 10 for LLM Applications 2025
+    url: https://genai.owasp.org/llm-top-10/
+    edition: "2025"
+    status: published
+    note: >-
+      Attestra owasp.yaml llm_top10_2025 and iso_42001_2023.yaml llm_top10 use this edition.
+      A 2026 LLM Top 10 also exists; this file intentionally stays on 2025 to match the pack.
+
+  owasp_agentic:
+    name: OWASP Top 10 for Agentic Applications
+    project: OWASP GenAI Security Project — Agentic Security Initiative (ASI)
+    edition: "2026"
+    published: "2025-12-09"
+    url: https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/
+    status: published
+    entries_prefix: ASI
+    note: >-
+      Official entries ASI01–ASI10 (Agent Goal Hijack … Rogue Agents). Distinct from SafeLabs'
+      independently structured ASI01–ASI10 prompt taxonomy.
+
+  iso_42001_2023:
+    name: ISO/IEC 42001:2023 Artificial intelligence management system
+    pack: attestra/compliance/data/packs/iso_42001_2023.yaml
+    llm_top10_key: llm_top10
+    status: pack_present
+    note: >-
+      Control and CWE links are Attestra engineering judgement in the pack (not an official
+      ISO↔OWASP mapping). Tool references under assessment_tools are evidence sources only;
+      a clean scan never marks a 42001 control met by itself.
+
+  coverage_matrix_reference:
+    name: LLM red-team coverage matrix (independent, CC BY 4.0)
+    url: https://github.com/fevziegeyurtsevenler/redteam-coverage-matrix
+    snapshot: "2026-08-03"
+    status: third_party_reference
+    confidence: medium
+    note: >-
+      Used to cross-check which tools ship dedicated tests per LLM01–LLM10. Not an Attestra product.
+
+# ---------------------------------------------------------------------------
+# Official taxonomy entry lists (for reference / validation)
+# ---------------------------------------------------------------------------
+owasp_llm_top10_2025:
+  LLM01: Prompt Injection
+  LLM02: Sensitive Information Disclosure
+  LLM03: Supply Chain
+  LLM04: Data and Model Poisoning
+  LLM05: Improper Output Handling
+  LLM06: Excessive Agency
+  LLM07: System Prompt Leakage
+  LLM08: Vector and Embedding Weaknesses
+  LLM09: Misinformation
+  LLM10: Unbounded Consumption
+
+owasp_agentic_2026:
+  ASI01: Agent Goal Hijack
+  ASI02: Tool Misuse and Exploitation
+  ASI03: Identity and Privilege Abuse
+  ASI04: Agentic Supply Chain Vulnerabilities
+  ASI05: Unexpected Code Execution (RCE)
+  ASI06: Memory and Context Poisoning
+  ASI07: Insecure Inter-Agent Communication
+  ASI08: Cascading Failures
+  ASI09: Human-Agent Trust Exploitation
+  ASI10: Rogue Agents
+
+# CWE IDs allowed in this file — must match packs/iso_42001_2023.yaml llm_top10.cwe
+# (empty list for LLM09 is intentional; pack has no good CWE).
+cwe_from_iso_pack:
+  LLM01: [1427, 77]
+  LLM02: [200, 359]
+  LLM03: [1104, 1395, 494]
+  LLM04: [345, 494]
+  LLM05: [79, 94, 116]
+  LLM06: [250, 269, 862]
+  LLM07: [200, 1427]
+  LLM08: [284, 639]
+  LLM09: []
+  LLM10: [400, 770]
+
+# ---------------------------------------------------------------------------
+# Tools → probe/plugin/scenario families
+# ---------------------------------------------------------------------------
+tools:
+  garak:
+    name: NVIDIA garak (Generative AI Red-teaming & Assessment Kit)
+    kind: probe_suite
+    docs: https://reference.garak.ai/
+    repo: https://github.com/NVIDIA/garak
+    numbering_caveat: >-
+      Probe tags owasp:llmNN follow the 2023 LLM Top 10 numbering. Map by behaviour to
+      2025 IDs below; do not reuse the tag number as a 2025 ID.
+    probes:
+      promptinject:
+        owasp_llm: [LLM01]
+        cwe: [1427, 77]
+        iso_controls: ["A.6.2.4", "A.6.2.3", "A.9.4"]
+        confidence: high
+        source: "garak.probes.promptinject tags include owasp:llm01; behaviour = direct injection (2025 LLM01)"
+      latentinjection:
+        owasp_llm: [LLM01]
+        cwe: [1427, 77]
+        iso_controls: ["A.6.2.4", "A.6.2.3", "A.9.4"]
+        confidence: high
+        source: "garak/probes/latentinjection.py — indirect/latent injection family"
+      dan:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Jailbreak/DAN family; treated as prompt-injection bypass (LLM01)"
+      encoding:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Obfuscated instruction delivery (base64/ROT13/hex); injection bypass"
+      leakreplay:
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2", "A.5.4"]
+        confidence: high
+        source: "Training-data / memorisation replay; sensitive disclosure (2025 LLM02)"
+      web_injection:
+        owasp_llm: [LLM02, LLM05]
+        cwe: [79, 200]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Markdown/image XSS and exfil patterns (formerly xss.py); disclosure + improper output"
+      packagehallucination:
+        owasp_llm: [LLM03, LLM09]
+        cwe: [1104, 494]
+        iso_controls: ["A.4.4", "A.10.3"]
+        confidence: medium
+        source: "garak tags owasp:llm09 + owasp:llm02 (2023); behaviour ≈ package supply-chain + misinformation"
+        coverage: partial
+        note: "Consumer-side dependency hallucination, not an SBOM/dependency audit"
+      fileformats:
+        owasp_llm: [LLM03, LLM05]
+        cwe: [494]
+        iso_controls: ["A.4.4"]
+        confidence: low
+        status: unverified
+        coverage: partial
+        source: "Cited in third-party coverage matrix for malicious model-file formats"
+      sysprompt_extraction:
+        owasp_llm: [LLM07]
+        cwe: [200, 1427]
+        iso_controls: ["A.6.2.4", "A.6.2.3"]
+        confidence: high
+        source: "Dedicated system-prompt extraction; garak tags owasp:llm01 (2023) but behaviour = 2025 LLM07"
+      propile:
+        owasp_llm: [LLM07]
+        cwe: [200]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "System-prompt / PII extraction family (with sysprompt_extraction)"
+      snowball:
+        owasp_llm: [LLM09]
+        cwe: []
+        iso_controls: ["A.6.2.4", "A.6.2.7", "A.8.2"]
+        confidence: high
+        source: "Snowballed hallucination probes"
+      misleading:
+        owasp_llm: [LLM09]
+        cwe: []
+        iso_controls: ["A.6.2.4", "A.8.2"]
+        confidence: high
+        source: "False-claim / misleading support probes"
+      agent_breaker:
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02]
+        cwe: [250, 269, 862]
+        iso_controls: ["A.6.2.2", "A.9.2", "A.9.4"]
+        confidence: low
+        coverage: partial
+        source: "Agentic/tool-using breaker; no general tool-permission enumeration"
+      divergence:
+        owasp_llm: [LLM02, LLM10]
+        cwe: [400, 770, 200]
+        iso_controls: ["A.6.2.5", "A.6.2.6"]
+        confidence: low
+        coverage: partial
+        source: "Divergence/repetition ≈ runaway generation + possible memorisation leak"
+      ansiescape:
+        owasp_llm: [LLM05]
+        cwe: [116]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "ANSI escape sequences for downstream consumers"
+      unmapped_known_gaps:
+        - probe_gap: LLM04 Data and Model Poisoning
+          status: not_covered
+          note: "garak probes inference output; it does not poison training or retrieval data"
+        - probe_gap: LLM08 Vector and Embedding Weaknesses
+          status: not_covered
+          note: "No dedicated RAG/vector/embedding probe family verified in public docs used here"
+
+  promptfoo:
+    name: promptfoo red-team
+    kind: plugin_strategy_framework
+    docs: https://www.promptfoo.dev/docs/red-team/owasp-llm-top-10/
+    repo: https://github.com/promptfoo/promptfoo
+    plugins:
+      owasp_llm_01_preset:
+        id: owasp:llm:01
+        owasp_llm: [LLM01]
+        cwe: [1427, 77]
+        iso_controls: ["A.6.2.4", "A.6.2.3", "A.9.4"]
+        confidence: high
+        source: "Official promptfoo OWASP LLM Top 10 page — LLM01 preset"
+      indirect_prompt_injection:
+        id: indirect-prompt-injection
+        owasp_llm: [LLM01, LLM08]
+        cwe: [1427, 284]
+        iso_controls: ["A.6.2.4", "A.6.2.3"]
+        confidence: high
+        source: "Retrieved-context injection; also RAG/vector class (LLM08)"
+      jailbreak_strategies:
+        id: "jailbreak / jailbreak-templates / jailbreak:tree"
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: high
+        source: "Strategies layered on plugins for injection bypass"
+      pii_direct:
+        id: pii:direct
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2", "A.5.4"]
+        confidence: high
+        source: "promptfoo OWASP LLM02 section"
+      pii_session:
+        id: pii:session
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2"]
+        confidence: high
+        source: "Cross-session PII leak plugin"
+      pii_api_db:
+        id: pii:api-db
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2"]
+        confidence: high
+        source: "Unauthorized API/DB PII access attempts"
+      pii_social:
+        id: pii:social
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.5.4"]
+        confidence: medium
+        source: "Social-engineering PII extraction"
+      harmful_privacy:
+        id: harmful:privacy
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2"]
+        confidence: medium
+        source: "Privacy harm category under LLM02"
+      model_audit_supply_chain:
+        id: ModelAudit / model-comparison
+        owasp_llm: [LLM03]
+        cwe: [1104, 1395, 494]
+        iso_controls: ["A.4.4", "A.10.3"]
+        confidence: low
+        coverage: partial
+        source: "promptfoo LLM03 page points to ModelAudit / comparison — not a red-team attack plugin"
+      owasp_llm_04_preset:
+        id: owasp:llm:04
+        owasp_llm: [LLM04]
+        cwe: [345, 494]
+        iso_controls: ["A.7.4", "A.7.5", "A.6.2.6"]
+        confidence: low
+        coverage: partial
+        source: "Preset maps to harmful/overreliance/hallucination — behavioural proxy, not training poisoning"
+      sql_injection:
+        id: sql-injection
+        owasp_llm: [LLM05]
+        cwe: [94, 116]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Output used as query — improper output handling"
+      shell_injection:
+        id: shell-injection
+        owasp_llm: [LLM05]
+        cwe: [94, 116]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Output used as shell — improper output handling"
+      ssrf:
+        id: ssrf
+        owasp_llm: [LLM05]
+        cwe: []
+        iso_controls: ["A.6.2.4"]
+        confidence: low
+        status: unverified
+        note: "Plugin exists; CWE-918 is not in iso_42001 llm_top10 for LLM05 — no pack CWE attached"
+      excessive_agency:
+        id: excessive-agency
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02]
+        cwe: [250, 269, 862]
+        iso_controls: ["A.6.2.2", "A.9.2", "A.9.4"]
+        confidence: high
+        source: "Dedicated agency plugin; owasp:llm:06 preset"
+      rbac:
+        id: rbac
+        owasp_llm: [LLM06, LLM08]
+        cwe: [862, 284]
+        iso_controls: ["A.6.2.4", "A.9.2"]
+        confidence: medium
+        source: "RBAC enforcement; also used for RAG access-control (LLM08)"
+      hijacking:
+        id: hijacking
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI01]
+        cwe: [250, 862]
+        iso_controls: ["A.9.2", "A.9.4"]
+        confidence: medium
+        source: "Goal/role hijacking of agent objectives"
+      prompt_extraction:
+        id: prompt-extraction
+        owasp_llm: [LLM07]
+        cwe: [200, 1427]
+        iso_controls: ["A.6.2.4", "A.6.2.3"]
+        confidence: high
+        source: "Requires systemPrompt config; dedicated LLM07 test"
+      bola:
+        id: bola
+        owasp_llm: [LLM08]
+        cwe: [639, 284]
+        iso_controls: ["A.6.2.3", "A.6.2.4", "A.7.2"]
+        confidence: medium
+        source: "Broken object-level auth in RAG/API context"
+      bfla:
+        id: bfla
+        owasp_llm: [LLM08]
+        cwe: [284]
+        iso_controls: ["A.6.2.3", "A.6.2.4"]
+        confidence: medium
+        source: "Broken function-level auth in RAG/API context"
+      rag_document_exfiltration:
+        id: rag-document-exfiltration
+        owasp_llm: [LLM08, LLM02]
+        cwe: [200, 284]
+        iso_controls: ["A.6.2.4", "A.7.2"]
+        confidence: medium
+        source: "RAG document exfiltration plugin"
+      rag_poisoning:
+        id: rag-poisoning
+        owasp_llm: [LLM08, LLM04]
+        cwe: [345]
+        iso_controls: ["A.6.2.3", "A.7.4"]
+        confidence: low
+        coverage: partial
+        source: "RAG poisoning utility — resilience test, not proof of training-data integrity"
+      hallucination:
+        id: hallucination
+        owasp_llm: [LLM09]
+        cwe: []
+        iso_controls: ["A.6.2.4", "A.6.2.7", "A.8.2"]
+        confidence: high
+        source: "owasp:llm:09 preset"
+      overreliance:
+        id: overreliance
+        owasp_llm: [LLM09]
+        cwe: []
+        iso_controls: ["A.6.2.7", "A.8.2", "A.5.3"]
+        confidence: medium
+        source: "Overreliance / unverifiable claims adjacent to misinformation"
+      divergent_repetition:
+        id: divergent-repetition
+        owasp_llm: [LLM10]
+        cwe: [400, 770]
+        iso_controls: ["A.6.2.5", "A.6.2.6", "A.4.5"]
+        confidence: medium
+        coverage: partial
+        source: "Narrower than full unbounded consumption (cost/rate/DoS)"
+      tool_discovery:
+        id: tool-discovery
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02]
+        cwe: [200, 269]
+        iso_controls: ["A.6.2.2", "A.9.2"]
+        confidence: low
+        source: "Reveals available tools/functions"
+      mcp:
+        id: mcp
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02, ASI04]
+        cwe: [269, 862]
+        iso_controls: ["A.6.2.2", "A.9.2", "A.10.3"]
+        confidence: low
+        status: unverified
+        source: "MCP plugin — agentic tool surface; exact OWASP Agentic mapping provisional"
+
+  safelabs:
+    name: AgentSafeLabs safelabs-eval
+    kind: agent_eval_suite
+    docs: https://github.com/AgentSafeLabs/safelabs-eval
+    repo: https://github.com/AgentSafeLabs/safelabs-eval
+    taxonomy_warning: >-
+      safelabs-eval ASI01–ASI10 is an independently structured, OWASP-inspired category set.
+      It is NOT the official OWASP Top 10 for Agentic Applications 2026. Crosswalk below is
+      Attestra judgement with confidence: low. Cap imported findings at potential.
+    tests:
+      ASI01_prompt_injection:
+        safelabs_id: ASI01
+        safelabs_name: Prompt Injection
+        owasp_llm: [LLM01]
+        owasp_agentic: [ASI01]
+        cwe: [1427, 77]
+        iso_controls: ["A.6.2.4", "A.6.2.3", "A.9.4"]
+        confidence: low
+        status: unverified
+        source: "SafeLabs detector PromptInjectionDetector; crosswalk Goal Hijack ≈ injection on agents"
+      ASI02_insecure_output:
+        safelabs_id: ASI02
+        safelabs_name: Insecure Output Handling
+        owasp_llm: [LLM05]
+        owasp_agentic: [ASI05]
+        cwe: [79, 94, 116]
+        iso_controls: ["A.6.2.4"]
+        confidence: low
+        status: unverified
+        source: "Name aligns with improper output; Agentic Unexpected Code Execution is a partial analogue"
+      ASI03_excessive_agency:
+        safelabs_id: ASI03
+        safelabs_name: Excessive Agency
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02]
+        cwe: [250, 269, 862]
+        iso_controls: ["A.6.2.2", "A.9.2", "A.9.4"]
+        confidence: low
+        status: unverified
+        source: "ScopeViolationDetector; Tool Misuse is closest official Agentic entry"
+      ASI04_resource_management:
+        safelabs_id: ASI04
+        safelabs_name: Resource Management
+        owasp_llm: [LLM10]
+        owasp_agentic: [ASI08]
+        cwe: [400, 770]
+        iso_controls: ["A.6.2.5", "A.6.2.6", "A.4.5"]
+        confidence: low
+        status: unverified
+        coverage: partial
+        source: "Resource exhaustion ≈ Unbounded Consumption; Cascading Failures is a weak Agentic analogue"
+      ASI05_tool_use_safety:
+        safelabs_id: ASI05
+        safelabs_name: Tool Use Safety
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02]
+        cwe: [250, 269]
+        iso_controls: ["A.6.2.2", "A.9.2"]
+        confidence: low
+        status: unverified
+        source: "Tool-use safety prompts → Tool Misuse & Exploitation"
+      ASI06_data_privacy:
+        safelabs_id: ASI06
+        safelabs_name: Data Privacy and Confidentiality
+        owasp_llm: [LLM02]
+        owasp_agentic: []
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2", "A.5.4"]
+        confidence: low
+        status: unverified
+        source: "DataLeakageDetector; no single Agentic Top 10 entry is a clean match"
+      ASI07_trust_boundaries:
+        safelabs_id: ASI07
+        safelabs_name: Trust Boundaries
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI03, ASI07]
+        cwe: [269, 862]
+        iso_controls: ["A.9.2", "A.9.4"]
+        confidence: low
+        status: unverified
+        source: "Provisional — Identity/Privilege Abuse and Inter-Agent Communication both plausible"
+      ASI08_behavioral_drift:
+        safelabs_id: ASI08
+        safelabs_name: Behavioral Drift (single-turn)
+        owasp_llm: [LLM01]
+        owasp_agentic: [ASI01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4", "A.9.4"]
+        confidence: low
+        status: unverified
+        source: "JailbreakDetector; jailbreak ≈ goal/instruction hijack"
+      ASI09_scope_violations:
+        safelabs_id: ASI09
+        safelabs_name: Scope Violations
+        owasp_llm: [LLM06]
+        owasp_agentic: [ASI02, ASI09]
+        cwe: [250, 862]
+        iso_controls: ["A.9.2", "A.9.4"]
+        confidence: low
+        status: unverified
+        source: "ScopeViolationDetector; maps loosely to agency / trust exploitation"
+      ASI10_hallucination:
+        safelabs_id: ASI10
+        safelabs_name: Hallucination / misinformation (eval_type hallucination)
+        owasp_llm: [LLM09]
+        owasp_agentic: []
+        cwe: []
+        iso_controls: ["A.6.2.4", "A.6.2.7", "A.8.2"]
+        confidence: low
+        status: unverified
+        source: "CATEGORY_EVAL_TYPE ASI10 → hallucination; no clean Agentic Top 10 analogue"
+
+  pyrit:
+    name: Microsoft PyRIT (Python Risk Identification Tool)
+    kind: attack_framework
+    docs: https://microsoft.github.io/PyRIT/
+    repo: https://github.com/microsoft/PyRIT
+    note: >-
+      PyRIT ships composable attacks/scenarios rather than a fixed OWASP catalogue.
+      Official OWASP mappings are not published by Microsoft; entries below are behaviour-based
+      with confidence medium/low. Multi-turn jailbreaks primarily evidence LLM01.
+    scenarios:
+      crescendo:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "Multi-turn gradual jailbreak (CrescendoAttack); injection/policy bypass"
+      pair:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "PAIRAttack — multi-turn prompt automatic iterative refinement"
+      tree_of_attacks:
+        id: tap
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "TreeOfAttacksWithPruningAttack (TAP)"
+      red_teaming:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "RedTeamingAttack generic adversarial loop"
+      many_shot_jailbreak:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: medium
+        source: "ManyShotJailbreakAttack"
+      skeleton_key:
+        owasp_llm: [LLM01]
+        cwe: [1427]
+        iso_controls: ["A.6.2.4"]
+        confidence: low
+        source: "Skeleton Key jailbreak technique; policy-bypass framing"
+      airt_leakage_dataset:
+        owasp_llm: [LLM02]
+        cwe: [200, 359]
+        iso_controls: ["A.6.2.4", "A.7.2"]
+        confidence: low
+        coverage: partial
+        source: "airt_leakage / privacy harm datasets — scoring objectives, not dedicated PII probes"
+      airt_misinformation_dataset:
+        owasp_llm: [LLM09]
+        cwe: []
+        iso_controls: ["A.6.2.4", "A.8.2"]
+        confidence: low
+        coverage: partial
+        source: "airt_misinformation harm dataset + anecdoctor-style generation"
+      unmapped_known_gaps:
+        - scenario_gap: LLM03 Supply Chain
+          status: not_covered
+          note: "No active supply-chain executor; scoring rubrics alone are not coverage"
+        - scenario_gap: LLM04 Data and Model Poisoning
+          status: not_covered
+        - scenario_gap: LLM06 Excessive Agency
+          status: not_covered
+          note: "No shipped agent/tool-permission executor; buildable with custom PromptTarget only"
+        - scenario_gap: LLM07 System Prompt Leakage
+          status: not_covered
+          note: "Achievable via custom objective + multi-turn attacks; nothing turnkey shipped"
+        - scenario_gap: LLM08 Vector and Embedding Weaknesses
+          status: not_covered
+        - scenario_gap: LLM10 Unbounded Consumption
+          status: not_covered
+
+# ---------------------------------------------------------------------------
+# Attestra test types → taxonomy refs (authoritative for ai_llm / ai_agent)
+# ---------------------------------------------------------------------------
+categories:
+  ai_llm:
+    description: >-
+      LLM application security testing (model/API chatbot surfaces without autonomous tool agency).
+      Primary taxonomy: OWASP LLM Top 10 2025. ISO 42001 llm_top10 controls via pack.
+    primary_taxonomy: owasp_llm_top10_2025
+    secondary_taxonomy: iso_42001_2023
+    tools: [garak, promptfoo, pyrit]
+    covered_llm:
+      - id: LLM01
+        tools: [garak, promptfoo, pyrit]
+        status: testable
+      - id: LLM02
+        tools: [garak, promptfoo]
+        status: testable
+        note: "PyRIT only partial via leakage datasets"
+      - id: LLM03
+        tools: [garak, promptfoo]
+        status: partial
+        note: "Package hallucination / ModelAudit proxies — not full SBOM supply-chain audit"
+      - id: LLM04
+        tools: [promptfoo]
+        status: partial
+        note: "Behavioural proxy only; training/RAG poisoning not directly tested"
+      - id: LLM05
+        tools: [garak, promptfoo]
+        status: testable
+      - id: LLM06
+        tools: [promptfoo, garak]
+        status: partial
+        note: "promptfoo dedicated; garak agent_breaker partial; PyRIT not covered"
+      - id: LLM07
+        tools: [garak, promptfoo]
+        status: testable
+      - id: LLM08
+        tools: [promptfoo]
+        status: testable
+        note: "garak/PyRIT have no dedicated vector/embedding probes"
+      - id: LLM09
+        tools: [garak, promptfoo]
+        status: testable
+      - id: LLM10
+        tools: [garak, promptfoo]
+        status: partial
+    not_claiming:
+      - "ISO 42001 control 'met' from tool output alone"
+      - "Official ISO↔OWASP CWE mapping (pack is engineering judgement)"
+      - "Full supply-chain or training-data poisoning proof from these scanners"
+
+  ai_agent:
+    description: >-
+      Agentic application testing (planning, tools, memory, multi-agent). Primary taxonomy:
+      OWASP Top 10 for Agentic Applications 2026 (ASI01–ASI10). SafeLabs results must be
+      remapped via tools.safelabs.tests and never treated as already-official ASI IDs.
+    primary_taxonomy: owasp_agentic_2026
+    secondary_taxonomy: owasp_llm_top10_2025
+    tools: [safelabs, promptfoo, garak, pyrit]
+    covered_agentic:
+      - id: ASI01
+        tools: [promptfoo, safelabs, garak]
+        status: partial
+        confidence: low
+        note: "Goal hijack ≈ hijacking / injection families; SafeLabs crosswalk unverified"
+      - id: ASI02
+        tools: [promptfoo, safelabs, garak]
+        status: partial
+        confidence: low
+        note: "Tool misuse ≈ excessive-agency / agent_breaker / SafeLabs ASI03/ASI05"
+      - id: ASI03
+        tools: [safelabs]
+        status: unverified
+        confidence: low
+        note: "Provisional SafeLabs ASI07 crosswalk only"
+      - id: ASI04
+        tools: [promptfoo]
+        status: unverified
+        confidence: low
+        note: "MCP plugin provisional; no dedicated agentic supply-chain suite"
+      - id: ASI05
+        tools: [promptfoo, safelabs]
+        status: partial
+        confidence: low
+        note: "shell/sql injection + SafeLabs insecure output — incomplete RCE coverage"
+      - id: ASI06
+        tools: []
+        status: not_covered
+        note: "No dedicated memory/context-poisoning test mapped in this Phase 1 file"
+      - id: ASI07
+        tools: [safelabs]
+        status: unverified
+        confidence: low
+      - id: ASI08
+        tools: [safelabs]
+        status: unverified
+        confidence: low
+        coverage: partial
+      - id: ASI09
+        tools: [safelabs]
+        status: unverified
+        confidence: low
+      - id: ASI10
+        tools: []
+        status: not_covered
+        note: "Rogue Agents — no mapped tool coverage in Phase 1"
+    not_claiming:
+      - "SafeLabs ASI IDs equal official OWASP Agentic ASI IDs"
+      - "Full Agentic Top 10 coverage"
+      - "Confirmed findings from pattern-only SafeLabs detectors (cap at potential)"
+
+honesty:
+  - "CWE lists are reused from iso_42001_2023.yaml llm_top10 only; empty for LLM09."
+  - "Garak owasp:llm tag numbers are 2023-era; behaviour mapping is required."
+  - "SafeLabs ASI labels differ from OWASP Agentic ASI labels — always remap."
+  - "partial / not_covered / unverified mean unsupported categories are not treated as covered."
+  - "assessment_tools on the ISO pack name evidence sources; they do not invent new CWEs or claim met."
+

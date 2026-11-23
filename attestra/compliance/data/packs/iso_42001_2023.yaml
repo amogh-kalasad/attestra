@@ -189,6 +189,10 @@ checks:
 # neither ISO nor OWASP publishes an official mapping. strength: full = the CWE squarely names the
 # weakness and a test gives direct (still partial-control) evidence; partial = indirect link.
 # CWE-1426 is deliberately not used (MITRE marks it DISCOURAGED for mapping).
+#
+# assessment_tools: imported LLM/agent probe results that can support (never alone prove) the
+# linked controls. Full probe→LLM→CWE matrix: attestra/compliance/data/ai_taxonomy.yaml.
+# Do not invent CWEs here; tool refs only where a real shipped test exists.
 llm_top10:
   LLM01:
     name: Prompt Injection
@@ -196,6 +200,7 @@ llm_top10:
     cwe: [1427, 77]
     strength: full
     active_test: true
+    assessment_tools: [garak, promptfoo, pyrit, safelabs]
     rationale: CWE-1427 is the dedicated CWE for unneutralised input in LLM prompts; probe results evidence verification (A.6.2.4), the threat model (A.6.2.3) and intended-use limits (A.9.4).
   LLM02:
     name: Sensitive Information Disclosure
@@ -203,6 +208,7 @@ llm_top10:
     cwe: [200, 359]
     strength: partial
     active_test: true
+    assessment_tools: [garak, promptfoo, safelabs]
     rationale: Leak tests show exposure in answers but not how data is governed; data management (A.7.2) and impact on individuals (A.5.4) need records and an assessor.
   LLM03:
     name: Supply Chain
@@ -210,20 +216,25 @@ llm_top10:
     cwe: [1104, 1395, 494]
     strength: full
     active_test: false
-    rationale: SBOM and dependency scans directly evidence the model and library register (A.4.4) and supplier checks (A.10.3); data sources (A.7.3) still need acquisition records.
+    assessment_tools: [garak, promptfoo]
+    assessment_coverage: partial
+    rationale: SBOM and dependency scans directly evidence the model and library register (A.4.4) and supplier checks (A.10.3); data sources (A.7.3) still need acquisition records. Garak packagehallucination and Promptfoo ModelAudit are proxies only, not a full SBOM audit.
   LLM04:
     name: Data and Model Poisoning
     controls: ["A.7.4", "A.7.5", "A.6.2.6"]
     cwe: [345, 494]
     strength: partial
     active_test: false
-    rationale: Integrity and authenticity weaknesses point at poisoning risk, but data quality and lineage (A.7.4, A.7.5) are proven by records, not scans.
+    assessment_tools: [promptfoo]
+    assessment_coverage: partial
+    rationale: Integrity and authenticity weaknesses point at poisoning risk, but data quality and lineage (A.7.4, A.7.5) are proven by records, not scans. Promptfoo owasp:llm:04 is a behavioural proxy, not a training-poisoning test.
   LLM05:
     name: Improper Output Handling
     controls: ["A.6.2.4"]
     cwe: [79, 94, 116]
     strength: full
     active_test: true
+    assessment_tools: [garak, promptfoo, safelabs]
     rationale: Model output reaching a browser, interpreter or query is classic injection (CWE-79/94/116, as MITRE suggests instead of CWE-1426); tests evidence verification (A.6.2.4).
   LLM06:
     name: Excessive Agency
@@ -231,13 +242,16 @@ llm_top10:
     cwe: [250, 269, 862]
     strength: partial
     active_test: true
-    rationale: Privilege CWEs describe part of the risk; agency limits must also be in requirements (A.6.2.2) and responsible-use processes (A.9.2, A.9.4).
+    assessment_tools: [promptfoo, garak, safelabs]
+    assessment_coverage: partial
+    rationale: Privilege CWEs describe part of the risk; agency limits must also be in requirements (A.6.2.2) and responsible-use processes (A.9.2, A.9.4). PyRIT has no shipped agency executor.
   LLM07:
     name: System Prompt Leakage
     controls: ["A.6.2.4", "A.6.2.3"]
     cwe: [200, 1427]
     strength: partial
     active_test: true
+    assessment_tools: [garak, promptfoo]
     rationale: Leakage is shown by probes (A.6.2.4); the design record (A.6.2.3) should keep secrets out of prompts, which only an assessor can confirm.
   LLM08:
     name: Vector and Embedding Weaknesses
@@ -245,13 +259,15 @@ llm_top10:
     cwe: [284, 639]
     strength: partial
     active_test: true
-    rationale: Access-control CWEs cover cross-tenant retrieval; embedding data governance (A.7.2) and design (A.6.2.3) need evidence.
+    assessment_tools: [promptfoo]
+    rationale: Access-control CWEs cover cross-tenant retrieval; embedding data governance (A.7.2) and design (A.6.2.3) need evidence. Garak/PyRIT have no dedicated vector probe.
   LLM09:
     name: Misinformation
     controls: ["A.6.2.4", "A.6.2.7", "A.8.2", "A.5.3"]
     cwe: []
     strength: partial
     active_test: false
+    assessment_tools: [garak, promptfoo, safelabs]
     rationale: No good CWE exists; verified through evaluation results, user documentation of limits (A.6.2.7, A.8.2) and impact records (A.5.3) with human review.
   LLM10:
     name: Unbounded Consumption
@@ -259,4 +275,35 @@ llm_top10:
     cwe: [400, 770]
     strength: full
     active_test: true
-    rationale: CWE-400/770 squarely describe missing rate and cost limits; endpoint checks evidence deployment (A.6.2.5) and operations (A.6.2.6) controls.
+    assessment_tools: [garak, promptfoo, safelabs]
+    assessment_coverage: partial
+    rationale: CWE-400/770 squarely describe missing rate and cost limits; endpoint checks evidence deployment (A.6.2.5) and operations (A.6.2.6) controls. Tool coverage is divergence/repetition style, not full cost/DoS proof.
+
+# AI red-team tools usable as assessment evidence sources for llm_top10 / A.6.2.4.
+# Import results support verification; they never alone mark a 42001 control met.
+# Probe→taxonomy detail: attestra/compliance/data/ai_taxonomy.yaml
+assessment_tools:
+  garak:
+    role: llm_probe_suite
+    evidence_for: ["A.6.2.4", "A.6.2.3", "A.9.4"]
+    llm_top10: [LLM01, LLM02, LLM03, LLM05, LLM06, LLM07, LLM09, LLM10]
+    coverage_notes: "No dedicated LLM04 or LLM08 probes; LLM03/06/10 partial. Garak owasp:llm tags use 2023 numbering — remap by behaviour."
+  promptfoo:
+    role: redteam_plugins
+    evidence_for: ["A.6.2.4", "A.6.2.2", "A.9.2", "A.9.4", "A.7.2"]
+    llm_top10: [LLM01, LLM02, LLM03, LLM04, LLM05, LLM06, LLM07, LLM08, LLM09, LLM10]
+    coverage_notes: "Broadest OWASP-preset coverage; LLM03/04/10 often partial per vendor docs."
+  safelabs:
+    role: agent_eval
+    evidence_for: ["A.6.2.4", "A.6.2.2", "A.9.2", "A.9.4"]
+    llm_top10: [LLM01, LLM02, LLM05, LLM06, LLM09, LLM10]
+    coverage_notes: "ASI01–ASI10 labels are OWASP-inspired, not official Agentic Top 10; remap via ai_taxonomy.yaml. Cap findings at potential."
+  pyrit:
+    role: multi_turn_attacks
+    evidence_for: ["A.6.2.4"]
+    llm_top10: [LLM01]
+    coverage_notes: "Turnkey strength is jailbreak/injection (LLM01); other LLM categories not claimed as covered without custom scenarios."
+
+ai_tools:
+  taxonomy_ref: attestra/compliance/data/ai_taxonomy.yaml
+  note: Alias of assessment_tools for AASI Phase 1 docs; prefer assessment_tools in new code.

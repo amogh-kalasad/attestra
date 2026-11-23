@@ -5,12 +5,16 @@ from __future__ import annotations
 from attestra.runner.scanners.base import ScannerAdapter
 from attestra.runner.scanners.checkov import CheckovAdapter
 from attestra.runner.scanners.dnsx import DnsxAdapter
+from attestra.runner.scanners.garak import GarakAdapter
 from attestra.runner.scanners.gitleaks import GitleaksAdapter
 from attestra.runner.scanners.httpx_probe import HttpxProbeAdapter
 from attestra.runner.scanners.kube_bench import KubeBenchAdapter
 from attestra.runner.scanners.naabu import NaabuAdapter
 from attestra.runner.scanners.nuclei import NucleiAdapter
+from attestra.runner.scanners.promptfoo import PromptfooAdapter
 from attestra.runner.scanners.prowler import ProwlerAdapter
+from attestra.runner.scanners.pyrit import PyRITAdapter
+from attestra.runner.scanners.safelabs import SafeLabsAdapter
 from attestra.runner.scanners.semgrep import SemgrepAdapter
 from attestra.runner.scanners.subfinder import SubfinderAdapter
 from attestra.runner.scanners.testssl import TlsTestsslAdapter
@@ -30,6 +34,12 @@ _ADAPTERS: dict[str, ScannerAdapter] = {
     "checkov": CheckovAdapter(),
     "naabu": NaabuAdapter(),
     "webcheck": WebcheckAdapter(),
+    # AASI Phase 2 — AI-security scanners (digest-pinned; ai_app targets only).
+    "garak": GarakAdapter(),
+    "promptfoo": PromptfooAdapter(),
+    "safelabs": SafeLabsAdapter(),
+    # AASI Phase 5 — PyRIT multi-turn isolated worker.
+    "pyrit": PyRITAdapter(),
     # WP4 passive discovery (T0/T1; candidates only, never findings; off unless
     # ATTESTRA_DISCOVERY_ENABLED=1). Not offered in the UI scan picker (web/ui.SCAN_TOOLS).
     "subfinder": SubfinderAdapter(),

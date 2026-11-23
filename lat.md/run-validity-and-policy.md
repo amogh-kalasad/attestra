@@ -18,7 +18,7 @@ Only `APP_AUTH_DENIED` and `AUTH_REDIRECT` are security-control evidence; [[atte
 
 Precedence: 80% network failures, then session loss (guard or `AUTH_EXPIRED` sample), challenge, rate limit, WAF block, too few usable samples, VALID. `CaseValidity` accumulates per case; `aggregate_run` produces the persisted `{state, reasons, sample_count, by_class, affected_cases, computed_at, version: "rv1"}`. Rows written before WP1 read as `NOT_COMPUTED`.
 
-[[attestra/automated_vapt/core/run_validity.py#gate_case_status]] returns PASSED only for a VALID case with no hint and no finding (legacy modules without samples keep PASSED). [[attestra/automated_vapt/core/run_validity.py#cap_validation_status]] downgrades CONFIRMED to POTENTIAL when the case is not VALID.
+[[attestra/automated_vapt/core/run_validity.py#gate_case_status]] returns PASSED only for a VALID case with no hint and no finding (legacy modules without samples keep PASSED). [[attestra/automated_vapt/core/run_validity.py#cap_validation_status]] downgrades CONFIRMED to POTENTIAL when the case is not VALID. AASI Phase 2: [[attestra/automated_vapt/core/run_validity.py#ai_tool_outcome_to_status]] maps empty / refused / rate-limited / failed AI-tool outcomes to ``NOT_TESTED`` (never PASSED); adapters with HTTP samples still use ``RATE_LIMITED`` validity state + gating. See [[aasi#Phase 2 coverage and AI-tool validity]].
 
 ## Intrusive policy
 

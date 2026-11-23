@@ -1,0 +1,5 @@
+{
+  "evalId": "not-a-promptfoo-summary",
+  "note": "missing results.results array and EvaluateSummary fields",
+  "config": { "description": "intentionally unsupported" }
+}

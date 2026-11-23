@@ -80,6 +80,12 @@ _PLACEHOLDER_IMAGES = {
     "subfinder": "docker.io/projectdiscovery/subfinder@sha256:0000000000000000000000000000000000000000000000000000000000000009",
     "dnsx": "docker.io/projectdiscovery/dnsx@sha256:000000000000000000000000000000000000000000000000000000000000000a",
     "httpx": "docker.io/projectdiscovery/httpx@sha256:000000000000000000000000000000000000000000000000000000000000000b",
+    # AASI Phase 2 AI-security scanners (VERIFY: replace with real digests after docker inspect).
+    "garak": "docker.io/nvidia/garak@sha256:000000000000000000000000000000000000000000000000000000000000000c",
+    "promptfoo": "docker.io/promptfoo/promptfoo@sha256:000000000000000000000000000000000000000000000000000000000000000d",
+    "safelabs": "docker.io/agentsafelabs/safelabs-eval@sha256:000000000000000000000000000000000000000000000000000000000000000e",
+    # AASI Phase 5 PyRIT isolated worker (VERIFY: replace with real digest after docker inspect).
+    "pyrit": "docker.io/attestra/pyrit-worker@sha256:000000000000000000000000000000000000000000000000000000000000000f",
 }
 SCANNER_IMAGES = {
     tool: os.environ.get(f"ATTESTRA_IMAGE_{tool.upper()}", default) for tool, default in _PLACEHOLDER_IMAGES.items()
@@ -108,6 +114,22 @@ def require_image_digest(image: str) -> str:
         raise ValueError(f"scanner image must be pinned with @sha256: digest, got {image!r}")
     return image
 
+
+# AASI (Attestra Agentic Security Intelligence). Off by default.
+# When off, AASI routes must not expose reasoning; deterministic workflows unchanged.
+AASI_ENABLED = os.environ.get("ATTESTRA_AASI", "off").strip().lower() in ("1", "true", "yes", "on")
+AASI_MAX_ITERATIONS = int(os.environ.get("ATTESTRA_AASI_MAX_ITERATIONS", "8"))
+AASI_MAX_TASKS = int(os.environ.get("ATTESTRA_AASI_MAX_TASKS", "32"))
+AASI_MAX_MODEL_CALLS = int(os.environ.get("ATTESTRA_AASI_MAX_MODEL_CALLS", "40"))
+AASI_MAX_TOKENS = int(os.environ.get("ATTESTRA_AASI_MAX_TOKENS", "50000"))
+AASI_MAX_WALL_CLOCK_S = int(os.environ.get("ATTESTRA_AASI_MAX_WALL_CLOCK_S", "1800"))
+AASI_RETRY_LIMIT = int(os.environ.get("ATTESTRA_AASI_RETRY_LIMIT", "2"))
+AASI_REQUIRE_APPROVAL = os.environ.get("ATTESTRA_AASI_REQUIRE_APPROVAL", "on").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 
 # Authenticated website testing (market-gap Phase 6). Off by default.
 AUTH_WEB_ENABLED = os.environ.get("ATTESTRA_AUTH_WEB_ENABLED", "").lower() in ("1", "true", "yes")

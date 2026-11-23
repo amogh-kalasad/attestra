@@ -18,6 +18,10 @@ Tool keys registered in [[attestra/importers/__init__.py#PARSERS]] and their par
 | `ssllabs` | [[attestra/importers/ssllabs.py#parse]] | Saved Qualys SSL Labs Host JSON (upload only) |
 | `burp` | [[attestra/importers/burp.py#parse]] | Burp Suite Issues XML export |
 | `nessus` | [[attestra/importers/nessus.py#parse]] | Nessus `.nessus` v2 XML |
+| `garak` | [[attestra/importers/garak.py#parse]] | Garak JSONL / hitlog (detector hits only) |
+| `promptfoo` | [[attestra/importers/promptfoo.py#parse]] | Promptfoo `eval` / redteam `results.json` |
+| `safelabs` | [[attestra/importers/safelabs.py#parse]] | safelabs-eval JSON / EvalResult |
+| `pyrit` | [[attestra/importers/pyrit.py#parse]] | PyRIT attack-result JSON/JSONL |
 
 Entry point: [[attestra/importers/__init__.py#parse]].
 
@@ -48,6 +52,30 @@ Scanner diagnostics stay on the import/scan record; they are not findings.
 Report box for protocols, ciphers, certificate and OCSP from the latest testssl result.
 
 [[attestra/importers/testssl.py#summarize]] fills those fields from raw JSON. [[attestra/services.py#tls_summaries]] reads the latest testssl scan or import per engagement, adds `days_left` from the cert end date, and returns `scanned=False` ("not scanned") when none exists. The technical report template renders the "TLS summary" section.
+
+## Garak importer
+
+AASI Phase 1 parser for native Garak JSONL reports and hitlogs.
+
+[[attestra/importers/garak.py#parse]] emits [[attestra/importers/base.py#NormalizedFinding]] only for detector hits (attempt `status==2` with score ≥ 0.5, or hitlog rows). Probe execution alone is not a finding. `tool="garak"`; probe/detector ids and tool version are preserved; CWE stays unset. Malformed `detector_results` raises `ValueError`. Registered in [[attestra/importers/__init__.py#PARSERS]]. Note: `docs/ai_security/AASI_PHASE1_GARAK_IMPORTER.md`.
+
+## Promptfoo importer
+
+AASI Phase 1 parser for `promptfoo eval -o results.json` / `redteam run -o results.json` (EvaluateSummary v2/v3).
+
+[[attestra/importers/promptfoo.py#parse]] accepts the wrapped export (`results.results[]` plus `metadata.promptfooVersion`) or a bare summary. Failed assertions (`success: false`, `failureReason` ASSERT) become [[attestra/importers/base.py#NormalizedFinding]] with `tool="promptfoo"`; plugin id → `rule_id`, strategy id → `variant` / `original_id`, provider → `location`, `testIdx` → `param`. Passed rows and provider ERROR rows (`failureReason` 2) emit nothing. CWE stays unset unless the source supplies one. Malformed structures raise `ValueError`. Registered in [[attestra/importers/__init__.py#PARSERS]]. Note: `docs/ai_security/AASI_PHASE1_PROMPTFOO_IMPORTER.md`.
+
+## SafeLabs importer
+
+AASI Phase 1 parser for safelabs-eval CLI `--output json` and EvalResult dumps.
+
+[[attestra/importers/safelabs.py#parse]] maps `vulnerable` / `fail` rows to [[attestra/importers/base.py#NormalizedFinding]] with `tool="safelabs"`. Prompt id, detector (`eval_type`), indicators, heuristic confidence, taxonomy source, and tool version are preserved. Titles use **SafeLabs ASI-source** labels (not official OWASP Agentic Top 10 2026). `pass` / `uncertain` / missing / error rows emit nothing. Heuristic uncertainty lives in `confidence` (`validation=potential`); NormalizedFinding has no validation field — persist must stay `potential`. Malformed JSON raises `ValueError`. Registered in [[attestra/importers/__init__.py#PARSERS]]. Note: `docs/ai_security/AASI_PHASE1_SAFELABS_PYRIT_IMPORTERS.md`.
+
+## PyRIT importer
+
+AASI Phase 1 fixture-driven parser for structured PyRIT attack-result JSON/JSONL (worker execution is Phase 5).
+
+[[attestra/importers/pyrit.py#parse]] accepts `attack_results` / `results` wrappers, lists, JSONL, or a single object. Successful outcomes / `success: true` / true scores become findings with `tool="pyrit"`; conversation and scenario ids, score, and success flags are preserved. Failures, errors, undetermined rows, and empty exports yield no findings. Malformed input raises `ValueError`. Registered in [[attestra/importers/__init__.py#PARSERS]]. Note: `docs/ai_security/AASI_PHASE1_SAFELABS_PYRIT_IMPORTERS.md`.
 
 ## Normalization helpers
 

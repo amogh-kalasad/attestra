@@ -2,9 +2,11 @@
 #   API:    docker run attestra:dev                      (default CMD = serve)
 #   Worker: docker run attestra:dev attestra worker
 # Build:   docker build -t attestra:dev .
-# Scanners are NOT bundled; they run as separate digest-pinned Kubernetes Jobs
-# (or host `docker run` from the worker). MongoDB (replica set) is required;
-# Mongo schema init lives in the attestra package (no Alembic/SQL migrations).
+# Scanners are NOT bundled (web or AASI AI tools); they run as separate
+# digest-pinned Kubernetes Jobs (or host `docker run` from the worker).
+# AASI deploy notes: docs/ai_security/AASI_DOCKER_DEPLOYMENT.md
+# MongoDB (replica set) is required; Mongo schema init lives in the attestra
+# package (no Alembic/SQL migrations).
 
 FROM python:3.12-slim AS build
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1

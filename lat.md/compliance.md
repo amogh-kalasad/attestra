@@ -87,6 +87,12 @@ CWE-driven OWASP Top 10, ASVS, and WSTG labels on findings.
 
 [[attestra/compliance/owasp.py#map_finding_to_owasp]] reads `attestra/compliance/data/owasp.yaml` and populates finding OWASP columns at import/enrich time. [[attestra/compliance/owasp.py#get_top10]] returns Top 10 2021 ids; [[attestra/compliance/owasp.py#group_findings_by_top10]] and [[attestra/compliance/owasp.py#should_show_llm_top10]] feed the `owasp_top10` report view (web categories always; optional LLM Top 10 2025 when ISO 42001 / AI evidence is present).
 
+## AI taxonomy mapping
+
+Source-backed AASI Phase 1 map from AI red-team tools to OWASP LLM / Agentic taxonomies and ISO 42001.
+
+`attestra/compliance/data/ai_taxonomy.yaml` records versioned sources (OWASP LLM Top 10 2025, OWASP Top 10 for Agentic Applications 2026, ISO 42001 pack), tool families for garak / promptfoo / safelabs / pyrit, and `categories.ai_llm` / `ai_agent`. CWEs are reused only from `attestra/compliance/data/packs/iso_42001_2023.yaml` `llm_top10` (no invented IDs). Gaps use `partial` / `not_covered` / `unverified`; SafeLabs ASI labels are not treated as official Agentic ASI IDs. The ISO pack adds `assessment_tools` per LLM entry and a top-level `assessment_tools` / `ai_tools` section as evidence sources only. Docs: `docs/ai_security/AASI_PHASE1_TAXONOMY.md`. Loader checks: [[tests/test_ai_taxonomy.py]].
+
 ## SEBI security testing timeline
 
 Engagement milestones mapped to SEBI CSCRF periodic security-testing expectations.

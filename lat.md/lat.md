@@ -22,6 +22,7 @@ Map of topic files in this vault. Use `lat section` or `lat search` to open one.
 - [[web-api-probes]] — WP2 web/API safe probes, injection catalogue, API inventory import
 - [[intel-and-reporting]] — threat-intel feeds, CVSS 4.0, retest outcomes, mapping provenance, run validity in reports
 - [[attack-surface-and-platform]] — passive discovery, takeover labels, snapshots, tenant strict mode, worker metrics, maintenance, adapter SDK
+- [[aasi]] — AASI Phase 1–7 catalogues/adapters/core/graph/reporting; Phase 8–9 env/deploy docs; Phase 13 readiness (READY FOR STAGING)
 - World-class VA + PT Phase 1 audit: [[architecture#World-class security testing audit (Phase 1)]] (`docs/WORLDCLASS_VAPT_PHASE1_AUDIT.md`)
 - World-class risk scoring (Phase 5): [[architecture#World-class risk scoring (Phase 5)]] (`docs/WORLDCLASS_VAPT_PHASE5_RISK_SCORING.md`)
 - World-class finding normalization (Phase 6): [[architecture#World-class finding normalization (Phase 6)]]

@@ -91,6 +91,69 @@ MIGRATIONS.append(
 )
 
 
+def _m0005_aasi_collections(db: Database) -> None:
+    """AASI Phase 3: aasi_runs / aasi_decisions collections and tenant indexes.
+
+    Additive only: create empty collections and indexes; nothing is dropped.
+    """
+    from pymongo import ASCENDING
+
+    for name in (C.AASI_RUNS, C.AASI_DECISIONS):
+        db[name]  # touch / create empty
+    # Unique idempotency key per tenant on runs.
+    db[C.AASI_RUNS].create_index(
+        [("tenant_id", ASCENDING), ("idempotency_key", ASCENDING)],
+        unique=True,
+        name="tenant_idempotency_unique",
+        partialFilterExpression={"idempotency_key": {"$type": "string"}},
+    )
+    db[C.AASI_RUNS].create_index([("tenant_id", ASCENDING), ("engagement_id", ASCENDING)])
+    db[C.AASI_RUNS].create_index([("tenant_id", ASCENDING), ("created_at", ASCENDING)])
+    db[C.AASI_DECISIONS].create_index([("tenant_id", ASCENDING), ("run_id", ASCENDING), ("created_at", ASCENDING)])
+    db[C.AASI_DECISIONS].create_index([("tenant_id", ASCENDING), ("engagement_id", ASCENDING)])
+
+
+MIGRATIONS.append(
+    (
+        "0005_aasi_collections",
+        "AASI runs/decisions collections + tenant/idempotency indexes",
+        _m0005_aasi_collections,
+    )
+)
+
+
+def _m0006_aasi_graph(db: Database) -> None:
+    """AASI Phase 6: aasi_graph_nodes / aasi_graph_edges collections and indexes.
+
+    Additive only: create empty collections and indexes; nothing is dropped.
+    """
+    from pymongo import ASCENDING
+
+    for name in (C.AASI_GRAPH_NODES, C.AASI_GRAPH_EDGES):
+        db[name]  # touch / create empty
+    db[C.AASI_GRAPH_NODES].create_index([("tenant_id", ASCENDING), ("engagement_id", ASCENDING)])
+    db[C.AASI_GRAPH_NODES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("key", ASCENDING)],
+        unique=True,
+        name="tenant_engagement_node_key_unique",
+        partialFilterExpression={"key": {"$type": "string"}},
+    )
+    db[C.AASI_GRAPH_EDGES].create_index([("tenant_id", ASCENDING), ("engagement_id", ASCENDING)])
+    db[C.AASI_GRAPH_EDGES].create_index(
+        [("tenant_id", ASCENDING), ("engagement_id", ASCENDING), ("from_node_id", ASCENDING), ("to_node_id", ASCENDING)]
+    )
+    db[C.AASI_GRAPH_EDGES].create_index([("tenant_id", ASCENDING), ("provenance", ASCENDING)])
+
+
+MIGRATIONS.append(
+    (
+        "0006_aasi_graph",
+        "AASI graph nodes/edges collections + tenant/provenance indexes",
+        _m0006_aasi_graph,
+    )
+)
+
+
 def applied_revisions(db: Database) -> set[str]:
     return {doc["_id"] for doc in db[C.SCHEMA_MIGRATIONS].find({}, {"_id": 1})}
 

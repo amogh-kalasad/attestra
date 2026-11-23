@@ -2086,6 +2086,11 @@ from attestra.automated_vapt.routes import ui_router as automated_vapt_ui_router
 app.include_router(automated_vapt_api_router)
 app.include_router(automated_vapt_ui_router)
 
+# AASI Phase 3 — recommend-only orchestration (disabled by default via ATTESTRA_AASI=off)
+from attestra.aasi.routes import api_router as aasi_api_router  # noqa: E402
+
+app.include_router(aasi_api_router)
+
 # Phase 8 P6-6: SEBI CSCRF security-testing timeline staff UI (parent include_router)
 from attestra.web.sebi_routes import ui_router as sebi_ui_router  # noqa: E402
 

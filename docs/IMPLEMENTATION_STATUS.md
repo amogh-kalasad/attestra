@@ -24,6 +24,8 @@ Attestra v0.1 started as an **import-and-report** platform; Phases 0–2 add Ale
 2. Phases 6–8 need Postgres/Temporal/OPA/Keycloak/Vault/K8s and external processes — cannot fully complete in-repo alone.
 3. Step 3.10 (external QSA review) and 8.1 (third-party pentest) require human/external action.
 
+**AASI (Attestra Agentic Security Intelligence):** parallel track on `attestra-asi-bundle` — Phases 0–1 and 3 complete; Phases 2/4–7/9/12 partially implemented; Phase 8 env templates and Phase 10 dependency docs complete; AI image digests still placeholders. See [`docs/ai_security/AASI_IMPLEMENTATION_STATUS.md`](ai_security/AASI_IMPLEMENTATION_STATUS.md).
+
 ## 2. Repository architecture discovered
 
 | Area | Path | Present |

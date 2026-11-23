@@ -183,8 +183,10 @@ def test_sarif_tool_name_normalised():
 def test_unsupported_tool_raises():
     from attestra.importers import parse
 
+    # Use a name that is not in PARSERS. "nessus" is registered and routes to the
+    # XML parser, so bare JSON bytes fail as invalid XML instead of Unsupported format.
     with pytest.raises(ValueError, match="Unsupported format"):
-        parse("nessus", b"{}")
+        parse("not_a_real_tool", b"{}")
 
 
 def test_parse_dispatch_zap():

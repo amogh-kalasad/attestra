@@ -16,6 +16,10 @@ Precedence (first match wins):
 7. ``VALID``
 
 Legacy rows without ``run_validity`` read as "not computed" and are never VALID.
+
+AASI Phase 2: :func:`ai_tool_outcome_to_status` maps empty / refused /
+rate-limited / failed AI-tool outputs to case status ``NOT_TESTED`` (never
+passed). See ``docs/ai_security/AASI_PHASE2_COVERAGE.md``.
 """
 
 # @lat: [[run-validity-and-policy#Run validity]]
@@ -288,3 +292,47 @@ def cap_validation_status(validation_status: str, case_state: str | None) -> tup
     if (validation_status or "").upper() == "CONFIRMED" and case_state != VALID:
         return "POTENTIAL", f"capped: case validity {case_state or NOT_COMPUTED}"
     return validation_status, ""
+
+
+# ------------------------------------------------------------------ AI tool outcomes (AASI Phase 2)
+
+
+def ai_tool_outcome_to_status(
+    error: Any = None,
+    raw_empty: bool = False,
+    refused: bool = False,
+    *,
+    rate_limited: bool = False,
+    failed: bool = False,
+) -> str | None:
+    """Map AI-scanner / AI-tool adapter outcomes to a case status override.
+
+    Empty, refused, rate-limited, errored, or failed AI-tool outputs become
+    ``NOT_TESTED`` — never ``PASSED``. Adapters should set
+    ``case_result["status"]`` (or ``status_hint``) from the return value when
+    it is not ``None``.
+
+    How this relates to existing run-validity states:
+
+    - ``RATE_LIMITED`` / ``CHALLENGE_DETECTED`` / ``PARTIALLY_BLOCKED`` are
+      *validity states* derived from ``validity_samples`` (HTTP classification).
+      When the adapter has samples, emit them and let :func:`gate_case_status`
+      map non-VALID states to ``BLOCKED`` / ``INCONCLUSIVE``.
+    - When the AI tool itself failed (no usable raw report, provider refusal,
+      tool rate-limit without HTTP samples), call this helper so the case is
+      ``NOT_TESTED`` instead of looking like a clean pass.
+    - Coverage ledger :func:`attestra.automated_vapt.coverage.ledger._map_status`
+      maps ``NOT_TESTED`` → ``SKIPPED`` (Phase 4 vocabulary) with a limitation.
+
+    Returns ``None`` when no failure signal is present (caller keeps its own
+    PASSED / FINDING status from real results). Never returns ``PASSED``.
+    """
+    err_s = ""
+    if error is not None:
+        if isinstance(error, BaseException):
+            err_s = type(error).__name__ or "error"
+        else:
+            err_s = str(error).strip()
+    if refused or raw_empty or rate_limited or failed or err_s:
+        return "NOT_TESTED"
+    return None

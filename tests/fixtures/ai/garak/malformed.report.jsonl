@@ -1,0 +1,2 @@
+{"entry_type": "init", "garak_version": "0.13.0", "start_time": "2026-01-15T14:00:00.000000", "run": "badbadba-dbad-badb-adba-dbadbadbadba"}
+{"entry_type": "attempt", "uuid": "bad-attempt-1", "seq": 0, "status": 2, "probe_classname": "dan.Dan_11_0", "prompt": {"turns": [{"role": "user", "content": {"text": "x"}}]}, "outputs": [{"text": "y"}], "detector_results": "not-a-mapping", "goal": "broken"}

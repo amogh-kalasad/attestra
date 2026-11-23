@@ -174,6 +174,10 @@ Order: safety and scanner execution, then identity and tenancy, then compliance,
 
 **Effort:** GA hardening 2–3 weeks. AI 2 weeks if needed (ESTIMATE).
 
+### AASI note (parallel track)
+
+**Attestra Agentic Security Intelligence** is developed on branch `attestra-asi-bundle` and stays **off by default** (`ATTESTRA_AASI=off`). As of the Phase 11 docs pass: Phases 0–1 and 3 are complete; adapters (incl. PyRIT) and Phases 4–7 / 9 helpers are **partially** in tree; env/dependency docs (8/10) exist; **production AI digests are not pinned**; Phase 13 readiness is not claimed. Tracker: [`docs/ai_security/AASI_IMPLEMENTATION_STATUS.md`](ai_security/AASI_IMPLEMENTATION_STATUS.md). This does not replace the Phase 8 “optional AI narratives” item above.
+
 ---
 
 ## 3. Start here: the very first task

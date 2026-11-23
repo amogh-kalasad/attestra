@@ -54,4 +54,38 @@ nothing against the control; it does not by itself show the control is in place.
 {% if auth_coverage and auth_coverage.checklist and auth_coverage.checklist.total %}
 <p class="meta">Authenticated security testing checklist: {{ auth_coverage.checklist.passed }} of {{ auth_coverage.checklist.total }} passed. Skipped and blocked items are not counted as passed.</p>
 {% endif %}
+
+{% if aasi and aasi.present and aasi.executive %}
+<h2 id="aasi-executive">AI security posture (AASI)</h2>
+<p>{{ aasi.executive.posture }}</p>
+<p class="meta">{{ aasi.executive.confidence_disclaimer }}</p>
+{% if aasi.executive.inventory %}
+<table>
+  <tr><th>Asset</th><th>Identifier</th><th>Kind</th></tr>
+  {% for a in aasi.executive.inventory %}
+  <tr><td>{{ a.name or a.id }}</td><td class="mono">{{ a.identifier }}</td><td>{{ a.kind }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+<p class="meta">Validation classes (not AI confidence): confirmed {{ aasi.executive.confirmed }}, potential {{ aasi.executive.potential }}, needs manual {{ aasi.executive.needs_manual }}.</p>
+{% if aasi.executive.unresolved_hypotheses %}
+<p><b>Unresolved hypotheses.</b></p>
+<ul>
+  {% for h in aasi.executive.unresolved_hypotheses %}
+  <li class="meta">{{ h.id }}: {{ h.statement }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if aasi.executive.gaps %}
+<p><b>Coverage gaps.</b> {{ aasi.executive.gaps|join("; ") }}</p>
+{% endif %}
+{% if aasi.executive.limitations %}
+<p><b>Limitations.</b></p>
+<ul>
+  {% for lim in aasi.executive.limitations %}
+  <li class="meta">{{ lim }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endif %}
 {% endblock %}

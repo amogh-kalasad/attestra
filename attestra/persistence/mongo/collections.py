@@ -67,6 +67,12 @@ DISCOVERY_CANDIDATES = "discovery_candidates"
 ASSET_SNAPSHOTS = "asset_snapshots"
 ASSET_CHANGE_EVENTS = "asset_change_events"
 INTEL_FEED_STATE = "intel_feed_state"
+# AASI Phase 3 — recommend-only decision history (tenant-scoped).
+AASI_RUNS = "aasi_runs"
+AASI_DECISIONS = "aasi_decisions"
+# AASI Phase 6 — attack-path graph (tenant-scoped; provenance on edges).
+AASI_GRAPH_NODES = "aasi_graph_nodes"
+AASI_GRAPH_EDGES = "aasi_graph_edges"
 
 # Domain collections that participate in normal CRUD (excludes meta).
 DOMAIN_COLLECTIONS: tuple[str, ...] = (
@@ -130,4 +136,8 @@ DOMAIN_COLLECTIONS: tuple[str, ...] = (
     DISCOVERY_CANDIDATES,
     ASSET_SNAPSHOTS,
     ASSET_CHANGE_EVENTS,
+    AASI_RUNS,
+    AASI_DECISIONS,
+    AASI_GRAPH_NODES,
+    AASI_GRAPH_EDGES,
 )

@@ -12,7 +12,9 @@ Engagement types, frameworks, asset kinds, test types, and allowed status transi
 
 ### Engagement type workflows
 
-Default planned tests follow the engagement type: VA uses [[attestra/models.py#VA_TEST_TYPES]] (automated scanners), PT uses [[attestra/models.py#PT_TEST_TYPES]] (`manual_pt`), and `vapt` / historical types use the full [[attestra/models.py#DEFAULT_TESTS]] set. [[attestra/models.py#default_tests_for]] and [[attestra/models.py#allowed_test_types_for]] drive [[attestra/services.py#add_asset]] defaults and rejection of cross-workflow test types.
+Default planned tests follow engagement type: VA uses [[attestra/models.py#VA_TEST_TYPES]], PT uses [[attestra/models.py#PT_TEST_TYPES]] (`manual_pt`), and `vapt` uses full [[attestra/models.py#DEFAULT_TESTS]].
+
+[[attestra/models.py#default_tests_for]] and [[attestra/models.py#allowed_test_types_for]] drive [[attestra/services.py#add_asset]] defaults and reject cross-workflow types. VA includes AASI `ai_llm` / `ai_agent`; see [[aasi#Phase 1 asset types]].
 
 ## Deduplication
 
