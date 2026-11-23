@@ -19,23 +19,28 @@ Operator steps to enable Attestra Agentic Security Intelligence on an **already 
 ## 1. Pin AI scanner digests (required before adapter runs)
 
 Placeholders and `REPLACE_AFTER_INSPECT` are **refused** at runtime.
+Full recipes: [`../../docker/aasi/README.md`](../../docker/aasi/README.md).
 
 ```bash
-# On an approved operator host — example for Garak; repeat per tool
-docker pull <approved-repo:tag>
-docker image inspect --format '{{index .RepoDigests 0}}' <approved-repo:tag>
+# Promptfoo (public)
+docker pull ghcr.io/promptfoo/promptfoo:<tag>
+docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/promptfoo/promptfoo:<tag>
+
+# Garak / SafeLabs / PyRIT — build from Attestra Dockerfiles (upstream pip packages)
+docker build -f docker/aasi/Dockerfile.garak -t attestra/garak:local docker/aasi
+docker build -f docker/aasi/Dockerfile.safelabs -t attestra/safelabs:local docker/aasi
+docker build -f docker/aasi/Dockerfile.pyrit -t attestra/pyrit-worker:local docker/aasi
+docker image inspect --format '{{index .RepoDigests 0}}' attestra/garak:local
 ```
 
-Set in the **deployment** environment (Compose `.env`, Helm secrets, or Vault) — do not commit production digests or secrets:
+Set in the **deployment** environment (Compose `.env`, Helm secrets, or Vault) — do not commit production secrets:
 
-| Variable | Tool |
-|---|---|
-| `ATTESTRA_IMAGE_GARAK` | Garak |
-| `ATTESTRA_IMAGE_PROMPTFOO` | Promptfoo |
-| `ATTESTRA_IMAGE_SAFELABS` | safelabs-eval |
-| `ATTESTRA_IMAGE_PYRIT` | PyRIT worker |
-
-Reconcile Promptfoo registry host (`ghcr.io` vs `docker.io`) so env, digests comments, and pulls agree.
+| Variable | Tool | Source |
+|---|---|---|
+| `ATTESTRA_IMAGE_GARAK` | Garak | Built `attestra/garak` (or NGC eval-factory if entrypoint aligned) |
+| `ATTESTRA_IMAGE_PROMPTFOO` | Promptfoo | `ghcr.io/promptfoo/promptfoo` |
+| `ATTESTRA_IMAGE_SAFELABS` | safelabs-eval | Built `attestra/safelabs` |
+| `ATTESTRA_IMAGE_PYRIT` | PyRIT worker | Built `attestra/pyrit-worker` |
 
 Optional local pull helper (Compose): uncomment `aasi-scanner-pull` in `compose.yaml` only after real digests exist. Default `scanner-pull` remains web tools only.
 

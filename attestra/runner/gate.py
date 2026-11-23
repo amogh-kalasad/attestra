@@ -27,8 +27,20 @@ TOOL_ASSET_KINDS: dict[str, tuple[str, ...]] = {
     **{t: ("web_app", "api", "host") for t in URL_TOOLS},
     **{t: ("repo",) for t in PATH_TOOLS},
     "trivy": ("repo", "image"),
+    # AASI AI scanners — authorized LLM / agent HTTP endpoints.
+    "garak": ("ai_app",),
+    "promptfoo": ("ai_app",),
+    "safelabs": ("ai_app",),
+    "pyrit": ("ai_app",),
 }
-_KIND_LABELS = {"web_app": "web application", "api": "API", "host": "host", "repo": "code repository", "image": "container image"}
+_KIND_LABELS = {
+    "web_app": "web application",
+    "api": "API",
+    "host": "host",
+    "repo": "code repository",
+    "image": "container image",
+    "ai_app": "AI application / LLM endpoint",
+}
 
 
 def tool_kind_problem(tool: str, kind: str) -> str | None:
@@ -142,7 +154,7 @@ def check(
     kind = asset.kind
     target = asset.identifier
     try:
-        if kind in ("web_app", "api"):
+        if kind in ("web_app", "api", "ai_app"):
             authorize_target(scope, target, "url")
             pin = pin_url(target, scope)
             if tool == "testssl" and pin.scheme != "https":

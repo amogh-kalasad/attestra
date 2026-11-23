@@ -80,6 +80,12 @@ Evidence-ID gate for conclusions, run-state task tree helpers, and recommendatio
 
 [[attestra/aasi/evidence_gate.py#assert_citations_valid]] rejects citations that are missing, cross-tenant/engagement, inaccessible, deleted, or expired via an injectable `lookup_fn` (raises [[attestra/aasi/evidence_gate.py#EvidenceGateError]] with `reason`). [[attestra/aasi/orchestrator.py#AasiOrchestrator#persist_conclusion]] applies the gate before recording a conclusion decision. [[attestra/aasi/task_tree.py]] attaches parent/child tasks (`dependencies`, `result_refs`, `retry_count`, completion summary propagation) to `run["tasks"]` — not a separate agent graph. [[attestra/aasi/prioritize.py#prioritize_recommendations]] ranks candidates (coverage gap > confirmed finding adjacency > default); the planner still orders execution. Evidence/quality reviewers note unknown or citation-less claims. Doc: `docs/ai_security/AASI_PHASE4_EVIDENCE.md`. Tests: [[tests#AASI Phase 4 evidence gate]], [[tests#AASI Phase 4 task tree]], [[tests#AASI Phase 4 prioritize]].
 
+## AASI worker image recipes
+
+Buildable isolated images for AI scanners; core Attestra stays free of those deps.
+
+`docker/aasi/` holds Dockerfiles for Garak, SafeLabs, and PyRIT plus a thin `attestra_pyrit_worker`. Promptfoo uses official GHCR. Upstream GitHub projects are referenced; Attestra implements adapters/importers here. See `docs/ai_security/AASI_WORKER_IMAGES.md` and `docker/aasi/README.md`.
+
 ## Phase 5 PyRIT adapter
 
 Digest-pinned multi-turn PyRIT worker for authorized `ai_app` URLs; never imports PyRIT into the core app.

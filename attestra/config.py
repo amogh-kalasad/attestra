@@ -80,12 +80,12 @@ _PLACEHOLDER_IMAGES = {
     "subfinder": "docker.io/projectdiscovery/subfinder@sha256:0000000000000000000000000000000000000000000000000000000000000009",
     "dnsx": "docker.io/projectdiscovery/dnsx@sha256:000000000000000000000000000000000000000000000000000000000000000a",
     "httpx": "docker.io/projectdiscovery/httpx@sha256:000000000000000000000000000000000000000000000000000000000000000b",
-    # AASI Phase 2 AI-security scanners (VERIFY: replace with real digests after docker inspect).
-    "garak": "docker.io/nvidia/garak@sha256:000000000000000000000000000000000000000000000000000000000000000c",
-    "promptfoo": "docker.io/promptfoo/promptfoo@sha256:000000000000000000000000000000000000000000000000000000000000000d",
-    "safelabs": "docker.io/agentsafelabs/safelabs-eval@sha256:000000000000000000000000000000000000000000000000000000000000000e",
-    # AASI Phase 5 PyRIT isolated worker (VERIFY: replace with real digest after docker inspect).
-    "pyrit": "docker.io/attestra/pyrit-worker@sha256:000000000000000000000000000000000000000000000000000000000000000f",
+    # AASI AI scanners — all-zero digests refused until ops pins real images.
+    # Build: docker/aasi/Dockerfiles; Promptfoo: ghcr.io/promptfoo/promptfoo (see docker/aasi/README.md).
+    "garak": "attestra/garak@sha256:000000000000000000000000000000000000000000000000000000000000000c",
+    "promptfoo": "ghcr.io/promptfoo/promptfoo@sha256:000000000000000000000000000000000000000000000000000000000000000d",
+    "safelabs": "attestra/safelabs@sha256:000000000000000000000000000000000000000000000000000000000000000e",
+    "pyrit": "attestra/pyrit-worker@sha256:000000000000000000000000000000000000000000000000000000000000000f",
 }
 SCANNER_IMAGES = {
     tool: os.environ.get(f"ATTESTRA_IMAGE_{tool.upper()}", default) for tool, default in _PLACEHOLDER_IMAGES.items()

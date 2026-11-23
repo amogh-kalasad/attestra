@@ -57,28 +57,30 @@ Env keys (also listed in `AASI_ENV_INVENTORY.md` / `docker/scanner-digests.env`)
 
 | Variable | Tool | Status in repo |
 |---|---|---|
-| `ATTESTRA_IMAGE_GARAK` | Garak | Placeholder in `config._PLACEHOLDER_IMAGES`; commented stub in `docker/scanner-digests.env` |
-| `ATTESTRA_IMAGE_PROMPTFOO` | Promptfoo | Same |
-| `ATTESTRA_IMAGE_SAFELABS` | safelabs-eval | Same |
-| `ATTESTRA_IMAGE_PYRIT` | PyRIT multi-turn worker | Placeholder in config (`attestra/pyrit-worker@sha256:…000f`); commented stub in digests file — pin after inspect |
+| `ATTESTRA_IMAGE_GARAK` | Garak | Build `docker/aasi/Dockerfile.garak` (preferred). Optional NGC `nvcr.io/nvidia/eval-factory/garak` |
+| `ATTESTRA_IMAGE_PROMPTFOO` | Promptfoo | Pull `ghcr.io/promptfoo/promptfoo`, then pin digest |
+| `ATTESTRA_IMAGE_SAFELABS` | safelabs-eval | Build `docker/aasi/Dockerfile.safelabs` (`pip install safelabs-eval`) |
+| `ATTESTRA_IMAGE_PYRIT` | PyRIT worker | Build `docker/aasi/Dockerfile.pyrit` (`attestra_pyrit_worker`) |
 
-Placeholders (all-zero-style digests) are **refused** at runtime. After you pull a
-candidate tag once, pin the digest:
+All-zero / `REPLACE_AFTER_INSPECT` digests are **refused** at runtime. See `docker/aasi/README.md`.
 
 ```bash
-# Example workflow (operator machine; replace repo:tag with the approved release)
-docker pull docker.io/nvidia/garak:latest
-docker image inspect --format '{{index .RepoDigests 0}}' docker.io/nvidia/garak:latest
+# Promptfoo (public GHCR)
+docker pull ghcr.io/promptfoo/promptfoo:latest
+docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/promptfoo/promptfoo:latest
 
-# Put the repo@sha256:… value in root .env (never commit real production secrets)
-# ATTESTRA_IMAGE_GARAK=docker.io/nvidia/garak@sha256:<real>
-# ATTESTRA_IMAGE_PROMPTFOO=…@sha256:<real>
-# ATTESTRA_IMAGE_SAFELABS=…@sha256:<real>
-# ATTESTRA_IMAGE_PYRIT=…@sha256:<real>
+# Garak / SafeLabs / PyRIT — build Attestra worker images from repo recipes
+docker build -f docker/aasi/Dockerfile.garak -t attestra/garak:local docker/aasi
+docker build -f docker/aasi/Dockerfile.safelabs -t attestra/safelabs:local docker/aasi
+docker build -f docker/aasi/Dockerfile.pyrit -t attestra/pyrit-worker:local docker/aasi
+docker image inspect --format '{{index .RepoDigests 0}}' attestra/garak:local
+
+# Put repo@sha256:… into deployment .env (do not commit production pins as secrets)
+# ATTESTRA_IMAGE_GARAK=attestra/garak@sha256:<real>
+# ATTESTRA_IMAGE_PROMPTFOO=ghcr.io/promptfoo/promptfoo@sha256:<real>
+# ATTESTRA_IMAGE_SAFELABS=attestra/safelabs@sha256:<real>
+# ATTESTRA_IMAGE_PYRIT=attestra/pyrit-worker@sha256:<real>
 ```
-
-Reconcile Promptfoo registry naming (`ghcr.io/promptfoo/…` vs `docker.io/promptfoo/…`)
-at pin time so `.env`, digests file comments, and `config` defaults agree.
 
 Web-tool pins remain required for default Compose (`ATTESTRA_IMAGE_ZAP` / `NUCLEI` /
 `TESTSSL` / `NAABU`) and are pulled by the existing `scanner-pull` one-shot.

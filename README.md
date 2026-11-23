@@ -448,7 +448,7 @@ Registered in `attestra.importers.PARSERS`:
 
 Registered scanners: **garak**, **promptfoo**, **safelabs**, and **pyrit** (isolated multi-turn worker; external judge off unless explicitly authorized). They expect digest-pinned images via `ATTESTRA_IMAGE_GARAK`, `ATTESTRA_IMAGE_PROMPTFOO`, `ATTESTRA_IMAGE_SAFELABS`, and `ATTESTRA_IMAGE_PYRIT`.
 
-**Honesty:** commented lines in `docker/scanner-digests.env` and `.env.example` still use `REPLACE_AFTER_INSPECT`, and config defaults are all-zero placeholder digests. Placeholder images are **refused** until you pin real digests from `docker inspect`. Do not treat AI scanners as production-ready until those pins exist.
+**Honesty:** AI image digests default to refused placeholders. Build/pull recipes live in [`docker/aasi/README.md`](docker/aasi/README.md) (Promptfoo from GHCR; Garak/SafeLabs/PyRIT from Attestra Dockerfiles that wrap the referenced upstream packages). Old Hub stub names like `docker.io/nvidia/garak` are not public images — that pull failure is expected. Do not treat AI scanners as production-ready until real digests are pinned.
 
 ### Recommend-only API
 
