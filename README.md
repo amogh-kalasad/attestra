@@ -305,6 +305,8 @@ Then open a target page: the **Authentication** card appears when auth-web is on
 
 Set `ATTESTRA_AUTH_WEB_ENABLED=1` (and `ATTESTRA_CREDENTIAL_FERNET_KEY` for stored test-account secrets), or use the [local testing block](#local-testing-auth-web--automated-vapt). Caps such as `ATTESTRA_AUTH_WEB_MAX_ROUTES` are listed below.
 
+**Tutorial:** step-by-step guide to entering session token, headers, cookies, refresh token and URL in a target's Authentication section: [Target Authentication Guide (PDF)](docs/tutorials/Attestra-Target-Authentication-Guide.pdf).
+
 Mid-scan expiry handling is **on unless** you set `ATTESTRA_AUTH_MIDSCAN_ENABLED=0`. ZAP reloads hook headers/cookies, Nuclei re-checks between URL chunks (`ATTESTRA_AUTH_NUCLEI_CHUNK`, default 25), and automated cases are marked **BLOCKED** if the session cannot be recovered. Checklist items are never auto-marked `passed` after auth loss.
 
 Re-login behaviour depends on the profile method:
