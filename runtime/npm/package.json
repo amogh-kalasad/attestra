@@ -1,0 +1,11 @@
+{
+  "name": "attestra-aasi-npm",
+  "private": true,
+  "description": "Pinned Promptfoo for Attestra AASI V5.1 shared environment (npm, not pip).",
+  "engines": {
+    "node": ">=20.0.0 <21"
+  },
+  "dependencies": {
+    "promptfoo": "0.118.17"
+  }
+}

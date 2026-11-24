@@ -39,5 +39,22 @@ ruff>=0.17.4
 # opentelemetry-instrumentation-fastapi>=0.66b2
 # opentelemetry-exporter-otlp-proto-http>=1.45.2
 
+# AASI V5.1 AI scanners — install into the ONE shared env only.
+# Prefer the staged installer (openai 3.x + garak --no-deps):
+#   python scripts/aasi/install_shared_env.py
+# Joint extras (no garak — installer stages garak with --no-deps):
+#   pip install -e ".[ai-scanners]"
+# Sync note: mirrors pyproject.toml [project.optional-dependencies].ai-scanners
+# (PyPI verified 2026-11-24). Do NOT install these into a second venv.
+# safelabs-eval==0.12.0
+# pyrit==1.2.1
+# openai>=3,<4
+# anthropic>=0.40.0,<1.0.0
+# litellm>=1.84.0
+# garak==0.17.1  # installer: pip install --no-deps (REST/Anthropic/LiteLLM)
+# Promptfoo is an npm package (not pip). Pin lives in runtime/npm/package.json
+# (promptfoo@0.118.17). Install under ATTESTRA_SHARED_ENV_ROOT/npm via
+# scripts/aasi/install_shared_env.py — never add promptfoo to this pip file.
+
 # Removed vs pre-Mongo requirements (no longer used at runtime):
 # alembic, psycopg, opentelemetry-instrumentation-sqlalchemy

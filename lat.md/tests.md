@@ -4176,25 +4176,53 @@ Once signed, the "this generation" Document control/Sign-off rows show the real 
 
 [[attestra/reports/render.py#_polish_signed_placeholders]] leaves an *other*, still-unsigned prior version's own history row untouched even though it is baked into the same signed report's HTML.
 
+## AASI V5.1 native egress
+
+Unit coverage for [[attestra/scanner_runtime/egress.py#assert_target_egress_allowed]] and [[attestra/scanner_runtime/egress.py#scanner_process_env]] (`tests/scanner_runtime/test_egress.py`).
+
+Public pins pass; missing/empty pins, cloud metadata, and CGNAT raise `AuthorizationError` even with `allow_private`; private IPs require the flag. Env strips AWS/Mongo/session secrets, sets `ATTESTRA_SCANNER_JOB=1`, and does not auto-forward `HTTP_PROXY`.
+
+## AASI V5.1 openai shared-env policy
+
+Unit coverage for shared-env openai 3.x + Garak `--no-deps` helpers in `scripts/aasi/install_shared_env.py` (`tests/scripts/test_install_shared_env_openai_policy.py`).
+
+Pins prefer openai 3.x / PyRIT joint extras (anthropic + litellm) and keep garak out of the joint list. `filter_garak_requirements` drops openai and extras. `_pip_check_only_known_openai_mismatch` accepts only the known garak↔openai WARN.
+
+## AASI V5.1 no Docker for AI adapters
+
+Base-class contract that `allows_docker=False` never selects Docker; covered by `tests/runner/test_ai_adapters_no_docker.py`.
+
+### Fake native adapter ignores image env
+
+A fake adapter with `allows_docker=False` and a non-placeholder `SCANNER_IMAGES` entry returns `uses_docker()` false even when Docker is available.
+
+### Unavailable reason points at shared env
+
+`unavailable_reason()` mentions `ATTESTRA_SHARED_ENV_ROOT` / `shared_env_root()`, never `ATTESTRA_IMAGE_*` or Docker Desktop.
+
+### Shared env root default
+
+Empty `SHARED_ENV_ROOT` resolves via `shared_env_root()` to `.attestra-runtime` under the process CWD.
+
 ## AASI Phase 2 Promptfoo adapter
 
-Unit coverage for [[attestra/runner/scanners/promptfoo.py#PromptfooAdapter]] (meta, docker `-e` lockdown, config write, digest pin) without pulling an image; see `tests/runner/test_promptfoo_adapter.py`.
+Unit coverage for [[attestra/runner/scanners/promptfoo.py#PromptfooAdapter]] (meta, native shared-env argv, config write) without Docker; see `tests/runner/test_promptfoo_adapter.py`.
 
 ### Meta and contract
 
-Adapter metadata (`ai_app`, T2, target egress, MIT, `ATTESTRA_IMAGE_PROMPTFOO`) has no `problems()`, and SDK `contract_problems` is empty.
+Adapter metadata (`ai_app`, T2, target egress, MIT, empty `image_ref_env`) has no `problems()`, and SDK `contract_problems` is empty; `allows_docker` is false.
 
-### Docker argv disables remote features
+### Native shared-env argv
 
-`build_docker_argv` includes `-e` for `PROMPTFOO_DISABLE_REMOTE_GENERATION`, `TELEMETRY`, `SHARING`, and `UPDATE`, plus `--add-host` for the pinned target.
+`build_argv` / `resolve_promptfoo_argv_prefix` run Promptfoo from `ATTESTRA_SHARED_ENV_ROOT` (npm/Node), write config, and never select Docker.
 
 ## AASI Phase 5 PyRIT adapter
 
-Unit coverage for [[attestra/runner/scanners/pyrit.py#PyRITAdapter]] (meta, scenario allowlist, judge lockdown, usage attach) without pulling an image; see `tests/runner/test_pyrit_adapter.py`.
+Unit coverage for [[attestra/runner/scanners/pyrit.py#PyRITAdapter]] and [[attestra/aasi/pyrit_native.py]] (native V5.1, no Docker); see `tests/runner/test_pyrit_adapter.py` and `tests/aasi/test_pyrit_native.py`.
 
 ### Meta and contract
 
-Adapter metadata (`ai_app`, T2, target egress, MIT, `ATTESTRA_IMAGE_PYRIT`, `pyrit-json`) has no `problems()`, and SDK `contract_problems` is empty.
+Adapter metadata (`ai_app`, T2, target egress, MIT, empty `image_ref_env`, `pyrit-json`) has no `problems()`, `allows_docker=False`, and SDK `contract_problems` is empty.
 
 ### Scenario allowlist
 
@@ -4202,7 +4230,7 @@ Only `crescendo` / `pair` / `tree_of_attacks` / `red_teaming` / `many_shot` (plu
 
 ### Docker argv and judge lockdown
 
-Default `build_docker_argv` includes `-e` for `PYRIT_DISABLE_EXTERNAL_JUDGE` / `ADVERSARIAL_EGRESS`, `--add-host`, and fixed `--scenario`; external judge opt-in omits the disable env and sets config `judge.mode=external`.
+Native path refuses `build_docker_argv` (`allows_docker=False`); run config defaults judge/adversarial egress off unless `tenant_authorize_external_judge=True`.
 
 ### Usage and transcripts
 
@@ -4210,15 +4238,15 @@ After scan, usage/cost from the report JSON are copied into `ScannerResult.extra
 
 ## AASI Phase 2 SafeLabs adapter
 
-Unit coverage for the SafeLabs scanner adapter (`tests/runner/test_safelabs_adapter.py`) without a real image.
+Unit coverage for the SafeLabs scanner adapter (`tests/runner/test_safelabs_adapter.py`) as native-only AASI V5.1 (no Docker).
 
 ### Contract and metadata
 
-`meta.problems()` and SDK `contract_problems` are empty; name, image key, tier T2, and `ATTESTRA_IMAGE_SAFELABS` match the adapter contract.
+`meta.problems()` and SDK `contract_problems` are empty; name, empty `image_key`, `allows_docker=False`, tier T2, and empty `image_ref_env` match the native contract.
 
 ### Argv and docker_args
 
-Fixed `safelabs run` argv includes target URL, category, and JSON output; docker paths use `/out`; unpinned targets are rejected.
+Fixed shared-env `python -m safelabs run` argv includes target URL, category, and JSON output; `docker_args` raises `NotImplementedError`; unpinned targets are rejected.
 
 ### Report validation
 
@@ -4226,7 +4254,7 @@ Valid fixture bytes pass `validate_report`; garbage bytes return an error string
 
 ### No real image required
 
-Without a local CLI or configured image, `available()` is false and `health()` stays value-free with `ready` false.
+Without a shared-env install or PATH fallback, `available()` is false, `unavailable_reason` mentions `install_shared_env.py` (never Docker), and `health()` stays value-free with `ready` false.
 
 ## AASI Phase 1 promptfoo importer
 
@@ -4419,7 +4447,7 @@ Empty, refused, or failed AI-tool outcomes map to NOT_TESTED / skipped coverage 
 
 ### Unpinned scanner image rejection
 
-Placeholder or `REPLACE_AFTER_INSPECT` AI scanner digests are refused so adapters cannot run unpinned images.
+V5.1 AI adapters (`allows_docker=False`, empty `image_key`) never use Docker even when `SCANNER_IMAGES` has placeholders; digest helpers still refuse floating tags for non-AI images.
 
 ## AASI Phase 12 security
 
@@ -4451,7 +4479,7 @@ Recommendations that introduce banned host/url/new_asset fields are rejected as 
 
 ### Arbitrary command request rejected
 
-PyRIT refuses unrestricted `command`/`argv`/`shell` opts; Garak keeps a fixed argv that does not incorporate agent command strings.
+PyRIT refuses unrestricted `command`/`argv`/`shell` opts; Garak keeps a fixed shared-env `python -m garak` argv that does not incorporate agent command strings (`argv[0]` is the interpreter, not `"garak"`).
 
 ### Secret leakage prevented in provider prompts
 
@@ -4495,4 +4523,4 @@ With AASI off, status reports `enabled: false` and mutating routes return 404; o
 
 ### Unpinned scanner image rejection
 
-[[attestra/config.py#require_image_digest]] refuses floating tags; placeholder digests leave adapters `image_configured() is False`.
+[[attestra/config.py#require_image_digest]] refuses floating tags for non-AI images; Garak/Promptfoo/SafeLabs/PyRIT stay native-only (`allows_docker=False`, `uses_docker()` false) even when `SCANNER_IMAGES` has placeholders.

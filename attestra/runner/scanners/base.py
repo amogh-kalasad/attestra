@@ -327,6 +327,8 @@ class ScannerAdapter(ABC):
     import_tool: str  # zap|nuclei|trivy|sarif
     out_name: str = ""  # report file name inside out_dir (default <name>-out.json)
     image_key: str = ""  # key in config.SCANNER_IMAGES when the tool can run in Docker
+    # AASI V5.1: AI scanners set False so Docker is never used even if an image env is set.
+    allows_docker: bool = True
     default_timeout_s: int | None = None  # per-tool default; None uses ATTESTRA_SCANNER_TIMEOUT_S
     report_on_stdout: bool = False  # the tool prints its report instead of writing a file
     # When set, the tool's (redacted) output is kept next to the report for troubleshooting,
@@ -405,6 +407,8 @@ class ScannerAdapter(ABC):
         return "@sha256:" in image and not config.image_is_placeholder(image)
 
     def uses_docker(self) -> bool:
+        if not self.allows_docker:
+            return False
         return self.image_configured() and docker_available()
 
     def docker_args(self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline", **opts) -> list[str]:
@@ -433,6 +437,12 @@ class ScannerAdapter(ABC):
         )
 
     def unavailable_reason(self) -> str:
+        if not self.allows_docker:
+            root = config.shared_env_root()
+            return (
+                f"{self.name} cannot run: install the tool into the shared env at {root} "
+                f"(set ATTESTRA_SHARED_ENV_ROOT); Docker is not used for this adapter"
+            )
         if self.image_key and docker_available() and not self.image_configured():
             return (
                 f"{self.name} cannot run: set ATTESTRA_IMAGE_{self.image_key.upper()} to a digest-pinned image "

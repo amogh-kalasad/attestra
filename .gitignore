@@ -141,3 +141,7 @@ _route_count*.py
 *.pid.lock
 celerybeat-schedule
 celerybeat.pid
+
+# AASI V5.1 shared scanner runtime root (local install)
+.attestra-runtime/
+

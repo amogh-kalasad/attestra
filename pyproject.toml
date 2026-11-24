@@ -50,6 +50,17 @@ observability = [
   "opentelemetry-instrumentation-fastapi>=0.66b2",
   "opentelemetry-exporter-otlp-proto-http>=1.45.2",
 ]
+# AASI V5.1 native AI scanners (shared env only). Promptfoo is npm, not listed here.
+# Prefer openai 3.x for PyRIT. Garak is NOT in this extra — install_shared_env.py
+# installs garak==0.17.1 with --no-deps (REST/Anthropic/LiteLLM; avoids openai<3).
+# See docs/ai_security/AASI_V51_DEPENDENCIES.md.
+ai-scanners = [
+  "safelabs-eval==0.12.0",
+  "pyrit==1.2.1",
+  "openai>=3,<4",
+  "anthropic>=0.40.0,<1.0.0",
+  "litellm>=1.84.0",
+]
 
 [project.scripts]
 attestra = "attestra.cli:main"

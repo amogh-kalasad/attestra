@@ -21,7 +21,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURIT
 | In-app scans | Background worker runs ZAP, webcheck, testssl, Nuclei, Trivy, Semgrep, Gitleaks, Checkov, naabu, Prowler, kube-bench. Scans can be cancelled. Same path from the CLI: `attestra scan` |
 | Auth website testing | Optional authenticated crawl and WSTG/ASVS checklist (off by default). Mid-scan session expiry detection and bounded re-login. See [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md) |
 | Automated VAPT | Optional catalogue (T01–T22 plus SESSION, INJ, XSS, XSSDOM, XSSSTORE, FILE, BIZ, ROLEDIFF, SSRF, UPLOAD). Off by default; some probes are extra-gated. Skip/blocked reasons stay visible in reports |
-| AASI (optional) | AI / LLM security track (`ai_app`, importers, digest-gated adapters, recommend-only `/api/aasi`). **Off by default** (`ATTESTRA_AASI=off`). See [AASI](#attestra-agentic-security-intelligence-aasi) |
+| AASI (optional) | AI / LLM security track (`ai_app`, importers, native shared-env AI scanners under V5.1, recommend-only `/api/aasi`). **Off by default** (`ATTESTRA_AASI=off`). See [AASI](#attestra-agentic-security-intelligence-aasi) |
 | Imports | ZAP, Nuclei, Trivy, SARIF, testssl, SSL Labs, Observatory, Burp, Nessus, Prowler, kube-bench, Checkov, Gitleaks, naabu, CycloneDX, Dependency-Track, webcheck, plus AI tools (garak, promptfoo, safelabs, pyrit) and more |
 | Findings | One format keyed on CWE, CVE and location, with observations kept under canonical findings. Import-time classification downgrades scanner noise (for example ZAP 10109/10112, CDN/challenge, Expect-CT). Finding-specific remediation packs |
 | Risk | Risk is based on CVSS (vector + score) plus FIRST EPSS, CISA KEV, asset criticality and exposure. Each site also gets a separate A–F observatory-style grade |
@@ -381,7 +381,7 @@ python -m attestra.cli checklist-sync --engagement ENGAGEMENT_ID --dry-run
 
 ## Attestra Agentic Security Intelligence (AASI)
 
-Optional AI / LLM security on branch work toward production readiness. **Disabled by default** — set `ATTESTRA_AASI=on` (or `1` / `true` / `yes`) only in lab or approved environments. Status detail: [docs/ai_security/AASI_IMPLEMENTATION_STATUS.md](docs/ai_security/AASI_IMPLEMENTATION_STATUS.md).
+Optional AI / LLM security on branch work toward production readiness. **Disabled by default** — set `ATTESTRA_AASI=on` (or `1` / `true` / `yes`) only in lab or approved environments. Status detail: [docs/ai_security/AASI_IMPLEMENTATION_STATUS.md](docs/ai_security/AASI_IMPLEMENTATION_STATUS.md). V5.1 tracker: [docs/ai_security/AASI_V51_STATUS.md](docs/ai_security/AASI_V51_STATUS.md).
 
 ### Implemented status (tree-verified)
 
@@ -389,17 +389,17 @@ Optional AI / LLM security on branch work toward production readiness. **Disable
 | --- | --- |
 | 0 Baseline / licence / audits | Complete |
 | 1 AI asset kinds, taxonomy, offline importers | Complete |
-| 2 Garak / Promptfoo / SafeLabs adapters + coverage origin | **Partially implemented** — adapters registered; **production image digests are not pinned yet** (placeholders refused at runtime) |
+| 2 Garak / Promptfoo / SafeLabs adapters + coverage origin | **V5.1 IN PROGRESS** — native shared-env execution supersedes V4 Docker digests |
 | 3 Recommend-only AASI core (`attestra/aasi/`, `/api/aasi`) | Complete (feature-flagged) |
 | 4 Evidence gate / task tree / prioritize helpers | **Partially implemented** |
-| 5 PyRIT isolated worker adapter | **Partially implemented** — registered; digest still a placeholder |
-| 6 Attack-path graph store | **Partially implemented** — Mongo graph helpers; no remediation PR flow |
+| 5 PyRIT adapter | **V5.1 IN PROGRESS** — real framework in shared venv; V4 Docker worker path superseded |
+| 6 Attack-path graph store | **Partially implemented** — Mongo graph helpers; remediation PR proposals exist |
 | 7 AASI report section builders | **Partially implemented** — `aasi_sections` in render context when AASI used |
-| 8 Env templates (`.env.example` / production example) | Complete (AASI still default off; digests commented placeholders) |
-| 9 Docker / deploy docs + validate-env stub | **Partially implemented** — docs only; no real AI digests |
-| 10 Dependency / isolated-worker policy docs | Complete (AI tools stay out of core `pyproject`) |
+| 8 Env templates (`.env.example` / production example) | Complete (AASI default off; `ATTESTRA_SHARED_ENV_ROOT`; AI image vars deprecated) |
+| 9 Deploy docs + validate-env | **V5.1 IN PROGRESS** — shared-env install steps; no AI digest readiness path |
+| 10 Dependency / runtime policy docs | **V5.1** — native shared env supersedes isolated AI worker images |
 | 11 README / setup docs | Complete (this section) |
-| 12–13 Full e2e / production readiness | Partially / not started |
+| 12–13 Full e2e / production readiness | Partially / not started for native AI scanners |
 
 ### Enablement
 
@@ -407,6 +407,9 @@ Optional AI / LLM security on branch work toward production readiness. **Disable
 # Master switch (default off). When off, GET /api/aasi/status returns {enabled:false};
 # other /api/aasi routes return 404.
 ATTESTRA_AASI=off
+
+# V5.1 shared environment root (one Python venv + Node/npm for Promptfoo)
+# ATTESTRA_SHARED_ENV_ROOT=/opt/attestra/runtime
 
 # Budgets and approval (safe defaults already in config)
 # ATTESTRA_AASI_MAX_ITERATIONS=8
@@ -446,9 +449,9 @@ Registered in `attestra.importers.PARSERS`:
 
 ### Adapters (in-app scans)
 
-Registered scanners: **garak**, **promptfoo**, **safelabs**, and **pyrit** (isolated multi-turn worker; external judge off unless explicitly authorized). They expect digest-pinned images via `ATTESTRA_IMAGE_GARAK`, `ATTESTRA_IMAGE_PROMPTFOO`, `ATTESTRA_IMAGE_SAFELABS`, and `ATTESTRA_IMAGE_PYRIT`.
+Registered scanners: **garak**, **promptfoo**, **safelabs**, and **pyrit** (allowlisted multi-turn scenarios; external judge off unless explicitly authorized).
 
-**Honesty:** AI image digests default to refused placeholders. Build/pull recipes live in [`docker/aasi/README.md`](docker/aasi/README.md) (Promptfoo from GHCR; Garak/SafeLabs/PyRIT from Attestra Dockerfiles that wrap the referenced upstream packages). Old Hub stub names like `docker.io/nvidia/garak` are not public images — that pull failure is expected. Do not treat AI scanners as production-ready until real digests are pinned.
+**V5.1 honesty:** AI tools run from a **native shared environment** (`ATTESTRA_SHARED_ENV_ROOT`) — one Python venv for Attestra/Garak/SafeLabs/PyRIT, plus Node/npm under the same root for Promptfoo. This **supersedes** the V4 Docker digest approach. `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` are **deprecated for AI execution**. Do **not** claim production AI digests. [`docker/aasi/README.md`](docker/aasi/README.md) is historical packaging only. Install/verify via the shared-env runbook: [docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md](docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md). Docker-free AI scanners remain **IN PROGRESS** until native runs are proven ([AASI_V51_STATUS.md](docs/ai_security/AASI_V51_STATUS.md)).
 
 ### Recommend-only API
 
@@ -569,7 +572,8 @@ Staging/production (or missing `APP_ENV`) with a bypass set to true fails startu
 | `ATTESTRA_AI_*` | off | Optional AI draft text (`PROVIDER`, `MODEL`, `BASE_URL`, `API_KEY`, `NARRATIVES`, `TENANTS_OFF`) — keep keys in the environment, never in the repo |
 | `ATTESTRA_AASI` | off | Master switch for recommend-only AASI (`/api/aasi`); see [AASI](#attestra-agentic-security-intelligence-aasi) |
 | `ATTESTRA_AASI_MAX_*`, `ATTESTRA_AASI_RETRY_LIMIT`, `ATTESTRA_AASI_REQUIRE_APPROVAL` | bounded / on | AASI run budgets and human approval gate |
-| `ATTESTRA_IMAGE_GARAK`, `ATTESTRA_IMAGE_PROMPTFOO`, `ATTESTRA_IMAGE_SAFELABS`, `ATTESTRA_IMAGE_PYRIT` | placeholders | AI scanner digests — placeholders refused until real pins |
+| `ATTESTRA_SHARED_ENV_ROOT` | unset | V5.1 shared env root (one Python venv + Node/npm for Promptfoo) |
+| `ATTESTRA_IMAGE_GARAK`, `ATTESTRA_IMAGE_PROMPTFOO`, `ATTESTRA_IMAGE_SAFELABS`, `ATTESTRA_IMAGE_PYRIT` | deprecated | Unused for AI execution under V5.1 — do not claim production AI digests |
 | `ATTESTRA_METRICS_TOKEN`, `ATTESTRA_METRICS_ENABLED`, `ATTESTRA_METRICS_ALLOW_ANON` | — | `/metrics` |
 | `ATTESTRA_LOG_JSON`, `ATTESTRA_LOG_LEVEL` | — | Logging |
 | `ATTESTRA_EVIDENCE_MAX_BYTES` | `20971520` | Evidence size cap |

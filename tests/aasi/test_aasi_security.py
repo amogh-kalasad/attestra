@@ -276,7 +276,8 @@ def test_arbitrary_command_request_rejected(tmp_path):
     assert "curl evil" not in joined
     assert "| sh" not in joined
     assert "shell=True" not in joined
-    assert argv[0] == "garak"
+    # V5.1: shared-env python -m garak (do not require argv[0] == "garak").
+    assert "garak" in argv and ("-m" in argv or argv[0] == "garak" or argv[0].endswith("garak"))
 
 
 # --------------------------------------------------------------------------- 8 secret leakage in provider prompts
@@ -708,42 +709,43 @@ def test_report_claims_without_evidence_fail_aasi_qa_issues():
     assert "aasi_invalid_evidence_ref" in codes
 
 
-# --------------------------------------------------------------------------- 18 unpinned / placeholder images
+# --------------------------------------------------------------------------- 18 unpinned / native-only AI (V5.1)
 
 
 # @lat: [[tests#AASI Phase 12 security#Unpinned scanner image rejection]]
 def test_unpinned_scanner_image_rejection(monkeypatch):
+    """Digest helpers still refuse floating tags; AI adapters are native-only (no Docker)."""
     from attestra import config
     from attestra.config import image_is_placeholder, require_image_digest
     from attestra.runner.scanners.base import require_digest_image
     from attestra.runner.scanners.garak import GarakAdapter
+    from attestra.runner.scanners.promptfoo import PromptfooAdapter
     from attestra.runner.scanners.pyrit import PyRITAdapter
+    from attestra.runner.scanners.safelabs import SafeLabsAdapter
 
+    # Non-AI / shared digest helpers keep refusing floating tags.
     with pytest.raises(ValueError, match="@sha256:"):
-        require_image_digest("docker.io/nvidia/garak:latest")
+        require_image_digest("docker.io/owasp/zap:latest")
     with pytest.raises(ValueError, match="@sha256:"):
-        require_digest_image("ghcr.io/promptfoo/promptfoo:latest")
+        require_digest_image("docker.io/aquasec/trivy:latest")
 
     zero = "docker.io/nvidia/garak@sha256:" + ("0" * 63) + "c"
     assert image_is_placeholder(zero) is True
     assert image_is_placeholder(config.SCANNER_IMAGES.get("garak", zero)) is True
 
-    # REPLACE_AFTER_INSPECT-style digests are not a real pin for adapters.
-    replace_img = "docker.io/nvidia/garak@sha256:REPLACE_AFTER_INSPECT"
-    # image_is_placeholder only flags all-zero digests; adapters still need a real pin.
-    monkeypatch.setitem(config.SCANNER_IMAGES, "garak", "docker.io/nvidia/garak:latest")
-    assert GarakAdapter().image_configured() is False
-    with pytest.raises(ValueError, match="@sha256:"):
-        GarakAdapter().image_ref()
+    digest = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    pinned = f"attestra/fake-ai@sha256:{digest}"
+    import attestra.runner.scanners.base as base
 
-    monkeypatch.setitem(config.SCANNER_IMAGES, "garak", zero)
-    assert GarakAdapter().image_configured() is False
-
-    monkeypatch.setitem(config.SCANNER_IMAGES, "pyrit", replace_img)
-    # Floating / non-hex REPLACE digest still has @sha256: so require_image_digest may accept
-    # the string shape; image_configured depends on placeholder detection for zeros only.
-    # Ensure a floating tag is refused:
-    monkeypatch.setitem(config.SCANNER_IMAGES, "pyrit", "docker.io/attestra/pyrit-worker:latest")
-    assert PyRITAdapter().image_configured() is False
-    with pytest.raises(ValueError, match="@sha256:"):
-        PyRITAdapter().image_ref()
+    monkeypatch.setattr(base, "docker_available", lambda: True)
+    for Adapter in (GarakAdapter, PromptfooAdapter, SafeLabsAdapter, PyRITAdapter):
+        adapter = Adapter()
+        assert adapter.allows_docker is False
+        assert adapter.image_key == ""
+        # Placeholders or even a real digest in SCANNER_IMAGES must not select Docker.
+        monkeypatch.setitem(config.SCANNER_IMAGES, "garak", pinned)
+        monkeypatch.setitem(config.SCANNER_IMAGES, "promptfoo", pinned)
+        monkeypatch.setitem(config.SCANNER_IMAGES, "safelabs", pinned)
+        monkeypatch.setitem(config.SCANNER_IMAGES, "pyrit", pinned)
+        assert adapter.uses_docker() is False
+        assert adapter.image_configured() is False

@@ -312,17 +312,28 @@ def validate_resolved_ips(
     *,
     allow_private: bool = False,
 ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    """Validate resolved addresses. Raises AuthorizationError if any are blocked."""
+    """Validate resolved addresses. Raises AuthorizationError if any are blocked.
+
+    Metadata / CGNAT (`BLOCKED_CIDRS`) are always refused. Loopback is refused by
+    default (SSRF pivot) but allowed when ``allow_private`` is true so lab fixtures
+    such as ``http://127.0.0.1:18080/`` with asset notes ``allow_private`` can run
+    native AASI scanners on the host.
+    """
     out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     for raw in ips:
         ip = unwrap_ip(ipaddress.ip_address(raw) if not isinstance(raw, (ipaddress.IPv4Address, ipaddress.IPv6Address)) else raw)
+        if any(ip in net for net in BLOCKED_CIDRS):
+            raise AuthorizationError(f"blocked IP: {ip}")
+        if ip.is_loopback:
+            if not allow_private:
+                raise AuthorizationError(f"blocked IP: {ip}")
+            out.append(ip)
+            continue
         if is_blocked_ip(ip):
             raise AuthorizationError(f"blocked IP: {ip}")
         if not allow_private and (not ip.is_global or is_private_ip(ip)):
             raise AuthorizationError(f"non-global IP not allowed: {ip}")
-        if allow_private and is_blocked_ip(ip):
-            raise AuthorizationError(f"blocked IP: {ip}")
-        # Even with allow_private, keep BLOCKED_CIDRS denied (already checked).
+        # Even with allow_private, keep BLOCKED_CIDRS denied (already checked above).
         out.append(ip)
     if not out:
         raise AuthorizationError("no resolved IPs")

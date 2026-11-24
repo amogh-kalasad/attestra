@@ -1,6 +1,6 @@
 # AASI (Attestra Agentic Security Intelligence)
 
-AI/LLM security for Attestra: catalogues, adapters, recommend-only AASI core, reporting, env/deploy docs, Phase 12 security tests, and Phase 13 readiness (READY FOR STAGING, not production-ready).
+AI/LLM security for Attestra: catalogues, adapters, recommend-only AASI core, reporting, V5.1 native shared-env scanners, env/deploy docs, Phase 12 tests, and Phase 13 readiness (READY FOR STAGING, not production-ready).
 
 ## Phase 1 asset types
 
@@ -16,9 +16,9 @@ Offline parsers for Garak, Promptfoo, safelabs-eval, and PyRIT exports, register
 
 ## Phase 2 SafeLabs adapter
 
-Digest-pinned [[attestra/runner/scanners/safelabs.py#SafeLabsAdapter]] runs safelabs-eval against a DNS-pinned `ai_app` URL inside an isolated Python container.
+Native shared-env [[attestra/runner/scanners/safelabs.py#SafeLabsAdapter]] runs safelabs-eval against a DNS-pinned `ai_app` URL (AASI V5.1; no Docker).
 
-[[attestra/runner/scanners/safelabs.py#SafeLabsAdapter]] sets `name`/`import_tool`/`image_key` to `safelabs`, `out_name` to `safelabs-report.json`, and `AdapterMeta` with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="Apache-2.0"`, `image_ref_env="ATTESTRA_IMAGE_SAFELABS"`, `output_schema="safelabs-json"`. `docker_args` invoke `safelabs run … --output json`; with `report_on_stdout`, base scan persists JSON under [[attestra/runner/scanners/base.py#CONTAINER_OUT]]. The adapter never upgrades heuristic hits — import stays at potential via [[attestra/importers/safelabs.py#parse]]. Registry/digest wiring is parent-owned. Note: `docs/ai_security/AASI_PHASE2_SAFELABS_ADAPTER.md`.
+[[attestra/runner/scanners/safelabs.py#SafeLabsAdapter]] sets `name`/`import_tool` to `safelabs`, `image_key=""`, `allows_docker=False`, `out_name` to `safelabs-report.json`, and `AdapterMeta` with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="Apache-2.0"`, empty `image_ref_env`, `output_schema="safelabs-json"`. `build_argv` launches shared `python -m safelabs` (or venv `safelabs` script) with `run … --output json`; with `report_on_stdout`, base scan persists JSON under the host out dir. The adapter never upgrades heuristic hits — import stays at potential via [[attestra/importers/safelabs.py#parse]]. Notes: `docs/ai_security/AASI_V51_GARAK_SAFELABS_NATIVE.md`, `docs/ai_security/AASI_PHASE2_SAFELABS_ADAPTER.md`.
 
 ## Phase 2 coverage and AI-tool validity
 
@@ -28,15 +28,15 @@ Ledger provenance and AI-tool failure honesty for AI coverage rows; scanner adap
 
 ## Phase 2 Garak adapter
 
-Digest-pinned Garak REST probes via [[attestra/runner/scanners/garak.py#GarakAdapter]] against authorized `ai_app` URLs.
+Native shared-env Garak REST probes via [[attestra/runner/scanners/garak.py#GarakAdapter]] against authorized `ai_app` URLs (AASI V5.1; no Docker).
 
-[[attestra/runner/scanners/garak.py#GarakAdapter]] declares `meta` (`ai_llm_probe`, `ai_app`, T2, `network_egress="target"`, Apache-2.0, `ATTESTRA_IMAGE_GARAK`, `garak-jsonl`). Docker is primary (`python -m garak`); local CLI is optional via `available()`. Fixed argv writes RestGenerator + run configs under `/out`, never `shell=True`. Scope uses `authorize_target` when provided. Empty/failed reports set `ScannerResult.error`. Design note: `docs/ai_security/AASI_PHASE2_GARAK_ADAPTER.md`. Registry and digest wiring are parent-owned.
+[[attestra/runner/scanners/garak.py#GarakAdapter]] declares `image_key=""`, `allows_docker=False`, and `meta` (`ai_llm_probe`, `ai_app`, T2, `network_egress="target"`, Apache-2.0, empty `image_ref_env`, `garak-jsonl`). Launcher is shared `python -m garak` via `_shared_python()` / `scanner_runtime`. Fixed argv writes RestGenerator + run configs under the host out dir, never `shell=True`. Scope uses `authorize_target` when provided. Empty/failed reports set `ScannerResult.error`. Shared-env openai policy: REST only; OpenAI generator unsupported; Anthropic/LiteLLM packages present ([[aasi#V5.1 openai shared-env policy]]). Design notes: `docs/ai_security/AASI_V51_GARAK_SAFELABS_NATIVE.md`, `docs/ai_security/AASI_PHASE2_GARAK_ADAPTER.md`.
 
 ## Phase 2 Promptfoo adapter
 
-Digest-pinned Node container that runs `promptfoo eval` against an authorized `ai_app` URL with remote/cloud features off.
+Native shared-env Promptfoo (`allows_docker=False`) that runs `promptfoo eval` against an authorized `ai_app` URL with remote/cloud features off.
 
-[[attestra/runner/scanners/promptfoo.py#PromptfooAdapter]] sets `name`/`import_tool`/`image_key` to `promptfoo`, `out_name` to `promptfoo-results.json`, and [[attestra/runner/scanners/sdk.py#AdapterMeta]] with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="MIT"`, `image_ref_env="ATTESTRA_IMAGE_PROMPTFOO"`, `output_schema="promptfoo-results-json"`. [[attestra/runner/scanners/promptfoo.py#PromptfooAdapter#build_docker_argv]] writes a minimal `promptfooconfig.yaml`, pins the host via `--add-host`, and passes `PROMPTFOO_DISABLE_REMOTE_GENERATION` / `TELEMETRY` / `SHARING` / `UPDATE` as `docker run -e` through `extra_flags`. Judges stay local or tenant-approved; registry/digest wiring is parent INT. Note: `docs/ai_security/AASI_PHASE2_PROMPTFOO_ADAPTER.md`. Tests: [[tests#AASI Phase 2 Promptfoo adapter]].
+[[attestra/runner/scanners/promptfoo.py#PromptfooAdapter]] sets `name`/`import_tool` to `promptfoo`, empty `image_key`, `allows_docker=False`, `out_name` to `promptfoo-results.json`, and [[attestra/runner/scanners/sdk.py#AdapterMeta]] with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="MIT"`, empty `image_ref_env`, `output_schema="promptfoo-results-json"`. [[attestra/runner/scanners/promptfoo.py#resolve_promptfoo_argv_prefix]] / [[attestra/runner/scanners/promptfoo.py#PromptfooAdapter#build_argv]] run from `ATTESTRA_SHARED_ENV_ROOT` (npm + Node under that root), write a minimal `promptfooconfig.yaml`, apply [[attestra/runner/scanners/promptfoo.py#privacy_env]], and never use Docker. Judges stay local or tenant-approved. Note: `docs/ai_security/AASI_V51_PROMPTFOO_NATIVE.md`, `docs/ai_security/AASI_V51_NO_DOCKER.md`. Tests: [[tests#AASI Phase 2 Promptfoo adapter]].
 
 ## Phase 3 provider and context
 
@@ -82,15 +82,15 @@ Evidence-ID gate for conclusions, run-state task tree helpers, and recommendatio
 
 ## AASI worker image recipes
 
-Buildable isolated images for AI scanners; core Attestra stays free of those deps.
+V4 Docker AI image recipes are **deprecated for execution** under V5.1; see [[aasi#V5.1 native scanners]].
 
-`docker/aasi/` holds Dockerfiles for Garak, SafeLabs, and PyRIT plus a thin `attestra_pyrit_worker`. Promptfoo uses official GHCR. Upstream GitHub projects are referenced; Attestra implements adapters/importers here. See `docs/ai_security/AASI_WORKER_IMAGES.md` and `docker/aasi/README.md`.
+`docker/aasi/` still holds historical Dockerfiles for Garak, SafeLabs, and PyRIT plus a thin `attestra_pyrit_worker`. They are not the V5.1 runtime path. Policy: `docs/ai_security/AASI_WORKER_IMAGES.md`; deprecation notice: `docker/aasi/README.md`.
 
 ## Phase 5 PyRIT adapter
 
-Digest-pinned multi-turn PyRIT worker for authorized `ai_app` URLs; never imports PyRIT into the core app.
+Native shared-env PyRIT runner for authorized `ai_app` URLs (AASI V5.1); Docker worker path is deprecated.
 
-[[attestra/runner/scanners/pyrit.py#PyRITAdapter]] sets `name`/`import_tool`/`image_key` to `pyrit`, `out_name` to `pyrit-results.json`, and [[attestra/runner/scanners/sdk.py#AdapterMeta]] with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="MIT"`, `image_ref_env="ATTESTRA_IMAGE_PYRIT"`, `output_schema="pyrit-json"`. Allowlisted scenarios (`crescendo`, `pair`, `tree_of_attacks`, `red_teaming`, `many_shot`) map to fixed argv; unrestricted command opts are rejected. Third-party judge/adversarial egress stays off unless `tenant_authorize_external_judge=True`. Run config requests transcripts; [[attestra/runner/scanners/pyrit.py#PyRITAdapter#scan]] copies usage/cost into `ScannerResult.extra`. Registry line in [[attestra/runner/scanners/registry.py]]. Note: `docs/ai_security/AASI_PHASE5_PYRIT.md`. Tests: [[tests#AASI Phase 5 PyRIT adapter]].
+[[attestra/runner/scanners/pyrit.py#PyRITAdapter]] sets `name`/`import_tool` to `pyrit`, `image_key=""`, `allows_docker=False`, `out_name` to `pyrit-results.json`, and [[attestra/runner/scanners/sdk.py#AdapterMeta]] with `asset_kinds=("ai_app",)`, `safety_tier="T2"`, `network_egress="target"`, `licence="MIT"`, empty `image_ref_env`, `output_schema="pyrit-json"`. Execution is `python -m attestra.aasi.pyrit_native` via [[attestra/aasi/pyrit_native.py#run_scenario]] (real `pyrit` import, `HTTPTarget`, `PromptSendingAttack` / `ManyShotJailbreakAttack`). Allowlisted scenarios only; unrestricted command opts rejected. Third-party judge egress off unless `tenant_authorize_external_judge=True`. Doc: `docs/ai_security/AASI_V51_PYRIT_NATIVE.md`. Tests: [[tests#AASI Phase 5 PyRIT adapter]].
 
 ## Phase 6 attack-path graph
 
@@ -112,15 +112,15 @@ AI-security executive / technical / traceability / coverage payloads inside the 
 
 ## Phase 8 environment templates
 
-Operator env templates for AASI/AI narratives with safe off-by-default values; digests stay placeholders until Phase 9.
+Operator env templates for AASI/AI narratives with safe off-by-default values; V5.1 adds shared-env root and deprecates AI image pins.
 
-`.env.example` documents `ATTESTRA_AI_*` narratives vars, [[attestra/config.py#AASI_ENABLED]] / `ATTESTRA_AASI_*` budgets with `ATTESTRA_AASI_REQUIRE_APPROVAL=on`, and commented `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` pins (`REPLACE_AFTER_INSPECT`). `.env.production.example` mirrors production-safe defaults (`APP_ENV=production`, bypasses false, AASI/AI off, secret placeholders only). Inventory: `docs/ai_security/AASI_ENV_INVENTORY.md`. Draft defaults: `docs/ai_security/AASI_PHASE8_ENV_DRAFT.md`. Completion: `docs/ai_security/AASI_PHASE8_COMPLETION.md`.
+`.env.example` documents `ATTESTRA_AI_*` narratives vars, [[attestra/config.py#AASI_ENABLED]] / `ATTESTRA_AASI_*` budgets with `ATTESTRA_AASI_REQUIRE_APPROVAL=on`, `ATTESTRA_SHARED_ENV_ROOT`, and deprecated commented `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` (unused for AI execution under V5.1). `.env.production.example` mirrors production-safe defaults (`APP_ENV=production`, bypasses false, AASI/AI off, secret placeholders only). Inventory: `docs/ai_security/AASI_ENV_INVENTORY.md`. Draft defaults: `docs/ai_security/AASI_PHASE8_ENV_DRAFT.md`. Completion: `docs/ai_security/AASI_PHASE8_COMPLETION.md`.
 
 ## Phase 9 Docker and deployment
 
-Docs and safe Compose extensions for AASI production Docker without enabling new required services.
+Docs and safe Compose extensions for the Attestra app stack; V5.1 moves AI scanner enablement to shared-env install, not digest pins.
 
-`docs/ai_security/AASI_DOCKER_DEPLOYMENT.md` records app-image practices (scanners not baked in), AI scanner isolation, digest pins for Garak/Promptfoo/SafeLabs/PyRIT, no-privileged/`no-new-privileges`, Helm resource limits, validate/health commands, and rollback. `scripts/aasi/validate_aasi_env.py` checks [[attestra/config.py#AASI_ENABLED]] and AI image digest shape without printing secrets. Root `compose.yaml` keeps default `scanner-pull` for web tools only; an optional `aasi-scanner-pull` block stays fully commented. Completion: `docs/ai_security/AASI_PHASE9_COMPLETION.md`.
+`docs/ai_security/AASI_DOCKER_DEPLOYMENT.md` records app-image practices. V5.1 operator path is `docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md` (install shared env under `ATTESTRA_SHARED_ENV_ROOT`). `scripts/aasi/validate_aasi_env.py` checks [[attestra/config.py#AASI_ENABLED]] without printing secrets; AI `--require-ai-images` is not a V5.1 readiness gate. Root `compose.yaml` keeps default `scanner-pull` for **web** tools only. Completion note: `docs/ai_security/AASI_PHASE9_COMPLETION.md` (V4 era); tracker: `docs/ai_security/AASI_V51_STATUS.md`.
 
 ## Phase 12 security and regression tests
 
@@ -132,4 +132,40 @@ Offline suite covering AASI trust boundaries (prompt-injection redaction, scope/
 
 Documentation-only readiness pack: final implementation report, production-readiness gates, deploy/rollback runbooks, and master feature matrix; no production deploy claimed.
 
-Classification is **READY FOR STAGING** (also READY FOR PRODUCTION REVIEW) — **not** PRODUCTION READY — because AI scanner digests remain placeholders, no staging deploy was verified in the Phase 13 session, and no live vulnerable-AI lab e2e was run then. Operator docs: `docs/ai_security/AASI_FINAL_IMPLEMENTATION_REPORT.md`, `docs/ai_security/AASI_PRODUCTION_READINESS_REPORT.md`, `docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md`, `docs/ai_security/AASI_ROLLBACK_RUNBOOK.md`, `docs/ai_security/AASI_PHASE13_COMPLETION.md`. Status matrix: `docs/ai_security/AASI_IMPLEMENTATION_STATUS.md`. Honest gaps include placeholder digests, possible core `.venv` lag vs `pyproject.toml`, and Shannon AGPL-3.0 no-reuse.
+Classification is **READY FOR STAGING** (also READY FOR PRODUCTION REVIEW) — **not** PRODUCTION READY — for recommend-only AASI core from the Phase 13 session. V5.1 native AI scanners are a separate **IN PROGRESS** track and must not claim production AI digests. Operator docs: `docs/ai_security/AASI_FINAL_IMPLEMENTATION_REPORT.md`, `docs/ai_security/AASI_PRODUCTION_READINESS_REPORT.md`, `docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md`, `docs/ai_security/AASI_ROLLBACK_RUNBOOK.md`, `docs/ai_security/AASI_PHASE13_COMPLETION.md`, `docs/ai_security/AASI_V51_STATUS.md`. Status matrix: `docs/ai_security/AASI_IMPLEMENTATION_STATUS.md`. Honest gaps include unfinished native shared-env install/adapters, possible core `.venv` lag vs `pyproject.toml`, and Shannon AGPL-3.0 no-reuse.
+
+## V5.1 native scanners
+
+V5.1 runs Garak, Promptfoo, SafeLabs, and PyRIT natively under one `ATTESTRA_SHARED_ENV_ROOT`; Docker AI digests are superseded and must not be claimed as production pins.
+
+Prompt 5.1 requires exactly one shared Python venv (Attestra + Garak + SafeLabs + PyRIT) and Node/npm under the same root for Promptfoo — no per-scanner venvs, no AI Docker pulls/execution. Track status is **IN PROGRESS** (`docs/ai_security/AASI_V51_STATUS.md`, `docs/ai_security/AASI_IMPLEMENTATION_STATUS.md`). Env templates document `ATTESTRA_SHARED_ENV_ROOT` and deprecate `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` for AI execution. Operator install/verify steps: `docs/ai_security/AASI_DEPLOYMENT_RUNBOOK.md`. Policy supersession: `docs/ai_security/AASI_WORKER_IMAGES.md`. `docker/aasi/` is deprecated for AI execution. Web scanner digests remain unchanged. Directive archive: `docs/ai_security/AASI_CLI_PROMPT_5.1.md`.
+
+## V5.1 native-only AI scanners (no Docker)
+
+AI adapters opt out of Docker via `allows_docker=False`; shared env installs replace container images for Garak/Promptfoo/SafeLabs/PyRIT.
+
+[[attestra/runner/scanners/base.py#ScannerAdapter]] adds `allows_docker` (default true). [[attestra/runner/scanners/base.py#ScannerAdapter#uses_docker]] returns false when that flag is false, even with a digest-pinned image and Docker present. [[attestra/runner/scanners/base.py#ScannerAdapter#unavailable_reason]] then points at [[attestra/config.py#SHARED_ENV_ROOT]] / [[attestra/config.py#shared_env_root]] (`ATTESTRA_SHARED_ENV_ROOT`, empty → `.attestra-runtime`) and never suggests Docker. Placeholder `garak`/`promptfoo`/`safelabs`/`pyrit` keys in `_PLACEHOLDER_IMAGES` may remain but are unused by AI adapters at runtime. Non-AI scanners keep Docker images. Doc: `docs/ai_security/AASI_V51_NO_DOCKER.md`. Tests: [[tests#AASI V5.1 no Docker for AI adapters]].
+
+## V5.1 shared scanner runtime
+
+One shared install root for native AI scanners: a single Python venv plus Node/npm for Promptfoo under `ATTESTRA_SHARED_ENV_ROOT`.
+
+[[attestra/scanner_runtime/environment.py#resolve_shared_env]] / [[attestra/scanner_runtime/environment.py#SharedEnvironment]] resolve the root (default `<repo>/.attestra-runtime`) and layout (`venv`, `tools/node`, `npm`, `manifests`, `logs`, `cache`, `tmp`). [[attestra/scanner_runtime/environment.py#require_python]], [[attestra/scanner_runtime/environment.py#require_promptfoo]], and [[attestra/scanner_runtime/environment.py#shared_python]] expose Windows-aware binaries; [[attestra/scanner_runtime/environment.py#reject_extra_venvs]] forbids per-scanner venvs. [[attestra/scanner_runtime/versions.py#SUPPORTED]] pins garak `0.17.1`, safelabs-eval `0.12.0`, pyrit `1.2.1`, promptfoo `~0.118.x`, node `20.x`. [[attestra/scanner_runtime/dependency_check.py#check_python_package]] queries shared-venv `importlib.metadata`; [[attestra/scanner_runtime/health.py#health_report]] covers all four scanners with `docker: false`. [[attestra/scanner_runtime/process.py#run_with_shared_env]] wraps [[attestra/runner/scanners/base.py#run_process]] with sanitized PATH. [[attestra/scanner_runtime/manifest.py#write_manifest]] / [[attestra/scanner_runtime/manifest.py#read_manifest]] store JSON under `manifests/`. Optional `pyproject.toml` extra `ai-scanners` lists SafeLabs, PyRIT, `openai>=3,<4`, anthropic, and litellm (Garak is staged by the installer with `--no-deps`); `requirements.txt` mirrors those as comments (Promptfoo is npm-only via `runtime/npm/package.json` pin `promptfoo@0.118.17`). [[scripts/aasi/install_shared_env.py]] provisions the root and installs into the single `venv/` (never docker-pulls / never a second venv); [[scripts/aasi/install_promptfoo_npm.py]] is the Promptfoo-only wrapper. Docs: `docs/ai_security/AASI_V51_SHARED_ENV.md`, `docs/ai_security/AASI_V51_DEPENDENCIES.md`, `docs/ai_security/AASI_V51_INSTALL.md`. Complements [[aasi#V5.1 native-only AI scanners (no Docker)]] and [[aasi#V5.1 openai shared-env policy]].
+
+## V5.1 openai shared-env policy
+
+Single shared venv prefers openai 3.x for PyRIT; Garak installs with `--no-deps` and runs REST/Anthropic/LiteLLM only.
+
+Upstream `garak==0.17.1` wants `openai>=2,<3` while `pyrit==1.2.1` wants `openai>=3,<4`. [[scripts/aasi/install_shared_env.py#pip_install_ai_scanners]] stages core + joint pins (SafeLabs, PyRIT, openai 3.x, anthropic, litellm), then `garak==0.17.1 --no-deps`, then Garak METADATA deps via [[scripts/aasi/install_shared_env.py#filter_garak_requirements]] (openai and extras dropped), re-pins openai 3.x, and verifies imports. A `pip check` line that only complains about garak↔openai is an accepted WARN. [[attestra/runner/scanners/garak.py#GarakAdapter]] keeps `--target_type rest`; Garak's native OpenAI generator is unsupported in this env. No second venv. Docs: `docs/ai_security/AASI_V51_DEPENDENCIES.md`. Tests: [[tests#AASI V5.1 openai shared-env policy]].
+
+## V5.1 native target-bound egress
+
+Helpers that re-check the DNS-pinned target and strip host secrets from scanner subprocess env for native shared-venv runs.
+
+[[attestra/scanner_runtime/egress.py#assert_target_egress_allowed]] refuses a missing pin and revalidates `pinned.ip` via [[attestra/runner/authorization.py#validate_resolved_ips]] (metadata/CGNAT stay blocked). [[attestra/scanner_runtime/egress.py#scanner_process_env]] keeps PATH/system essentials, drops AWS/Mongo/`ATTESTRA_SESSION*` secrets, and sets `ATTESTRA_SCANNER_JOB=1`. Shared venv is not isolation; `HTTP_PROXY` alone is insufficient — fail closed without a valid pin. Doc: `docs/ai_security/AASI_V51_NATIVE_EGRESS.md`. Tests: [[tests#AASI V5.1 native egress]]. Lab note: when asset notes include `allow_private`, [[attestra/runner/authorization.py#validate_resolved_ips]] may allow loopback so the mock LLM on `127.0.0.1` can be scanned.
+
+## V5.1 live Anthive + mock LLM E2E
+
+Lab verification that shared-env openai policy and native AI adapters run, plus webcheck against the Anthive marketing site.
+
+`https://www.anthive.tech/` is treated as `web_app` (HTML marketing); AI scanners target [[scripts/aasi/mock_llm_target.py]] (`ai_app` + `allow_private`). Live eng `#1`: SafeLabs `#10` and PyRIT `#12` `done` against the mock; webcheck `#13` `done` with 10 imported anthive findings; Garak `#11` REST RestGenerator completed (exit 0, digest) but Attestra marked `failed` on strict JSONL import ([[attestra/importers/garak.py#_parse_records]]); Promptfoo skipped (`--skip-node`); ZAP not run (Docker daemon down). Results doc: `docs/ai_security/AASI_V51_E2E_ANTHIVE_VERIFICATION.md`. Tracker: `docs/ai_security/AASI_V51_STATUS.md`. Policy: [[aasi#V5.1 openai shared-env policy]].

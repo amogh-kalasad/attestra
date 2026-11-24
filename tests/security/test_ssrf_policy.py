@@ -31,6 +31,15 @@ def test_ipv4_mapped_loopback_refused_by_validate():
         validate_resolved_ips(["::ffff:127.0.0.1"], allow_private=False)
 
 
+def test_loopback_allowed_when_allow_private():
+    """Lab fixtures (mock LLM on 127.0.0.1) require allow_private to pass validation."""
+    result = validate_resolved_ips(["127.0.0.1"], allow_private=True)
+    assert [str(ip) for ip in result] == ["127.0.0.1"]
+    mapped = validate_resolved_ips(["::ffff:127.0.0.1"], allow_private=True)
+    assert len(mapped) == 1
+    assert mapped[0].is_loopback or str(mapped[0]) in ("127.0.0.1", "::ffff:127.0.0.1")
+
+
 def test_public_ip_not_blocked():
     ip = ipaddress.ip_address("8.8.8.8")
     assert is_blocked_ip(ip) is False

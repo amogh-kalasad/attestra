@@ -1,8 +1,8 @@
-"""Promptfoo adapter: Node container eval against a pinned ``ai_app`` URL (AASI Phase 2).
+"""Promptfoo adapter: native Node eval against a pinned ``ai_app`` URL (AASI V5.1).
 
-Runs ``promptfoo eval`` in a digest-pinned image. Remote generation, telemetry, sharing,
-and updates are disabled via ``docker run -e``. Egress is target-only (``--add-host`` pin);
-graders stay tenant-approved or local — never Promptfoo Cloud. Registry wiring is parent INT.
+Runs ``promptfoo eval`` from the shared env npm prefix (``ATTESTRA_SHARED_ENV_ROOT/npm``).
+Remote generation, telemetry, sharing, and updates stay disabled via process env and the
+written config. Graders stay tenant-approved or local — never Promptfoo Cloud. No Docker.
 """
 # @lat: [[aasi#Phase 2 Promptfoo adapter]]
 
@@ -13,16 +13,12 @@ from typing import Any
 
 import yaml
 
+from attestra import config
 from attestra.runner.dns_pin import PinnedTarget
-from attestra.runner.scanners.base import (
-    CONTAINER_OUT,
-    ScannerAdapter,
-    docker_run_argv,
-    new_container_name,
-    prepare_docker_bind_mounts,
-    which,
-)
+from attestra.runner.scanners.base import ScannerAdapter
 from attestra.runner.scanners.sdk import AdapterMeta, ResourceProfile
+from attestra.scanner_runtime.egress import scanner_process_env
+from attestra.scanner_runtime.environment import resolve_shared_env
 
 CONFIG_NAME = "promptfooconfig.yaml"
 
@@ -34,17 +30,17 @@ DISABLE_ENV: tuple[tuple[str, str], ...] = (
     ("PROMPTFOO_DISABLE_UPDATE", "1"),
 )
 
+# Windows npm wrappers need a shell; skip them and use ``node`` + JS entry instead.
+_WIN_WRAPPER_SUFFIXES = (".cmd", ".bat", ".ps1")
 
-def disable_env_flags() -> list[str]:
-    """``docker run -e KEY=VAL`` pairs that turn off Promptfoo remote/cloud features."""
-    flags: list[str] = []
-    for key, val in DISABLE_ENV:
-        flags.extend(["-e", f"{key}={val}"])
-    return flags
+
+def privacy_env() -> dict[str, str]:
+    """Process env that turns off Promptfoo remote/cloud features."""
+    return {key: val for key, val in DISABLE_ENV}
 
 
 def authorized_url(target: PinnedTarget, path: str = "/") -> str:
-    """Host-header URL for the pinned target (resolved inside the container via ``--add-host``)."""
+    """Host-header URL for the pinned target."""
     p = path if path.startswith("/") else f"/{path}"
     return f"{target.scheme}://{target.host_header}{p}"
 
@@ -107,15 +103,50 @@ def write_promptfoo_config(
     return dest
 
 
+def _shared_env():
+    """Shared runtime rooted at ``config.shared_env_root()`` (honours test monkeypatches)."""
+    return resolve_shared_env(root=config.shared_env_root())
+
+
+def _is_shell_wrapper(path: Path) -> bool:
+    return path.suffix.lower() in _WIN_WRAPPER_SUFFIXES
+
+
+def _promptfoo_js_entry(npm: Path) -> Path | None:
+    """Published package CLI entry (``bin.promptfoo`` → ``dist/src/entrypoint.js``)."""
+    entry = npm / "node_modules" / "promptfoo" / "dist" / "src" / "entrypoint.js"
+    return entry if entry.is_file() else None
+
+
+def resolve_promptfoo_argv_prefix() -> list[str] | None:
+    """Fixed argv prefix for shared-env Promptfoo, or ``None`` when not installed.
+
+    Prefers a real CLI under ``npm/bin`` or ``npm/node_modules/.bin`` (not Windows shell
+    wrappers). Otherwise ``[node, entrypoint.js]`` using the shared Node runtime.
+    Never falls back to a system-global Promptfoo on PATH.
+    """
+    shared = _shared_env()
+    npm = shared.npm
+    for rel in ("bin/promptfoo", "node_modules/.bin/promptfoo", "promptfoo"):
+        cli = npm / rel
+        if cli.is_file() and not _is_shell_wrapper(cli):
+            return [str(cli)]
+
+    entry = _promptfoo_js_entry(npm)
+    node = shared.node
+    if entry is not None and node.is_file():
+        return [str(node), str(entry)]
+    return None
+
+
 class PromptfooAdapter(ScannerAdapter):
     name = "promptfoo"
     import_tool = "promptfoo"
-    image_key = "promptfoo"
+    image_key = ""
+    allows_docker = False
     out_name = "promptfoo-results.json"
     default_timeout_s = 3600
-    adapter_version = "1.0"
-    # Official promptfoo image entrypoint is the CLI binary.
-    docker_entrypoint = "promptfoo"
+    adapter_version = "2.0"
     meta = AdapterMeta(
         capabilities=("llm_eval", "prompt_injection", "ai_redteam"),
         asset_kinds=("ai_app",),
@@ -123,15 +154,22 @@ class PromptfooAdapter(ScannerAdapter):
         network_egress="target",
         resource_profile=ResourceProfile(cpu=1, mem_mb=1024, timeout_s=3600),
         licence="MIT",
-        image_ref_env="ATTESTRA_IMAGE_PROMPTFOO",
+        image_ref_env="",
         output_schema="promptfoo-results-json",
     )
 
     def available(self) -> bool:
-        return which("promptfoo") is not None
+        return resolve_promptfoo_argv_prefix() is not None
 
     def version(self) -> str:
         return "promptfoo"
+
+    def unavailable_reason(self) -> str:
+        root = config.shared_env_root()
+        return (
+            f"promptfoo cannot run: install the promptfoo npm package under {root / 'npm'} "
+            f"(set ATTESTRA_SHARED_ENV_ROOT); Docker is not used for this adapter"
+        )
 
     def build_argv(
         self,
@@ -145,53 +183,38 @@ class PromptfooAdapter(ScannerAdapter):
     ) -> list[str]:
         if not isinstance(target, PinnedTarget):
             raise ValueError("promptfoo needs a DNS-pinned target")
+        prefix = resolve_promptfoo_argv_prefix()
+        if not prefix:
+            raise RuntimeError(self.unavailable_reason())
         cfg = write_promptfoo_config(out_file.parent, target, path=path, judge=judge)
-        return ["promptfoo", "eval", "-c", str(cfg), "-o", str(out_file)]
+        return [*prefix, "eval", "-c", str(cfg), "-o", str(out_file)]
 
-    def docker_args(
+    def _scan(
         self,
-        target,
+        pin: PinnedTarget | str,
         *,
-        out_file: Path,
+        out_dir: Path,
+        cancel=None,
         profile: str = "baseline",
-        path: str = "/",
-        judge: str | None = None,
-        **_,
-    ) -> list[str]:
-        if not isinstance(target, PinnedTarget):
-            raise ValueError("promptfoo needs a DNS-pinned target")
-        write_promptfoo_config(out_file.parent, target, path=path, judge=judge)
-        return [
-            "eval",
-            "-c",
-            f"{CONTAINER_OUT}/{CONFIG_NAME}",
-            "-o",
-            f"{CONTAINER_OUT}/{out_file.name}",
-        ]
-
-    def build_docker_argv(
-        self,
-        target: PinnedTarget | str,
-        *,
-        out_file: Path,
-        profile: str = "baseline",
-        name: str = "",
         **opts,
-    ) -> list[str]:
-        if not isinstance(target, PinnedTarget):
-            raise ValueError("promptfoo needs a DNS-pinned target")
-        mounts = list(self.docker_mounts(target, out_file=out_file))
-        prepare_docker_bind_mounts(mounts)
-        hosts = [(target.host, target.ip)]
-        return docker_run_argv(
-            self.image_ref(),
-            name=name or new_container_name(self.name),
-            mounts=mounts,
-            add_hosts=hosts,
-            entrypoint=self.docker_entrypoint,
-            args=self.docker_args(target, out_file=out_file, profile=profile, **opts),
-            extra_flags=disable_env_flags(),
-        )
+    ):
+        """Native run: shared-env PATH + sanitized/privacy env (no Docker, no global env mutate)."""
+        import attestra.runner.scanners.base as base_mod
+
+        orig = base_mod.run_process
+        shared = _shared_env()
+
+        def run_with_privacy(argv, **kwargs):
+            base_env = shared.process_env()
+            env = scanner_process_env(base=base_env, extra=privacy_env())
+            kwargs["env"] = env
+            return orig(argv, **kwargs)
+
+        base_mod.run_process = run_with_privacy  # type: ignore[assignment]
+        try:
+            return super()._scan(pin, out_dir=out_dir, cancel=cancel, profile=profile, **opts)
+        finally:
+            base_mod.run_process = orig
 
     def validate_report(self, raw: bytes) -> str | None:
         try:

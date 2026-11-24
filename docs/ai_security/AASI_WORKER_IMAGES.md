@@ -1,6 +1,18 @@
-# AASI worker images — dependency policy
+# AASI worker images — **superseded by V5.1 native policy**
 
-Short policy note for AI-security scanner / worker containers used by Attestra Agentic Security Intelligence. Build instructions: [`../../docker/aasi/README.md`](../../docker/aasi/README.md). Full inventory: [`AASI_DEPENDENCY_AND_LICENSE_INVENTORY.md`](./AASI_DEPENDENCY_AND_LICENSE_INVENTORY.md). Licence decisions: [`AASI_LICENSE_REVIEW.md`](./AASI_LICENSE_REVIEW.md). Adoption matrix: [`REPOSITORY_ADOPTION_MATRIX.md`](./REPOSITORY_ADOPTION_MATRIX.md).
+Short policy note for AI-security scanners used by Attestra Agentic Security Intelligence.
+
+**V5.1 supersedes** the V4 isolated Docker worker-image model for Garak, Promptfoo, SafeLabs, and PyRIT. Master tracker: [`AASI_V51_STATUS.md`](./AASI_V51_STATUS.md). Directive: [`AASI_CLI_PROMPT_5.1.md`](./AASI_CLI_PROMPT_5.1.md). Deployment: [`AASI_DEPLOYMENT_RUNBOOK.md`](./AASI_DEPLOYMENT_RUNBOOK.md). Historical Dockerfiles: [`../../docker/aasi/README.md`](../../docker/aasi/README.md) (**deprecated for AI execution**). Licence decisions: [`AASI_LICENSE_REVIEW.md`](./AASI_LICENSE_REVIEW.md). Adoption matrix: [`REPOSITORY_ADOPTION_MATRIX.md`](./REPOSITORY_ADOPTION_MATRIX.md).
+
+## V5.1 native / shared-env policy (authoritative)
+
+1. Garak, SafeLabs Eval, and PyRIT run as **native** processes from **one** shared Python virtual environment under `ATTESTRA_SHARED_ENV_ROOT` (same venv as Attestra Python deps).
+2. Promptfoo runs via a **Node.js** runtime and npm prefix under the **same** shared environment root (not pip; not a separate Promptfoo-only venv; not a Docker image).
+3. **No** per-scanner virtual environments. **No** AI scanner Docker image pulls or Docker execution for these four tools.
+4. `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` are **deprecated / unused** for AI execution. Do **not** claim production AI digests.
+5. Core Attestra still must not treat Shannon AGPL code as reusable. Promptfoo workers keep remote generation, telemetry, sharing, and update checks disabled.
+6. Host-level process, filesystem, and network controls remain required — a shared venv is not isolation.
+7. Web/non-AI scanners (ZAP, Nuclei, testssl, naabu, …) **continue** to use digest-pinned images; this supersession is AI-scanner-scoped only.
 
 ## What “reference those repos and implement here” means
 
@@ -8,24 +20,17 @@ Short policy note for AI-security scanner / worker containers used by Attestra A
 |---|---|
 | Architecture / CLI / schema reference | External GitHub projects (Garak, Promptfoo, safelabs-eval, PyRIT, …) |
 | Importers, adapters, AASI orchestration | **This Attestra repo** (`attestra/importers`, `attestra/runner/scanners`, `attestra/aasi`) |
-| Tool runtimes | **Isolated images** under `docker/aasi/` or official GHCR/NGC — never core `pyproject.toml` |
+| Tool runtimes (V5.1) | **`ATTESTRA_SHARED_ENV_ROOT`** — one Python `venv/` + `tools/node/` + `npm/` |
+| Tool runtimes (V4, superseded) | Isolated images under `docker/aasi/` or GHCR/NGC — **not** used for AI execution under V5.1 |
 | Shannon | **No code reuse** (AGPL) |
 
-## Isolated worker dependency policy
+## Historical V4 image table (obsolete for execution)
 
-1. Garak, Promptfoo, SafeLabs Eval, and PyRIT run only inside digest-pinned container images referenced by `ATTESTRA_IMAGE_*`.
-2. Core Attestra must **not** install those frameworks as API dependencies. Importers parse exports; adapters invoke Docker.
-3. Placeholder / `REPLACE_AFTER_INSPECT` digests are refused at runtime.
-4. Promptfoo workers must keep remote generation, telemetry, sharing, and update checks disabled.
-5. Do not bake AGPL-prohibited code (e.g. Shannon) into Attestra-shipped worker images.
+| Env var | V4 approach | V5.1 |
+|---|---|---|
+| `ATTESTRA_IMAGE_PROMPTFOO` | Pull GHCR, pin digest | **Unused** — npm under shared root |
+| `ATTESTRA_IMAGE_GARAK` | Build `Dockerfile.garak` | **Unused** — pip into shared venv |
+| `ATTESTRA_IMAGE_SAFELABS` | Build `Dockerfile.safelabs` | **Unused** — pip into shared venv |
+| `ATTESTRA_IMAGE_PYRIT` | Build `Dockerfile.pyrit` | **Unused** — pip into shared venv |
 
-## Image reality (why Hub pulls failed)
-
-| Env var | Correct approach |
-|---|---|
-| `ATTESTRA_IMAGE_PROMPTFOO` | Pull `ghcr.io/promptfoo/promptfoo`, pin digest |
-| `ATTESTRA_IMAGE_GARAK` | Build `docker/aasi/Dockerfile.garak` → `attestra/garak` (preferred for adapter). Optional NGC `nvcr.io/nvidia/eval-factory/garak` |
-| `ATTESTRA_IMAGE_SAFELABS` | Build `docker/aasi/Dockerfile.safelabs` from `pip install safelabs-eval` |
-| `ATTESTRA_IMAGE_PYRIT` | Build `docker/aasi/Dockerfile.pyrit` (PyRIT + `attestra_pyrit_worker`) |
-
-Old stub names (`docker.io/nvidia/garak`, `docker.io/agentsafelabs/safelabs-eval`, unpublished `docker.io/attestra/pyrit-worker`) are documentation placeholders, not public Hub images.
+Old stub Hub names were documentation placeholders, not public images. V5.1 does not replace them with production digests.

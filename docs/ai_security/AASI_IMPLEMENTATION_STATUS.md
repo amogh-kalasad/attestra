@@ -1,9 +1,24 @@
 # AASI implementation status
 
 Phase tracker for Attestra Agentic Security Intelligence (AASI) on branch `attestra-asi-bundle`.
-Companion docs: [`AASI_BASELINE_AUDIT.md`](AASI_BASELINE_AUDIT.md), [`AASI_REPOSITORY_FINDINGS.md`](AASI_REPOSITORY_FINDINGS.md), [`REPOSITORY_ADOPTION_MATRIX.md`](REPOSITORY_ADOPTION_MATRIX.md), [`AASI_LICENSE_REVIEW.md`](AASI_LICENSE_REVIEW.md), [`AASI_IMPLEMENTATION_BLUEPRINT.md`](AASI_IMPLEMENTATION_BLUEPRINT.md), [`AASI_PHASE11_COMPLETION.md`](AASI_PHASE11_COMPLETION.md), [`AASI_PHASE13_COMPLETION.md`](AASI_PHASE13_COMPLETION.md), [`AASI_FINAL_IMPLEMENTATION_REPORT.md`](AASI_FINAL_IMPLEMENTATION_REPORT.md), [`AASI_PRODUCTION_READINESS_REPORT.md`](AASI_PRODUCTION_READINESS_REPORT.md).
+Companion docs: [`AASI_BASELINE_AUDIT.md`](AASI_BASELINE_AUDIT.md), [`AASI_REPOSITORY_FINDINGS.md`](AASI_REPOSITORY_FINDINGS.md), [`REPOSITORY_ADOPTION_MATRIX.md`](REPOSITORY_ADOPTION_MATRIX.md), [`AASI_LICENSE_REVIEW.md`](AASI_LICENSE_REVIEW.md), [`AASI_IMPLEMENTATION_BLUEPRINT.md`](AASI_IMPLEMENTATION_BLUEPRINT.md), [`AASI_PHASE11_COMPLETION.md`](AASI_PHASE11_COMPLETION.md), [`AASI_PHASE13_COMPLETION.md`](AASI_PHASE13_COMPLETION.md), [`AASI_FINAL_IMPLEMENTATION_REPORT.md`](AASI_FINAL_IMPLEMENTATION_REPORT.md), [`AASI_PRODUCTION_READINESS_REPORT.md`](AASI_PRODUCTION_READINESS_REPORT.md), [`AASI_V51_STATUS.md`](AASI_V51_STATUS.md), [`AASI_CLI_PROMPT_5.1.md`](AASI_CLI_PROMPT_5.1.md).
 
-Verified against the working tree on **2026-11-23** (code + docs). **AI scanner digests remain placeholders** (`REPLACE_AFTER_INSPECT` / all-zero defaults) and are refused at runtime until operators pin real digests.
+Verified against the working tree on **2026-11-23** (V4 Phases 0–13 code + docs). **V5.1** (Docker-free native AI scanners / shared env) is tracked separately below and in [`AASI_V51_STATUS.md`](AASI_V51_STATUS.md). **Do not claim production AI image digests** — V5.1 supersedes the V4 Docker AI digest path for Garak, Promptfoo, SafeLabs, and PyRIT.
+
+## V5.1 — Docker-free AI scanners (**IN PROGRESS**)
+
+AASI CLI Prompt **5.1** supersedes V4’s digest-pinned Docker execution for the four AI scanners. Target model: one `ATTESTRA_SHARED_ENV_ROOT` with a single Python venv (Attestra + Garak + SafeLabs + PyRIT) and Node/npm under the same root for Promptfoo. No per-scanner venvs; no AI Docker image pulls/execution. Web scanner images are unchanged.
+
+| Track | Status |
+|---|---|
+| Docs / env (`ATTESTRA_SHARED_ENV_ROOT`; deprecate AI `ATTESTRA_IMAGE_*`) | **IN PROGRESS** |
+| Shared-env installer / verify / health (`scripts/runtime/…`) | **IN PROGRESS** |
+| Runtime manager + native adapters (garak, promptfoo, safelabs, pyrit) | **IN PROGRESS** |
+| Host process/network hardening for native AI runs | **IN PROGRESS** |
+| Offline importers + recommend-only `/api/aasi` | **Complete** (V4 carry-forward) |
+| Production AI digests | **N/A (superseded)** — do not claim |
+
+Master detail table: [`AASI_V51_STATUS.md`](AASI_V51_STATUS.md). Directive: [`AASI_CLI_PROMPT_5.1.md`](AASI_CLI_PROMPT_5.1.md).
 
 ## Classification (Phase 13)
 
@@ -94,13 +109,15 @@ Legend: **Production configured** = real digests/secrets/flags set in a deployed
 | `ATTESTRA_AASI_MAX_*` / `RETRY_LIMIT` | bounded | Orchestrator budget ceilings |
 | `ATTESTRA_AASI_REQUIRE_APPROVAL` | `on` | Human approval before intrusive recommendations |
 | `ATTESTRA_AI_NARRATIVES` / tenant off-list | off / honour | Provider also gated by narratives stack |
-| `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` | placeholders | Required for adapter runs; placeholders refused |
+| `ATTESTRA_SHARED_ENV_ROOT` | unset | V5.1 shared env root (native AI scanners; **IN PROGRESS**) |
+| `ATTESTRA_IMAGE_GARAK` / `PROMPTFOO` / `SAFELABS` / `PYRIT` | deprecated | Unused for AI execution under V5.1 — do not claim production digests |
 
 ## Blockers / honesty notes
 
-- **Do not claim production AI scanner digests are pinned.**
+- **Do not claim production AI scanner digests are pinned.** Under V5.1 those `ATTESTRA_IMAGE_{GARAK,PROMPTFOO,SAFELABS,PYRIT}` pins are obsolete for execution, not a readiness gap to close with Hub digests.
+- V5.1 Docker-free AI scanners remain **IN PROGRESS** until shared-env install and native adapters are proven — docs/env updates alone are not completion.
 - Shannon AGPL-3.0: hard no-reuse.
 - No CLI `aasi` subcommand; HTTP API under `/api/aasi` (status always answers; mutate routes 404 when disabled).
 - No staging/production deploy verified in the Phase 13 documentation session.
-- Core venv may lag `pyproject.toml` floors — refresh with `pip install -e ".[dev]"` before relying on declared minimums.
-- Runbooks: [`AASI_DEPLOYMENT_RUNBOOK.md`](AASI_DEPLOYMENT_RUNBOOK.md), [`AASI_ROLLBACK_RUNBOOK.md`](AASI_ROLLBACK_RUNBOOK.md).
+- Core venv may lag `pyproject.toml` floors — refresh with `pip install -e ".[dev]"` before relying on declared minimums; V5.1 intends one shared root via `ATTESTRA_SHARED_ENV_ROOT`.
+- Runbooks: [`AASI_DEPLOYMENT_RUNBOOK.md`](AASI_DEPLOYMENT_RUNBOOK.md), [`AASI_ROLLBACK_RUNBOOK.md`](AASI_ROLLBACK_RUNBOOK.md), [`AASI_V51_STATUS.md`](AASI_V51_STATUS.md).

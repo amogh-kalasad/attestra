@@ -80,8 +80,9 @@ _PLACEHOLDER_IMAGES = {
     "subfinder": "docker.io/projectdiscovery/subfinder@sha256:0000000000000000000000000000000000000000000000000000000000000009",
     "dnsx": "docker.io/projectdiscovery/dnsx@sha256:000000000000000000000000000000000000000000000000000000000000000a",
     "httpx": "docker.io/projectdiscovery/httpx@sha256:000000000000000000000000000000000000000000000000000000000000000b",
-    # AASI AI scanners — all-zero digests refused until ops pins real images.
-    # Build: docker/aasi/Dockerfiles; Promptfoo: ghcr.io/promptfoo/promptfoo (see docker/aasi/README.md).
+    # AASI V5.1: AI adapters are native-only (allows_docker=False) and ignore these image keys at
+    # runtime. Entries remain so ATTESTRA_IMAGE_* env wiring stays stable for other tooling/docs.
+    # Historical Docker recipes: docker/aasi/Dockerfiles; Promptfoo: ghcr.io/promptfoo/promptfoo.
     "garak": "attestra/garak@sha256:000000000000000000000000000000000000000000000000000000000000000c",
     "promptfoo": "ghcr.io/promptfoo/promptfoo@sha256:000000000000000000000000000000000000000000000000000000000000000d",
     "safelabs": "attestra/safelabs@sha256:000000000000000000000000000000000000000000000000000000000000000e",
@@ -92,6 +93,15 @@ SCANNER_IMAGES = {
 }
 # Persistent scanner caches (nuclei templates, trivy DB) so each run does not download them again.
 SCANNER_CACHE_DIR = Path(os.environ.get("ATTESTRA_SCANNER_CACHE_DIR", DATA_DIR / "scanner-cache")).resolve()
+
+# AASI V5.1 shared env for native-only AI scanners (garak/promptfoo/safelabs/pyrit).
+# Empty ATTESTRA_SHARED_ENV_ROOT → resolve to .attestra-runtime under the process CWD.
+SHARED_ENV_ROOT = os.environ.get("ATTESTRA_SHARED_ENV_ROOT", "").strip()
+
+
+def shared_env_root() -> Path:
+    """Resolved root for native AI scanner installs; empty env uses ``.attestra-runtime``."""
+    return Path(SHARED_ENV_ROOT or ".attestra-runtime").expanduser().resolve()
 
 # Evidence upload size cap (API + proof screenshot). Portal uses a stricter 5 MB cap.
 EVIDENCE_MAX_BYTES = int(os.environ.get("ATTESTRA_EVIDENCE_MAX_BYTES", str(20 * 1024 * 1024)))

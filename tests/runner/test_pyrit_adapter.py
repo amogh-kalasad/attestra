@@ -1,4 +1,4 @@
-"""Unit tests for the AASI Phase 5 PyRIT isolated worker adapter (no image pull)."""
+"""Unit tests for the AASI V5.1 native PyRIT adapter (no Docker / no image pull)."""
 # @lat: [[tests#AASI Phase 5 PyRIT adapter]]
 
 from __future__ import annotations
@@ -11,37 +11,26 @@ import pytest
 
 from attestra.runner.dns_pin import PinnedTarget
 from attestra.runner.scanners import sdk
-from attestra.runner.scanners.base import CONTAINER_OUT, ScannerResult
+from attestra.runner.scanners.base import ScannerResult
 from attestra.runner.scanners.pyrit import (
     CONFIG_NAME,
     DISABLE_EXTERNAL_ENV,
+    NATIVE_MODULE,
     SCENARIOS,
-    WORKER_MODULE,
     PyRITAdapter,
     authorized_url,
-    disable_external_env_flags,
     resolve_scenario,
     write_pyrit_run_config,
 )
 
 _METACHAR = re.compile(r"[;|&`$]|\$\(|\n|\r")
 PIN = PinnedTarget(host="llm.example.com", ip="203.0.113.10", port=443, scheme="https")
-FAKE_DIGEST = "sha256:" + "cd" * 32
-FAKE_IMAGE = f"docker.io/attestra/pyrit-worker@{FAKE_DIGEST}"
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ai" / "pyrit" / "attack_results.json"
 
 
 def _clean(argv: list[str]) -> list[str]:
     assert [a for a in argv if _METACHAR.search(a)] == []
     return argv
-
-
-@pytest.fixture
-def pinned_image(monkeypatch):
-    import attestra.config as cfg
-
-    monkeypatch.setitem(cfg.SCANNER_IMAGES, "pyrit", FAKE_IMAGE)
-    return FAKE_IMAGE
 
 
 @pytest.fixture
@@ -53,7 +42,8 @@ def adapter() -> PyRITAdapter:
 def test_pyrit_meta_ok(adapter: PyRITAdapter):
     assert adapter.name == "pyrit"
     assert adapter.import_tool == "pyrit"
-    assert adapter.image_key == "pyrit"
+    assert adapter.image_key == ""
+    assert adapter.allows_docker is False
     assert adapter.out_name == "pyrit-results.json"
     meta = adapter.meta
     assert isinstance(meta, sdk.AdapterMeta)
@@ -62,7 +52,7 @@ def test_pyrit_meta_ok(adapter: PyRITAdapter):
     assert meta.safety_tier == "T2"
     assert meta.network_egress == "target"
     assert meta.licence == "MIT"
-    assert meta.image_ref_env == "ATTESTRA_IMAGE_PYRIT"
+    assert meta.image_ref_env == ""
     assert meta.output_schema == "pyrit-json"
 
 
@@ -73,8 +63,13 @@ def test_pyrit_passes_sdk_contract(adapter: PyRITAdapter, tmp_path: Path):
 def test_pyrit_rejects_unpinned_target(adapter: PyRITAdapter, tmp_path: Path):
     with pytest.raises(ValueError, match="DNS-pinned"):
         adapter.build_argv("https://llm.example.com/", out_file=tmp_path / "o.json")
-    with pytest.raises(ValueError, match="DNS-pinned"):
-        adapter.build_docker_argv("https://llm.example.com/", out_file=tmp_path / "o.json")
+
+
+def test_allows_docker_false_and_uses_docker(adapter: PyRITAdapter):
+    assert adapter.allows_docker is False
+    assert adapter.uses_docker() is False
+    with pytest.raises(NotImplementedError, match="native-only"):
+        adapter.build_docker_argv(PIN, out_file=Path("o.json"))
 
 
 # @lat: [[tests#AASI Phase 5 PyRIT adapter#Scenario allowlist]]
@@ -99,75 +94,36 @@ def test_rejects_unrestricted_command_opts(adapter: PyRITAdapter, tmp_path: Path
         adapter.build_argv(PIN, out_file=out, argv=["--anything"])
 
 
-# @lat: [[tests#AASI Phase 5 PyRIT adapter#Docker argv and judge lockdown]]
-def test_pyrit_docker_argv_disables_external_judge(tmp_path: Path, pinned_image, adapter: PyRITAdapter):
+def test_native_argv_writes_config(adapter: PyRITAdapter, tmp_path: Path):
     out = tmp_path / adapter.out_name
-    argv = _clean(adapter.build_docker_argv(PIN, out_file=out, name="attestra-pyrit-test", profile="pair"))
-    assert argv[:3] == ["docker", "run", "--rm"]
-    assert FAKE_IMAGE in argv
-    assert "--entrypoint" in argv and "python" in argv
-    assert "-m" in argv and WORKER_MODULE in argv
-    assert "--scenario" in argv and argv[argv.index("--scenario") + 1] == "pair"
-    assert f"{CONTAINER_OUT}/{CONFIG_NAME}" in argv
-    assert f"{CONTAINER_OUT}/pyrit-results.json" in argv
-    assert "--add-host" in argv
-    assert "llm.example.com:203.0.113.10" in argv
-    for key, val in DISABLE_EXTERNAL_ENV:
-        pair = f"{key}={val}"
-        assert pair in argv
-        assert argv[argv.index(pair) - 1] == "-e"
+    argv = _clean(adapter.build_argv(PIN, out_file=out, scenario="many_shot", endpoint_path="/v1/chat"))
+    assert Path(argv[0]).name.lower().startswith("python")
+    assert "-m" in argv and NATIVE_MODULE in argv
+    assert argv[argv.index("--scenario") + 1] == "many_shot"
     cfg = json.loads((tmp_path / CONFIG_NAME).read_text(encoding="utf-8"))
-    assert cfg["scenario"] == "pair"
+    assert cfg["target"]["url"] == "https://llm.example.com/v1/chat"
+    assert cfg["scenario"] == "many_shot"
+    assert cfg["scenario_engine"] == "pyrit-backed"
     assert cfg["judge"]["mode"] == "none"
     assert cfg["judge"]["external_authorized"] is False
     assert cfg["adversarial_model"]["egress"] == "disabled"
-    assert cfg["output"]["include_transcripts"] is True
-    assert cfg["target"]["url"] == authorized_url(PIN)
     assert cfg["target"]["prompt_target"] == "http_target"
 
 
-def test_external_judge_opt_in_skips_disable_env(tmp_path: Path, pinned_image, adapter: PyRITAdapter):
+def test_external_judge_opt_in_config(adapter: PyRITAdapter, tmp_path: Path):
     out = tmp_path / adapter.out_name
-    argv = adapter.build_docker_argv(
+    adapter.build_argv(
         PIN,
         out_file=out,
         scenario="crescendo",
         tenant_authorize_external_judge=True,
         judge="ollama:local",
     )
-    for key, val in DISABLE_EXTERNAL_ENV:
-        assert f"{key}={val}" not in argv
     cfg = json.loads((tmp_path / CONFIG_NAME).read_text(encoding="utf-8"))
     assert cfg["judge"]["mode"] == "external"
     assert cfg["judge"]["external_authorized"] is True
     assert cfg["judge"]["provider"] == "ollama:local"
     assert cfg["adversarial_model"]["egress"] == "external"
-
-
-def test_disable_env_flags_pairs():
-    flags = disable_external_env_flags()
-    assert flags.count("-e") == len(DISABLE_EXTERNAL_ENV)
-    for key, val in DISABLE_EXTERNAL_ENV:
-        assert f"{key}={val}" in flags
-
-
-def test_pyrit_image_ref_requires_digest(monkeypatch, adapter: PyRITAdapter):
-    import attestra.config as cfg
-
-    monkeypatch.setitem(cfg.SCANNER_IMAGES, "pyrit", "docker.io/attestra/pyrit-worker:latest")
-    with pytest.raises(ValueError, match="@sha256:"):
-        adapter.image_ref()
-
-
-def test_local_argv_writes_config(adapter: PyRITAdapter, tmp_path: Path):
-    out = tmp_path / adapter.out_name
-    argv = _clean(adapter.build_argv(PIN, out_file=out, scenario="many_shot", endpoint_path="/v1/chat"))
-    assert argv[0] == "python"
-    assert WORKER_MODULE in argv
-    assert argv[argv.index("--scenario") + 1] == "many_shot"
-    cfg = json.loads((tmp_path / CONFIG_NAME).read_text(encoding="utf-8"))
-    assert cfg["target"]["url"] == "https://llm.example.com/v1/chat"
-    assert cfg["scenario"] == "many_shot"
 
 
 def test_write_config_rejects_unsafe_path(tmp_path: Path):
@@ -185,6 +141,8 @@ def test_scan_attaches_usage_from_report(adapter: PyRITAdapter, tmp_path: Path, 
     report = {
         "tool": "pyrit",
         "tool_version": "1.2.1",
+        "pyrit_version": "1.2.1",
+        "scenario_engine": "pyrit-backed",
         "usage": {"tokens_in": 100, "tokens_out": 40, "cost_usd": 0.02},
         "attack_results": [
             {
@@ -207,7 +165,7 @@ def test_scan_attaches_usage_from_report(adapter: PyRITAdapter, tmp_path: Path, 
     def fake_scan(self, pin, *, out_dir, cancel=None, profile="baseline", **opts):
         sr = ScannerResult(
             tool=self.name,
-            tool_version="pyrit (docker)",
+            tool_version="pyrit 1.2.1",
             import_tool=self.import_tool,
             raw_path=out_file,
             extra={"returncode": 0},
@@ -218,13 +176,48 @@ def test_scan_attaches_usage_from_report(adapter: PyRITAdapter, tmp_path: Path, 
         "attestra.runner.scanners.base.ScannerAdapter.scan",
         fake_scan,
     )
-    sr = adapter.scan(PIN, out_dir=tmp_path, profile="crescendo")
+    # Bypass _scan_with_env by authorizing external so super().scan is used.
+    sr = adapter.scan(PIN, out_dir=tmp_path, profile="crescendo", tenant_authorize_external_judge=True)
     assert sr.extra.get("usage") == report["usage"]
     assert sr.extra.get("tokens_in") == 100
     assert sr.extra.get("cost_usd") == 0.02
-    # Transcript remains in report JSON for the importer / evidence path.
     doc = json.loads(out_file.read_text(encoding="utf-8"))
     assert doc["attack_results"][0]["transcript"]
+
+
+def test_available_false_when_pyrit_missing(adapter: PyRITAdapter, monkeypatch):
+    import attestra.aasi.pyrit_native as native
+    import attestra.runner.scanners.pyrit as mod
+
+    monkeypatch.setattr(native, "available", lambda: False)
+    monkeypatch.setattr(native, "pyrit_version", lambda: None)
+    monkeypatch.setattr(mod, "_pyrit_in_shared_env", lambda: False)
+    monkeypatch.setattr(mod, "_pyrit_importable", lambda _py: False)
+    assert adapter.available() is False
+    h = adapter.health()
+    assert h["name"] == "pyrit"
+    assert h["ready"] is False
+    assert "pyrit" in adapter.unavailable_reason().lower()
+    assert "shared" in adapter.unavailable_reason().lower()
+
+
+def test_available_true_when_pyrit_present(adapter: PyRITAdapter, monkeypatch):
+    import attestra.aasi.pyrit_native as native
+    import attestra.runner.scanners.pyrit as mod
+
+    monkeypatch.setattr(mod, "_pyrit_in_shared_env", lambda: True)
+    monkeypatch.setattr(mod, "_pyrit_importable", lambda _py: True)
+    monkeypatch.setattr(native, "available", lambda: True)
+    monkeypatch.setattr(native, "pyrit_version", lambda: "1.2.1")
+
+    class _Proc:
+        returncode = 0
+        stdout = "1.2.1\n"
+        stderr = ""
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: _Proc())
+    assert adapter.available() is True
+    assert "1.2.1" in adapter.version()
 
 
 def test_registry_lists_pyrit():
@@ -234,16 +227,7 @@ def test_registry_lists_pyrit():
     assert get_adapter("pyrit").name == "pyrit"
 
 
-def test_health_without_real_image(adapter: PyRITAdapter, monkeypatch):
-    import attestra.runner.scanners.base as base
-    import attestra.runner.scanners.pyrit as mod
-
-    monkeypatch.setattr(base, "which", lambda _name: None)
-    monkeypatch.setattr(mod, "which", lambda _name: None)
-    monkeypatch.setattr(adapter, "configured_image", lambda: "")
-    assert adapter.available() is False
-    h = adapter.health()
-    assert h["name"] == "pyrit"
-    assert h["ready"] is False
-    assert h["safety_tier"] == "T2"
-    assert h["meta_problems"] == []
+def test_disable_env_constants():
+    assert ("PYRIT_DISABLE_EXTERNAL_JUDGE", "1") in DISABLE_EXTERNAL_ENV
+    assert ("PYRIT_DISABLE_ADVERSARIAL_EGRESS", "1") in DISABLE_EXTERNAL_ENV
+    assert authorized_url(PIN) == "https://llm.example.com/"
