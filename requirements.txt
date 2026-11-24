@@ -39,6 +39,11 @@ ruff>=0.17.4
 # opentelemetry-instrumentation-fastapi>=0.66b2
 # opentelemetry-exporter-otlp-proto-http>=1.45.2
 
+# AI Narratives (optional report drafts, Step 8.5) use stock deps above
+# (cryptography for Fernet keys; HTTP via attestra/ai_providers.py).
+# Do NOT add openai/anthropic SDKs for draft narratives — providers call
+# provider HTTP APIs directly. Guide: docs/AI_NARRATIVES.md / README AI Narratives.
+
 # AASI V5.1 AI scanners — install into the ONE shared env only.
 # Prefer the staged installer (openai 3.x + garak --no-deps):
 #   python scripts/aasi/install_shared_env.py
@@ -46,6 +51,7 @@ ruff>=0.17.4
 #   pip install -e ".[ai-scanners]"
 # Sync note: mirrors pyproject.toml [project.optional-dependencies].ai-scanners
 # (PyPI verified 2026-11-24). Do NOT install these into a second venv.
+# These pins are for AASI scanners, not AI Narratives drafts.
 # safelabs-eval==0.12.0
 # pyrit==1.2.1
 # openai>=3,<4

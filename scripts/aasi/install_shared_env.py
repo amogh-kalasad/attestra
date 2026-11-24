@@ -431,6 +431,23 @@ def install_promptfoo(root: Path) -> int:
     # Keep npm cache under shared root; never use a second Python venv.
     env["npm_config_cache"] = str(root / "cache" / "npm")
     (root / "cache" / "npm").mkdir(parents=True, exist_ok=True)
+    # Windows npm.cmd / node-gyp resolve `node` from PATH. System Node (e.g. 24)
+    # breaks better-sqlite3 prebuilds for the pinned Promptfoo Node 20 engine.
+    bdir = str(node_bin_dir(root))
+    path_sep = ";" if platform.system() == "Windows" else ":"
+    env["PATH"] = bdir + path_sep + env.get("PATH", "")
+    env["npm_config_scripts_prepend_node_path"] = "true"
+    nexe = node_exe(root)
+    if nexe.is_file():
+        print(f"OK: using shared Node for npm: {nexe}")
+        ver = subprocess.run(
+            [str(nexe), "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if ver.stdout.strip():
+            print(f"OK: shared Node reports {ver.stdout.strip()}")
     cmd = npm_cmd(root) + ["install", "--omit=dev", "--no-fund", "--no-audit"]
     proc = subprocess.run(cmd, cwd=str(npm_root), env=env)
     return proc.returncode

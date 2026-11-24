@@ -8,7 +8,7 @@ Attestra only tests a target when the engagement has a valid signed permission l
 
 Runtime storage is **MongoDB only**. SQLAlchemy is used as a schema/query builder over a Mongo session — there is no SQLite, PostgreSQL or Alembic path.
 
-More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/USER_MANAGEMENT.md](docs/USER_MANAGEMENT.md), [SETUP_GUIDE.md](SETUP_GUIDE.md), [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md), [docs/mongodb_migration/SECURE_LOCAL_MONGO.md](docs/mongodb_migration/SECURE_LOCAL_MONGO.md).
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURITY.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/USER_MANAGEMENT.md](docs/USER_MANAGEMENT.md), [SETUP_GUIDE.md](SETUP_GUIDE.md), [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md), [docs/AI_NARRATIVES.md](docs/AI_NARRATIVES.md), [docs/mongodb_migration/SECURE_LOCAL_MONGO.md](docs/mongodb_migration/SECURE_LOCAL_MONGO.md).
 
 ## What Attestra does
 
@@ -21,7 +21,8 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURIT
 | In-app scans | Background worker runs ZAP, webcheck, testssl, Nuclei, Trivy, Semgrep, Gitleaks, Checkov, naabu, Prowler, kube-bench. Scans can be cancelled. Same path from the CLI: `attestra scan` |
 | Auth website testing | Optional authenticated crawl and WSTG/ASVS checklist (off by default). Mid-scan session expiry detection and bounded re-login. See [docs/AUTH_WEB_TESTING.md](docs/AUTH_WEB_TESTING.md) |
 | Automated VAPT | Optional catalogue (T01–T22 plus SESSION, INJ, XSS, XSSDOM, XSSSTORE, FILE, BIZ, ROLEDIFF, SSRF, UPLOAD). Off by default; some probes are extra-gated. Skip/blocked reasons stay visible in reports |
-| AASI (optional) | AI / LLM security track (`ai_app`, importers, native shared-env AI scanners under V5.1, recommend-only `/api/aasi`). **Off by default** (`ATTESTRA_AASI=off`). See [AASI](#attestra-agentic-security-intelligence-aasi) |
+| AI Narratives (optional) | Draft executive summaries and structured finding writeups (Description / Impact / Likelihood / Recommendation). **Off by default**; tester/lead/admin must approve before reports. See [AI Narratives](#ai-narratives-optional) |
+| AASI (optional) | AI / LLM security track (`ai_app`, importers, native shared-env AI scanners under V5.1, recommend-only `/api/aasi`). **Off by default** (`ATTESTRA_AASI=off`). Separate from AI Narratives. See [AASI](#attestra-agentic-security-intelligence-aasi) |
 | Imports | ZAP, Nuclei, Trivy, SARIF, testssl, SSL Labs, Observatory, Burp, Nessus, Prowler, kube-bench, Checkov, Gitleaks, naabu, CycloneDX, Dependency-Track, webcheck, plus AI tools (garak, promptfoo, safelabs, pyrit) and more |
 | Findings | One format keyed on CWE, CVE and location, with observations kept under canonical findings. Import-time classification downgrades scanner noise (for example ZAP 10109/10112, CDN/challenge, Expect-CT). Finding-specific remediation packs |
 | Risk | Risk is based on CVSS (vector + score) plus FIRST EPSS, CISA KEV, asset criticality and exposure. Each site also gets a separate A–F observatory-style grade |
@@ -379,9 +380,61 @@ python -m attestra.cli checklist-sync --engagement ENGAGEMENT_ID
 python -m attestra.cli checklist-sync --engagement ENGAGEMENT_ID --dry-run
 ```
 
+## AI Narratives (optional)
+
+Optional LLM-assisted **report drafts** for an engagement (executive summary and finding writeups). **Off by default.** Unapproved drafts never appear in reports. This is **not** AASI (no Garak/Promptfoo scanners, no `/api/aasi`).
+
+Detail: [docs/AI_NARRATIVES.md](docs/AI_NARRATIVES.md).
+
+### Steps
+
+1. **Run the stack** (Compose or host serve) with Mongo and a Fernet key so pasted API keys can be stored:
+   ```bash
+   # Fernet key is created by install wrappers when empty
+   powershell -ExecutionPolicy Bypass -File .\scripts\compose_up.ps1
+   # or: bash scripts/compose_up.sh
+   ```
+2. **Configure the provider** (admin or lead): open **More → AI provider** (`/settings/ai`).
+   - Enable AI for the tenant.
+   - Choose provider (`ollama`, `openai`, `anthropic`, `xai`, `openrouter`, `openai-compatible`).
+   - Set model (and base URL if needed). Paste an API key when required; it is Fernet-encrypted in Mongo and never shown again.
+   - Save. UI settings apply to Compose `api`/`worker` immediately (no restart). Env-only bootstrap changes need `docker compose up -d --force-recreate api worker worker-2`.
+3. **Collect findings** (scan or import). False positives are hidden from the draft picker.
+4. **Create drafts** on the engagement **AI drafts** page (`/engagements/{id}/ai-drafts`):
+   - Executive summary, or finding narratives.
+   - Multi-select findings; **Select needing writeup** skips ones already approved for reports (those rows are highlighted with an **In report** badge).
+   - Mode: one draft per finding, or one combined writeup. Finding text uses Description / Impact / Likelihood / Recommendation.
+5. **Approve or reject** each draft (tester, lead, or admin). Edit before approve if needed.
+6. **Generate reports** as usual. Approved AI text shows on executive (summary) and technical (finding / combined) reports, labeled AI-assisted.
+
+### Env bootstrap (optional)
+
+When no per-tenant UI settings exist, `.env` can enable the feature:
+
+```env
+ATTESTRA_AI_NARRATIVES=on
+ATTESTRA_AI_PROVIDER=anthropic
+ATTESTRA_AI_BASE_URL=https://api.anthropic.com
+ATTESTRA_AI_MODEL=claude-sonnet-4-5
+# Prefer Settings → AI provider paste, or secret store ai_api_key:
+# ATTESTRA_AI_API_KEY=
+```
+
+Compose loads `.env` via `env_file` and passes `ATTESTRA_AI_NARRATIVES` (default `off`). Prefer UI keys over committing secrets. Local Ollama from a container must use a host-reachable URL (not `localhost` inside the container).
+
+### API sketch
+
+| Action | Path |
+| --- | --- |
+| Settings | `GET/PUT /api/ai/settings?tenant_id=` |
+| List / create drafts | `GET/POST /api/engagements/{id}/ai-drafts` |
+| Approve / reject | `POST …/ai-drafts/{draft}/approve` or `…/reject` |
+
+Create body examples: `{"kind":"executive_summary"}` or `{"kind":"finding","finding_ids":[1,2],"mode":"per_finding"|"combined"}`.
+
 ## Attestra Agentic Security Intelligence (AASI)
 
-Optional AI / LLM security on branch work toward production readiness. **Disabled by default** — set `ATTESTRA_AASI=on` (or `1` / `true` / `yes`) only in lab or approved environments. Status detail: [docs/ai_security/AASI_IMPLEMENTATION_STATUS.md](docs/ai_security/AASI_IMPLEMENTATION_STATUS.md). V5.1 tracker: [docs/ai_security/AASI_V51_STATUS.md](docs/ai_security/AASI_V51_STATUS.md).
+Optional AI / LLM security on branch work toward production readiness. **Disabled by default** — set `ATTESTRA_AASI=on` (or `1` / `true` / `yes`) only in lab or approved environments. Reuses the same `ATTESTRA_AI_*` provider stack as [AI Narratives](#ai-narratives-optional) when LLM calls are needed. Status detail: [docs/ai_security/AASI_IMPLEMENTATION_STATUS.md](docs/ai_security/AASI_IMPLEMENTATION_STATUS.md). V5.1 tracker: [docs/ai_security/AASI_V51_STATUS.md](docs/ai_security/AASI_V51_STATUS.md).
 
 ### Implemented status (tree-verified)
 
@@ -569,7 +622,8 @@ Staging/production (or missing `APP_ENV`) with a bypass set to true fails startu
 | `ATTESTRA_OIDC_*` | disabled unless `ATTESTRA_OIDC_ENABLED` | SSO (`ISSUER`, `CLIENT_ID`, `CLIENT_SECRET`, `AUDIENCE`, `JWKS_URL`, `ALGORITHMS`, `USERNAME_CLAIM`, `TENANT_CLAIM`, `AUTO_PROVISION`) |
 | `ATTESTRA_S3_BUCKET`, `ATTESTRA_S3_ENDPOINT`, `ATTESTRA_S3_OBJECT_LOCK` | — | S3 evidence (`pip install -e ".[s3]"`) |
 | `ATTESTRA_SECRETS_BACKEND` | `env` | Secrets backend (`env` or Vault-related `ATTESTRA_VAULT_*`) |
-| `ATTESTRA_AI_*` | off | Optional AI draft text (`PROVIDER`, `MODEL`, `BASE_URL`, `API_KEY`, `NARRATIVES`, `TENANTS_OFF`) — keep keys in the environment, never in the repo |
+| `ATTESTRA_AI_NARRATIVES` | off | Master/bootstrap switch for [AI Narratives](#ai-narratives-optional); prefer **More → AI provider** per tenant |
+| `ATTESTRA_AI_PROVIDER`, `ATTESTRA_AI_BASE_URL`, `ATTESTRA_AI_MODEL`, `ATTESTRA_AI_API_KEY`, `ATTESTRA_AI_TENANTS_OFF` | ollama / catalog / empty | Env bootstrap when no Mongo UI settings; keep keys out of git — prefer UI paste or secret store `ai_api_key` |
 | `ATTESTRA_AASI` | off | Master switch for recommend-only AASI (`/api/aasi`); see [AASI](#attestra-agentic-security-intelligence-aasi) |
 | `ATTESTRA_AASI_MAX_*`, `ATTESTRA_AASI_RETRY_LIMIT`, `ATTESTRA_AASI_REQUIRE_APPROVAL` | bounded / on | AASI run budgets and human approval gate |
 | `ATTESTRA_SHARED_ENV_ROOT` | unset | V5.1 shared env root (one Python venv + Node/npm for Promptfoo) |

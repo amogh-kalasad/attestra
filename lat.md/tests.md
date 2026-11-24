@@ -1175,12 +1175,11 @@ Rendered technical, executive, compliance, closure, and attestation reports for 
 
 Test modules for features added on top of the core flow. Each line says what the file checks.
 
-- `tests/test_ai_narratives.py`: AI drafts are off by default, never touch the network unless set up, hide evidence, need tester approval, and can be turned off per tenant.
+- `tests/test_ai_narratives.py`: AI drafts are off by default, never touch the network unless set up, hide evidence, need tester approval, can be turned off per tenant, and multi-select per-finding / combined writeups keep Description / Impact / Likelihood / Recommendation structure.
 - `tests/test_phase5_ai.py`: OpenAI API key never appears in drafts, logs, or errors; default provider is Ollama when unset; feature still off unless narratives are on.
 - `tests/test_phase5_ownership.py`: set/reuse ownership token clears verification, audits suffix only, and target-page Verify now routes work.
 - `tests/test_phase5_grc.py`: GRC webhook push is off by default, posts signed report metadata only, and never logs the webhook secret.
-- `tests/test_ai_routes.py`: AI draft pages and API return 404 when off, and only approved drafts reach a report.
-- `tests/test_ai_drafts_page.py`: the AI drafts page uses the normal layout, shows a friendly off message, and asks before Reject.
+- `tests/test_ai_routes.py`: AI draft pages and API return 404 when off, only approved drafts reach a report, multi `finding_ids` create supports per_finding and combined modes with structured report sections, and the create picker highlights findings already approved for reporting (`In report` / `ai-finding-approved`).
 - `tests/test_c7_c11_mapping_soc2.py`: mapping strength and reason show in compliance output, and SOC 2 Type II sampling is repeatable.
 - `tests/test_c9_c10_pci_iso.py`: ASV import, PCI calendar, segmentation records, ISO SoA, nonconformity and corrective action, and audit sampling.
 - `tests/test_control_libraries.py`: PCI, ISO and SOC 2 crosswalks cover every objective, and OSCAL and SCF control libraries import correctly.

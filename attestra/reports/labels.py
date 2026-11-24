@@ -906,6 +906,28 @@ def _escape_keep(text: str) -> str:
     return escape(text, quote=False)
 
 
+def _ai_writeup_sections(text: str | None) -> list[tuple[str, str]]:
+    """Split an approved AI writeup into labeled sections for report HTML."""
+    try:
+        from attestra.ai_narratives import writeup_sections
+
+        return writeup_sections(text or "")
+    except Exception:  # noqa: BLE001 — never break report render over AI formatting
+        raw = (text or "").strip()
+        return [("Narrative", raw)] if raw else []
+
+
+def _ai_combined_writeup_blocks(text: str | None) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Split an approved combined AI writeup into per-finding section blocks."""
+    try:
+        from attestra.ai_narratives import combined_writeup_blocks
+
+        return combined_writeup_blocks(text or "")
+    except Exception:  # noqa: BLE001 — never break report render over AI formatting
+        raw = (text or "").strip()
+        return [("", [("Narrative", raw)])] if raw else []
+
+
 def register_jinja_filters(env: Any) -> None:
     """Attach display-label filters to a Jinja environment."""
     env.filters["tool_label"] = tool_label
@@ -932,9 +954,13 @@ def register_jinja_filters(env: Any) -> None:
     env.filters["format_checklist_note"] = format_checklist_note
     env.filters["test_name_label"] = test_name_label
     env.filters["recommendation_to_bullets"] = recommendation_to_bullets
+    env.filters["ai_writeup_sections"] = _ai_writeup_sections
+    env.filters["ai_combined_writeup_blocks"] = _ai_combined_writeup_blocks
     env.globals["plural"] = plural
     env.globals["automated_run_header"] = automated_run_header
     env.globals["recommendation_to_bullets"] = recommendation_to_bullets
+    env.globals["ai_writeup_sections"] = _ai_writeup_sections
+    env.globals["ai_combined_writeup_blocks"] = _ai_combined_writeup_blocks
     env.globals["effective_exposure"] = effective_exposure_for_asset
     env.globals["effective_exposure_label"] = effective_exposure_label
     env.globals["test_name_label"] = test_name_label

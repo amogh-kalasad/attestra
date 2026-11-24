@@ -1463,6 +1463,8 @@ def render_html(
     ctx.setdefault("automated_run_header", report_labels.automated_run_header)
     ctx.setdefault("plural", report_labels.plural)
     ctx.setdefault("recommendation_to_bullets", report_labels.recommendation_to_bullets)
+    ctx.setdefault("ai_writeup_sections", report_labels._ai_writeup_sections)
+    ctx.setdefault("ai_combined_writeup_blocks", report_labels._ai_combined_writeup_blocks)
     from attestra.library.templates import render_custom  # tenant template, else built-in
 
     custom = render_custom(s, eng.tenant_id, kind, ctx)

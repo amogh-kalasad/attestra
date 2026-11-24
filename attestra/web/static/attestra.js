@@ -727,11 +727,115 @@
     timer = window.setInterval(tick, pollMs);
   }
 
+  /* AI drafts: multi-select findings + per-finding/combined mode (CSP blocks inline classic scripts). */
+  function initAiDraftsPage() {
+    var form = document.getElementById("ai_create");
+    var kindSel = document.getElementById("ai_kind");
+    var wrap = document.getElementById("ai_finding_wrap");
+    var picker = document.getElementById("ai_finding");
+    if (!form || !kindSel || !wrap || !picker) return;
+    var countEl = document.getElementById("ai_finding_count");
+    var btnAll = document.getElementById("ai_findings_all");
+    var btnNone = document.getElementById("ai_findings_none");
+    var btnNeed = document.getElementById("ai_findings_need");
+    var createBtn = document.getElementById("ai_create_btn");
+    var createHint = document.getElementById("ai_create_hint");
+
+    function boxes() {
+      return picker.querySelectorAll('input[type="checkbox"][name="finding_ids"]');
+    }
+
+    function selectedCount() {
+      var n = 0;
+      Array.prototype.forEach.call(boxes(), function (cb) { if (cb.checked) n++; });
+      return n;
+    }
+
+    function boxCount() {
+      return boxes().length;
+    }
+
+    function modeValue() {
+      var r = form.querySelector('input[name="mode"]:checked');
+      return r ? r.value : "per_finding";
+    }
+
+    function refreshCount() {
+      var n = selectedCount();
+      if (countEl) countEl.textContent = n + " selected";
+      if (createBtn && kindSel.value === "finding") {
+        if (modeValue() === "combined") createBtn.textContent = n > 1 ? "Create combined writeup" : "Create draft";
+        else createBtn.textContent = n > 1 ? "Create " + n + " drafts" : "Create draft";
+      } else if (createBtn) {
+        createBtn.textContent = "Create draft";
+      }
+      if (createHint && kindSel.value === "finding" && modeValue() === "combined" && n > 8) {
+        createHint.textContent =
+          "Combined writeups for many findings can take several minutes. Timeout and output size scale with the selection.";
+      } else if (createHint && kindSel.value === "finding" && modeValue() === "per_finding" && n > 5) {
+        createHint.textContent = "Creates one structured writeup per finding. Larger batches take longer.";
+      } else if (createHint) {
+        createHint.textContent = "Takes a few seconds. The draft waits below for review.";
+      }
+    }
+
+    function setAll(on) {
+      Array.prototype.forEach.call(boxes(), function (cb) { cb.checked = !!on; });
+      refreshCount();
+    }
+
+    function setNeedingWriteup() {
+      Array.prototype.forEach.call(boxes(), function (cb) {
+        cb.checked = cb.getAttribute("data-approved") !== "1";
+      });
+      refreshCount();
+    }
+
+    function kindCheck() {
+      var on = kindSel.value === "finding";
+      wrap.hidden = !on;
+      picker.setAttribute("aria-disabled", on ? "false" : "true");
+      Array.prototype.forEach.call(boxes(), function (cb) { cb.disabled = !on; });
+      var empty = boxCount() === 0;
+      if (btnAll) btnAll.disabled = !on || empty;
+      if (btnNone) btnNone.disabled = !on || empty;
+      if (btnNeed) btnNeed.disabled = !on || empty;
+      refreshCount();
+    }
+
+    kindSel.addEventListener("change", kindCheck);
+    picker.addEventListener("change", refreshCount);
+    Array.prototype.forEach.call(form.querySelectorAll('input[name="mode"]'), function (r) {
+      r.addEventListener("change", refreshCount);
+    });
+    if (btnAll) btnAll.addEventListener("click", function () { setAll(true); });
+    if (btnNone) btnNone.addEventListener("click", function () { setAll(false); });
+    if (btnNeed) btnNeed.addEventListener("click", function () { setNeedingWriteup(); });
+    kindCheck();
+
+    form.addEventListener("submit", function (ev) {
+      if (kindSel.value === "finding" && selectedCount() < 1) {
+        ev.preventDefault();
+        if (countEl) countEl.textContent = "Pick at least one finding";
+        var first = boxes()[0];
+        if (first) first.focus();
+        return;
+      }
+      var b = createBtn;
+      if (!b) return;
+      setTimeout(function () {
+        b.disabled = true;
+        b.textContent = modeValue() === "combined" ? "Drafting combined writeup..." : "Drafting...";
+      }, 0);
+    });
+  }
+
   function init() {
     document.documentElement.classList.add("js-asel");
     enhance(document);
     initNewEngagementFrameworks();
     initEngagementPage();
+    initAiDraftsPage();
     openDetailsFromHash();
     new MutationObserver(function (muts) {
       muts.forEach(function (m) {

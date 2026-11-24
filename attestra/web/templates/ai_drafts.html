@@ -9,9 +9,39 @@
   .ai-st-rejected { background: var(--err-bg); color: var(--err-ink); }
   .draft-head { display:flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
   .draft-head h2 { margin: 0; }
-  .draft textarea { width: 100%; min-height: 220px; line-height: 1.55; resize: vertical; }
+  .draft textarea { width: 100%; min-height: 280px; line-height: 1.55; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
   .draft .text { white-space: pre-wrap; border: 1px solid var(--rule); border-radius: 6px; padding: 10px 12px; }
+  .draft .ai-writeup-sec { margin: 0 0 12px; }
+  .draft .ai-writeup-sec:last-child { margin-bottom: 0; }
   .empty { text-align: center; padding: 28px 16px; }
+  .ai-finding-toolbar { display:flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0 8px; }
+  .ai-mode-row { display:flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+  .ai-mode-row label { display:flex; gap: 6px; align-items: center; font-weight: 500; margin: 0; }
+  .ai-finding-list {
+    max-height: 280px; overflow: auto; border: 1px solid var(--rule); border-radius: 8px;
+    background: var(--card, #fff); padding: 4px 0;
+  }
+  .ai-finding-list[aria-disabled="true"] { opacity: 0.55; pointer-events: none; }
+  .ai-finding-row {
+    display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 8px 12px;
+    font-weight: 500; border-left: 3px solid transparent; cursor: pointer;
+  }
+  .ai-finding-row:hover { background: var(--accent-soft, #F0F7F6); }
+  .ai-finding-row input { margin-top: 3px; flex: 0 0 auto; }
+  .ai-finding-row .ai-finding-meta { flex: 1 1 auto; min-width: 0; line-height: 1.35; }
+  .ai-finding-row.ai-finding-approved {
+    background: var(--ok-bg); border-left-color: var(--ok-ink);
+  }
+  .ai-finding-row.ai-finding-approved:hover { filter: brightness(0.98); }
+  .ai-in-report {
+    display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 700; background: var(--ok-ink); color: #fff; vertical-align: middle;
+  }
+  .ai-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 6px 0 0; }
+  .ai-legend-swatch {
+    display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    background: var(--ok-bg); border-left: 3px solid var(--ok-ink); vertical-align: -1px; margin-right: 4px;
+  }
 </style>
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="/">Engagements</a><span aria-hidden="true">/</span>
@@ -33,20 +63,49 @@
     <div class="fields">
       <div><label for="ai_kind">What to draft *</label>
         <select id="ai_kind" name="kind">
-          <option value="executive_summary">Executive summary</option>
+          <option value="executive_summary">Executive summary{% if executive_approved %} (approved one already in reports){% endif %}</option>
           <option value="finding" {{ "disabled" if not findings }}>Finding narrative{{ " (no findings yet)" if not findings }}</option>
         </select>
-        <div class="hint">The executive summary covers all findings except false positives. A finding narrative explains one finding's impact and fix.</div>
+        <div class="hint">The executive summary covers all findings except false positives. Finding narratives use a VAPT writeup layout (Description, Impact, Likelihood, Recommendation).</div>
         {% if not findings %}<div class="hint" id="no_findings_hint">Finding narratives need a finding. Import results or run a scan first.</div>{% endif %}</div>
-      <div id="ai_finding_wrap" hidden><label for="ai_finding">Finding *</label>
-        <select id="ai_finding" name="finding_id" disabled>
-          {% for f in findings %}<option value="{{ f.id }}">F-{{ f.id }} &middot; {{ f.severity|capitalize }} &middot; {{ f.title[:80] }}</option>{% endfor %}
-        </select>
-        <div class="hint">Findings marked false positive are not listed.</div></div>
+      <div id="ai_finding_wrap" hidden>
+        <span class="label-like" id="ai_finding_label">Findings *</span>
+        <div class="ai-finding-toolbar">
+          <button type="button" class="secondary" id="ai_findings_all" {{ "disabled" if not findings }}>Select all</button>
+          <button type="button" class="secondary" id="ai_findings_none" {{ "disabled" if not findings }}>Clear</button>
+          <button type="button" class="secondary" id="ai_findings_need" {{ "disabled" if not findings }}>Select needing writeup</button>
+          <span class="hint" id="ai_finding_count" style="margin:0">0 selected</span>
+        </div>
+        <div id="ai_finding" class="ai-finding-list" role="group" aria-labelledby="ai_finding_label" aria-disabled="true" data-finding-picker>
+          {% for f in findings %}
+          {% set already = f.id in approved_finding_ids %}
+          <label class="ai-finding-row{% if already %} ai-finding-approved{% endif %}" {% if already %}title="An approved AI writeup for this finding is already used in reports"{% endif %}>
+            <input type="checkbox" name="finding_ids" value="{{ f.id }}" disabled data-approved="{{ '1' if already else '0' }}">
+            <span class="ai-finding-meta">
+              F-{{ f.id }} &middot; {{ f.severity|capitalize }} &middot; {{ f.title[:80] }}
+              {% if already %}<span class="ai-in-report">In report</span>{% endif %}
+            </span>
+          </label>
+          {% else %}
+          <p class="hint" style="margin:10px 12px">No findings to draft yet.</p>
+          {% endfor %}
+        </div>
+        {% if approved_finding_ids %}
+        <p class="hint ai-legend" id="ai_approved_legend">
+          <span><span class="ai-legend-swatch" aria-hidden="true"></span>Highlighted findings already have an <b>approved</b> writeup in reports. You can still re-draft them; the new draft needs approval again.</span>
+        </p>
+        {% endif %}
+        <div class="hint">Findings marked false positive are not listed. Use Select needing writeup to skip ones already in the report.</div>
+        <div class="ai-mode-row" id="ai_mode_row" role="radiogroup" aria-label="How to create finding drafts">
+          <label><input type="radio" name="mode" value="per_finding" checked> One draft per finding</label>
+          <label><input type="radio" name="mode" value="combined"> One combined writeup{% if combined_approved %} <span class="meta">(an approved combined writeup already exists)</span>{% endif %}</label>
+        </div>
+        <div class="hint" id="ai_mode_hint">Per finding creates a separate structured writeup for each selected finding (best for technical report cards). Combined produces one document covering every selected finding.</div>
+      </div>
     </div>
     <div class="form-actions">
       <button type="submit" id="ai_create_btn">Create draft</button>
-      <span class="hint" style="margin:0">Takes a few seconds. The draft waits below for review.</span>
+      <span class="hint" style="margin:0" id="ai_create_hint">Takes a few seconds. The draft waits below for review.</span>
     </div>
   </form>
 </div>
@@ -57,7 +116,7 @@
 {% for d in drafts %}
 <div class="card draft" id="d-{{ d.id }}">
   <div class="draft-head">
-    <h2>{% if d.kind == "executive_summary" %}Executive summary{% else %}Finding narrative &middot; <a href="/engagements/{{ e.id }}#f-{{ d.finding_id }}">F-{{ d.finding_id }}</a>{% if finding_titles.get(d.finding_id) %} <span class="meta">{{ finding_titles[d.finding_id][:80] }}</span>{% endif %}{% endif %}</h2>
+    <h2>{% if d.kind == "executive_summary" %}Executive summary{% elif d.kind == "finding_combined" %}Combined finding writeup{% else %}Finding narrative &middot; <a href="/engagements/{{ e.id }}#f-{{ d.finding_id }}">F-{{ d.finding_id }}</a>{% if finding_titles.get(d.finding_id) %} <span class="meta">{{ finding_titles[d.finding_id][:80] }}</span>{% endif %}{% endif %}</h2>
     <span class="ai-st ai-st-{{ d.status }}">{{ d.status|label }}</span>
   </div>
   <p class="meta">{{ d.label }} &middot; created {{ d.created_at|dt }}{% if d.provider %} &middot; written by {{ d.provider }}{% endif %}
@@ -66,8 +125,8 @@
   {% if d.status == "draft" and can_decide %}
   <form method="post" action="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/approve">
     <label for="t-{{ d.id }}">Draft text (edit before approving)</label>
-    <textarea id="t-{{ d.id }}" name="text" rows="12">{{ d.text }}</textarea>
-    <div class="hint">Approving puts this text in the next report. Check every statement against the findings first.</div>
+    <textarea id="t-{{ d.id }}" name="text" rows="16">{{ d.text }}</textarea>
+    <div class="hint">Approving puts this text in the next report. Prefer keeping the Description / Impact / Likelihood / Recommendation headings. Check every statement against the findings first.</div>
     <div class="form-actions" style="margin-top:var(--space-4)">
       <button type="submit">Approve (with edits)</button>
       <button type="submit" class="danger" formaction="/engagements/{{ e.id }}/ai-drafts/{{ d.id }}/reject" formnovalidate data-confirm="Reject this AI draft? It will not be used in any report.">Reject</button>
@@ -85,15 +144,5 @@
 </div>
 {% endfor %}
 
-<script>
-  // Show the finding picker only for a finding narrative.
-  const kindSel = document.getElementById('ai_kind'), wrap = document.getElementById('ai_finding_wrap'),
-        fsel = document.getElementById('ai_finding');
-  function kindCheck() { const on = kindSel.value === 'finding'; wrap.hidden = !on; fsel.disabled = !on; fsel.required = on; }
-  kindSel.addEventListener('change', kindCheck); kindCheck();
-  // One click per draft: the AI call takes a few seconds.
-  document.getElementById('ai_create').addEventListener('submit', () => {
-    const b = document.getElementById('ai_create_btn'); setTimeout(() => { b.disabled = true; b.textContent = 'Drafting...'; }, 0);
-  });
-</script>
+{# Finding-picker / submit handlers live in /static/attestra.js (CSP blocks inline classic scripts). #}
 {% endblock %}

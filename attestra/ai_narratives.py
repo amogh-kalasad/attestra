@@ -84,7 +84,38 @@ def finding_metadata(finding: Any) -> dict[str, Any]:
 class Provider(Protocol):
     name: str
 
-    def complete(self, system: str, prompt: str) -> str: ...
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> str: ...
+
+
+# Output token / HTTP timeout budgets (combined drafts grow with finding count).
+MAX_OUTPUT_TOKENS = 16384
+MAX_HTTP_TIMEOUT_S = 600.0
+
+
+def draft_generation_budget(finding_count: int, *, mode: str = "finding") -> tuple[int, float]:
+    """Return ``(max_tokens, timeout_seconds)`` scaled by finding count and draft mode.
+
+    Combined writeups need more output room and a longer HTTP read timeout; Select-all
+    on a large engagement otherwise hits the default provider read timeout.
+    """
+    n = max(1, int(finding_count or 1))
+    if mode == "combined":
+        tokens = min(MAX_OUTPUT_TOKENS, 2048 + 450 * n)
+        timeout = min(MAX_HTTP_TIMEOUT_S, 120.0 + 18.0 * n)
+    elif mode == "executive_summary":
+        tokens = 2048
+        timeout = min(240.0, 90.0 + 1.5 * min(n, 50))
+    else:
+        tokens = 2048
+        timeout = 120.0
+    return int(tokens), float(timeout)
 
 
 def _tenant_settings_row(tenant_id: int) -> dict[str, Any] | None:
@@ -173,7 +204,7 @@ def provider_from_tenant(
 @dataclass
 class Draft:
     id: str
-    kind: str  # executive_summary | finding
+    kind: str  # executive_summary | finding | finding_combined
     engagement_id: int
     finding_id: int | None
     text: str
@@ -255,7 +286,7 @@ def approved_draft(store: DraftStore, engagement_id: int, kind: str, finding_id:
 def approved_for_report(engagement_id: int, tenant_id: int | None = None) -> dict[str, Any]:
     """Context for report templates. Empty when the feature is off (reports unchanged)."""
     if not is_enabled(tenant_id=tenant_id):
-        return {"ai_summary": None, "ai_narratives": {}}
+        return {"ai_summary": None, "ai_narratives": {}, "ai_combined": None}
     store = DraftStore()
     summary = approved_draft(store, engagement_id, "executive_summary")
     narratives: dict[int, Draft] = {}
@@ -264,7 +295,8 @@ def approved_for_report(engagement_id: int, tenant_id: int | None = None) -> dic
             ok = approved_draft(store, engagement_id, "finding", d.finding_id)
             if ok:
                 narratives[d.finding_id] = ok
-    return {"ai_summary": summary, "ai_narratives": narratives}
+    combined = approved_draft(store, engagement_id, "finding_combined")
+    return {"ai_summary": summary, "ai_narratives": narratives, "ai_combined": combined}
 
 
 _provider_override: Provider | None = None
@@ -298,13 +330,81 @@ def approved_text(store: DraftStore, engagement_id: int, kind: str, finding_id: 
 
 # ---------------------------------------------------------------- generation
 SYSTEM_PROMPT = (
-    "You are drafting text for a security assessment report. Use only the metadata given. "
-    "Do not invent hosts, evidence or numbers. Be concise and factual."
+    "You are drafting text for a professional VAPT / penetration-test report. "
+    "Use only the metadata given. Do not invent hosts, evidence, CVEs, or numbers. "
+    "Be concise, factual, and suitable for a client deliverable."
+)
+
+# VAPT finding-card writeup headings (must match prompt + report rendering).
+FINDING_WRITEUP_SECTIONS = ("Description", "Impact", "Likelihood", "Recommendation")
+_SECTION_RE = re.compile(
+    r"^##\s+(Description|Impact|Likelihood|Recommendation)\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
 def _new_id() -> str:
     return os.urandom(8).hex()
+
+
+def _finding_writeup_prompt(meta: dict[str, Any]) -> str:
+    headings = "\n".join(f"## {h}" for h in FINDING_WRITEUP_SECTIONS)
+    return (
+        "Write a VAPT finding writeup for this finding using EXACTLY these Markdown headings "
+        f"in this order (one short paragraph under each):\n{headings}\n\n"
+        "Do not add other headings. Do not wrap the whole answer in a code fence.\n"
+        f"Finding metadata:\n{json.dumps(meta, sort_keys=True)}"
+    )
+
+
+def normalize_finding_writeup(text: str) -> str:
+    """Ensure Description / Impact / Likelihood / Recommendation headings exist for reports."""
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    found = {m.group(1).title(): True for m in _SECTION_RE.finditer(raw)}
+    if all(h in found for h in FINDING_WRITEUP_SECTIONS):
+        # Canonicalize heading casing.
+        return _SECTION_RE.sub(lambda m: f"## {m.group(1).title()}", raw).strip()
+    # Model ignored structure — wrap as Description so report still has a labeled block.
+    return f"## Description\n{raw}\n\n## Impact\nNot stated by the model.\n\n## Likelihood\nNot stated by the model.\n\n## Recommendation\nNot stated by the model."
+
+
+def writeup_sections(text: str) -> list[tuple[str, str]]:
+    """Split a structured writeup into ``(heading, body)`` pairs for report HTML."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    matches = list(_SECTION_RE.finditer(raw))
+    if not matches:
+        return [("Narrative", raw)]
+    out: list[tuple[str, str]] = []
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        body = raw[start:end].strip()
+        out.append((m.group(1).title(), body))
+    return out
+
+
+_COMBINED_FINDING_RE = re.compile(r"^#\s+(F-\S+.*?)\s*$", re.MULTILINE)
+
+
+def combined_writeup_blocks(text: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Split a combined finding writeup into ``(finding_heading, sections)`` for reports."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    matches = list(_COMBINED_FINDING_RE.finditer(raw))
+    if not matches:
+        return [("", writeup_sections(raw))]
+    out: list[tuple[str, list[tuple[str, str]]]] = []
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        body = raw[start:end].strip()
+        out.append((m.group(1).strip(), writeup_sections(body)))
+    return out
 
 
 def draft_finding_narrative(
@@ -313,12 +413,65 @@ def draft_finding_narrative(
     if provider is None or (tenant_id is not None and not is_enabled(tenant_id=tenant_id)):
         return None
     meta = finding_metadata(finding)
-    prompt = "Write a 3-4 sentence narrative (impact and fix direction) for this finding:\n" + json.dumps(
-        meta, sort_keys=True
+    tokens, wait = draft_generation_budget(1, mode="finding")
+    text = normalize_finding_writeup(
+        provider.complete(SYSTEM_PROMPT, _finding_writeup_prompt(meta), max_tokens=tokens, timeout=wait)
     )
-    text = provider.complete(SYSTEM_PROMPT, prompt)
     return store.add(
         Draft(_new_id(), "finding", engagement_id, getattr(finding, "id", None), text, provider=provider.name)
+    )
+
+
+def draft_finding_narratives(
+    provider: Provider | None,
+    store: DraftStore,
+    engagement_id: int,
+    findings: Iterable[Any],
+    *,
+    tenant_id: int | None = None,
+) -> list[Draft]:
+    """Create one structured finding writeup draft per finding (per-finding batch mode)."""
+    out: list[Draft] = []
+    for f in findings:
+        d = draft_finding_narrative(provider, store, engagement_id, f, tenant_id=tenant_id)
+        if d is not None:
+            out.append(d)
+    return out
+
+
+def draft_combined_finding_writeup(
+    provider: Provider | None,
+    store: DraftStore,
+    engagement_id: int,
+    findings: Iterable[Any],
+    *,
+    tenant_id: int | None = None,
+) -> Draft | None:
+    """One combined VAPT writeup covering every selected finding (shared approval)."""
+    if provider is None or (tenant_id is not None and not is_enabled(tenant_id=tenant_id)):
+        return None
+    items = list(findings)
+    if not items:
+        return None
+    payload = [
+        {"id": getattr(f, "id", None), **finding_metadata(f)}
+        for f in items
+    ]
+    ids = ", ".join(f"F-{getattr(f, 'id', '?')}" for f in items)
+    headings = "\n".join(f"## {h}" for h in FINDING_WRITEUP_SECTIONS)
+    prompt = (
+        f"Write a combined VAPT findings writeup for these {len(items)} findings ({ids}). "
+        "For EACH finding, emit a level-1 heading like `# F-<id> · <short title>` then EXACTLY these "
+        f"level-2 headings in order:\n{headings}\n\n"
+        "Keep each section to one short paragraph. Do not invent hosts or evidence.\n"
+        f"Findings metadata:\n{json.dumps(payload, sort_keys=True)}"
+    )
+    tokens, wait = draft_generation_budget(len(items), mode="combined")
+    text = provider.complete(SYSTEM_PROMPT, prompt, max_tokens=tokens, timeout=wait).strip()
+    if text and not text.startswith("#"):
+        text = f"# Combined finding writeup ({ids})\n\n{text}"
+    return store.add(
+        Draft(_new_id(), "finding_combined", engagement_id, None, text, provider=provider.name)
     )
 
 
@@ -337,8 +490,12 @@ def draft_executive_summary(
     for m in metas:
         counts[str(m.get("severity", "info"))] = counts.get(str(m.get("severity", "info")), 0) + 1
     payload = {"severity_counts": counts, "kev_count": sum(1 for m in metas if m.get("kev")), "top": metas[:15]}
-    prompt = "Write a short executive summary (one paragraph) for this assessment:\n" + json.dumps(
-        payload, sort_keys=True
+    prompt = (
+        "Write a short executive summary for this assessment using these Markdown headings:\n"
+        "## Overview\n## Key risks\n## Recommended priorities\n\n"
+        "One short paragraph under each. Do not invent hosts or numbers beyond the counts given.\n"
+        f"Assessment metadata:\n{json.dumps(payload, sort_keys=True)}"
     )
-    text = provider.complete(SYSTEM_PROMPT, prompt)
+    tokens, wait = draft_generation_budget(len(metas), mode="executive_summary")
+    text = provider.complete(SYSTEM_PROMPT, prompt, max_tokens=tokens, timeout=wait)
     return store.add(Draft(_new_id(), "executive_summary", engagement_id, None, text, provider=provider.name))

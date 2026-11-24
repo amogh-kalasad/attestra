@@ -46,6 +46,12 @@ Notable routes:
 | GET | `/api/findings/{fid}/evidence/gallery` | Grouped evidence cards (no paths) |
 | POST | `/api/findings/{fid}/evidence/{eid}/annotate` | Annotated screenshot derivative |
 | POST | `/api/scans/{sid}/cancel` | Cancel a queued or running scan (`scan.start`) |
+| GET/PUT | `/api/ai/settings?tenant_id=` | Per-tenant AI provider settings (`ai.configure`; admin/lead) |
+| GET/POST | `/api/engagements/{eid}/ai-drafts` | List or create AI drafts (404 when narratives off for tenant) |
+| POST | `/api/engagements/{eid}/ai-drafts/{did}/approve` | Approve draft (optional edited `text`) |
+| POST | `/api/engagements/{eid}/ai-drafts/{did}/reject` | Reject draft |
+
+AI draft create accepts `kind` `executive_summary` or `finding`, with `finding_id` or `finding_ids` plus `mode` `per_finding` \| `combined`. Dashboard: `GET/POST /engagements/{eid}/ai-drafts` ([[attestra/web/ai_routes.py#ui_drafts]], [[attestra/web/ai_routes.py#ui_create]]). See [[architecture#AI drafts]] and `docs/AI_NARRATIVES.md`.
 
 Writes require [[attestra/api.py#get_principal]] (Bearer or session) and [[attestra/api.py#require]] for the route permission. Service errors map via [[attestra/api.py#_run]].
 

@@ -7,6 +7,8 @@
 # Scanner digests (ZAP/Nuclei/testssl/Naabu): defaults match docker/scanner-digests.env.
 # Override via root `.env`. One-shot `scanner-pull` validates + pulls them on up.
 #
+# AI Narratives (optional report drafts): off by default. Prefer Settings → AI provider
+# (Mongo + Fernet key). Env bootstrap via .env (ATTESTRA_AI_*); see docs/AI_NARRATIVES.md.
 # AASI AI scanners (Garak/Promptfoo/SafeLabs; PyRIT later): NOT pulled by default.
 # See docs/ai_security/AASI_DOCKER_DEPLOYMENT.md and the commented aasi-scanner-pull
 # block at the bottom of this file. Keep ATTESTRA_AASI=off until real digests exist.
@@ -80,6 +82,9 @@ services:
       ATTESTRA_INTEL_AUTO_REFRESH: ${ATTESTRA_INTEL_AUTO_REFRESH:-0}
       ATTESTRA_LICENSE_POLICY: ${ATTESTRA_LICENSE_POLICY:-}
       ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      # AI Narratives bootstrap (default off). Prefer UI Settings → AI provider for keys.
+      # Other ATTESTRA_AI_* values still load from optional env_file .env when present.
+      ATTESTRA_AI_NARRATIVES: ${ATTESTRA_AI_NARRATIVES:-off}
       ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
       ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
       ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}
@@ -185,6 +190,7 @@ services:
       ATTESTRA_INTEL_AUTO_REFRESH: ${ATTESTRA_INTEL_AUTO_REFRESH:-0}
       ATTESTRA_LICENSE_POLICY: ${ATTESTRA_LICENSE_POLICY:-}
       ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      ATTESTRA_AI_NARRATIVES: ${ATTESTRA_AI_NARRATIVES:-off}
       ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
       ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
       ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}
@@ -266,6 +272,7 @@ services:
       ATTESTRA_INTEL_AUTO_REFRESH: ${ATTESTRA_INTEL_AUTO_REFRESH:-0}
       ATTESTRA_LICENSE_POLICY: ${ATTESTRA_LICENSE_POLICY:-}
       ATTESTRA_AUTH_WEB_ENABLED: ${ATTESTRA_AUTH_WEB_ENABLED:-0}
+      ATTESTRA_AI_NARRATIVES: ${ATTESTRA_AI_NARRATIVES:-off}
       ATTESTRA_CREDENTIAL_FERNET_KEY: ${ATTESTRA_CREDENTIAL_FERNET_KEY:-}
       ATTESTRA_API_KEY_PEPPER: ${ATTESTRA_API_KEY_PEPPER:-attestra-dev-pepper-change-me}
       ATTESTRA_INITIAL_TEST_RUN_CREDITS: ${ATTESTRA_INITIAL_TEST_RUN_CREDITS:-10}

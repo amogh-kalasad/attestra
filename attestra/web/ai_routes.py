@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from attestra import ai_narratives as ai
 from attestra import audit, services
+from attestra.ai_providers import AIProviderError
 from attestra.auth.keys import Principal
 from attestra.auth.roles import has_permission
 from attestra.web import data_access
@@ -25,7 +26,9 @@ PERM_APPROVE = "finding.write"  # admin, lead, tester
 
 class DraftIn(BaseModel):
     kind: str  # executive_summary | finding
-    finding_id: int | None = None
+    finding_id: int | None = None  # single-finding API (backward compatible)
+    finding_ids: list[int] | None = None  # multi-select finding narratives
+    mode: str = "per_finding"  # per_finding | combined (finding kind only)
 
 
 class ApproveIn(BaseModel):
@@ -55,24 +58,45 @@ def _check_enabled(s, eid: int, principal: Principal):
     return eng
 
 
-def _create(s, eid: int, principal: Principal, kind: str, finding_id: int | None) -> ai.Draft:
+def _create(
+    s,
+    eid: int,
+    principal: Principal,
+    kind: str,
+    finding_ids: list[int] | None,
+    *,
+    mode: str = "per_finding",
+) -> list[ai.Draft]:
     eng = _check_enabled(s, eid, principal)
     provider = ai.get_provider(eng.tenant_id)
     if provider is None:
         raise HTTPException(404, "AI narratives are disabled")
     store = ai.DraftStore()
     findings = [f for f in services.list_findings(s, eid) if f.status != "false_positive"]
+    batch_mode = (mode or "per_finding").strip().lower()
     if kind == "executive_summary":
         d = ai.draft_executive_summary(provider, store, eid, findings, tenant_id=eng.tenant_id)
+        created = [d] if d is not None else []
     elif kind == "finding":
-        f = next((f for f in findings if f.id == finding_id), None)
-        if f is None:
+        ids = [int(x) for x in (finding_ids or []) if x is not None]
+        if not ids:
+            raise HTTPException(422, "pick at least one finding")
+        by_id = {f.id: f for f in findings}
+        selected = [by_id[i] for i in ids if i in by_id]
+        if not selected:
             raise HTTPException(404, "finding not found in this engagement")
-        d = ai.draft_finding_narrative(provider, store, eid, f, tenant_id=eng.tenant_id)
+        if batch_mode == "combined":
+            d = ai.draft_combined_finding_writeup(provider, store, eid, selected, tenant_id=eng.tenant_id)
+            created = [d] if d is not None else []
+        else:
+            created = ai.draft_finding_narratives(provider, store, eid, selected, tenant_id=eng.tenant_id)
     else:
         raise HTTPException(422, "kind must be executive_summary or finding")
-    audit.record(s, principal.username, "ai_draft.create", "engagement", eid, kind=kind, draft=d.id)
-    return d
+    for d in created:
+        audit.record(
+            s, principal.username, "ai_draft.create", "engagement", eid, kind=d.kind, draft=d.id, mode=batch_mode
+        )
+    return created
 
 
 def _decide(s, eid: int, did: str, principal: Principal, *, approve: bool, text: str | None) -> ai.Draft:
@@ -133,7 +157,19 @@ def list_drafts(eid: int, principal: Principal = Depends(_require(PERM_DRAFT))):
 
 @api_router.post("/api/engagements/{eid}/ai-drafts", status_code=201)
 def create_draft(eid: int, body: DraftIn, principal: Principal = Depends(_require(PERM_DRAFT))):
-    return _with_session(lambda s: _draft_dict(_create(s, eid, principal, body.kind, body.finding_id)))
+    ids = list(body.finding_ids or [])
+    if body.finding_id is not None and body.finding_id not in ids:
+        ids.append(int(body.finding_id))
+    try:
+        drafts = _with_session(lambda s: _create(s, eid, principal, body.kind, ids or None, mode=body.mode))
+    except (ai.AINarrativesError, AIProviderError) as e:
+        raise HTTPException(502, str(e).strip() or "AI provider request failed") from None
+    if not drafts:
+        raise HTTPException(502, "AI provider returned no draft")
+    # One draft (executive, combined, or a single finding) keeps the object shape; batches get a list.
+    if len(drafts) == 1:
+        return _draft_dict(drafts[0])
+    return [_draft_dict(d) for d in drafts]
 
 
 @api_router.post("/api/engagements/{eid}/ai-drafts/{did}/approve")
@@ -194,14 +230,19 @@ def ui_drafts(request: Request, eid: int):
             # A friendly page (200), not "Page not found": the feature exists but is switched off.
             return _render(request, "ai_drafts_off.html", {"e": eng, "globally_on": ai.is_enabled()})
         findings = [f for f in services.list_findings(s, eid) if f.status != "false_positive"]
+        drafts = list(reversed(ai.DraftStore().list(eid)))
+        report_ai = ai.approved_for_report(eid, tenant_id=eng.tenant_id)
         return _render(
             request,
             "ai_drafts.html",
             {
                 "e": eng,
-                "drafts": list(reversed(ai.DraftStore().list(eid))),
+                "drafts": drafts,
                 "findings": findings,
                 "finding_titles": {f.id: f.title for f in findings},
+                "approved_finding_ids": set(report_ai.get("ai_narratives") or {}),
+                "executive_approved": report_ai.get("ai_summary") is not None,
+                "combined_approved": report_ai.get("ai_combined") is not None,
                 "can_decide": principal.role in ai.APPROVER_ROLES and has_permission(principal.role, PERM_APPROVE),
             },
         )
@@ -210,21 +251,58 @@ def ui_drafts(request: Request, eid: int):
 
 
 @ui_router.post("/engagements/{eid}/ai-drafts")
-def ui_create(request: Request, eid: int, kind: str = Form(...), finding_id: str = Form("")):
+async def ui_create(
+    request: Request,
+    eid: int,
+    kind: str = Form(...),
+    mode: str = Form("per_finding"),
+):
     principal = _ui_principal(request, PERM_DRAFT)
     if not _ui_enabled(eid, principal):
         return _ui_back(eid)
-    fid = int(finding_id) if finding_id.strip().isdigit() else None
-    if kind == "finding" and (fid is None or not _with_session(lambda s: _finding_ok(s, eid, fid))):
-        # A missing or wrong id goes back to the page with an inline error, not a 404 page.
-        return _ui_back(eid, error="Pick a finding from the list.")
+    form = await request.form()
+    # Multi-select posts repeated finding_ids=…; keep a lone finding_id for older clients.
+    raw_ids = form.getlist("finding_ids") or form.getlist("finding_id")
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        s = str(raw).strip()
+        if s.isdigit():
+            i = int(s)
+            if i not in seen:
+                seen.add(i)
+                ids.append(i)
+    if kind == "finding":
+        if not ids:
+            return _ui_back(eid, error="Pick at least one finding from the list.")
+        ok_ids = _with_session(lambda s: [i for i in ids if _finding_ok(s, eid, i)])
+        if not ok_ids:
+            return _ui_back(eid, error="Pick at least one finding from the list.")
+        ids = ok_ids
+    batch_mode = (mode or "per_finding").strip().lower()
+    if batch_mode not in ("per_finding", "combined"):
+        batch_mode = "per_finding"
     try:
-        _with_session(lambda s: _create(s, eid, principal, kind, fid))
-    except (ai.AINarrativesError, OSError, ValueError) as e:
-        why = type(e).__name__
-        error = f"The AI service could not write a draft ({why}). Check the AI settings and try again."
+        drafts = _with_session(lambda s: _create(s, eid, principal, kind, ids or None, mode=batch_mode))
+    except (ai.AINarrativesError, AIProviderError, OSError, ValueError) as e:
+        detail = str(e).strip() or type(e).__name__
+        if len(detail) > 180:
+            detail = detail[:177] + "..."
+        error = f"The AI service could not write a draft: {detail}. Check Settings → AI and try again."
         return _ui_back(eid, error=error)
-    return _ui_back(eid, msg="Draft created. Review it below before approving.")
+    if not drafts:
+        return _ui_back(
+            eid,
+            error="AI drafts are on, but no provider answered. Check Settings → AI (provider, model, API key).",
+        )
+    n = len(drafts)
+    if n == 1 and drafts[0].kind == "finding_combined":
+        msg = "Combined finding writeup created. Review it below before approving."
+    elif n == 1:
+        msg = "Draft created. Review it below before approving."
+    else:
+        msg = f"{n} finding writeups created. Review each below before approving."
+    return _ui_back(eid, msg=msg)
 
 
 @ui_router.post("/engagements/{eid}/ai-drafts/{did}/approve")

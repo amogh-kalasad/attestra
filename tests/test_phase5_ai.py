@@ -17,7 +17,7 @@ class FakeProvider:
         self.calls = []
         self.text = text
 
-    def complete(self, system, prompt):
+    def complete(self, system, prompt, *, max_tokens=None, timeout=None):
         self.calls.append(prompt)
         return self.text
 
@@ -70,7 +70,7 @@ def test_openai_key_never_in_drafts_logs_or_errors(tmp_path, monkeypatch, caplog
         assert p is not None and p.name == "openai"
         assert secret not in repr(p)
         d = ai.draft_finding_narrative(p, store, 9, _finding())
-    assert d is not None and d.text == "Safe draft text."
+    assert d is not None and "Safe draft text." in d.text and "## Description" in d.text
     blob = json.dumps([d.__dict__], default=str)
     assert secret not in blob
     assert "Authorization" not in blob

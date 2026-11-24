@@ -83,6 +83,19 @@ ATTESTRA_IMAGE_NUCLEI=…
 
 Placeholder all-zero digests refuse to run (by design).
 
+### AI Narratives (optional)
+
+Report draft text (executive summary / finding writeups), **off by default**. Distinct from AASI scanners.
+
+1. Ensure `ATTESTRA_CREDENTIAL_FERNET_KEY` is set (install wrappers fill an empty key) so UI-pasted provider keys encrypt in Mongo.
+2. Prefer **More → AI provider** in the UI (`/settings/ai`) for enable + provider + key. No recreate needed for UI-only saves (api/worker share Mongo).
+3. Optional env bootstrap in `.env`: `ATTESTRA_AI_NARRATIVES=on` plus `ATTESTRA_AI_PROVIDER` / `BASE_URL` / `MODEL` / `API_KEY`. Compose passes `ATTESTRA_AI_NARRATIVES` (default `off`); other `ATTESTRA_AI_*` come from `env_file`.
+4. After env-only changes: `docker compose up -d --force-recreate api worker worker-2`.
+5. After Python/template/static changes for AI drafts: `docker compose up -d --build api` (and workers if their code changed).
+6. Tester flow: engagement → **AI drafts** → create → approve → generate reports. See [docs/AI_NARRATIVES.md](AI_NARRATIVES.md) and the root README **AI Narratives** section.
+
+Keep `ATTESTRA_AASI=off` unless you intentionally enable the separate AI-security track.
+
 ## Health checks
 
 - API / image: HTTP `GET /api/health` (includes Mongo ping)  
@@ -110,6 +123,10 @@ Worker instance locks survive container restart (PID-namespace-aware steal in `I
 | `docker was not found` from worker | Image lacked Docker CLI, or socket not usable | Rebuild so [[Dockerfile]] includes the Docker client; worker needs socket mount + `group_add: ["0"]`; set `ATTESTRA_DOCKER_HOST_DATA_DIR` to the absolute host path of `./data` |
 | Nuclei `secrets file '/attestra-secrets/...' does not exist` | Auth secrets written under container `/tmp`, invisible to host Docker | Set `ATTESTRA_AUTH_SECRET_DIR=/data/auth-secrets` on the worker (compose default) and recreate worker |
 | Port in use | Local process or old container | Stop the other listener; `docker ps` |
+| AI drafts page says feature off / 404 | Narratives disabled for tenant | Enable under More → AI provider, or set `ATTESTRA_AI_NARRATIVES=on` and recreate api/worker |
+| AI create flashes provider error | Bad model, base URL, or key | Check Settings → AI; Anthropic base may be `https://api.anthropic.com` (with or without `/v1`); ensure Fernet key is set for pasted keys |
+| Ollama connection refused from API container | `localhost` points at the container | Point `ATTESTRA_AI_BASE_URL` at a host-reachable Ollama URL |
+| Stale AI drafts UI after code change | Image bake; `/data` only bind-mounts data | `docker compose up -d --build api` and hard-refresh (`attestra.js?v=` cache bust) |
 
 ## Related docs
 
@@ -117,3 +134,4 @@ Worker instance locks survive container restart (PID-namespace-aware steal in `I
 - Specialist audits: `docs/audit/`  
 - Helm / k8s: `deploy/README.md`  
 - Secure Mongo: `docs/mongodb_migration/SECURE_LOCAL_MONGO.md`  
+- AI Narratives: `docs/AI_NARRATIVES.md`  

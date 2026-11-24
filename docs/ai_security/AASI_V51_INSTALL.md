@@ -166,6 +166,20 @@ python scripts/aasi/install_promptfoo_npm.py
    python scripts\aasi\install_promptfoo_npm.py --skip-node
    ```
 
+If `npm install` fails with `better-sqlite3` / `node-gyp` / Visual Studio errors while reporting **Node 24** (or any version other than **v20.20.2**), a system Node on `PATH` is winning over the shared `tools\node`. The installer now prepends the shared Node directory for `npm install`. Clean and retry:
+
+```powershell
+Remove-Item -Recurse -Force .\.attestra-runtime\npm\node_modules -ErrorAction SilentlyContinue
+$env:PATH = "$pwd\.attestra-runtime\tools\node;$env:PATH"
+python scripts\aasi\install_shared_env.py --skip-python --promptfoo-only
+```
+
+Verify with the shared Node binary (do not rely on a bare `promptfoo.cmd` while system Node 24 is first on `PATH`):
+
+```powershell
+& "$root\tools\node\node.exe" "$root\npm\node_modules\promptfoo\dist\src\main.js" --version
+```
+
 Verify:
 
 ```powershell

@@ -13,9 +13,14 @@ class FakeProvider:
     def __init__(self):
         self.calls = []
 
-    def complete(self, system, prompt):
-        self.calls.append(prompt)
-        return "Drafted narrative."
+    def complete(self, system, prompt, *, max_tokens=None, timeout=None):
+        self.calls.append({"prompt": prompt, "max_tokens": max_tokens, "timeout": timeout})
+        return (
+            "## Description\nDrafted description.\n\n"
+            "## Impact\nDrafted impact.\n\n"
+            "## Likelihood\nDrafted likelihood.\n\n"
+            "## Recommendation\nDrafted recommendation."
+        )
 
 
 def _finding(**kw):
@@ -74,7 +79,11 @@ def test_drafts_require_tester_approval(tmp_path, monkeypatch):
     d = ai.draft_finding_narrative(fake, store, 7, _finding())
     s = ai.draft_executive_summary(fake, store, 7, [_finding(), _finding(id=2, severity="low")])
     assert d.label == "AI draft" and d.status == "draft"
-    assert "acme" not in "".join(fake.calls) and "hunter2" not in "".join(fake.calls)
+    assert "## Description" in d.text and "## Recommendation" in d.text
+    prompts = "\n".join(c["prompt"] for c in fake.calls)
+    assert "acme" not in prompts and "hunter2" not in prompts
+    assert "Description" in fake.calls[0]["prompt"] and "Impact" in fake.calls[0]["prompt"]
+    assert fake.calls[0]["timeout"] == 120.0 and fake.calls[0]["max_tokens"] == 2048
     assert ai.approved_text(store, 7, "finding", 1) is None
     assert ai.approved_text(store, 7, "executive_summary") is None
     with pytest.raises(PermissionError):
@@ -83,6 +92,41 @@ def test_drafts_require_tester_approval(tmp_path, monkeypatch):
     assert ai.approved_text(store, 7, "finding", 1) == "Reviewed text."
     store.reject(7, s.id, user="t1")
     assert ai.approved_text(store, 7, "executive_summary") is None
+
+
+def test_multi_finding_per_and_combined(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATTESTRA_AI_NARRATIVES", "on")
+    store = ai.DraftStore(tmp_path)
+    fake = FakeProvider()
+    findings = [_finding(id=1), _finding(id=2, severity="low"), _finding(id=3, severity="medium")]
+    batch = ai.draft_finding_narratives(fake, store, 9, findings)
+    assert len(batch) == 3
+    assert all(d.kind == "finding" and d.finding_id in (1, 2, 3) for d in batch)
+    combined = ai.draft_combined_finding_writeup(fake, store, 9, findings)
+    assert combined is not None and combined.kind == "finding_combined" and combined.finding_id is None
+    last = fake.calls[-1]
+    assert "F-1" in last["prompt"] and "F-3" in last["prompt"]
+    expect_tokens, expect_timeout = ai.draft_generation_budget(3, mode="combined")
+    assert last["max_tokens"] == expect_tokens and last["timeout"] == expect_timeout
+    secs = ai.writeup_sections(batch[0].text)
+    assert [h for h, _ in secs] == list(ai.FINDING_WRITEUP_SECTIONS)
+    sample = (
+        "# F-1 · SQL injection\n\n## Description\nA\n\n## Impact\nB\n\n## Likelihood\nC\n\n## Recommendation\nD\n\n"
+        "# F-2 · XSS\n\n## Description\nE\n\n## Impact\nF\n\n## Likelihood\nG\n\n## Recommendation\nH"
+    )
+    blocks = ai.combined_writeup_blocks(sample)
+    assert len(blocks) == 2
+    assert blocks[0][0].startswith("F-1") and [h for h, _ in blocks[0][1]] == list(ai.FINDING_WRITEUP_SECTIONS)
+    assert blocks[1][0].startswith("F-2") and blocks[1][1][0][1] == "E"
+
+
+def test_draft_generation_budget_scales_with_finding_count():
+    t1, w1 = ai.draft_generation_budget(1, mode="combined")
+    t45, w45 = ai.draft_generation_budget(45, mode="combined")
+    assert t45 > t1 and w45 > w1
+    assert t45 == ai.MAX_OUTPUT_TOKENS
+    assert w45 == ai.MAX_HTTP_TIMEOUT_S
+    assert ai.draft_generation_budget(1, mode="finding") == (2048, 120.0)
 
 
 def test_per_tenant_off_switch(tmp_path, monkeypatch):
@@ -138,6 +182,35 @@ def test_bad_config_rejected():
         ai.OllamaProvider("file:///etc/passwd")
 
 
+def test_http_post_includes_error_body(monkeypatch):
+    """Provider HTTP failures must surface the upstream body, not only the status line."""
+    import io
+
+    import urllib.error
+
+    from attestra.ai_providers import AIProviderError, _http_post
+
+    class FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__("https://api.example/v1/messages", 400, "Bad Request", {}, None)
+            self._buf = io.BytesIO(b'{"type":"error","error":{"message":"invalid model"}}')
+
+        def read(self, n=-1):
+            return self._buf.read(n)
+
+    def boom(req, timeout=60.0):
+        raise FakeHTTPError()
+
+    import attestra.ai_providers as providers
+
+    monkeypatch.setattr(providers.urllib.request, "urlopen", boom)
+    with pytest.raises(AIProviderError) as exc:
+        _http_post("https://api.example/v1/messages", {"Content-Type": "application/json"}, {"model": "x"})
+    msg = str(exc.value)
+    assert "400" in msg
+    assert "invalid model" in msg
+
+
 def test_anthropic_and_catalog_providers(monkeypatch):
     from attestra.ai_providers import AnthropicProvider, build_provider
 
@@ -162,6 +235,12 @@ def test_anthropic_and_catalog_providers(monkeypatch):
     assert sent[-1][1]["x-api-key"] == "sk-ant-test-key"
     assert "anthropic-version" in sent[-1][1]
     assert "sk-ant-test-key" not in repr(p)
+
+    # Operators often set ATTESTRA_AI_BASE_URL=.../v1; do not produce /v1/v1/messages.
+    sent.clear()
+    p_v1 = AnthropicProvider("https://api.anthropic.com/v1", "claude-sonnet-4-5", "sk-ant-test-key", http_post=post)
+    assert p_v1.complete("sys", "user") == "claude text"
+    assert sent[-1][0] == "https://api.anthropic.com/v1/messages"
 
     x = build_provider(provider="xai", model="grok-2-latest", api_key="xk", http_post=post)
     assert x.complete("s", "u") == "compat text"

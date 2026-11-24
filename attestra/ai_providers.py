@@ -7,6 +7,7 @@ behind :func:`build_provider` so AASI can keep using ``Provider.complete``.
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,18 +21,67 @@ class AIProviderError(Exception):
 class Provider(Protocol):
     name: str
 
-    def complete(self, system: str, prompt: str) -> str: ...
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> str: ...
 
 
-HttpPost = Callable[[str, dict[str, str], dict[str, Any]], dict[str, Any]]
+HttpPost = Callable[..., dict[str, Any]]
 
 ANTHROPIC_VERSION = "2023-06-01"
+DEFAULT_HTTP_TIMEOUT_S = 120.0
 
 
-def _http_post(url: str, headers: dict[str, str], body: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - scheme checked in __init__
-        return json.loads(resp.read(2_000_000).decode("utf-8"))
+def _http_post(
+    url: str, headers: dict[str, str], body: dict[str, Any], *, timeout: float = DEFAULT_HTTP_TIMEOUT_S
+) -> dict[str, Any]:
+    """POST JSON; on HTTP errors include a short response body so callers can surface the real reason."""
+    wait = float(timeout) if timeout is not None else DEFAULT_HTTP_TIMEOUT_S
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=wait) as resp:  # noqa: S310 - scheme checked in __init__
+            return json.loads(resp.read(2_000_000).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = ""
+        try:
+            raw = exc.read(4_000).decode("utf-8", errors="replace").strip()
+        except Exception:  # noqa: BLE001 - best-effort body for the raised message
+            raw = ""
+        detail = raw.replace("\n", " ")[:500] if raw else (exc.reason or "Bad Request")
+        raise AIProviderError(f"HTTP Error {exc.code}: {detail}") from None
+    except TimeoutError:
+        raise AIProviderError(
+            f"AI provider timed out after {wait:.0f}s (try fewer findings, or use one draft per finding)"
+        ) from None
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        msg = str(reason) if reason is not None else str(exc)
+        if isinstance(reason, TimeoutError) or "timed out" in msg.lower():
+            raise AIProviderError(
+                f"AI provider timed out after {wait:.0f}s (try fewer findings, or use one draft per finding)"
+            ) from None
+        raise AIProviderError(f"AI provider network error: {msg}") from None
+
+
+def _call_http_post(
+    post: HttpPost,
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    *,
+    timeout: float,
+) -> dict[str, Any]:
+    """Call a transport with timeout when supported (injected test posts may omit it)."""
+    try:
+        return post(url, headers, body, timeout=timeout)
+    except TypeError:
+        return post(url, headers, body)
 
 
 def _check_url(url: str) -> str:
@@ -142,14 +192,25 @@ class OllamaProvider:
         self.model = model
         self._post = http_post or _http_post
 
-    def complete(self, system: str, prompt: str) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        options: dict[str, Any] = {"temperature": 0.2}
+        if max_tokens is not None:
+            options["num_predict"] = int(max_tokens)
         body = {
             "model": self.model,
             "stream": False,
-            "options": {"temperature": 0.2},
+            "options": options,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         }
-        doc = self._post(self.url, {"Content-Type": "application/json"}, body)
+        wait = float(timeout) if timeout is not None else DEFAULT_HTTP_TIMEOUT_S
+        doc = _call_http_post(self._post, self.url, {"Content-Type": "application/json"}, body, timeout=wait)
         return str(((doc or {}).get("message") or {}).get("content", "")).strip()
 
 
@@ -185,18 +246,36 @@ class OpenAICompatProvider:
             out = out.replace(f"Bearer {key}", "Bearer [redacted]")
         return out
 
-    def complete(self, system: str, prompt: str) -> str:
-        body = {
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        body: dict[str, Any] = {
             "model": self.model,
             "temperature": 0.2,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
         }
+        if max_tokens is not None:
+            body["max_tokens"] = int(max_tokens)
+        wait = float(timeout) if timeout is not None else DEFAULT_HTTP_TIMEOUT_S
         try:
-            doc = self._post(self.url, dict(self._headers), body)
+            doc = _call_http_post(self._post, self.url, dict(self._headers), body, timeout=wait)
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(self._scrub(str(exc)) or "AI provider request failed") from None
         choices = (doc or {}).get("choices") or [{}]
         return str((choices[0].get("message") or {}).get("content", "")).strip()
+
+
+def _anthropic_messages_url(base_url: str) -> str:
+    """Build Messages API URL; tolerate bases that already end with ``/v1``."""
+    root = _check_url(base_url)
+    if root.endswith("/v1"):
+        return root + "/messages"
+    return root + "/v1/messages"
 
 
 class AnthropicProvider:
@@ -207,7 +286,7 @@ class AnthropicProvider:
     def __init__(self, base_url: str, model: str, api_key: str, *, http_post: HttpPost | None = None):
         if not api_key:
             raise AIProviderError("AI API key missing (paste in Settings → AI provider, or set ATTESTRA_AI_API_KEY)")
-        self.url = _check_url(base_url) + "/v1/messages"
+        self.url = _anthropic_messages_url(base_url)
         self.model = model
         self._api_key = api_key
         self._headers = {
@@ -228,16 +307,24 @@ class AnthropicProvider:
             out = out.replace(f"x-api-key: {key}", "x-api-key: [redacted]")
         return out
 
-    def complete(self, system: str, prompt: str) -> str:
+    def complete(
+        self,
+        system: str,
+        prompt: str,
+        *,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        # Omit temperature: newer Claude models (e.g. claude-sonnet-5) reject it as deprecated.
         body = {
             "model": self.model,
-            "max_tokens": 1024,
-            "temperature": 0.2,
+            "max_tokens": int(max_tokens) if max_tokens is not None else 2048,
             "system": system,
             "messages": [{"role": "user", "content": prompt}],
         }
+        wait = float(timeout) if timeout is not None else DEFAULT_HTTP_TIMEOUT_S
         try:
-            doc = self._post(self.url, dict(self._headers), body)
+            doc = _call_http_post(self._post, self.url, dict(self._headers), body, timeout=wait)
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(self._scrub(str(exc)) or "AI provider request failed") from None
         parts = (doc or {}).get("content") or []

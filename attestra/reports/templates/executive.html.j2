@@ -15,7 +15,17 @@
 </p>
 {% if run_validity is defined %}{% set rv_compact = True %}{% include "_run_validity.html.j2" %}{% endif %}
 {% if ai_summary %}
-<p>{{ ai_summary.text }}</p>
+{% set ai_secs = ai_writeup_sections(ai_summary.text) if ai_writeup_sections is defined else [] %}
+{% if ai_secs and ai_secs|length > 1 %}
+  {% for heading, body in ai_secs %}
+  <div class="finding-section">
+    <p><b>{{ heading }}.</b></p>
+    <p style="white-space:pre-wrap">{{ body|param_label }}</p>
+  </div>
+  {% endfor %}
+{% else %}
+<p style="white-space:pre-wrap">{{ ai_summary.text }}</p>
+{% endif %}
 <div class="meta">AI-assisted narrative, reviewed and approved by {{ ai_summary.approved_by }}.</div>
 {% endif %}
 

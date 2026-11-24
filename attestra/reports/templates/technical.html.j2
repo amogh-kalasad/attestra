@@ -24,6 +24,7 @@
     {% if aasi and aasi.present and aasi.traceability %}<li><a href="#aasi-traceability">AASI traceability</a></li>{% endif %}
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
+    {% if ai_combined %}<li><a href="#ai-combined-writeup">AI combined finding writeup</a></li>{% endif %}
     <li><a href="#findings">Detailed findings</a></li>
     {% if automated_runs is defined and automated_runs %}<li><a href="#automated-testing-evidence">Automated testing evidence</a></li>{% endif %}
     <li><a href="#disclaimer">Assumptions, limitations and confidentiality</a></li>
@@ -454,6 +455,27 @@ CVSS vector and version appear on individual findings when available.</p>
 {% endfor %}
 {% endif %}
 
+{% if ai_combined %}
+{% set sec.n = sec.n + 1 %}<h2 id="ai-combined-writeup">{{ sec.n }}. AI combined finding writeup</h2>
+<p class="meta">AI-assisted combined writeup, reviewed and approved by {{ ai_combined.approved_by }}.</p>
+{% set ai_blocks = ai_combined_writeup_blocks(ai_combined.text) if ai_combined_writeup_blocks is defined else [] %}
+{% if ai_blocks %}
+  {% for finding_heading, sections in ai_blocks %}
+  <div class="finding-section">
+    {% if finding_heading %}<h3>{{ finding_heading }}</h3>{% endif %}
+    {% for heading, body in sections %}
+    <div class="ai-writeup-sec">
+      <p><b>{{ heading }}.</b></p>
+      <p style="white-space:pre-wrap">{{ body|param_label }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+{% else %}
+<div class="finding-section" style="white-space:pre-wrap">{{ ai_combined.text|param_label }}</div>
+{% endif %}
+{% endif %}
+
 {% set sec.n = sec.n + 1 %}<h2 id="findings">{{ sec.n }}. Detailed findings</h2>
 {% for f in findings %}
 <div class="finding finding-{{ f.severity }}" id="finding-{{ f.id }}">
@@ -569,7 +591,17 @@ CVSS vector and version appear on individual findings when available.</p>
   <div class="finding-section">
     <p><b>Validation status.</b> {{ vlabel }}{% if f.validation_reasons is defined and f.validation_reasons %} — {{ f.validation_reasons|join("; ") }}{% endif %}</p>
   </div>
-  {% if ai_narratives and ai_narratives.get(f.id) %}<div class="finding-section"><p><b>Narrative.</b> {{ ai_narratives[f.id].text }} <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p></div>{% endif %}
+  {% if ai_narratives and ai_narratives.get(f.id) %}
+  <div class="finding-section">
+    <p><b>AI writeup.</b> <span class="meta">(AI-assisted, approved by {{ ai_narratives[f.id].approved_by }})</span></p>
+    {% for heading, body in ai_writeup_sections(ai_narratives[f.id].text) %}
+    <div class="ai-writeup-sec">
+      <p><b>{{ heading }}.</b></p>
+      <p style="white-space:pre-wrap">{{ body|param_label }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% set obs = observations_by_finding.get(f.id, []) if observations_by_finding is defined else [] %}
   {% if obs %}
   <div class="finding-section">

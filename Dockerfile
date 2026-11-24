@@ -4,6 +4,8 @@
 # Build:   docker build -t attestra:dev .
 # Scanners are NOT bundled (web or AASI AI tools); they run as separate
 # digest-pinned Kubernetes Jobs (or host `docker run` from the worker).
+# AI Narratives (optional report drafts) ship in this image; enable via
+# Settings → AI provider or ATTESTRA_AI_* — see docs/AI_NARRATIVES.md.
 # AASI deploy notes: docs/ai_security/AASI_DOCKER_DEPLOYMENT.md
 # MongoDB (replica set) is required; Mongo schema init lives in the attestra
 # package (no Alembic/SQL migrations).
