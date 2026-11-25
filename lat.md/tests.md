@@ -1611,6 +1611,38 @@ Without a registered capture function, [[attestra/proof/capture.py#capture_from_
 
 With a registered capture function, import-time capture attaches a screenshot for findings that have locations.
 
+## Automatic screenshots
+
+Classic finding auto-screenshots after scan/import when `ATTESTRA_AUTO_SCREENSHOT` is on (Playwright capture_fn on the worker).
+
+### Finding gets screenshot via capture_fn
+
+[[attestra/proof/screenshots.py#capture_finding_screenshot]] with an injected capture_fn stores screenshot evidence on the finding.
+
+### Capture failure recorded
+
+When capture_fn raises, a `capture_failure` evidence row is stored and no screenshot PNG is fabricated.
+
+### Non-http marks N/A when enabled
+
+With [[attestra/config.py#AUTO_SCREENSHOT_ENABLED]] on and a registered capture_fn, non-http(s) locations get `capture_status=n/a` via [[attestra/services.py#record_screenshot_not_applicable]].
+
+### Multiple findings separate hashes
+
+Two findings each receive their own screenshot evidence row with a verifiable sha256.
+
+### Technical report includes screenshot
+
+After auto-attach, [[attestra/reports/render.py#generate_report]] technical HTML embeds the screenshot figure.
+
+### Gallery visually verified
+
+[[attestra/evidence/gallery.py#build_gallery]] sets `visually_verified` when a successful screenshot exists.
+
+### Playwright factory registers when enabled
+
+[[attestra/proof/playwright_capture.py#try_register_auto_screenshot]] registers only when the env flag is on and Playwright is available.
+
 ### Checklist refs in technical report
 
 When [[attestra/models.py#AuthChecklistItem]] rows exist, [[attestra/reports/render.py#generate_report]] technical HTML includes `#auth-checklist`; only executed statuses (passed / failed / blocked and aliases) appear as table rows — `not_started` is omitted at render time.

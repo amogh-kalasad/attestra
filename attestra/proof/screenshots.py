@@ -79,6 +79,21 @@ def has_screenshot(s: Session, finding_id: int) -> bool:
     )
 
 
+def has_screenshot_na(s: Session, finding_id: int) -> bool:
+    """True when a screenshot-not-applicable (or prior capture_failure) row already exists."""
+    return (
+        s.scalar(
+            select(Evidence.id)
+            .where(
+                Evidence.finding_id == finding_id,
+                Evidence.kind == "capture_failure",
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def _http_url(location: str) -> str:
     """Return a bare http(s) URL from a finding location, or empty if not usable."""
     raw = (location or "").split(" [param:", 1)[0].strip()
@@ -107,12 +122,10 @@ def capture_finding_screenshot(
     already have screenshot evidence. Notes never include secrets.
     """
     url = _http_url(getattr(finding, "location", "") or "")
-    if not url:
-        return None
     if has_screenshot(session, finding.id):
         return None
 
-    from attestra import services
+    from attestra import config, services
 
     def _fail(reason: str) -> Evidence | None:
         try:
@@ -126,6 +139,28 @@ def capture_finding_screenshot(
         except Exception:  # noqa: BLE001
             log.exception("could not record capture failure for finding %s", getattr(finding, "id", "?"))
             return None
+
+    def _na(reason: str) -> Evidence | None:
+        if has_screenshot_na(session, finding.id):
+            return None
+        try:
+            return services.record_screenshot_not_applicable(
+                session,
+                finding.id,
+                actor=actor,
+                reason=reason,
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("could not record screenshot N/A for finding %s", getattr(finding, "id", "?"))
+            return None
+
+    if not url:
+        # Non-browser / non-http locations: mark N/A only when auto-screenshot is enabled
+        # and a capture path was otherwise active (registered/injected fn or explicit PNG).
+        fn_present = (capture_fn if capture_fn is not None else _registered_capture) is not None
+        if page_png_bytes is None and fn_present and getattr(config, "AUTO_SCREENSHOT_ENABLED", False):
+            return _na("location is not an http(s) URL; screenshot not applicable")
+        return None
 
     attempted = False
     png = page_png_bytes

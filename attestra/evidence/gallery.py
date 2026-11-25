@@ -49,7 +49,13 @@ def build_gallery(evidence_rows: list[Any]) -> dict[str, Any]:
     originals = [c for c in cards if c["role"] == "original" and c["kind"] != "capture_failure"]
     annotated = [c for c in cards if c["role"] == "annotated"]
     excerpts = [c for c in cards if c["role"] == "excerpt"]
-    failures = [c for c in cards if c["kind"] == "capture_failure" or c["capture_status"] in ("failed", "unavailable")]
+    not_applicable = [c for c in cards if c.get("capture_status") == "n/a"]
+    failures = [
+        c
+        for c in cards
+        if c not in not_applicable
+        and (c["kind"] == "capture_failure" or c["capture_status"] in ("failed", "unavailable"))
+    ]
     screenshots = [c for c in cards if c["kind"] == "screenshot"]
     http_pairs = [c for c in cards if c["kind"] == "http_pair"]
     logs = [c for c in cards if c["kind"] == "log"]
@@ -66,11 +72,13 @@ def build_gallery(evidence_rows: list[Any]) -> dict[str, Any]:
         "code": code,
         "packages": packages,
         "capture_failures": failures,
+        "screenshot_not_applicable": not_applicable,
         "counts": {
             "total": len(cards),
             "screenshots": len(screenshots),
             "annotated": len(annotated),
             "failures": len(failures),
+            "not_applicable": len(not_applicable),
         },
         "visually_verified": any(
             c["kind"] == "screenshot" and c["capture_status"] == "success" and c["role"] in ("original", "annotated")

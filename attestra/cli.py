@@ -731,6 +731,20 @@ def cmd_worker(args) -> None:
         maintenance.register_builtin_tasks()
     except Exception as exc:  # noqa: BLE001 - never block the worker on maintenance setup
         print(f"warning: maintenance tasks not registered ({type(exc).__name__})", file=sys.stderr)
+    # Optional classic auto-screenshots: register Playwright capture_fn when enabled.
+    try:
+        from attestra.proof.playwright_capture import try_register_auto_screenshot
+
+        if try_register_auto_screenshot():
+            print("auto-screenshot: Playwright capture_fn registered")
+        elif config.AUTO_SCREENSHOT_ENABLED:
+            print(
+                "warning: ATTESTRA_AUTO_SCREENSHOT is on but Playwright is unavailable; "
+                "findings will not get automatic screenshots",
+                file=sys.stderr,
+            )
+    except Exception as exc:  # noqa: BLE001 - never block the worker on screenshot setup
+        print(f"warning: auto-screenshot not registered ({type(exc).__name__})", file=sys.stderr)
     print(f"worker {worker_id} started (runs up to {concurrency} scan(s) at the same time)")
     try:
         WorkerPool(

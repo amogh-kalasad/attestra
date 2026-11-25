@@ -97,31 +97,31 @@ def _base(url: str) -> str:
 def capture_from_import(s: Session, engagement_id: int, tool: str, data: bytes, *, actor: str) -> int:
     """Attach one redacted pair per matching finding that has none yet. Returns count attached.
 
-    After HTTP pairs, also attempts screenshots for those findings when a
+    HTTP request/response pairs are extracted only for [[TOOLS]] (zap/nuclei/burp).
+    Screenshots run for **any** tool's findings when a
     [[attestra.proof.screenshots.register_screenshot_capture]] callable is set
     (default None keeps imports network-free). Screenshot failures never raise.
     """
-    if tool not in TOOLS:
-        return 0
     findings = [
         f for f in s.scalars(select(Finding).where(Finding.engagement_id == engagement_id)) if tool in (f.tools or [])
     ]
     attached = 0
-    pairs = extract_pairs(tool, data)
-    if pairs:
-        done: set[int] = set()
-        for pair in pairs:
-            key = _base(pair.url)
-            for f in findings:
-                if f.id in done or not key or _base(f.location.split(" [param:", 1)[0]) != key:
-                    continue
-                if has_http_pair(s, f.id):
+    if tool in TOOLS:
+        pairs = extract_pairs(tool, data)
+        if pairs:
+            done: set[int] = set()
+            for pair in pairs:
+                key = _base(pair.url)
+                for f in findings:
+                    if f.id in done or not key or _base(f.location.split(" [param:", 1)[0]) != key:
+                        continue
+                    if has_http_pair(s, f.id):
+                        done.add(f.id)
+                        continue
+                    attach_http_pair(s, f.id, pair, actor=actor, note=f"auto-captured from {tool}")
                     done.add(f.id)
-                    continue
-                attach_http_pair(s, f.id, pair, actor=actor, note=f"auto-captured from {tool}")
-                done.add(f.id)
-                attached += 1
-                break
+                    attached += 1
+                    break
     # Optional screenshots: only when a capture_fn is registered/injected.
     try:
         from attestra.proof.screenshots import capture_screenshots_for_findings, registered_screenshot_capture

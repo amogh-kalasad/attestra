@@ -150,6 +150,22 @@ AUTH_WEB_RATE_PER_HOST = float(os.environ.get("ATTESTRA_AUTH_WEB_RATE_PER_HOST",
 AUTH_WEB_CONCURRENCY = int(os.environ.get("ATTESTRA_AUTH_WEB_CONCURRENCY", "2"))
 # Credential encryption: see attestra.credentials.store (ATTESTRA_CREDENTIAL_FERNET_KEY).
 
+# Classic finding auto-screenshots after scan/import (Playwright). Off by default so
+# CI and network-free imports stay quiet unless the worker opts in.
+AUTO_SCREENSHOT_ENABLED = os.environ.get("ATTESTRA_AUTO_SCREENSHOT", "off").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+# Allow private/loopback targets when capturing (lab / mock hosts only).
+AUTO_SCREENSHOT_ALLOW_PRIVATE = os.environ.get("ATTESTRA_AUTO_SCREENSHOT_ALLOW_PRIVATE", "off").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # Elite automated security-testing orchestrator. Off by default.
 AUTOMATED_VAPT_ENABLED = os.environ.get("ATTESTRA_AUTOMATED_VAPT_ENABLED", "").lower() in (
     "1",

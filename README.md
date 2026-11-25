@@ -28,6 +28,7 @@ More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [SECURITY.md](SECURIT
 | Risk | Risk is based on CVSS (vector + score) plus FIRST EPSS, CISA KEV, asset criticality and exposure. Each site also gets a separate A–F observatory-style grade |
 | Lifecycle | new, triaged, validated, fixed, retest passed, plus false positive and risk accepted (a reason is required). A fixed finding that comes back reopens. SLA due dates are set per severity |
 | Evidence | Files are hashed with SHA-256, stored by content and never changed |
+| Auto screenshots (optional) | When enabled on the worker, http(s) findings get a real browser screenshot after scan/import with **no manual upload**. Off by default. See [Automatic screenshots](#automatic-screenshots-optional) |
 | Compliance | Findings map to control objectives and framework requirements (PCI DSS, ISO 27001, SOC 2, ASVS, SEBI CSCRF, CERT-In and others). An assessor can confirm or change each result with a reason |
 | Reports | Technical, executive, compliance pack, OWASP Top 10, attestation letter and others. Draft watermark until signed. Submit for QA → QA approve or reject → lead signs. Technical reports include an automated coverage and limitations section |
 | Dashboards | Staff metrics at `/dashboard`; per-target grades at `/sites`. Client and auditor roles use the portal |
@@ -382,6 +383,39 @@ python -m attestra.cli checklist-sync --engagement ENGAGEMENT_ID
 python -m attestra.cli checklist-sync --engagement ENGAGEMENT_ID --dry-run
 ```
 
+## Automatic screenshots (optional)
+
+Classic findings with an **http(s)** location can get a **real browser screenshot** automatically after scan/import — **no tester upload or screenshot button**. Screenshots are stored as evidence (SHA-256), show in the finding gallery, and appear in the **technical report** after generate (or the post-scan auto-draft).
+
+**Off by default** so CI and network-free imports stay quiet.
+
+### Enable on the worker
+
+1. Install **Playwright** on the worker host (same environment that runs `attestra worker`).
+2. Set in the worker `.env` (API does not need this for capture):
+
+```bash
+ATTESTRA_AUTO_SCREENSHOT=on
+# Optional lab only — allow private/loopback targets:
+# ATTESTRA_AUTO_SCREENSHOT_ALLOW_PRIVATE=on
+```
+
+3. Restart the worker. On start it should log that the Playwright capture_fn was registered (or warn if Playwright is missing).
+
+### Behaviour
+
+| Case | What happens |
+| --- | --- |
+| Finding has http(s) location, feature on, Playwright available | Worker captures a full-page PNG, redacts sensitive DOM fields where supported, attaches evidence |
+| Finding already has a screenshot | Skip — never overwrite previous evidence |
+| Capture fails | Finding result is kept; a `capture_failure` evidence row is recorded (gallery shows a missing-evidence warning). No fake image |
+| Non-http(s) location with feature on | Mark screenshot **not applicable** (`capture_status=n/a`). No fabricated screenshot |
+| Feature off (default) | Imports stay network-free; no auto-capture |
+
+Elite automated VAPT already has its own browser capture path; this flag wires the **classic** scan/import path (`register_screenshot_capture` on the worker).
+
+Tests: `tests/test_auto_screenshots.py`. Env template: `.env.example`.
+
 ## AI Narratives (optional)
 
 Optional LLM-assisted **report drafts** for an engagement (executive summary and finding writeups). **Off by default.** Unapproved drafts never appear in reports. This is **not** AASI (no Garak/Promptfoo scanners, no `/api/aasi`).
@@ -591,6 +625,8 @@ Staging/production (or missing `APP_ENV`) with a bypass set to true fails startu
 | `ATTESTRA_AUTH_RELOGIN_MIN_INTERVAL_S` | `5` | Minimum spacing between re-login attempts |
 | `ATTESTRA_AUTH_HEARTBEAT_S` | `120` | Liveness poll interval (minimum 10) |
 | `ATTESTRA_AUTH_NUCLEI_CHUNK` | `25` | Nuclei URLs per chunk between session checks |
+| `ATTESTRA_AUTO_SCREENSHOT` | off | Classic finding auto-screenshots after scan/import (Playwright on the **worker**). See [Automatic screenshots](#automatic-screenshots-optional) |
+| `ATTESTRA_AUTO_SCREENSHOT_ALLOW_PRIVATE` | off | Allow private/loopback URLs when auto-screenshot is on (lab only) |
 
 ### Automated VAPT safety flags
 

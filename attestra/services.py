@@ -2204,6 +2204,34 @@ def record_capture_failure(
     )
 
 
+def record_screenshot_not_applicable(
+    s: Session,
+    finding_id: int,
+    *,
+    actor: str,
+    reason: str = "",
+    source_tool: str = "",
+    note: str = "",
+) -> Evidence:
+    """Mark screenshot evidence as not applicable (non-browser finding); never fabricates an image."""
+    body = (reason or "screenshot not applicable for this finding").strip()[:500]
+    return add_evidence(
+        s,
+        finding_id,
+        kind="capture_failure",
+        filename="screenshot_not_applicable.txt",
+        data=(body + "\n").encode("utf-8"),
+        note=note or "Screenshot not applicable; other evidence is unchanged. No image was fabricated.",
+        actor=actor,
+        content_type="text/plain",
+        source_tool=source_tool,
+        role="original",
+        capture_status="n/a",
+        capture_failure_reason=body,
+        redaction_status="n/a",
+    )
+
+
 def attach_annotated_screenshot(
     s: Session,
     finding_id: int,
