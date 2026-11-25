@@ -390,6 +390,21 @@
         <div><label for="ap_password_field">Password Field Name</label><input type="text" id="ap_password_field" name="password_field" placeholder="password" autocomplete="off"></div>
         <div><label for="ap_success">Success URL Contains</label><input type="text" id="ap_success" name="success_url_contains" placeholder="/dashboard" autocomplete="off"></div>
       </div>
+      <p class="hint">Token apps (single-page apps that return a JWT instead of setting a cookie, e.g. Juice Shop): choose JSON, and the token in the login reply is sent as a header on every request. If the login sets a cookie, the cookie is used as before.</p>
+      <div class="fields">
+        <div>
+          <label for="ap_login_body_format">Login Body Format</label>
+          <select id="ap_login_body_format" name="login_body_format">
+            <option value="">Form (default)</option>
+            <option value="json">JSON</option>
+          </select>
+        </div>
+        <div><label for="ap_json_user_field">JSON Username Field</label><input type="text" id="ap_json_user_field" name="json_username_field" placeholder="email" autocomplete="off"><div class="hint">Optional. JSON body only; defaults to Username Field Name, else email.</div></div>
+        <div><label for="ap_json_pass_field">JSON Password Field</label><input type="text" id="ap_json_pass_field" name="json_password_field" placeholder="password" autocomplete="off"></div>
+        <div><label for="ap_token_path">Token Path in Response (optional)</label><input type="text" id="ap_token_path" name="token_json_path" placeholder="authentication.token" autocomplete="off"><div class="hint">Dotted path to the token in the login JSON reply. Blank = auto-detect (token, access_token, accessToken, jwt, id_token, authentication.token, data.token).</div></div>
+        <div><label for="ap_token_header">Token Header Name</label><input type="text" id="ap_token_header" name="token_header_name" placeholder="Authorization" autocomplete="off"></div>
+        <div><label for="ap_token_prefix">Token Prefix</label><input type="text" id="ap_token_prefix" name="token_prefix" placeholder="Bearer " autocomplete="off"><div class="hint">Blank = "Bearer ". Type none to send the raw token.</div></div>
+      </div>
 
       <h3>Email OTP (Test Inbox)</h3>
       <p class="hint">For the Email OTP method, we POST the username, poll the test inbox over IMAP for the one-time code, submit it, and capture the session.</p>

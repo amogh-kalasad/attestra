@@ -1429,6 +1429,12 @@ def ui_create_auth_profile(
     refresh_token_json_path: str = Form(""),
     refresh_apply_as: str = Form(""),
     refresh_cookie_secret: str = Form(""),
+    login_body_format: str = Form(""),
+    json_username_field: str = Form(""),
+    json_password_field: str = Form(""),
+    token_json_path: str = Form(""),
+    token_header_name: str = Form(""),
+    token_prefix: str = Form(""),
 ):
     """Create an auth credential profile. Secrets go only to the credential store (masked in UI)."""
     import json as _json
@@ -1468,6 +1474,20 @@ def ui_create_auth_profile(
     ):
         if val and val.strip():
             cfg[key] = val.strip()
+    # Form login: optional JSON body + token pickup (blank = defaults / legacy cookie behaviour).
+    if method == "form":
+        for key, val in (
+            ("login_body_format", login_body_format),
+            ("json_username_field", json_username_field),
+            ("json_password_field", json_password_field),
+            ("token_json_path", token_json_path),
+            ("token_header_name", token_header_name),
+        ):
+            if val and val.strip():
+                cfg[key] = val.strip()
+        if token_prefix and token_prefix.strip():
+            # Keep a trailing space ("Bearer "); the word "none" means no prefix.
+            cfg["token_prefix"] = token_prefix.lstrip()
     # Compose the stored secret value (never persisted in metadata / audit).
     secret_value: str | None
     if method == "none":

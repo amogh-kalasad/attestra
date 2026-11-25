@@ -69,11 +69,12 @@ def _truncate_ref(secret_ref: str) -> str:
 
 
 def _sanitize_profile_config(config_json: dict | None) -> dict:
-    """Validate optional mid-scan refresh keys; never persist token values in config."""
+    """Validate optional mid-scan refresh keys and form-login token keys; never persist token values in config."""
+    from attestra.auth_web import scan_auth as sa
     from attestra.auth_web import session_guard as sg
 
     try:
-        return sg.sanitize_refresh_config(dict(config_json or {}))
+        return sa.sanitize_login_token_config(sg.sanitize_refresh_config(dict(config_json or {})))
     except ValueError as exc:
         raise services.ServiceError(str(exc)) from exc
 

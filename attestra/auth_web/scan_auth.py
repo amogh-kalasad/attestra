@@ -27,6 +27,11 @@ Supported methods (``AuthCredentialProfile.method``):
 * ``cookie``  — paste a session cookie value (or a full ``Cookie:`` string).
 * ``form``    — username + password form login; we POST the form, capture the
   session cookie, and inject it (falls back to ZAP's native form context).
+  Token apps (SPA / JWT, e.g. OWASP Juice Shop): with ``login_body_format=json``
+  the credentials are POSTed as JSON, and when the login sets NO cookie but the
+  JSON reply carries a token (``token_json_path`` or auto-detected), the session
+  becomes header auth (``Authorization: Bearer <token>`` by default), exactly
+  like the ``header`` method. Mid-scan re-login simply repeats this login.
 * ``otp``     — email one-time-passcode login via a test IMAP inbox
   (see :mod:`attestra.auth_web.otp`).
 * ``none`` / ``sso_bootstrap`` — no injection (sso_bootstrap is reported blocked).
@@ -296,7 +301,9 @@ def session_material(
     if method == "form":
         if http_post is None:
             raise ScanAuthError("form login requires an http transport")
-        cookies = _form_login(cfg, secrets, http_post=http_post)
+        headers, cookies = _form_login(cfg, secrets, http_post=http_post)
+        if headers:
+            return headers, cookies, "form login ok (token from login response injected as header)"
         return {}, cookies, "form login ok"
 
     if method == "otp":
@@ -324,7 +331,179 @@ def _parse_cookie_string(raw: str) -> dict[str, str]:
     return out
 
 
-def _form_login(cfg: dict[str, Any], secrets: dict[str, str], *, http_post: "otp_mod.HttpPost") -> dict[str, str]:
+# Form-login token pickup (token apps). Non-secret config keys, all optional:
+#   login_body_format    "form" (default, urlencoded) or "json"
+#   json_username_field  JSON key for the username (default: username_field, a plain
+#                        username_selector, else "email")
+#   json_password_field  JSON key for the password (default: password_field, a plain
+#                        password_selector, else "password")
+#   token_json_path      dotted path of the token in the JSON reply (e.g.
+#                        "authentication.token"); empty = auto-detect
+#   token_header_name    header that carries the token (default "Authorization")
+#   token_prefix         value prefix (default "Bearer "; "" = raw token)
+LOGIN_BODY_FORMATS = ("form", "json")
+DEFAULT_TOKEN_HEADER = "Authorization"
+DEFAULT_TOKEN_PREFIX = "Bearer "
+TOKEN_AUTO_PATHS = (
+    "token",
+    "access_token",
+    "accessToken",
+    "jwt",
+    "id_token",
+    "authentication.token",
+    "data.token",
+)
+_PLAIN_FIELD_RE = re.compile(r"^[A-Za-z0-9_.\-\[\]]{1,100}$")
+_JSON_PATH_RE = re.compile(r"^[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*$")
+_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~\-]{1,100}$")
+_FORBIDDEN_TOKEN_HEADERS = {"cookie", "host", "content-length", "content-type", "transfer-encoding", "connection"}
+LOGIN_TOKEN_CONFIG_KEYS = (
+    "login_body_format",
+    "json_username_field",
+    "json_password_field",
+    "token_json_path",
+    "token_header_name",
+    "token_prefix",
+)
+
+
+def sanitize_login_token_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate/normalise the optional form-login token keys. Raises ``ValueError`` (value-free).
+
+    Blank values are dropped (defaults apply), except ``token_prefix`` where an explicit
+    ``""`` (or ``"none"``) means "send the raw token without a prefix".
+    """
+    out = dict(cfg or {})
+    fmt = out.get("login_body_format")
+    if fmt is not None:
+        f = str(fmt).strip().lower()
+        if f in ("", None):
+            out.pop("login_body_format", None)
+        else:
+            if f in ("application/json",):
+                f = "json"
+            elif f in ("application/x-www-form-urlencoded", "urlencoded"):
+                f = "form"
+            if f not in LOGIN_BODY_FORMATS:
+                raise ValueError("login_body_format must be form or json")
+            out["login_body_format"] = f
+    for key in ("json_username_field", "json_password_field"):
+        if key in out:
+            v = str(out.get(key) or "").strip()
+            if not v:
+                out.pop(key, None)
+            elif not _PLAIN_FIELD_RE.match(v):
+                raise ValueError(f"{key} must be a plain field name (letters, digits, _ . -)")
+            else:
+                out[key] = v
+    if "token_json_path" in out:
+        v = str(out.get("token_json_path") or "").strip()
+        if v.startswith("$."):
+            v = v[2:]
+        if not v:
+            out.pop("token_json_path", None)
+        elif len(v) > 200 or not _JSON_PATH_RE.match(v):
+            raise ValueError("token_json_path must be a dotted key path such as authentication.token")
+        else:
+            out["token_json_path"] = v
+    if "token_header_name" in out:
+        v = str(out.get("token_header_name") or "").strip()
+        if not v:
+            out.pop("token_header_name", None)
+        elif not _HEADER_NAME_RE.match(v) or v.lower() in _FORBIDDEN_TOKEN_HEADERS:
+            raise ValueError("token_header_name must be a valid HTTP header name (not Cookie/Host/Content-*)")
+        else:
+            out["token_header_name"] = v
+    if "token_prefix" in out:
+        raw = out.get("token_prefix")
+        v = "" if raw is None else str(raw)
+        if v.strip().lower() == "none":
+            v = ""
+        if "\r" in v or "\n" in v or len(v) > 40:
+            raise ValueError("token_prefix must be a short single-line prefix such as 'Bearer '")
+        if v and v.strip().lower() == "bearer":
+            v = "Bearer "
+        elif v and v.strip().isalnum() and not v.endswith(" "):
+            v = v.strip() + " "  # "Token" -> "Token " (a bare scheme word needs its space)
+        out["token_prefix"] = v
+    return out
+
+
+def _plain_field(value: Any) -> str:
+    v = str(value or "").strip()
+    return v if v and _PLAIN_FIELD_RE.match(v) else ""
+
+
+def _login_fields(cfg: dict[str, Any], body_format: str) -> tuple[str, str]:
+    if body_format == "json":
+        user_field = (
+            _plain_field(cfg.get("json_username_field"))
+            or _plain_field(cfg.get("username_field"))
+            or _plain_field(cfg.get("username_selector"))
+            or "email"
+        )
+        pass_field = (
+            _plain_field(cfg.get("json_password_field"))
+            or _plain_field(cfg.get("password_field"))
+            or _plain_field(cfg.get("password_selector"))
+            or "password"
+        )
+        return user_field, pass_field
+    return str(cfg.get("username_field") or "username"), str(cfg.get("password_field") or "password")
+
+
+def _json_lookup(doc: Any, path: str) -> Any:
+    cur = doc
+    for part in path.split("."):
+        if isinstance(cur, dict):
+            if part not in cur:
+                return None
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return None
+    return cur
+
+
+def extract_login_token(body: str | None, token_json_path: str = "") -> str:
+    """Return the session token from a JSON login reply ("" when none). Never logs it."""
+    if not body or not isinstance(body, str):
+        return ""
+    try:
+        doc = json.loads(body[:200_000])
+    except Exception:  # noqa: BLE001 - HTML / text replies carry no token for us
+        return ""
+    paths = (token_json_path,) if token_json_path else TOKEN_AUTO_PATHS
+    for path in paths:
+        val = _json_lookup(doc, path)
+        if isinstance(val, str):
+            val = val.strip()
+            if val and "\r" not in val and "\n" not in val and len(val) <= 16_384:
+                return val
+    return ""
+
+
+def token_header(cfg: dict[str, Any], token: str) -> dict[str, str]:
+    """Header-auth session for a login token (same shape the ``header`` method injects)."""
+    name = str(cfg.get("token_header_name") or "").strip() or DEFAULT_TOKEN_HEADER
+    prefix = cfg.get("token_prefix")
+    prefix = DEFAULT_TOKEN_PREFIX if prefix is None else str(prefix)
+    if prefix and token.lower().startswith(prefix.strip().lower() + " "):
+        value = token  # the server already returned "Bearer <token>"
+    else:
+        value = f"{prefix}{token}"
+    return {name: value}
+
+
+def _form_login(
+    cfg: dict[str, Any], secrets: dict[str, str], *, http_post: "otp_mod.HttpPost"
+) -> tuple[dict[str, str], dict[str, str]]:
+    """POST the login; return ``(headers, cookies)``.
+
+    Cookies set by the login always win (unchanged legacy behaviour). Only when NO cookie
+    was set do we look for a token in the JSON reply and turn it into header auth.
+    """
     login_url = str(cfg.get("login_url") or "").strip()
     if not login_url:
         raise ScanAuthError("login_url is required for form login")
@@ -332,15 +511,35 @@ def _form_login(cfg: dict[str, Any], secrets: dict[str, str], *, http_post: "otp
     password = secrets.get("password") or ""
     if not username or not password:
         raise ScanAuthError("username and password are required for form login")
-    user_field = str(cfg.get("username_field") or "username")
-    pass_field = str(cfg.get("password_field") or "password")
-    reply = http_post(login_url, {user_field: username, pass_field: password}, {})
+    body_format = str(cfg.get("login_body_format") or "form").strip().lower()
+    if body_format not in LOGIN_BODY_FORMATS:
+        raise ScanAuthError("login_body_format must be form or json")
+    user_field, pass_field = _login_fields(cfg, body_format)
+    data = {user_field: username, pass_field: password}
+    if body_format == "json":
+        reply = http_post(login_url, data, {}, json_body=True)
+    else:
+        reply = http_post(login_url, data, {})
     if reply.status >= 400:
         raise ScanAuthError(f"form login failed (HTTP {reply.status})")
     cookies = dict(reply.cookies or {})
-    if not cookies:
-        raise ScanAuthError("form login completed but no session cookie was set")
-    return cookies
+    token_path = str(cfg.get("token_json_path") or "").strip()
+    if cookies:
+        # Legacy cookie session, unchanged. Only a profile that explicitly names a
+        # token_json_path also gets that token as a header next to the cookies.
+        if token_path:
+            token = extract_login_token(getattr(reply, "body", "") or "", token_path)
+            if token:
+                return token_header(cfg, token), cookies
+        return {}, cookies
+    token = extract_login_token(getattr(reply, "body", "") or "", token_path)
+    if token:
+        return token_header(cfg, token), {}
+    if token_path:
+        raise ScanAuthError(
+            "form login completed but no session cookie was set and no token was found at token_json_path"
+        )
+    raise ScanAuthError("form login completed but no session cookie was set")
 
 
 def cookie_header(cookies: dict[str, str]) -> str:
@@ -603,13 +802,23 @@ def live_http_post(
     import urllib.request
     from http.cookiejar import CookieJar
 
-    def _post(url: str, data: dict[str, str], cookies: dict[str, str]) -> "otp_mod.HttpReply":
+    def _post(
+        url: str, data: dict[str, str], cookies: dict[str, str], *, json_body: bool = False
+    ) -> "otp_mod.HttpReply":
         if not _host_ok(url, allowed_hosts):
             raise ScanAuthError("login URL host is not in scope for this target")
         jar = CookieJar()
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        body = urllib.parse.urlencode(data).encode("utf-8")
-        headers = {"User-Agent": _USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"}
+        if json_body:
+            body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+            headers = {
+                "User-Agent": _USER_AGENT,
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+            }
+        else:
+            body = urllib.parse.urlencode(data).encode("utf-8")
+            headers = {"User-Agent": _USER_AGENT, "Content-Type": "application/x-www-form-urlencoded"}
         cookies = xc.merge_cookies(dict(cookies or {}), list(extra_cookies or []))
         if cookies:
             headers["Cookie"] = cookie_header(cookies)
@@ -889,6 +1098,9 @@ def prepare_for_run(
     )
     if not headers and not cookies:
         raise ScanAuthError("no session header or cookie could be prepared")
+    # A form login that yielded a token (no cookie) is header auth: ZAP's native form
+    # context (urlencoded POST + cookie session) cannot reproduce it, so skip that fallback.
+    form_token_session = method == "form" and bool(headers)
     # Encrypted extra cookies join the session cookies in ONE Cookie header (session wins).
     cookies = xc.merge_cookies(cookies, extra_cookies)
     # Redact the session material incl. every extra cookie value; extra headers are
@@ -915,7 +1127,7 @@ def prepare_for_run(
                 "secret_dir": str(sdir),
             }
             # Keep a native ZAP form context as a fallback for full (active) scans.
-            if method == "form":
+            if method == "form" and not form_token_session:
                 try:
                     from attestra.auth_web.zap_auth import prepare_zap_auth
 

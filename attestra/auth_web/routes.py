@@ -48,6 +48,35 @@ class ProfileCreateIn(BaseModel):
         default=None,
         description="Refresh cookie value (or name=value); stored encrypted in extra cookies, never echoed",
     )
+    # Optional form-login token pickup (token apps such as Juice Shop); stored in config.
+    login_body_format: str | None = Field(default=None, description="form (default) or json")
+    json_username_field: str | None = Field(default=None, description="JSON key for the username (default email)")
+    json_password_field: str | None = Field(default=None, description="JSON key for the password (default password)")
+    token_json_path: str | None = Field(default=None, description="Token path in the login JSON reply; blank = auto-detect")
+    token_header_name: str | None = Field(default=None, description="Header carrying the token (default Authorization)")
+    token_prefix: str | None = Field(default=None, description="Token value prefix (default 'Bearer ')")
+
+
+_LOGIN_TOKEN_FIELDS = (
+    "login_body_format",
+    "json_username_field",
+    "json_password_field",
+    "token_json_path",
+    "token_header_name",
+    "token_prefix",
+)
+
+
+def _config_with_login_token_fields(body: "ProfileCreateIn") -> dict | None:
+    cfg = dict(body.config or {}) if body.config is not None else None
+    for key in _LOGIN_TOKEN_FIELDS:
+        val = getattr(body, key, None)
+        if val is None:
+            continue
+        if cfg is None:
+            cfg = {}
+        cfg[key] = val
+    return cfg
 
 
 class RotateIn(BaseModel):
@@ -87,7 +116,7 @@ def create_auth_profile(eid: int, body: ProfileCreateIn, principal=Depends(_prin
                 secret_value=body.secret,
                 secret_ref=body.secret_ref,
                 asset_id=body.asset_id,
-                config_json=body.config,
+                config_json=_config_with_login_token_fields(body),
                 extra_headers=body.extra_headers,
                 extra_cookies=body.extra_cookies,
                 refresh_cookie_secret=body.refresh_cookie_secret,
