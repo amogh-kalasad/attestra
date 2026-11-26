@@ -276,6 +276,13 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "SSL/TLS → Edge Certificates → HTTP Strict Transport Security (HSTS): enable.\n"
             "Set max-age to 12 months, include subdomains when ready; enable preload only after all subdomains are HTTPS."
         ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.hsts({ maxAge: 31536000, includeSubDomains: true }));\n"
+            "// Or enable the full helmet defaults (includes HSTS):\n"
+            "// app.use(helmet());"
+        ),
     },
     "Missing or weak Content Security Policy": {
         "importance": "High",
@@ -309,6 +316,22 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; img-src 'self' data:.\n"
             "Switch to Content-Security-Policy after testing."
         ),
+        "snippet_node": (
+            "// Express with helmet — start Report-Only, then enforce\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.contentSecurityPolicy({\n"
+            "  useDefaults: true,\n"
+            "  directives: {\n"
+            "    defaultSrc: [\"'self'\"],\n"
+            "    objectSrc: [\"'none'\"],\n"
+            "    baseUri: [\"'self'\"],\n"
+            "    frameAncestors: [\"'self'\"],\n"
+            "    imgSrc: [\"'self'\", 'data:'],\n"
+            "    reportUri: '/csp-report', // optional\n"
+            "  },\n"
+            "  reportOnly: true, // set false when ready to enforce\n"
+            "}));"
+        ),
     },
     "Clickjacking: page can be framed": {
         "importance": "Medium",
@@ -341,6 +364,16 @@ BY_TITLE: dict[str, dict[str, str]] = {
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: set Content-Security-Policy to frame-ancestors 'self'.\n"
             "Also set X-Frame-Options to SAMEORIGIN."
+        ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.frameguard({ action: 'sameorigin' }));\n"
+            "// Prefer CSP frame-ancestors as well:\n"
+            "app.use(helmet.contentSecurityPolicy({\n"
+            "  useDefaults: true,\n"
+            "  directives: { frameAncestors: [\"'self'\"] },\n"
+            "}));"
         ),
     },
     "Server version disclosed in headers": {
@@ -598,6 +631,13 @@ BY_TITLE: dict[str, dict[str, str]] = {
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: set X-Content-Type-Options to nosniff."
         ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.noSniff());\n"
+            "// Or full helmet defaults (includes X-Content-Type-Options: nosniff):\n"
+            "// app.use(helmet());"
+        ),
     },
     "Referrer-Policy is not a strict value": {
         "importance": "Medium",
@@ -626,6 +666,11 @@ BY_TITLE: dict[str, dict[str, str]] = {
         ),
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: set Referrer-Policy to strict-origin-when-cross-origin."
+        ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.referrerPolicy({ policy: 'strict-origin-when-cross-origin' }));"
         ),
     },
     # ZAP 10063 / nuclei permissions-policy — never CSP snippets (ENG1 F-7).
@@ -662,6 +707,16 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "Transform Rules → Modify Response Header: set Permissions-Policy to "
             "camera=(), microphone=(), geolocation=(), payment=() (adjust allow-lists)."
         ),
+        "snippet_node": (
+            "// Express — Helmet does not set Permissions-Policy by default; set explicitly:\n"
+            "app.use((req, res, next) => {\n"
+            "  res.setHeader(\n"
+            "    'Permissions-Policy',\n"
+            "    'camera=(), microphone=(), geolocation=(), payment=()'\n"
+            "  );\n"
+            "  next();\n"
+            "});"
+        ),
     },
     "Cross-Origin-Embedder-Policy Header Missing": {
         "importance": "Medium",
@@ -687,6 +742,11 @@ BY_TITLE: dict[str, dict[str, str]] = {
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: set "
             "Cross-Origin-Embedder-Policy to require-corp (or credentialless)."
+        ),
+        "snippet_node": (
+            "// Express with helmet (crossOriginEmbedderPolicy)\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.crossOriginEmbedderPolicy({ policy: 'require-corp' }));"
         ),
     },
     "Cross-Origin-Opener-Policy Header Missing": {
@@ -714,6 +774,11 @@ BY_TITLE: dict[str, dict[str, str]] = {
             "Transform Rules → Modify Response Header: set "
             "Cross-Origin-Opener-Policy to same-origin."
         ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.crossOriginOpenerPolicy({ policy: 'same-origin' }));"
+        ),
     },
     "Cross-Origin-Resource-Policy Header Missing": {
         "importance": "Medium",
@@ -740,6 +805,11 @@ BY_TITLE: dict[str, dict[str, str]] = {
         "snippet_cloudflare": (
             "Transform Rules → Modify Response Header: set "
             "Cross-Origin-Resource-Policy to same-origin (or cross-origin for public assets)."
+        ),
+        "snippet_node": (
+            "// Express with helmet\n"
+            "const helmet = require('helmet');\n"
+            "app.use(helmet.crossOriginResourcePolicy({ policy: 'same-origin' }));"
         ),
     },
     "X-Permitted-Cross-Domain-Policies Header Missing": {
@@ -964,28 +1034,84 @@ def has_fix_content(guidance: dict[str, Any] | None) -> bool:
     return any((guidance.get("snippets") or {}).values())
 
 
-def detect_server_type(*texts: str) -> str | None:
-    """Return nginx / apache / iis / cloudflare / node when clearly mentioned, else None."""
+_ORIGIN_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Prefer app origin (Express / Next / Node) over classic web servers when both appear.
+    ("node", r"\bexpress\b|\bnext\.js\b|\bnextjs\b|\bnode\.js\b"),
+    ("nginx", r"\bnginx\b"),
+    ("apache", r"\bapache\b|\bhttpd\b"),
+    ("iis", r"\biis\b|\bmicrosoft-iis\b|\bweb\.config\b"),
+)
+_EDGE_PATTERN = ("cloudflare", r"\bcloudflare\b")
+# Reverse-proxy mentions that can sit in front of a distinct origin (node).
+_PROXY_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("nginx", r"\bnginx\b"),
+    ("apache", r"\bapache\b|\bhttpd\b"),
+    ("iis", r"\biis\b|\bmicrosoft-iis\b|\bweb\.config\b"),
+)
+
+
+def detect_stack_layers(*texts: str) -> dict[str, str | None]:
+    """Return ``{origin, edge, proxy}`` from evidence text (empty roles are None).
+
+    Express/Node + Cloudflare is a layered stack (origin=node, edge=cloudflare), not
+    an ambiguity. Classic multi-origin collisions (nginx+apache with no Node) leave
+    ``origin`` unset so callers can fall back to nginx+Apache snippets.
+    """
     blob = " ".join(t for t in texts if t).lower()
+    empty = {"origin": None, "edge": None, "proxy": None}
     if not blob:
-        return None
-    patterns = (
-        ("cloudflare", r"\bcloudflare\b"),
-        ("nginx", r"\bnginx\b"),
-        ("apache", r"\bapache\b|\bhttpd\b"),
-        ("iis", r"\biis\b|\bmicrosoft-iis\b|\bweb\.config\b"),
-        # X-Powered-By: Express, Next.js dev/server banners, or an explicit Node.js mention.
-        ("node", r"\bexpress\b|\bnext\.js\b|\bnextjs\b|\bnode\.js\b"),
-    )
-    hits = [name for name, pat in patterns if re.search(pat, blob)]
-    if len(hits) == 1:
-        return hits[0]
-    return None
+        return empty
+
+    edge = _EDGE_PATTERN[0] if re.search(_EDGE_PATTERN[1], blob) else None
+    origin_hits = [name for name, pat in _ORIGIN_PATTERNS if re.search(pat, blob)]
+    # Node/Express is always the app origin when present (CDN/proxy is a separate layer).
+    if "node" in origin_hits:
+        origin: str | None = "node"
+        proxy_hits = [name for name, pat in _PROXY_PATTERNS if re.search(pat, blob)]
+        proxy = proxy_hits[0] if len(proxy_hits) == 1 else None
+    elif len(origin_hits) == 1:
+        origin = origin_hits[0]
+        proxy = None
+    else:
+        # nginx+apache (etc.) without Node — ambiguous origin; do not guess.
+        origin = None
+        proxy = None
+
+    return {"origin": origin, "edge": edge, "proxy": proxy}
 
 
-def snippets_for_report(guidance: dict[str, Any], server_type: str | None) -> list[tuple[str, str]]:
-    """Pick snippets for a report: known server only, else nginx + Apache."""
+def detect_server_type(*texts: str) -> str | None:
+    """Primary server type for remediation snippet selection.
+
+    Prefer origin when layered (e.g. Express behind Cloudflare → ``node``), then edge,
+    then a lone proxy. Ambiguous multi-origin text without Node still returns None so
+    reports keep the nginx+Apache fallback pair instead of inventing a stack.
+    """
+    layers = detect_stack_layers(*texts)
+    return layers.get("origin") or layers.get("edge") or layers.get("proxy")
+
+
+def snippets_for_report(
+    guidance: dict[str, Any],
+    server_type: str | None,
+    *,
+    layers: dict[str, str | None] | None = None,
+) -> list[tuple[str, str]]:
+    """Pick snippets for a report: layered stacks may return origin + edge; else known type or nginx + Apache."""
     snippets = guidance.get("snippets") or {}
+    if layers:
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for role in ("origin", "proxy", "edge"):
+            key = layers.get(role)
+            if not key or key in seen:
+                continue
+            text = snippets.get(key) or ""
+            if text:
+                out.append((key, text))
+                seen.add(key)
+        if out:
+            return out
     if server_type and snippets.get(server_type):
         return [(server_type, snippets[server_type])]
     out = []

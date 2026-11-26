@@ -162,6 +162,15 @@ class PromptfooAdapter(ScannerAdapter):
         return resolve_promptfoo_argv_prefix() is not None
 
     def version(self) -> str:
+        # Recorded tool_version only — never invent a pin when the probe fails.
+        try:
+            from attestra.scanner_runtime import check_promptfoo
+
+            status = check_promptfoo()
+            if status.installed:
+                return f"promptfoo {status.installed}"
+        except Exception:  # noqa: BLE001
+            pass
         return "promptfoo"
 
     def unavailable_reason(self) -> str:

@@ -10,6 +10,7 @@
     <li><a href="#scope">Scope and authorization</a></li>
     <li><a href="#methodology">Methodology and data sources</a></li>
     <li><a href="#tools-and-versions">Tools and versions</a></li>
+    {% if numbering_legend %}<li><a href="#numbering-legend">Report Identifier and Numbering Legend</a></li>{% endif %}
     <li><a href="#standards">Standards and test types</a></li>
     <li><a href="#risk-legend">Risk Rating Legend</a></li>
     <li><a href="#summary">Summary</a></li>
@@ -25,6 +26,8 @@
     {% if site_grades %}<li><a href="#site-grades">Site grades</a></li>{% endif %}
     {% if tls_summaries %}<li><a href="#tls">TLS summary</a></li>{% endif %}
     {% if ai_combined %}<li><a href="#ai-combined-writeup">AI combined finding writeup</a></li>{% endif %}
+    {% if cdn_infrastructure_observations %}<li><a href="#cdn-infrastructure">CDN / Cloudflare Infrastructure Observations</a></li>{% endif %}
+    {% if security_header_findings %}<li><a href="#security-headers">Security Headers and Browser Security Controls</a></li>{% endif %}
     <li><a href="#findings">Detailed findings</a></li>
     {% if automated_runs is defined and automated_runs %}<li><a href="#automated-testing-evidence">Automated testing evidence</a></li>{% endif %}
     <li><a href="#disclaimer">Assumptions, limitations and confidentiality</a></li>
@@ -160,6 +163,21 @@ Testing Guide (WSTG); a finding is marked <em>validated</em> only after a named 
   <tr><td colspan="3">No tools recorded for this engagement yet.</td></tr>
   {% endfor %}
 </table>
+
+{% if numbering_legend %}
+{% set sec.n = sec.n + 1 %}<h2 id="numbering-legend">{{ sec.n }}. Report Identifier and Numbering Legend</h2>
+<p class="meta">Only identifier forms that appear in this report are listed. Unused types are omitted — never placeholder rows.</p>
+<table>
+  <tr><th>Form</th><th>Type</th><th>Meaning</th></tr>
+  {% for row in numbering_legend %}
+  <tr>
+    <td class="mono">{{ row.form }}</td>
+    <td>{{ row.label }}</td>
+    <td>{{ row.meaning }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
 
 {% set sec.n = sec.n + 1 %}<h2 id="standards">{{ sec.n }}. Standards and test types</h2>
 {% if test_types %}
@@ -474,6 +492,40 @@ CVSS vector and version appear on individual findings when available.</p>
 {% else %}
 <div class="finding-section" style="white-space:pre-wrap">{{ ai_combined.text|param_label }}</div>
 {% endif %}
+{% endif %}
+
+{% if cdn_infrastructure_observations %}
+{% set sec.n = sec.n + 1 %}<h2 id="cdn-infrastructure">{{ sec.n }}. CDN / Cloudflare Infrastructure Observations</h2>
+<p class="meta">{{ cdn_infrastructure_observations|length }} informational observation{{ "s" if cdn_infrastructure_observations|length != 1 else "" }} on CDN / challenge-platform paths or Cloudflare infrastructure cookies (for example <span class="mono">cf_clearance</span>). These are not application-owned vulnerabilities; scanners and paths are listed for transparency. Original finding cards remain under Detailed findings.</p>
+<table class="overview-table">
+  <tr><th>ID</th><th>Title</th><th>Path / location</th><th>Detected by</th><th>Validation</th></tr>
+  {% for f in cdn_infrastructure_observations %}
+  <tr>
+    <td class="mono"><a href="#finding-{{ f.id }}">{{ flabel(f) }}</a></td>
+    <td>{{ f.title|truncate(90, True, '…') }}</td>
+    <td class="mono">{{ (f.location or "")|truncate(80, True, '…')|param_label }}</td>
+    <td>{% for t in f.tools %}{{ t|tool_label }}{% if not loop.last %}, {% endif %}{% else %}—{% endfor %}</td>
+    <td>{{ f.validation_status_label if f.validation_status_label is defined and f.validation_status_label else (f.validation_status|status_label if f.validation_status is defined and f.validation_status else "Informational") }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if security_header_findings %}
+{% set sec.n = sec.n + 1 %}<h2 id="security-headers">{{ sec.n }}. Security Headers and Browser Security Controls</h2>
+<p class="meta">Application-path findings for HSTS, CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, and Permissions-Policy. Each control stays individually traceable via its F-label; see Detailed findings for full writeups.</p>
+<table class="overview-table">
+  <tr><th>ID</th><th>Control / title</th><th>Severity</th><th>Status</th><th>Location</th></tr>
+  {% for f in security_header_findings %}
+  <tr>
+    <td class="mono"><a href="#finding-{{ f.id }}">{{ flabel(f) }}</a></td>
+    <td>{{ f.title|truncate(100, True, '…') }}</td>
+    <td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td>
+    <td>{{ f.status|status_label }}</td>
+    <td class="mono">{{ (f.location or "")|truncate(70, True, '…')|param_label }}</td>
+  </tr>
+  {% endfor %}
+</table>
 {% endif %}
 
 {% set sec.n = sec.n + 1 %}<h2 id="findings">{{ sec.n }}. Detailed findings</h2>

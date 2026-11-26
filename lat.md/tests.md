@@ -193,6 +193,50 @@ The webcheck importer stores `cookie:{name}:{flag}` as the finding variant.
 
 `safe_request` joins multiple Set-Cookie response headers with newlines.
 
+## Gap 10 report stack versions
+
+ShieldByte Gap #10 coverage in `tests/test_gap10_report_stack_versions.py`: Express+Cloudflare stack layers, Helmet node snippets, mocked AI adapter version probes, and numbering legend in technical HTML.
+
+### Express plus Cloudflare prefers node origin
+
+`detect_server_type` / `detect_stack_layers` treat Express behind Cloudflare as origin=node and edge=cloudflare, not None.
+
+### Layered snippets return node and cloudflare
+
+`snippets_for_report` with layered origin+edge returns both node and cloudflare texts when present.
+
+### Ambiguous nginx apache still None
+
+nginx+apache without Node remains ambiguous so the nginx+Apache fallback pair still applies.
+
+### Helmet node snippets on header titles
+
+XCTO, Referrer-Policy, CSP, HSTS, and clickjacking seed titles carry `snippet_node` without dropping other stacks.
+
+### Garak version probe mocked
+
+Garak `version()` returns `garak <installed>` when `check_python_package` reports a version.
+
+### Promptfoo version probe mocked
+
+Promptfoo `version()` returns `promptfoo <installed>` when `check_promptfoo` reports a version.
+
+### Safelabs version probe mocked
+
+SafeLabs `version()` returns `safelabs-eval <installed>` when the package probe succeeds.
+
+### Unknown version never invented
+
+Failed probes leave adapters at name-only (`garak` / `promptfoo` / `safelabs-eval`) with no invented pin.
+
+### Numbering legend only present types
+
+`_numbering_legend` emits only identifier types that exist in the supplied context.
+
+### Legend in technical HTML
+
+Generated technical HTML includes `#numbering-legend` with Engagement and Finding rows when those ids are present.
+
 ## test_fix_snippets.py
 
 Phase 10 library fix text: importance, effort, fix steps and nginx/Apache/IIS/Cloudflare snippets on header/TLS/cookie/CSP writeups.
@@ -4555,3 +4599,27 @@ With AASI off, status reports `enabled: false` and mutating routes return 404; o
 ### Unpinned scanner image rejection
 
 [[attestra/config.py#require_image_digest]] refuses floating tags for non-AI images; Garak/Promptfoo/SafeLabs/PyRIT stay native-only (`allows_docker=False`, `uses_docker()` false) even when `SCANNER_IMAGES` has placeholders.
+
+## ShieldByte Gap 6 infrastructure report grouping
+
+CDN/Cloudflare observations and app-path security-header grouping in reports (`tests/test_gap6_infrastructure_report.py`).
+
+### cf_clearance and cdn-cgi classified
+
+cf_clearance SameSite and CORS on cdn-cgi challenge URLs classify informational via existing classifiers.
+
+### App CORS still eligible
+
+Application-path CORS stays unvalidated and is not bucketed as CDN infrastructure or a security-header control.
+
+### Distinct headers remain traceable
+
+HSTS, CSP, XCTO, XFO, Referrer-Policy, and Permissions-Policy each appear as separate security_header_findings entries.
+
+### Consolidate keeps app and CDN apart
+
+Report consolidate does not fold the same header title across app vs cdn-cgi security contexts into one card.
+
+### Technical HTML section headings
+
+Technical and executive templates include CDN / Cloudflare Infrastructure Observations and Security Headers and Browser Security Controls when applicable.

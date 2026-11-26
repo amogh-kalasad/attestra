@@ -214,6 +214,30 @@ class GarakAdapter(ScannerAdapter):
         return f"{self.name} cannot run: garak is not available in the shared scanner env. {_INSTALL_HINT}"
 
     def version(self) -> str:
+        # Recorded tool_version only — never invent a pin when the probe fails.
+        try:
+            from attestra.scanner_runtime import check_python_package
+
+            status = check_python_package("garak", expected="")
+            if status.installed:
+                return f"garak {status.installed}"
+        except Exception:  # noqa: BLE001
+            pass
+        py = _shared_python()
+        if py:
+            try:
+                proc = subprocess.run(
+                    [py, "-c", "import garak; print(getattr(garak,'__version__','') or '')"],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+                ver = (proc.stdout or "").strip()
+                if proc.returncode == 0 and ver:
+                    return f"garak {ver}"
+            except Exception:  # noqa: BLE001
+                pass
         return "garak"
 
     def resolve_output(self, out_file: Path) -> Path:

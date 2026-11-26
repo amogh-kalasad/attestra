@@ -213,6 +213,38 @@ class SafeLabsAdapter(ScannerAdapter):
         )
 
     def version(self) -> str:
+        # Recorded tool_version only — never invent a pin when the probe fails.
+        try:
+            from attestra.scanner_runtime import check_python_package
+
+            status = check_python_package("safelabs-eval", expected="")
+            if status.installed:
+                return f"safelabs-eval {status.installed}"
+        except Exception:  # noqa: BLE001
+            pass
+        py = _shared_python()
+        if py:
+            try:
+                proc = subprocess.run(
+                    [
+                        py,
+                        "-c",
+                        "import importlib.metadata as m\n"
+                        "try:\n"
+                        " print(m.version('safelabs-eval'))\n"
+                        "except m.PackageNotFoundError:\n"
+                        " print('')\n",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+                ver = (proc.stdout or "").strip()
+                if proc.returncode == 0 and ver:
+                    return f"safelabs-eval {ver}"
+            except Exception:  # noqa: BLE001
+                pass
         return "safelabs-eval"
 
     def build_argv(self, target: PinnedTarget | str, *, out_file: Path, profile: str = "baseline", **opts) -> list[str]:

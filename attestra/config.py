@@ -174,12 +174,23 @@ AUTOMATED_VAPT_ENABLED = os.environ.get("ATTESTRA_AUTOMATED_VAPT_ENABLED", "").l
 )
 
 # Body-level write mutation (T22 POST/PUT/PATCH object-id swaps). Off by default.
-# Sends only occur when this is on AND APP_ENV is local/test/development.
+# Sends only occur when this is on AND the FND-02 target-environment policy allows
+# (dev/demo allowlist by default; production remains hard-forbidden unless the
+# supervised production safe-mutation path below is enabled with a one-time grant).
 AUTOMATED_VAPT_MUTATION = os.environ.get("ATTESTRA_AUTOMATED_VAPT_MUTATION", "0").lower() in (
     "1",
     "true",
     "yes",
 )
+
+# Supervised production safe-mutation (ShieldByte Gap #3). Off by default.
+# Does NOT remove the ordinary production ban for SSRF/UPLOAD/XSSSTORE/T22.
+# When on, T22 may run on production ONLY with a four-eyes one-time approval
+# naming the exact asset, origin, endpoint, method, synthetic record, fields,
+# and cleanup plan (see attestra.automated_vapt.core.mutation_approval).
+AUTOMATED_VAPT_PRODUCTION_SAFE_MUTATION = os.environ.get(
+    "ATTESTRA_AUTOMATED_VAPT_PRODUCTION_SAFE_MUTATION", "0"
+).lower() in ("1", "true", "yes", "on")
 
 
 def _flag(name: str, default: str = "0") -> bool:

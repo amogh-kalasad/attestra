@@ -361,6 +361,18 @@ def _site(rows: list[Any]) -> str:
     return ""
 
 
+def _security_ctx(rows: list[Any]) -> str:
+    """Host@bucket key so app / cdn-cgi / challenge do not share a report card."""
+    from attestra.finding_normalize import security_context_key
+
+    for r in rows:
+        loc = getattr(r, "location", None) or ""
+        title = getattr(r, "title", None) or ""
+        if loc or title:
+            return security_context_key(loc, title)
+    return security_context_key("", "")
+
+
 def consolidate(s: Any, findings: list[Any], obs_by: dict[int, list[Any]] | None = None) -> list[Any]:
     """Return the report finding list with per-URL and cross-tool duplicates folded."""
     rows = [f for f in findings if f.status != FALSE_POSITIVE]
@@ -373,7 +385,7 @@ def consolidate(s: Any, findings: list[Any], obs_by: dict[int, list[Any]] | None
         obs_by = crossmerge._obs_by_finding(s, ids)
     order = {f.id: i for i, f in enumerate(rows)}
 
-    # Pass 1: same tool, same rule + title, different URLs.
+    # Pass 1: same tool, same rule + title, different URLs (same security context only).
     groups: dict[tuple, list[Any]] = defaultdict(list)
     for f in rows:
         members = [m for m in member_rows(f) if m.status != FALSE_POSITIVE] or [f]
@@ -388,6 +400,7 @@ def consolidate(s: Any, findings: list[Any], obs_by: dict[int, list[Any]] | None
             tuple(sorted(_rule_keys(f, obs_by.get(f.id, [])))),
             f.cwe,
             crossmerge.site_key(f.location or ""),
+            _security_ctx([f]),
             f.status in OPEN_STATUSES,
         )
         groups[key].append(f)
@@ -402,15 +415,15 @@ def consolidate(s: Any, findings: list[Any], obs_by: dict[int, list[Any]] | None
         why = f"{len(fs)} {crossmerge.tool_label(key[1])} results on different URLs" if key[0] == "url" and len(fs) > 1 else ""
         entries.append((first, members, title, why))
 
-    # Pass 2: different entries describing the same issue on the same host.
-    by_concept: dict[tuple[str, str], list[int]] = defaultdict(list)
+    # Pass 2: same issue on the same host *and* security context (app ≠ CDN ≠ challenge).
+    by_concept: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     for idx, (_, members, _, _) in enumerate(entries):
         concept = _report_concept(members, obs_by)
         if concept:
-            by_concept[(_site(members), concept)].append(idx)
+            by_concept[(_site(members), _security_ctx(members), concept)].append(idx)
     absorbed: set[int] = set()
     merged: list[tuple[int, list[Any], str | None, str]] = []
-    for (site, concept), idxs in by_concept.items():
+    for (_site_key, _ctx_key, concept), idxs in by_concept.items():
         if len(idxs) < 2:
             continue
         all_members: list[Any] = []

@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import mimetypes
+import re
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -57,6 +58,111 @@ def _validation_status_of(f) -> str:
 def _counts_as_open_vuln(f) -> bool:
     """Informational / contradicted validation classes are not confirmed vulns."""
     return _validation_status_of(f) not in _NON_VULN_VALIDATION
+
+
+# Browser security-control titles/rules for the dedicated headers report section.
+# HSTS, CSP, XCTO, XFO, Referrer-Policy, Permissions-Policy (app paths only).
+_SECURITY_HEADER_TITLE_RE = re.compile(
+    r"(?i)\b(?:strict[- ]?transport[- ]?security|\bhsts\b|"
+    r"content[- ]security[- ]policy|\bcsp\b|"
+    r"x[- ]?content[- ]?type[- ]?options|"
+    r"x[- ]?frame[- ]?options|anti[- ]?clickjack|"
+    r"referrer[- ]?policy|"
+    r"permissions[- ]?policy|feature[- ]?policy)\b"
+)
+_SECURITY_HEADER_RULE_PREFIXES = (
+    "10035",  # HSTS
+    "10038",  # CSP missing
+    "10055",  # CSP directives
+    "10020",  # X-Frame-Options
+    "10021",  # X-Content-Type-Options
+    "10063",  # Permissions-Policy
+)
+_SECURITY_HEADER_RULE_MARKERS = (
+    "http-missing-security-headers:",
+    "strict-transport-security",
+    "content-security-policy",
+    "x-frame-options",
+    "x-content-type-options",
+    "referrer-policy",
+    "permissions-policy",
+    "webcheck/hsts",
+    "webcheck/referrer-policy",
+    "webcheck/x-content-type-options",
+    "weak-csp",
+    "csp:",
+)
+
+
+def _is_cdn_infrastructure_observation(f) -> bool:
+    """CDN/challenge/CF-cookie noise for the infrastructure observations section.
+
+    Reuses existing classifiers; does not mark all CF-proxied app findings as noise.
+    """
+    # @lat: [[reports#Generation#CDN and security-header grouping]]
+    from attestra.finding_normalize import path_context_bucket
+    from attestra.finding_validation.infrastructure import (
+        is_cache_related_finding,
+        is_cdn_challenge_url,
+        is_cdn_cors_finding,
+        is_infrastructure_cookie_finding,
+    )
+
+    loc = getattr(f, "location", None) or ""
+    title = getattr(f, "title", None) or ""
+    param = getattr(f, "param", None) or ""
+    desc = getattr(f, "description", None) or ""
+    rules = list(getattr(f, "rule_ids", None) or [])
+    bucket = path_context_bucket(loc, title)
+    on_cdn = is_cdn_challenge_url(loc) or bucket in ("cdn-cgi", "challenge")
+    if is_infrastructure_cookie_finding(title, param, loc, desc):
+        return True
+    if is_cdn_cors_finding(title, loc, desc):
+        return True
+    if on_cdn and is_cache_related_finding(title, rules, desc):
+        return True
+    if on_cdn and _validation_status_of(f) == INFORMATIONAL:
+        return True
+    return False
+
+
+def _is_security_header_finding(f) -> bool:
+    """True for HSTS/CSP/XCTO/XFO/Referrer/Permissions-Policy on application paths."""
+    # @lat: [[reports#Generation#CDN and security-header grouping]]
+    from attestra.finding_normalize import path_context_bucket
+
+    loc = getattr(f, "location", None) or ""
+    title = getattr(f, "title", None) or ""
+    desc = getattr(f, "description", None) or ""
+    bucket = path_context_bucket(loc, title)
+    if bucket in ("cdn-cgi", "challenge"):
+        return False
+    blob = f"{title}\n{desc}"
+    if _SECURITY_HEADER_TITLE_RE.search(blob):
+        return True
+    for rid in getattr(f, "rule_ids", None) or []:
+        r = str(rid).lower()
+        if any(r.startswith(p) or p in r for p in _SECURITY_HEADER_RULE_PREFIXES):
+            return True
+        if any(m in r for m in _SECURITY_HEADER_RULE_MARKERS):
+            return True
+    return False
+
+
+def _partition_infrastructure_findings(reportable: list) -> dict:
+    """Additive context lists; main ``findings`` list is left unchanged for detail/QA."""
+    # @lat: [[reports#Generation#CDN and security-header grouping]]
+    cdn: list = []
+    headers: list = []
+    for f in reportable:
+        if _is_cdn_infrastructure_observation(f):
+            cdn.append(f)
+        elif _is_security_header_finding(f):
+            headers.append(f)
+    return {
+        "cdn_infrastructure_observations": cdn,
+        "security_header_findings": headers,
+    }
 
 
 def _finding_cvss_version(f) -> str:
@@ -451,6 +557,95 @@ def _tools_and_versions(
             notes = "Multiple versions recorded"
         out.append({"tool": b["tool"], "version": version, "notes": notes})
     return out
+
+
+def _numbering_legend(
+    eng: Engagement | None,
+    findings: list,
+    imports: list,
+    scan_history: list,
+    retest_requests: list,
+    figures: list,
+) -> list[dict]:
+    """Report Identifier and Numbering Legend rows for IDs actually present only.
+
+    Never invents placeholder rows for unused identifier types. Does not change
+    report signing or hashes beyond the additive HTML section that consumes this list.
+    """
+    # @lat: [[reports#Generation]]
+    rows: list[dict] = []
+    if eng is not None and getattr(eng, "id", None) is not None:
+        rows.append(
+            {
+                "form": f"Engagement #{eng.id}",
+                "label": "Engagement",
+                "meaning": "Database id of this engagement (shown in the footer).",
+            }
+        )
+    if findings:
+        rows.append(
+            {
+                "form": "F-N",
+                "label": "Finding",
+                "meaning": (
+                    "Report-local finding number in detailed-findings order "
+                    "(anchors use the database id; F-N is the reader-facing label)."
+                ),
+            }
+        )
+    if scan_history:
+        rows.append(
+            {
+                "form": "Scan #N",
+                "label": "Scan / run",
+                "meaning": "ScanRun database id in methodology and appendix tables.",
+            }
+        )
+    if imports:
+        rows.append(
+            {
+                "form": "Import #N",
+                "label": "Import",
+                "meaning": "ImportRun database id in methodology and appendix tables.",
+            }
+        )
+    auth_ids = {
+        int(getattr(run, "auth_profile_id"))
+        for run in (scan_history or [])
+        if getattr(run, "auth_profile_id", None) is not None
+    }
+    if auth_ids:
+        rows.append(
+            {
+                "form": "Auth profile #N",
+                "label": "Auth profile",
+                "meaning": (
+                    "AuthCredentialProfile id referenced by authenticated scan runs "
+                    "(secrets are never shown in the report)."
+                ),
+            }
+        )
+    if retest_requests:
+        rows.append(
+            {
+                "form": "Retest on F-N",
+                "label": "Retest",
+                "meaning": "Retest request linked to a finding label in Retesting information.",
+            }
+        )
+    has_evidence = bool(figures) or any(getattr(f, "evidence", None) for f in (findings or []))
+    if has_evidence:
+        rows.append(
+            {
+                "form": "Fig. F-N-i / sha256",
+                "label": "Evidence",
+                "meaning": (
+                    "Figure captions use Fig. F-N-i; the evidence register lists "
+                    "filename and sha256 (no invented evidence numbers)."
+                ),
+            }
+        )
+    return rows
 
 
 def _retest_request_rows(retests_by_finding: dict[int, list], flabel) -> list[dict]:
@@ -1147,7 +1342,12 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         reportable, observations_by_finding, imports, scan_history
     )
     retest_requests = _retest_request_rows(retests_by_finding, flabel)
+    figures = _figures_list(embeds, flabel, fnum)
+    numbering_legend = _numbering_legend(
+        eng, reportable, imports, scan_history, retest_requests, figures
+    )
     eng = _apply_exposure_honesty(eng, reportable)
+    infra_groups = _partition_infrastructure_findings(reportable)
     return {
         "eng": eng,
         "tenant": eng.tenant.name,
@@ -1158,6 +1358,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "observations_by_finding": observations_by_finding,
         "evidence_limitations": _evidence_limitations(reportable),
         "findings": reportable,
+        "cdn_infrastructure_observations": infra_groups["cdn_infrastructure_observations"],
+        "security_header_findings": infra_groups["security_header_findings"],
         "passed_checks": services.list_passed_checks(s, engagement_id),
         # Only targets testssl actually scanned; the TLS section is omitted when empty.
         "tls_summaries": tls_scanned,
@@ -1202,7 +1404,8 @@ def _context(s: Session, engagement_id: int, framework: str = "", *, include_com
         "retest_requests": retest_requests,
         "latest_retest": lambda fid: _latest_retest(retests_by_finding, fid),
         "evidence_embeds": embeds,
-        "figures": _figures_list(embeds, flabel, fnum),
+        "figures": figures,
+        "numbering_legend": numbering_legend,
         "flabel": flabel,
         "finding_numbers": fnum,
         "http_pairs": _http_pair_embeds(reportable),

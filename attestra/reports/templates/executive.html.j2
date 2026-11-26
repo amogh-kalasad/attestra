@@ -51,6 +51,30 @@
   {% else %}<tr><td colspan="4">No open findings.</td></tr>{% endfor %}
 </table>
 
+{% if cdn_infrastructure_observations %}
+<h2 id="cdn-infrastructure">CDN / Cloudflare Infrastructure Observations</h2>
+<p class="meta">{{ cdn_infrastructure_observations|length }} CDN / challenge-platform or Cloudflare cookie observation{{ "s" if cdn_infrastructure_observations|length != 1 else "" }} (informational). These are edge/infrastructure signals, not application vulnerabilities.</p>
+<ul>
+  {% for f in cdn_infrastructure_observations[:8] %}
+  <li class="meta">{{ flabel(f) }} · {{ f.title|truncate(80, True, '…') }} · <span class="mono">{{ (f.location or "")|truncate(60, True, '…')|param_label }}</span></li>
+  {% endfor %}
+  {% if cdn_infrastructure_observations|length > 8 %}
+  <li class="meta">… and {{ cdn_infrastructure_observations|length - 8 }} more (see technical report).</li>
+  {% endif %}
+</ul>
+{% endif %}
+
+{% if security_header_findings %}
+<h2 id="security-headers">Security Headers and Browser Security Controls</h2>
+<p class="meta">{{ security_header_findings|length }} application-path header control{{ "s" if security_header_findings|length != 1 else "" }} (HSTS, CSP, XCTO, XFO, Referrer-Policy, Permissions-Policy). Each remains individually traceable.</p>
+<table>
+  <tr><th>ID</th><th>Control</th><th>Severity</th></tr>
+  {% for f in security_header_findings %}
+  <tr><td class="mono">{{ flabel(f) }}</td><td>{{ f.title|truncate(90, True, '…') }}</td><td><span class="sev sev-{{ f.severity }}">{{ f.severity|severity_label }}</span></td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <h2>Compliance readiness</h2>
 <table>
   <tr><th>Framework</th><th>Met</th><th>No exceptions</th><th>Partial</th><th>Not met</th><th>Not assessed</th></tr>

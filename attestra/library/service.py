@@ -18,6 +18,7 @@ from attestra.library.fix_snippets import (
     SNIPPET_KEYS,
     api_fix_fields,
     detect_server_type,
+    detect_stack_layers,
     enrich,
     guidance_from_mapping,
     guidance_looks_csp_only,
@@ -388,9 +389,21 @@ def guidance_for_finding(s: Session, f: Finding) -> dict | None:
     return pack_guidance
 
 
+def _finding_stack_texts(f: Finding) -> tuple[str, str, str]:
+    return (f.title or "", f.description or "", f.location or "")
+
+
 def server_type_for_finding(f: Finding) -> str | None:
-    """Infer nginx/apache/iis/cloudflare/node from one finding's own text when unambiguous."""
-    return detect_server_type(f.title or "", f.description or "", f.location or "")
+    """Infer nginx/apache/iis/cloudflare/node from one finding's own text when unambiguous.
+
+    Express/Node behind Cloudflare prefers ``node`` (origin) rather than returning None.
+    """
+    return detect_server_type(*_finding_stack_texts(f))
+
+
+def stack_layers_for_finding(f: Finding) -> dict[str, str | None]:
+    """Per-finding ``{origin, edge, proxy}`` so origin Helmet and edge Cloudflare snippets can coexist."""
+    return detect_stack_layers(*_finding_stack_texts(f))
 
 
 def server_type_for_findings(findings: list[Finding]) -> str | None:
@@ -401,11 +414,9 @@ def server_type_for_findings(findings: list[Finding]) -> str | None:
     unrelated CDN/Cloudflare finding elsewhere in the report cannot blank out the correct
     origin-stack snippet (e.g. Node/Express) for *this* finding.
     """
-    parts = []
+    parts: list[str] = []
     for f in findings:
-        parts.append(f.title or "")
-        parts.append(f.description or "")
-        parts.append(f.location or "")
+        parts.extend(_finding_stack_texts(f))
     return detect_server_type(*parts)
 
 
@@ -416,6 +427,7 @@ def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
     one server type guessed from every finding in the engagement — a report with both
     Cloudflare-edge noise and an origin Node/Express disclosure must not let the Cloudflare
     mentions elsewhere blank out (or override) the Node/Express snippet for the real finding.
+    Layered Express+Cloudflare evidence can yield both node and cloudflare snippets.
     """
     server_type = server_type_for_findings(findings)
     by_id: dict[int, dict] = {}
@@ -425,7 +437,10 @@ def fix_context_for_engagement(s: Session, findings: list[Finding]) -> dict:
         g = guidance_for_finding(s, f)
         if g:
             by_id[f.id] = g
-            report_snips[f.id] = snippets_for_report(g, server_type_for_finding(f))
+            layers = stack_layers_for_finding(f)
+            report_snips[f.id] = snippets_for_report(
+                g, server_type_for_finding(f), layers=layers
+            )
         rem = remediation_api_fields(_safe_remediation_for_finding(f))
         if rem:
             rem_by_id[f.id] = rem

@@ -60,6 +60,8 @@ R_ENV_UNKNOWN = "env_unknown"
 R_ALLOWLIST_INVALID = "allowlist_invalid"
 R_CLEANUP = "cleanup_plan_missing"
 R_NO_DECISION = "no_policy_decision"
+R_PROD_SAFE_ALLOWED = "production_safe_mutation_allowed"
+R_PROD_SAFE_DENIED = "production_safe_mutation_denied"
 
 
 @dataclass(frozen=True)
@@ -156,8 +158,14 @@ def decide_from_policy_input(
     cleanup_plan_ack: bool = False,
     policy_decide: Callable[[dict[str, Any]], Any] | None = None,
     allowed: frozenset[str] | None = None,
+    production_grant: Mapping[str, Any] | None = None,
 ) -> IntrusiveDecision:
-    """Pure core of :func:`decide_intrusive` (no DB). ``inp`` is a ``gate.policy_input`` document."""
+    """Pure core of :func:`decide_intrusive` (no DB). ``inp`` is a ``gate.policy_input`` document.
+
+    ``production_grant`` is an optional pre-validated grant facts dict from
+    [[attestra.automated_vapt.core.mutation_approval]] (Gap #3). Ordinary intrusive
+    tests remain forbidden on production when no valid grant is present.
+    """
     tid = (test_id or "").upper()
     prof = (profile or "").strip().lower()
     envs = allowed_environments() if allowed is None else allowed
@@ -173,6 +181,7 @@ def decide_from_policy_input(
         "engagement_status": str(inp.get("engagement_status") or ""),
         "authorized_for_environment": asset_env in [str(e).lower() for e in (inp.get("authorized_environments") or [])],
         "cleanup_plan_ack": bool(cleanup_plan_ack),
+        "production_safe_grant": bool(production_grant),
     }
     if tid not in INTRUSIVE_TEST_IDS:
         return deny(R_NOT_INTRUSIVE, **facts)
@@ -198,6 +207,24 @@ def decide_from_policy_input(
     if not asset_env:
         return deny(R_ENV_UNKNOWN, **facts)
     if asset_env in FORBIDDEN_ENVIRONMENTS:
+        # Gap #3: supervised production safe-mutation for T22 only.
+        if tid == "T22" and production_grant:
+            from attestra.automated_vapt.core import mutation_approval as ma
+
+            if not ma.production_safe_mutation_enabled():
+                return deny(R_PROD_SAFE_DENIED, **facts, grant_reason="flag_off")
+            ok = bool(production_grant.get("ok"))
+            reason = str(production_grant.get("reason") or "")
+            facts["grant_reason"] = reason
+            facts["grant_id"] = str(production_grant.get("approval_id") or "")[:32]
+            if not ok:
+                return deny(R_PROD_SAFE_DENIED, **facts)
+            if tid in CLEANUP_REQUIRED and not cleanup_plan_ack:
+                return deny(R_CLEANUP, **facts)
+            # T22 production path always requires an explicit cleanup_plan on the grant.
+            if not str(production_grant.get("cleanup_plan") or "").strip():
+                return deny(R_CLEANUP, **facts, grant_reason="cleanup_plan_missing")
+            return IntrusiveDecision(True, R_PROD_SAFE_ALLOWED, facts)
         return deny(R_ENV_FORBIDDEN, **facts)
     if not envs:
         return deny(R_ALLOWLIST_INVALID, **facts)
@@ -206,6 +233,23 @@ def decide_from_policy_input(
     if tid in CLEANUP_REQUIRED and not cleanup_plan_ack:
         return deny(R_CLEANUP, **facts)
     return IntrusiveDecision(True, R_ALLOWED, facts)
+
+
+def _grant_facts_from_extra(extra: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    """Build production_grant facts from ctx.extra when a validated approval is attached."""
+    extra = extra or {}
+    raw = extra.get("production_safe_mutation") or extra.get("_production_safe_mutation")
+    if not isinstance(raw, Mapping):
+        return None
+    # Expected keys set by orchestrator after validate_grant_for_execution
+    return {
+        "ok": bool(raw.get("ok")),
+        "reason": str(raw.get("reason") or ""),
+        "approval_id": str(raw.get("approval_id") or "")[:64],
+        "cleanup_plan": str(raw.get("cleanup_plan") or ""),
+        "test_record_id": str(raw.get("test_record_id") or ""),
+        "approved_fields": list(raw.get("approved_fields") or []),
+    }
 
 
 def decide_intrusive(
@@ -217,6 +261,7 @@ def decide_intrusive(
     profile: str,
     env_flag_enabled: bool,
     cleanup_plan_ack: bool = False,
+    production_grant: Mapping[str, Any] | None = None,
 ) -> IntrusiveDecision:
     """Contract §3.4: gather policy facts from the DB and decide. Never raises."""
     tid = (test_id or "").upper()
@@ -236,9 +281,10 @@ def decide_intrusive(
     return decide_from_policy_input(
         inp,
         test_id=tid,
-        profile=prof,
+        profile=profile,
         env_flag_enabled=env_flag_enabled,
         cleanup_plan_ack=cleanup_plan_ack,
+        production_grant=production_grant,
     )
 
 
@@ -253,8 +299,10 @@ def decide_all(
 ) -> dict[str, IntrusiveDecision]:
     """Convenience for INT: one decision per intrusive id present in ``test_ids``."""
     ack = bool((extra or {}).get("cleanup_plan") or (extra or {}).get("cleanup_plan_ack"))
+    grant = _grant_facts_from_extra(extra)
     out: dict[str, IntrusiveDecision] = {}
     for tid in sorted({str(t).upper() for t in test_ids} & INTRUSIVE_TEST_IDS):
+        # Production grant applies only to T22; other intrusive ids stay hard-forbidden on prod.
         out[tid] = decide_intrusive(
             session,
             engagement_id=engagement_id,
@@ -263,6 +311,7 @@ def decide_all(
             profile=profile,
             env_flag_enabled=env_flag_enabled(tid),
             cleanup_plan_ack=ack,
+            production_grant=grant if tid == "T22" else None,
         )
     return out
 
