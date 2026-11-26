@@ -121,6 +121,27 @@ def _wrap_pre(html: str, width: int = 90) -> str:
     return _PRE.sub(wrap, html)
 
 
+
+_PREWRAP = re.compile(
+    r'(?is)<(p|li|div)\b([^>]*?)\s*style="white-space:\s*pre-wrap;?"([^>]*)>'
+    r'((?:(?!</?(?:div|p|li)\b).)*)</\1>')
+_TICKS = re.compile(r"`([^`\n]+)`")
+
+
+def _prewrap_to_br(html: str) -> str:
+    """xhtml2pdf treats pre-wrap as pre (never wraps). Keep the author's line
+    breaks as <br/>, drop the style, and render `code` as monospace.
+    """
+
+    def fix(m: re.Match) -> str:
+        tag, a, b, inner = m.group(1), m.group(2), m.group(3), m.group(4)
+        inner = _TICKS.sub(r'<span class="mono">\1</span>', inner)
+        inner = re.sub(r"\r?\n", "<br />", inner)
+        return f"<{tag}{a}{b}>{inner}</{tag}>"
+
+    return _PREWRAP.sub(fix, html)
+
+
 _TAG_OR_TEXT = re.compile(r"(<[^>]*>)|([^<]+)")
 _LONG = re.compile(r"[^\s<>&]{40,}")
 
@@ -1014,6 +1035,7 @@ def prepare_html(html: str, *, kind: str, draft: bool, for_engine: str = "xhtml2
         out = re.sub(r"(?is)<style.*?</style>", f"<style>{_font_css()}{PDF_CSS}</style>", out, count=1)
         # xhtml2pdf cannot draw inline SVG, but it renders SVG <img> data URIs via svglib.
         out = re.sub(r"(?is)<svg.*?</svg>", _svg_to_img, out)
+        out = _prewrap_to_br(out)
         out = _wrap_pre(out)
         out = _breakable(out)
         out = _kpis_to_table(out)
@@ -1145,7 +1167,16 @@ def _xhtml2pdf(html: str) -> bytes | None:
 
     def _try(payload: str) -> bytes | None:
         buf = BytesIO()
-        result = pisa.CreatePDF(payload, dest=buf, encoding="utf-8")
+        kw = {}
+        try:
+            from xhtml2pdf.config.resources import ResourceAccessPolicy
+
+            kw["resource_policy"] = ResourceAccessPolicy(
+                base_dir=Path.cwd(), extra_roots=(FONT_DIR,)
+            )
+        except Exception:
+            pass  # older xhtml2pdf without resource policies
+        result = pisa.CreatePDF(payload, dest=buf, encoding="utf-8", **kw)
         if result.err:
             return None
         return buf.getvalue() or None
