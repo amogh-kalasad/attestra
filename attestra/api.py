@@ -1370,6 +1370,7 @@ _REPORT_EXPORT_TYPES = {
 def download_report(
     rid: int,
     branding: str | None = None,
+    save: str | None = None,
     principal: Principal = Depends(require("report.read")),
 ):
     """View a report: sealed HTML with a sign-off record on top. File on disk is unchanged.
@@ -1377,12 +1378,16 @@ def download_report(
     ``branding=plain`` (or ``off`` / ``none``) returns a derivative content-only view:
     logos, issuer/platform marks, and powered-by footers are stripped. The sealed
     original and its SHA-256 are unchanged; use ``/reports/{rid}/sealed`` to download it.
+
+    ``save=1`` (with plain) returns the plain HTML as an attachment so the browser
+    saves the file instead of only opening it in a tab.
     """
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, Response
 
     from attestra.reports.signoff import banner_html, inject
 
     plain = (branding or "").strip().lower() in ("plain", "off", "none", "unbranded", "0", "false")
+    as_attachment = (save or "").strip().lower() in ("1", "true", "yes", "download", "save")
     with data_access.session() as s:
         r, path = _report_file(s, rid, principal)
         sealed = path.read_bytes()
@@ -1390,6 +1395,36 @@ def download_report(
             from attestra.reports.plain import plain_banner_html, strip_report_branding
 
             sealed_view = strip_report_branding(sealed)
+            if as_attachment:
+                # File download: content only, no in-app banner chrome.
+                from attestra.reports import signoff as _signoff
+
+                body = (
+                    _signoff._DRAFT_MARK_RE.sub(b"", sealed_view)
+                    if r.status == "signed"
+                    else sealed_view
+                )
+                audit.record(
+                    s,
+                    principal.actor,
+                    "report.download",
+                    "report",
+                    r.id,
+                    branding="plain",
+                    as_file=True,
+                )
+                name = (
+                    f"eng{r.engagement_id}-{r.kind}"
+                    f"{'-' + r.framework if r.framework else ''}-v{r.version}-plain.html"
+                )
+                return Response(
+                    content=body,
+                    media_type="text/html; charset=utf-8",
+                    headers={
+                        "Cache-Control": "no-store",
+                        "Content-Disposition": f'attachment; filename="{name}"',
+                    },
+                )
             banner = plain_banner_html(
                 sealed_url=f"/reports/{rid}/sealed",
                 branded_url=f"/reports/{rid}",

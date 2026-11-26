@@ -856,10 +856,24 @@
   </div>
   <div class="card" id="reports">
     <h2>Reports</h2>
+    <p class="meta" style="margin-bottom:12px">Use the branding dropdown to open with branding, or without branding (plain content). Without branding also has a <b>Download</b> link that saves a plain HTML file (no logos / Attestra / powered-by). Sealed verify file is unchanged.</p>
     <table>
-      <tr><th>#</th><th>Report</th><th>Status</th><th>QA by</th><th>Approved by</th><th>Next step</th></tr>
+      <tr><th>#</th><th>Report</th><th>Open / download</th><th>Status</th><th>QA by</th><th>Approved by</th><th>Next step</th></tr>
       {% set my_uid = principal.user_id if principal else None %}
-      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td><td><a href="/reports/{{ r.id }}" target="_blank" rel="noopener" title="Opens in a new tab">{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }} <span aria-hidden="true">&#8599;</span><span class="meta"> (new tab)</span></a></td>
+      {% for r in reports %}<tr id="report-{{ r.id }}"><td>{{ r.id }}</td>
+        <td>{{ r.kind|label }}{% if r.framework %} &middot; {{ r.framework|fw_name }}{% endif %} v{{ r.version }}</td>
+        <td>
+          <form class="row" method="get" action="/reports/{{ r.id }}" target="_blank" style="gap:6px;align-items:center;margin:0;flex-wrap:wrap" data-report-branding-form="{{ r.id }}">
+            <select id="eng-report-branding-{{ r.id }}" name="branding" aria-label="Report branding for report {{ r.id }}">
+              <option value="branded" selected>With branding</option>
+              <option value="plain">Without branding (plain)</option>
+            </select>
+            <button type="submit" class="secondary">Open <span aria-hidden="true">&#8599;</span></button>
+          </form>
+          <div class="meta" style="margin-top:6px">
+            <a href="/reports/{{ r.id }}?branding=plain&amp;save=1">Download without branding</a>
+          </div>
+        </td>
         <td><span class="st">{{ "In QA" if r.status == "submitted" else "QA approved" if r.status == "qa_approved" else r.status|label }}</span>{% if r.status == "rejected" and r.rejection_note %}<div class="meta">QA note: {{ r.rejection_note }}</div>{% endif %}</td>
         <td>{{ r.qa_by or "-" }}</td>
         <td>{{ r.approved_by or "-" }}{% if r.signed_at %}<div class="meta">{{ r.signed_at|dt }}</div>{% endif %}</td>
@@ -897,7 +911,7 @@
         {% elif r.status == "signed" %}<span class="meta">Signed. Nothing more to do.</span>
         {% else %}<span class="meta">-</span>{% endif %}
         </div>
-        </td></tr>{% else %}<tr><td colspan="6">No reports yet. Generate one after QA has reviewed the findings.</td></tr>{% endfor %}
+        </td></tr>{% else %}<tr><td colspan="7">No reports yet. Generate one after QA has reviewed the findings.</td></tr>{% endfor %}
     </table>
     {% if can(prole, "report.generate") %}
     <form method="post" action="/engagements/{{ e.id }}/reports/generate" class="form-follow">

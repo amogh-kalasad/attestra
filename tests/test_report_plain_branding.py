@@ -1,4 +1,4 @@
-"""Portal / report plain (unbranded) derivative views."""
+"""Portal / engagement report plain (unbranded) derivative views."""
 # @lat: [[interfaces#Client remediation portal]]
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def test_strip_removes_logo_brand_and_powered_by_keeps_findings():
     out = strip_report_branding(SAMPLE)
     assert b"cover-logo" not in out
     assert b"cover-band-brand" not in out
-    assert b'data:image/png;base64,aaa' not in out
+    assert b"data:image/png;base64,aaa" not in out
     assert b"with Attestra" not in out
     assert b"Plain content view" in out or b"plain" in out.lower()
     assert b"Missing HSTS on app.example.com" in out

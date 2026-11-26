@@ -69,14 +69,16 @@
     <tr><td>{{ r.id }}</td><td>{{ r.kind|label }}</td><td>{{ r.version }}</td><td><span class="st">{{ r.status|label }}</span></td><td class="mono">{{ r.sha256[:16] }}&hellip;</td><td>{{ r.signed_at|dt if r.signed_at else "-" }}</td>
       <td>
         {% if r.status == "signed" or role != "client_viewer" %}
-        <form class="row" method="get" action="/reports/{{ r.id }}" target="_blank" style="gap:6px;align-items:center;margin:0">
-          <label class="sr-only" for="report-branding-{{ r.id }}">Branding</label>
+        <form class="row" method="get" action="/reports/{{ r.id }}" target="_blank" style="gap:6px;align-items:center;margin:0;flex-wrap:wrap">
           <select id="report-branding-{{ r.id }}" name="branding" aria-label="Report branding for report {{ r.id }}">
             <option value="branded" selected>With branding</option>
             <option value="plain">Without branding (plain)</option>
           </select>
           <button type="submit" class="secondary">Open <span aria-hidden="true">&#8599;</span></button>
         </form>
+        <div class="meta" style="margin-top:6px">
+          <a href="/reports/{{ r.id }}?branding=plain&amp;save=1">Download without branding</a>
+        </div>
         {% else %}
         <span class="meta">Sign to open</span>
         {% endif %}
