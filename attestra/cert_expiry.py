@@ -187,8 +187,14 @@ def _read_bytes(path_str: str) -> bytes | None:
     try:
         p = Path(path_str)
         if p.is_file():
-            return p.read_bytes()
-    except OSError:
+            data = p.read_bytes()
+            # GridFS sidecar: tiny file holding ``mongo://<key>``; follow it (lazy import: cycle).
+            if data.startswith(b"mongo://") and len(data) < 1024 and b"\n" not in data.strip():
+                from attestra.storage.mongo import MongoStorage
+
+                return MongoStorage().get(data.decode("utf-8").strip())
+            return data
+    except Exception:  # unreadable file or unreachable/missing GridFS record: treat as no data
         return None
     return None
 
@@ -217,10 +223,13 @@ def end_date_from_webcheck_raw(raw: bytes) -> date | None:
 
 def end_date_from_raw(tool: str, raw: bytes) -> date | None:
     t = (tool or "").lower()
-    if t == "testssl":
-        return end_date_from_testssl_raw(raw)
-    if t == "webcheck":
-        return end_date_from_webcheck_raw(raw)
+    try:
+        if t == "testssl":
+            return end_date_from_testssl_raw(raw)
+        if t == "webcheck":
+            return end_date_from_webcheck_raw(raw)
+    except (ValueError, UnicodeError, OSError):  # JSONDecodeError is a ValueError
+        return None
     return None
 
 
@@ -264,7 +273,10 @@ def saved_cert_for_asset(s: Session, asset_id: int) -> dict[str, Any] | None:
         if run.tool == "testssl":
             from attestra.importers import testssl as testssl_importer
 
-            summary = testssl_importer.summarize(raw)
+            try:
+                summary = testssl_importer.summarize(raw)
+            except (ValueError, UnicodeError, OSError):
+                continue
             summary_host = caa_host(str(summary.get("host") or ""))
             if summary_host and host_key and summary_host != host_key and not host_key.endswith("." + summary_host):
                 if summary_host not in host_key and host_key not in summary_host:

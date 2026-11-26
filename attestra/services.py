@@ -1932,14 +1932,14 @@ def list_passed_checks(s: Session, engagement_id: int) -> list[dict]:
 
 
 def _read_bytes(path_str: str) -> bytes | None:
-    """Read a local path when it exists; ignore missing or non-file URIs."""
+    """Read a local path when it exists (following ``mongo://`` sidecars); ignore missing or non-file URIs."""
     if not path_str:
         return None
     try:
         p = Path(path_str)
         if p.is_file():
-            return p.read_bytes()
-    except OSError:
+            return read_stored_bytes(p)
+    except Exception:  # unreadable file or missing GridFS record: treat as no data
         return None
     return None
 

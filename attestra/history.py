@@ -125,8 +125,10 @@ def _read_bytes(path_str: str) -> bytes | None:
     try:
         p = Path(path_str)
         if p.is_file():
-            return p.read_bytes()
-    except OSError:
+            from attestra.services import read_stored_bytes  # lazy: services imports this module
+
+            return read_stored_bytes(p)
+    except Exception:  # unreadable file or missing GridFS record: treat as no data
         return None
     return None
 

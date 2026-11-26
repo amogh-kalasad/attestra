@@ -71,14 +71,39 @@ def _entries(doc) -> list[tuple[dict, str, str]]:
     return out
 
 
+_HOST_SUFFIX_RE = re.compile(r"\s*<[^>]*>")
+
+
+def _base_id(cid: str) -> str:
+    """Strip testssl ``<hostCert#N>`` / ``<#N>`` suffixes: ``cert_notAfter <hostCert#1>`` -> ``cert_notAfter``."""
+    return _HOST_SUFFIX_RE.sub("", cid).strip()
+
+
+def _is_intermediate_id(cid: str) -> bool:
+    return cid.startswith("intermediate_cert")
+
+
 def _by_id(entries: list[tuple[dict, str, str]]) -> dict[str, tuple[str, str]]:
-    """Map check id → (severity, finding text); last wins."""
+    """Map check id → (severity, finding text).
+
+    Exact ids: last wins. Suffixed ids (``cert_notAfter <hostCert#1>``) are keyed by their base
+    id; the first leaf host cert wins and ``intermediate_cert_*`` never maps onto a leaf id.
+    An exact (unsuffixed) id always beats a suffixed one.
+    """
     out: dict[str, tuple[str, str]] = {}
+    suffixed: dict[str, tuple[str, str]] = {}
     for e, _, _ in entries:
         cid = str(e.get("id", "")).strip()
         if not cid:
             continue
-        out[cid] = (str(e.get("severity", "")).upper(), str(e.get("finding", "")))
+        val = (str(e.get("severity", "")).upper(), str(e.get("finding", "")))
+        base = _base_id(cid)
+        if base == cid:
+            out[cid] = val
+        elif base and not _is_intermediate_id(base):
+            suffixed.setdefault(base, val)
+    for k, v in suffixed.items():
+        out.setdefault(k, v)
     return out
 
 
@@ -228,6 +253,15 @@ def parse(raw: bytes, *, today: date | None = None) -> list[NormalizedFinding]:
         check = str(e.get("id", ""))
         finding = str(e.get("finding", ""))
         location = f"{host}:{port}" if port else host
+        _base = _base_id(check)
+        if _base != check and _base in {"cert_notAfter", "cert_expirationStatus", "cert_expiration"}:
+            # Suffixed leaf cert ids: first host cert per location wins.
+            if _base == "cert_notAfter":
+                if finding.strip():
+                    cert_after.setdefault(location, finding.strip())
+            else:
+                cert_status.setdefault(location, finding)
+            continue
         cves = [c for c in str(e.get("cve", "")).split() if c.upper().startswith("CVE-")]
 
         # Tool notes (engine_problem / GOST / service) stay off the findings list.
