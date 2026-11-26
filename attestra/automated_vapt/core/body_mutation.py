@@ -306,6 +306,10 @@ def run_object_mutation(
     )
 
     policy_decision = intrusive_policy.decision_from_ctx(ctx, "T22")
+    # Gap #3: when production safe-mutation was allowed via one-time grant, run the
+    # narrow synthetic executor instead of the general object-id swap path.
+    if getattr(policy_decision, "reason", "") == intrusive_policy.R_PROD_SAFE_ALLOWED:
+        return _run_production_safe_mutation(ctx, auth, auth_info, policy_decision)
     _token = _T22_POLICY_ALLOWS.set(bool(policy_decision.allow))
     try:
         return _run_object_mutation(
@@ -314,6 +318,118 @@ def run_object_mutation(
         )
     finally:
         _T22_POLICY_ALLOWS.reset(_token)
+
+
+def _run_production_safe_mutation(
+    ctx: Any,
+    auth: SessionAuth | None,
+    auth_info: dict[str, Any],
+    policy_decision: Any,
+) -> dict[str, Any]:
+    """Execute approved synthetic production mutation (consume → mutate → restore)."""
+    from attestra.automated_vapt.core import mutation_approval as ma
+    from attestra.automated_vapt.core.production_safe_executor import (
+        ProductionSafeExecutionError,
+        build_httpx_transport,
+        execute_approved_mutation,
+    )
+
+    grant = (ctx.extra or {}).get("production_safe_mutation") or {}
+    approval_id = str(grant.get("approval_id") or "")
+    nonce = str(grant.get("nonce") or "")
+    base = {
+        "test_id": "T22",
+        "category": "authorization",
+        "auth": auth_info,
+        "policy_decision": policy_decision.to_json(),
+        "production_safe_mutation": {
+            "approval_id": approval_id,
+            "grant_reason": grant.get("reason"),
+        },
+    }
+    if not approval_id:
+        return {
+            **base,
+            "status": "NOT_TESTED",
+            "detail": "production safe-mutation allowed by policy but approval id missing",
+            "skip_reason": "approval_missing",
+            "endpoints": [],
+            "validation": {},
+        }
+    if auth is None or auth.status != "ready":
+        return {
+            **base,
+            "status": "NOT_TESTED",
+            "detail": f"login profile not ready for production safe-mutation ({auth_info.get('status')})",
+            "skip_reason": SKIP_NO_AUTH_SESSION,
+            "endpoints": [],
+            "validation": {},
+        }
+
+    client = ctx.extra.get("httpx_client")
+    if client is None:
+        return {
+            **base,
+            "status": "NOT_TESTED",
+            "detail": "http client unavailable for production safe-mutation",
+            "skip_reason": "http_client_missing",
+            "endpoints": [],
+            "validation": {},
+        }
+
+    headers = {}
+    try:
+        headers = auth.headers_for(ctx.target_base_url, ctx.target_base_url) or {}
+    except Exception:  # noqa: BLE001
+        headers = {}
+
+    store = ma.ApprovalStore()
+    http_get, http_write = build_httpx_transport(client)
+    try:
+        result = execute_approved_mutation(
+            store=store,
+            engagement_id=int(ctx.engagement_id),
+            tenant_id=int(ctx.tenant_id),
+            asset_id=int(ctx.asset_id),
+            approval_id=approval_id,
+            nonce=nonce,
+            headers=headers,
+            http_get=http_get,
+            http_write=http_write,
+            baseline_values=dict(grant.get("baseline_values") or {}) or None,
+        )
+        # Stop flag for orchestrator if callers check it
+        ctx.extra["production_safe_mutation_result"] = result
+        return {
+            **base,
+            "status": result.get("status") or "PASSED",
+            "detail": result.get("detail") or "production safe-mutation completed",
+            "mutation": {"production_safe": True, "evidence": result.get("evidence")},
+            "endpoints": [],
+            "validation": {"status": "CONFIRMED" if result.get("status") == "PASSED" else "INCONCLUSIVE"},
+        }
+    except ProductionSafeExecutionError as exc:
+        ctx.extra["production_safe_mutation_stop"] = True
+        ctx.extra["production_safe_mutation_error"] = str(exc)
+        return {
+            **base,
+            "status": "FAILED",
+            "detail": f"production safe-mutation stopped: {exc}",
+            "skip_reason": str(exc),
+            "mutation": {"production_safe": True, "error": str(exc)},
+            "endpoints": [],
+            "validation": {"status": "INCONCLUSIVE"},
+        }
+    except ma.MutationApprovalError as exc:
+        ctx.extra["production_safe_mutation_stop"] = True
+        return {
+            **base,
+            "status": "NOT_TESTED",
+            "detail": f"production safe-mutation approval error: {exc}",
+            "skip_reason": "approval_error",
+            "endpoints": [],
+            "validation": {},
+        }
 
 
 def _run_object_mutation(

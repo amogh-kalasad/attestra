@@ -230,12 +230,38 @@ def _auth_ids_from_execution(ex: AutomatedTestExecution) -> dict[str, int]:
     return out
 
 
+def _queued_meta_from_execution(ex: AutomatedTestExecution) -> dict[str, Any]:
+    """Read queued request metadata (auth profiles + mutation approval) from result_json."""
+    try:
+        stored = json.loads(ex.result_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return stored if isinstance(stored, dict) else {}
+
+
 def _hydrate_auth_profile_ids(ctx: TestContext, ex: AutomatedTestExecution) -> dict[str, int]:
     """Copy stored profile ids into ctx.extra without overriding an explicit extra value."""
     stored = _auth_ids_from_execution(ex)
     for key, val in stored.items():
         ctx.extra.setdefault(key, val)
     return stored
+
+
+def _hydrate_mutation_approval(ctx: TestContext, ex: AutomatedTestExecution) -> None:
+    """Attach mutation_approval_id from queued result_json when present."""
+    meta = _queued_meta_from_execution(ex)
+    aid = str(meta.get("mutation_approval_id") or "").strip()
+    if aid:
+        ctx.extra.setdefault("mutation_approval_id", aid)
+    for key in (
+        "mutation_endpoint",
+        "mutation_method",
+        "mutation_test_record_id",
+        "mutation_origin",
+        "mutation_fields",
+    ):
+        if key in meta and meta[key] not in (None, "", []):
+            ctx.extra.setdefault(key, meta[key])
 
 
 def create_execution(
@@ -250,6 +276,7 @@ def create_execution(
     allow_private: bool | None = None,
     auth_profile_id: int | str | None = None,
     secondary_auth_profile_id: int | str | None = None,
+    mutation_approval_id: str | None = None,
 ) -> AutomatedTestExecution:
     """Queue an approved Elite test execution for an engagement asset."""
     guard.require_feature_enabled()
@@ -294,11 +321,27 @@ def create_execution(
         )
     if primary_pid is not None and secondary_pid is not None and primary_pid == secondary_pid:
         raise ServiceError("secondary auth profile must be different from the primary profile")
-    request_auth: dict[str, int] = {}
+    request_meta: dict[str, Any] = {}
     if primary_pid is not None:
-        request_auth["auth_profile_id"] = primary_pid
+        request_meta["auth_profile_id"] = primary_pid
     if secondary_pid is not None:
-        request_auth["secondary_auth_profile_id"] = secondary_pid
+        request_meta["secondary_auth_profile_id"] = secondary_pid
+    approval_id = str(mutation_approval_id or "").strip()
+    if approval_id:
+        # Bind the one-time production safe-mutation grant to this queued run.
+        from attestra.automated_vapt.core import mutation_approval as _ma
+
+        store = _ma.ApprovalStore()
+        row = store.get(eng.id, approval_id)
+        if row is None:
+            raise ServiceError("mutation approval not found for this engagement")
+        if int(row.tenant_id) != int(eng.tenant_id):
+            raise ServiceError("mutation approval tenant mismatch")
+        if int(row.asset_id) != int(asset.id):
+            raise ServiceError("mutation approval is for a different target asset")
+        if row.status not in (_ma.STATUS_PENDING, _ma.STATUS_APPROVED):
+            raise ServiceError(f"mutation approval status is {row.status}")
+        request_meta["mutation_approval_id"] = row.id
 
     ex = AutomatedTestExecution(
         engagement_id=eng.id,
@@ -310,7 +353,7 @@ def create_execution(
         status="QUEUED",
         requested_by=actor,
         allow_private=private,
-        result_json=json.dumps(request_auth, sort_keys=True) if request_auth else "{}",
+        result_json=json.dumps(request_meta, sort_keys=True) if request_meta else "{}",
         error="",
         created_at=utcnow(),
     )
@@ -388,6 +431,27 @@ def run_execution(
         extra=dict(extra or {}),
     )
 
+    queued_auth = _hydrate_auth_profile_ids(ctx, ex)
+    _hydrate_mutation_approval(ctx, ex)
+
+    # Gap #3: attach production safe-mutation grant facts (if approval id on execution extra)
+    # before FND-02 decisions so T22 can be narrowly allowed on production.
+    try:
+        from attestra.automated_vapt.core import mutation_approval as _ma
+
+        _grant = _ma.resolve_grant_for_ctx(
+            engagement_id=eng.id,
+            tenant_id=eng.tenant_id,
+            asset_id=asset.id,
+            target_base_url=ex.target_base_url,
+            extra=ctx.extra,
+        )
+        if _grant is not None:
+            ctx.extra["production_safe_mutation"] = _grant
+            ctx.extra["_production_safe_mutation"] = _grant
+    except Exception:  # noqa: BLE001 — fail closed: no grant attached
+        ctx.extra.pop("production_safe_mutation", None)
+
     # FND-02: intrusive cases (SSRF/UPLOAD/XSSSTORE/T22) are decided from the target asset's
     # environment + flags + profile + cleanup plan. Absent decision => modules deny.
     _decisions = intrusive_policy.decide_all(
@@ -400,8 +464,6 @@ def run_execution(
     )
     ctx.extra[intrusive_policy.CTX_KEY] = {tid: d.to_json() for tid, d in _decisions.items()}
     _policy_public = intrusive_policy.public_decisions(_decisions)
-
-    queued_auth = _hydrate_auth_profile_ids(ctx, ex)
     _ensure_httpx_client(ctx)
     try:
         seeds = [ln.strip() for ln in (asset.crawl_seed_urls or "").splitlines() if ln.strip()]
@@ -535,6 +597,14 @@ def run_execution(
             # unrecoverable loss the case is BLOCKED with a reason (never run as "passed").
             blocked = _ensure_session_for_case(tid, ctx)
             case_result = blocked if blocked is not None else _run_case(tid, ctx)
+            # Gap #3: restoration/mutation failure stops further mutation cases.
+            if ctx.extra.get("production_safe_mutation_stop") and _halt is None:
+                stop_msg = str(
+                    ctx.extra.get("production_safe_mutation_error")
+                    or case_result.get("detail")
+                    or "production safe-mutation stop"
+                )[:400]
+                _halt = ("production_safe_mutation_stop", stop_msg)
             _apply_case_validity(tid, case_result, ctx, _case_validities)
             if ctx.extra.get("_auth_events"):
                 case_result.setdefault("auth_events", list(ctx.extra["_auth_events"]))

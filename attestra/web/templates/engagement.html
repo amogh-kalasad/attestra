@@ -496,6 +496,83 @@
 {% if discovery_enabled and can(prole, "finding.read") %}{% include "_discovery_candidates.html" %}{% endif %}
 
 {% if automated_vapt_enabled %}
+<!-- ============================================================ PRODUCTION SAFE-MUTATION APPROVALS -->
+<div class="card" id="mutation-approvals">
+  <h2>Production safe-mutation approvals</h2>
+  <p class="meta">Four-eyes, one-time grants for supervised T22 body mutation against a <b>customer-designated synthetic test record</b> only. Feature flag {{ "ON" if production_safe_mutation_enabled else "OFF (requests still stored; execution remains blocked)" }}. Requester cannot approve their own request. DELETE and bulk writes are never allowed. See operator runbook.</p>
+  {% if can(prole, "engagement.write") %}
+  <form method="post" action="/engagements/{{ e.id }}/mutation-approvals">
+    <div class="fields">
+      <div><label for="mut_asset">Target *</label>
+        <select id="mut_asset" name="asset_id" required>
+          {% for a in e.assets %}<option value="{{ a.id }}">{{ a.identifier }} ({{ a.kind }})</option>
+          {% else %}<option value="">No targets</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="mut_origin">Target origin *</label>
+        <input id="mut_origin" name="target_origin" required placeholder="https://app.example.com" value="{{ e.assets[0].identifier if e.assets else '' }}">
+      </div>
+      <div><label for="mut_endpoint">Endpoint pattern *</label>
+        <input id="mut_endpoint" name="endpoint_pattern" required placeholder="/api/test-records/demo-1">
+      </div>
+      <div><label for="mut_method">HTTP method *</label>
+        <select id="mut_method" name="http_method"><option>PATCH</option><option>PUT</option><option>POST</option></select>
+      </div>
+      <div><label for="mut_record">Synthetic test record id *</label>
+        <input id="mut_record" name="test_record_id" required placeholder="demo-1">
+      </div>
+      <div><label for="mut_fields">Approved fields * (comma-separated)</label>
+        <input id="mut_fields" name="approved_fields" required placeholder="display_name, id">
+      </div>
+      <div><label for="mut_values">Approved values (JSON object, optional)</label>
+        <input id="mut_values" name="approved_values" placeholder='{"display_name":"attestra-mut-safe"}'>
+      </div>
+      <div><label for="mut_ttl">TTL minutes</label>
+        <input id="mut_ttl" name="ttl_minutes" type="number" min="5" max="1440" value="60">
+      </div>
+    </div>
+    <div><label for="mut_cleanup">Cleanup / restoration plan *</label>
+      <textarea id="mut_cleanup" name="cleanup_plan" rows="2" required placeholder="PATCH approved fields back to baseline; GET-verify equals baseline"></textarea>
+    </div>
+    <div><label for="mut_expected">Expected impact</label>
+      <input id="mut_expected" name="expected_behavior" placeholder="Only synthetic record fields change; no customer data">
+    </div>
+    <div class="form-actions"><button type="submit">Request mutation approval</button></div>
+  </form>
+  {% endif %}
+  {% if mutation_approvals %}
+  <h3>Approval history</h3>
+  <table class="table">
+    <thead><tr><th>Id</th><th>Status</th><th>Target</th><th>Record / fields</th><th>People</th><th>Expiry</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for a in mutation_approvals %}
+      <tr id="mutation-approval-{{ a.id }}">
+        <td class="mono">{{ a.id }}</td>
+        <td><b>{{ a.status }}</b>{% if a.restore_verified is not none %}<br><span class="meta">restore {{ "ok" if a.restore_verified else "FAILED" }}</span>{% endif %}</td>
+        <td class="mono">{{ a.http_method }} {{ a.target_origin }}{{ a.endpoint_pattern }}</td>
+        <td><span class="mono">{{ a.test_record_id }}</span><br><span class="meta">{{ a.approved_fields|join(', ') }}</span>{% if a.cleanup_plan %}<br><span class="meta">{{ a.cleanup_plan[:120] }}{% if a.cleanup_plan|length > 120 %}…{% endif %}</span>{% endif %}</td>
+        <td class="meta">req {{ a.requester }} ({{ a.requester_role }}){% if a.approver %}<br>apr {{ a.approver }} ({{ a.approver_role }}){% endif %}</td>
+        <td class="meta">{{ a.expires_at }}</td>
+        <td>
+          {% if can(prole, "engagement.write") %}
+          {% if a.status == 'pending' %}
+          <form method="post" action="/engagements/{{ e.id }}/mutation-approvals/{{ a.id }}/approve" style="display:inline"><button type="submit">Approve</button></form>
+          <form method="post" action="/engagements/{{ e.id }}/mutation-approvals/{{ a.id }}/reject" style="display:inline"><button type="submit" class="secondary">Reject</button></form>
+          {% endif %}
+          {% if a.status in ('pending', 'approved') %}
+          <form method="post" action="/engagements/{{ e.id }}/mutation-approvals/{{ a.id }}/revoke" style="display:inline"><button type="submit" class="secondary">Revoke</button></form>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="meta">No mutation approvals yet.</p>
+  {% endif %}
+</div>
+
 <!-- ============================================================ ELITE AUTOMATED TESTING -->
 <div class="card" id="automated-testing">
   <h2>Automated security testing</h2>
@@ -510,6 +587,13 @@
       </div>
       <div><label for="elite_profile">Profile</label>
         <select id="elite_profile" name="profile"><option value="baseline">Baseline</option><option value="active">Active</option></select>
+      </div>
+      <div><label for="elite_mutation_approval">Mutation approval id (optional, for production T22)</label>
+        <input id="elite_mutation_approval" name="mutation_approval_id" placeholder="Paste approved grant id" list="mutation-approval-ids">
+        <datalist id="mutation-approval-ids">
+          {% for a in mutation_approvals if a.status == 'approved' %}<option value="{{ a.id }}">{{ a.test_record_id }} · {{ a.http_method }} {{ a.endpoint_pattern }}</option>{% endfor %}
+        </datalist>
+        <div class="hint">Bind a four-eyes approved grant when queuing T22 against a production-like asset. Leave blank for ordinary non-production runs.</div>
       </div>
       {% if auth_web_enabled %}
       <div><label for="elite_auth_profile">Auth profile</label>

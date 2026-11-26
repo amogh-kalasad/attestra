@@ -26,6 +26,12 @@ Precedence: 80% network failures, then session loss (guard or `AUTH_EXPIRED` sam
 
 Allow needs all of: the per-test flag, an active or intrusive profile, the scope policy allowing the engagement/asset as an active profile, an asset environment in the allowlist (default `dev,demo`; production, prod, live, prd are always refused and refusing to parse), and a cleanup plan acknowledgement for UPLOAD and XSSSTORE. Any error denies. Modules read the stored decision with [[attestra/automated_vapt/core/intrusive_policy.py#decision_from_ctx]], which re-checks the flag and forbidden environments; no stored decision means deny. `force=True` is honoured only for in-process lab clients. T22 sends need the flag and the decision; an explicit `dry_run=False` cannot override them.
 
+### Production safe-mutation (Gap #3)
+
+Supervised production T22 uses a default-off flag plus a one-time four-eyes grant; restore failure stops further mutations.
+
+[[attestra/automated_vapt/core/mutation_approval.py#request_approval]] / [[attestra/automated_vapt/core/mutation_approval.py#approve_approval]] create the grant. [[attestra/automated_vapt/core/orchestrator.py#create_execution]] may bind `mutation_approval_id`; at run time [[attestra/automated_vapt/core/mutation_approval.py#resolve_grant_for_ctx]] feeds policy. When allowed, [[attestra/automated_vapt/core/body_mutation.py#run_object_mutation]] calls [[attestra/automated_vapt/core/production_safe_executor.py#execute_approved_mutation]] (consume → evidence → mutate → restore → verify). [[attestra/automated_vapt/core/intrusive_policy.py#decision_from_ctx]] preserves a stored `production_safe_mutation_allowed` decision for T22 when the feature flag remains on (ordinary SSRF/UPLOAD/XSSSTORE stay production-forbidden). Flag: `ATTESTRA_AUTOMATED_VAPT_PRODUCTION_SAFE_MUTATION`. API/UI on automated-vapt routers; runbook `docs/ai_security/PRODUCTION_SAFE_MUTATION_RUNBOOK.md`. Full confidence matrix: `tests/automated_vapt/test_production_safe_full_confidence.py`.
+
 ## Engagement readiness
 
 [[attestra/automated_vapt/core/authorization_guard.py#readiness_problems]] mirrors the scope policy: halted or non-active status, no currently valid signed authorization, authorization not covering the asset environment, or outside the testing window.

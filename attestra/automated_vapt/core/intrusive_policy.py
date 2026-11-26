@@ -348,6 +348,14 @@ def decision_from_ctx(ctx: Any, test_id: str) -> IntrusiveDecision:
     if not env:
         return deny(R_ENV_UNKNOWN, **dec.facts)
     if env in FORBIDDEN_ENVIRONMENTS:
+        # Gap #3: a stored production-safe-mutation allow for T22 must survive
+        # defence-in-depth re-check when the feature flag is still on.
+        if tid == "T22" and dec.reason == R_PROD_SAFE_ALLOWED and dec.allow:
+            from attestra.automated_vapt.core import mutation_approval as ma
+
+            if ma.production_safe_mutation_enabled():
+                return dec
+            return deny(R_PROD_SAFE_DENIED, **dec.facts, grant_reason="flag_off")
         return deny(R_ENV_FORBIDDEN, **dec.facts)
     return dec
 

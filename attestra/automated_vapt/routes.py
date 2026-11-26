@@ -40,6 +40,26 @@ class CreateExecutionIn(BaseModel):
     allow_private: bool | None = None
     auth_profile_id: int | None = None
     secondary_auth_profile_id: int | None = None
+    mutation_approval_id: str | None = None
+
+
+class MutationApprovalRequestIn(BaseModel):
+    asset_id: int
+    target_origin: str
+    endpoint_pattern: str
+    http_method: str = "PATCH"
+    test_record_id: str
+    approved_fields: list[str] = Field(..., min_length=1)
+    approved_values: dict | None = None
+    cleanup_plan: str
+    expected_behavior: str = ""
+    ttl_minutes: int = 60
+    test_case_id: str = "T22"
+    execution_id: int | None = None
+
+
+class MutationApprovalActionIn(BaseModel):
+    reason: str = ""
 
 
 @api_router.get("/categories")
@@ -103,10 +123,186 @@ def create_engagement_execution(eid: int, body: CreateExecutionIn, principal=Dep
                 allow_private=body.allow_private,
                 auth_profile_id=body.auth_profile_id,
                 secondary_auth_profile_id=body.secondary_auth_profile_id,
+                mutation_approval_id=body.mutation_approval_id,
             )
             return orch.execution_public_dict(ex)
     except services.ServiceError as e:
         raise _err(e) from e
+
+
+def _mutation_actor(principal) -> tuple[str, int | None, str]:
+    actor = getattr(principal, "actor", None) or getattr(principal, "username", "") or "api"
+    uid = getattr(principal, "user_id", None)
+    role = str(getattr(principal, "role", "") or "").strip().lower()
+    return str(actor), uid if uid is None or isinstance(uid, int) else int(uid), role
+
+
+@api_router.get("/engagements/{eid}/mutation-approvals")
+def list_mutation_approvals(eid: int, principal=Depends(_principal)):
+    """List production safe-mutation approvals for an engagement (tenant-scoped)."""
+    if not has_permission(principal.role, "engagement.read"):
+        raise HTTPException(403, "permission denied: engagement.read")
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            store = ma.ApprovalStore()
+            rows = [r for r in store.list(eid) if int(r.tenant_id) == int(eng.tenant_id)]
+            return {
+                "enabled": ma.production_safe_mutation_enabled(),
+                "approvals": [r.to_public() for r in rows],
+            }
+    except services.ServiceError as e:
+        raise _err(e) from e
+
+
+@api_router.post("/engagements/{eid}/mutation-approvals", status_code=201)
+def request_mutation_approval(eid: int, body: MutationApprovalRequestIn, principal=Depends(_principal)):
+    """Request a one-time four-eyes production safe-mutation approval."""
+    if not has_permission(principal.role, "engagement.write"):
+        raise HTTPException(403, "permission denied: engagement.write")
+    from attestra.automated_vapt.core import mutation_approval as ma
+
+    try:
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            asset = services.get_asset(s, body.asset_id, principal)
+            if asset.engagement_id != eid:
+                raise services.ServiceError("asset not found for this engagement")
+            actor, uid, role = _mutation_actor(principal)
+            store = ma.ApprovalStore()
+            row = ma.request_approval(
+                store,
+                tenant_id=int(eng.tenant_id),
+                engagement_id=int(eid),
+                asset_id=int(asset.id),
+                requester=actor,
+                requester_user_id=uid,
+                requester_role=role,
+                target_origin=body.target_origin,
+                endpoint_pattern=body.endpoint_pattern,
+                http_method=body.http_method,
+                test_record_id=body.test_record_id,
+                approved_fields=list(body.approved_fields),
+                approved_values=dict(body.approved_values or {}),
+                cleanup_plan=body.cleanup_plan,
+                expected_behavior=body.expected_behavior,
+                ttl_minutes=body.ttl_minutes,
+                test_case_id=body.test_case_id,
+                execution_id=body.execution_id,
+            )
+            ma.audit_lifecycle(s, actor=actor, action="requested", approval=row)
+            return row.to_public()
+    except ma.MutationApprovalError as e:
+        raise HTTPException(400, str(e)) from e
+    except services.ServiceError as e:
+        raise _err(e) from e
+
+
+@api_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/approve")
+def approve_mutation_approval(eid: int, approval_id: str, principal=Depends(_principal)):
+    """Four-eyes approve a pending production safe-mutation (requester cannot self-approve)."""
+    if not has_permission(principal.role, "engagement.write"):
+        raise HTTPException(403, "permission denied: engagement.write")
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            store = ma.ApprovalStore()
+            row = ma.approve_approval(
+                store,
+                engagement_id=eid,
+                approval_id=approval_id,
+                approver=actor,
+                approver_user_id=uid,
+                approver_role=role,
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="approved", approval=row)
+            return row.to_public()
+    except Exception as e:
+        from attestra.automated_vapt.core.mutation_approval import MutationApprovalError
+
+        if isinstance(e, MutationApprovalError):
+            raise HTTPException(400, str(e)) from e
+        if isinstance(e, services.ServiceError):
+            raise _err(e) from e
+        raise
+
+
+@api_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/reject")
+def reject_mutation_approval(
+    eid: int, approval_id: str, body: MutationApprovalActionIn | None = None, principal=Depends(_principal)
+):
+    """Reject a pending production safe-mutation request."""
+    if not has_permission(principal.role, "engagement.write"):
+        raise HTTPException(403, "permission denied: engagement.write")
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            store = ma.ApprovalStore()
+            row = ma.reject_approval(
+                store,
+                engagement_id=eid,
+                approval_id=approval_id,
+                actor=actor,
+                actor_user_id=uid,
+                actor_role=role,
+                reason=(body.reason if body else "") or "",
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="rejected", approval=row)
+            return row.to_public()
+    except Exception as e:
+        from attestra.automated_vapt.core.mutation_approval import MutationApprovalError
+
+        if isinstance(e, MutationApprovalError):
+            raise HTTPException(400, str(e)) from e
+        if isinstance(e, services.ServiceError):
+            raise _err(e) from e
+        raise
+
+
+@api_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/revoke")
+def revoke_mutation_approval(
+    eid: int, approval_id: str, body: MutationApprovalActionIn | None = None, principal=Depends(_principal)
+):
+    """Revoke a pending or approved (unused) production safe-mutation grant."""
+    if not has_permission(principal.role, "engagement.write"):
+        raise HTTPException(403, "permission denied: engagement.write")
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            store = ma.ApprovalStore()
+            row = ma.revoke_approval(
+                store,
+                engagement_id=eid,
+                approval_id=approval_id,
+                actor=actor,
+                actor_user_id=uid,
+                actor_role=role,
+                reason=(body.reason if body else "") or "",
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="revoked", approval=row)
+            return row.to_public()
+    except Exception as e:
+        from attestra.automated_vapt.core.mutation_approval import MutationApprovalError
+
+        if isinstance(e, MutationApprovalError):
+            raise HTTPException(400, str(e)) from e
+        if isinstance(e, services.ServiceError):
+            raise _err(e) from e
+        raise
 
 
 @api_router.get("/executions/{xid}")
@@ -203,6 +399,7 @@ async def ui_create_execution(
         secondary_pid = _optional_form_id(
             form.get("secondary_auth_profile_id"), field="secondary auth profile"
         )
+        mutation_approval_id = str(form.get("mutation_approval_id") or "").strip() or None
         with db.session() as s:
             orch.create_execution(
                 s,
@@ -214,11 +411,180 @@ async def ui_create_execution(
                 profile=profile,
                 auth_profile_id=primary_pid,
                 secondary_auth_profile_id=secondary_pid,
+                mutation_approval_id=mutation_approval_id,
             )
         return RedirectResponse(f"/engagements/{eid}#automated-testing", status_code=303)
     except services.ServiceError as e:
         return RedirectResponse(
             f"/engagements/{eid}?error={str(e)[:180]}#automated-testing",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/mutation-approvals")
+async def ui_request_mutation_approval(request: Request, eid: int):
+    """HTML form: request a production safe-mutation approval."""
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    form = await request.form()
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        fields_raw = str(form.get("approved_fields") or "")
+        fields = [f.strip() for f in fields_raw.replace(";", ",").split(",") if f.strip()]
+        values_raw = str(form.get("approved_values") or "").strip()
+        approved_values: dict = {}
+        if values_raw:
+            import json as _json
+
+            try:
+                parsed = _json.loads(values_raw)
+                if isinstance(parsed, dict):
+                    approved_values = parsed
+            except _json.JSONDecodeError as exc:
+                raise services.ServiceError(f"approved_values must be JSON object: {exc}") from None
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            asset_id = int(str(form.get("asset_id") or "0"))
+            asset = services.get_asset(s, asset_id, principal)
+            if asset.engagement_id != eid:
+                raise services.ServiceError("asset not found for this engagement")
+            actor, uid, role = _mutation_actor(principal)
+            store = ma.ApprovalStore()
+            row = ma.request_approval(
+                store,
+                tenant_id=int(eng.tenant_id),
+                engagement_id=int(eid),
+                asset_id=int(asset.id),
+                requester=actor,
+                requester_user_id=uid,
+                requester_role=role,
+                target_origin=str(form.get("target_origin") or ""),
+                endpoint_pattern=str(form.get("endpoint_pattern") or ""),
+                http_method=str(form.get("http_method") or "PATCH"),
+                test_record_id=str(form.get("test_record_id") or ""),
+                approved_fields=fields,
+                approved_values=approved_values,
+                cleanup_plan=str(form.get("cleanup_plan") or ""),
+                expected_behavior=str(form.get("expected_behavior") or ""),
+                ttl_minutes=int(str(form.get("ttl_minutes") or "60") or "60"),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="requested", approval=row)
+        return RedirectResponse(
+            f"/engagements/{eid}?msg=Mutation+approval+requested#mutation-approvals",
+            status_code=303,
+        )
+    except Exception as e:
+        from attestra.automated_vapt.core.mutation_approval import MutationApprovalError
+
+        msg = str(e)[:180]
+        if not isinstance(e, (MutationApprovalError, services.ServiceError)):
+            msg = f"request failed: {msg}"
+        return RedirectResponse(
+            f"/engagements/{eid}?error={msg}#mutation-approvals",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/approve")
+def ui_approve_mutation_approval(request: Request, eid: int, approval_id: str):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            row = ma.approve_approval(
+                ma.ApprovalStore(),
+                engagement_id=eid,
+                approval_id=approval_id,
+                approver=actor,
+                approver_user_id=uid,
+                approver_role=role,
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="approved", approval=row)
+        return RedirectResponse(
+            f"/engagements/{eid}?msg=Mutation+approval+granted#mutation-approvals",
+            status_code=303,
+        )
+    except Exception as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#mutation-approvals",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/reject")
+def ui_reject_mutation_approval(request: Request, eid: int, approval_id: str):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            row = ma.reject_approval(
+                ma.ApprovalStore(),
+                engagement_id=eid,
+                approval_id=approval_id,
+                actor=actor,
+                actor_user_id=uid,
+                actor_role=role,
+                reason="rejected via UI",
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="rejected", approval=row)
+        return RedirectResponse(
+            f"/engagements/{eid}?msg=Mutation+approval+rejected#mutation-approvals",
+            status_code=303,
+        )
+    except Exception as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#mutation-approvals",
+            status_code=303,
+        )
+
+
+@ui_router.post("/engagements/{eid}/mutation-approvals/{approval_id}/revoke")
+def ui_revoke_mutation_approval(request: Request, eid: int, approval_id: str):
+    principal, redirect = _ui_principal(request)
+    if redirect is not None:
+        return redirect
+    assert principal is not None
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        with db.session() as s:
+            eng = services.get_engagement(s, eid, principal)
+            actor, uid, role = _mutation_actor(principal)
+            row = ma.revoke_approval(
+                ma.ApprovalStore(),
+                engagement_id=eid,
+                approval_id=approval_id,
+                actor=actor,
+                actor_user_id=uid,
+                actor_role=role,
+                reason="revoked via UI",
+                tenant_id=int(eng.tenant_id),
+            )
+            ma.audit_lifecycle(s, actor=actor, action="revoked", approval=row)
+        return RedirectResponse(
+            f"/engagements/{eid}?msg=Mutation+approval+revoked#mutation-approvals",
+            status_code=303,
+        )
+    except Exception as e:
+        return RedirectResponse(
+            f"/engagements/{eid}?error={str(e)[:180]}#mutation-approvals",
             status_code=303,
         )
 

@@ -18,7 +18,7 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 APPROVER_ROLES = frozenset({"lead", "admin", "super_admin"})
@@ -413,3 +413,166 @@ def record_restore_result(
         restore_verified=bool(verified),
         restore_notes=note,
     )
+
+
+def reject_approval(
+    store: ApprovalStore,
+    *,
+    engagement_id: int,
+    approval_id: str,
+    actor: str,
+    actor_user_id: int | None,
+    actor_role: str,
+    reason: str = "",
+    tenant_id: int | None = None,
+) -> MutationApproval:
+    """Reject a pending approval (lead/admin)."""
+    row = store.get(engagement_id, approval_id)
+    if row is None:
+        raise MutationApprovalError("approval not found")
+    if tenant_id is not None and int(tenant_id) != int(row.tenant_id):
+        raise MutationApprovalError("cross-tenant approval access denied")
+    if row.status != STATUS_PENDING:
+        raise MutationApprovalError(f"approval status is {row.status}")
+    role = (actor_role or "").strip().lower()
+    if role not in APPROVER_ROLES:
+        raise MutationApprovalError("role cannot reject production safe-mutation")
+    note = (reason or "rejected").strip()[:500]
+    return store.update(
+        engagement_id,
+        approval_id,
+        status=STATUS_DENIED,
+        approver=(actor or "").strip(),
+        approver_user_id=actor_user_id,
+        approver_role=role,
+        approved_at=_iso(_now()),
+        restore_notes=note,
+    )
+
+
+def revoke_approval(
+    store: ApprovalStore,
+    *,
+    engagement_id: int,
+    approval_id: str,
+    actor: str,
+    actor_user_id: int | None,
+    actor_role: str,
+    reason: str = "",
+    tenant_id: int | None = None,
+) -> MutationApproval:
+    """Revoke a pending or approved (unused) approval."""
+    row = store.get(engagement_id, approval_id)
+    if row is None:
+        raise MutationApprovalError("approval not found")
+    if tenant_id is not None and int(tenant_id) != int(row.tenant_id):
+        raise MutationApprovalError("cross-tenant approval access denied")
+    if row.status in (STATUS_CONSUMED, STATUS_REVOKED, STATUS_DENIED, STATUS_EXPIRED):
+        raise MutationApprovalError(f"approval status is {row.status}")
+    role = (actor_role or "").strip().lower()
+    if role not in APPROVER_ROLES and not (
+        role in REQUESTER_ROLES
+        and actor_user_id is not None
+        and row.requester_user_id is not None
+        and int(actor_user_id) == int(row.requester_user_id)
+    ):
+        raise MutationApprovalError("role cannot revoke this approval")
+    note = (reason or "revoked").strip()[:500]
+    return store.update(
+        engagement_id,
+        approval_id,
+        status=STATUS_REVOKED,
+        restore_notes=note,
+        approver=(actor or "").strip() or row.approver,
+        approver_user_id=actor_user_id if actor_user_id is not None else row.approver_user_id,
+        approver_role=role or row.approver_role,
+    )
+
+
+def audit_lifecycle(
+    session: Any,
+    *,
+    actor: str,
+    action: str,
+    approval: MutationApproval,
+) -> None:
+    """Append-only audit for approval lifecycle transitions."""
+    try:
+        from attestra import audit
+
+        audit.record(
+            session,
+            actor,
+            f"mutation_approval.{action}",
+            "mutation_approval",
+            approval.id,
+            engagement_id=approval.engagement_id,
+            tenant_id=approval.tenant_id,
+            asset_id=approval.asset_id,
+            status=approval.status,
+            test_case_id=approval.test_case_id,
+        )
+    except Exception:  # noqa: BLE001 — never fail the mutation path on audit alone
+        import logging
+
+        logging.getLogger(__name__).exception("mutation approval audit failed")
+
+
+def resolve_grant_for_ctx(
+    *,
+    engagement_id: int,
+    tenant_id: int,
+    asset_id: int,
+    target_base_url: str,
+    extra: Mapping[str, Any] | None,
+    store: ApprovalStore | None = None,
+) -> dict[str, Any] | None:
+    """Build ``production_safe_mutation`` facts for intrusive_policy from ctx.extra.
+
+    Expects ``mutation_approval_id`` (and optional endpoint/method/record overrides)
+    on the execution extra. Returns None when no approval id is attached.
+    """
+    extra = dict(extra or {})
+    approval_id = str(extra.get("mutation_approval_id") or "").strip()
+    if not approval_id:
+        return None
+    store = store or ApprovalStore()
+    row = store.get(int(engagement_id), approval_id)
+    if row is None:
+        return {
+            "ok": False,
+            "reason": "approval_not_found",
+            "approval_id": approval_id,
+            "cleanup_plan": "",
+            "test_record_id": "",
+            "approved_fields": [],
+        }
+    endpoint = str(extra.get("mutation_endpoint") or row.endpoint_pattern)
+    method = str(extra.get("mutation_method") or row.http_method)
+    record = str(extra.get("mutation_test_record_id") or row.test_record_id)
+    origin = str(extra.get("mutation_origin") or target_base_url or row.target_origin)
+    ok, reason = validate_grant_for_execution(
+        row,
+        tenant_id=int(tenant_id),
+        engagement_id=int(engagement_id),
+        asset_id=int(asset_id),
+        target_origin=origin,
+        endpoint=endpoint,
+        http_method=method,
+        test_record_id=record,
+        fields=list(extra.get("mutation_fields") or row.approved_fields),
+    )
+    return {
+        "ok": ok,
+        "reason": reason,
+        "approval_id": row.id,
+        "nonce": row.nonce if ok else "",
+        "cleanup_plan": row.cleanup_plan,
+        "test_record_id": row.test_record_id,
+        "approved_fields": list(row.approved_fields),
+        "approved_values": dict(row.approved_values or {}),
+        "endpoint_pattern": row.endpoint_pattern,
+        "http_method": row.http_method,
+        "target_origin": row.target_origin,
+        "status": row.status,
+    }

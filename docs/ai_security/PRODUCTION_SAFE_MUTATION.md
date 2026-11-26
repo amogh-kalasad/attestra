@@ -30,17 +30,39 @@ Ordinary intrusive tests (**SSRF**, **UPLOAD**, **XSSSTORE**, and T22 without a 
 
 - Store: `DATA_DIR/mutation_approvals/engagement_{id}.json`
 - Policy: `intrusive_policy.decide_from_policy_input(..., production_grant=...)`
+- Executor: `production_safe_executor.execute_approved_mutation` (consume → before → mutate → restore → verify)
+- Orchestrator: hydrates `mutation_approval_id` from queued execution meta; attaches grant facts before FND-02; halts remaining cases on restore/mutation stop
 - Reason codes: `production_safe_mutation_allowed` / `production_safe_mutation_denied`
+
+## API / UI
+
+| Method | Path |
+|---|---|
+| GET | `/api/automated-vapt/engagements/{eid}/mutation-approvals` |
+| POST | `/api/automated-vapt/engagements/{eid}/mutation-approvals` |
+| POST | `.../mutation-approvals/{id}/approve` |
+| POST | `.../mutation-approvals/{id}/reject` |
+| POST | `.../mutation-approvals/{id}/revoke` |
+
+Engagement UI: *Production safe-mutation approvals* card + optional *Mutation approval id* on the automated test queue form.
+
+Queueing an execution with `mutation_approval_id` binds the grant into `result_json` until the worker runs.
 
 ## Safety
 
 - No arbitrary body injection — only approved fields/values.
 - No agent/scanner boolean as approval.
 - Cross-tenant access denied.
-- Restoration verification must succeed before claiming safe restore; failures stop further mutations (caller responsibility).
+- Restoration verification must succeed before claiming safe restore; failures stop further mutations (orchestrator halt).
+
+## Operator runbook
+
+See `docs/ai_security/PRODUCTION_SAFE_MUTATION_RUNBOOK.md` for roles, monitoring, manual restore, and rollback.
 
 ## Tests
 
-`tests/automated_vapt/test_mutation_approval.py`
+- `tests/automated_vapt/test_mutation_approval.py`
+- `tests/automated_vapt/test_production_safe_executor.py`
+- `tests/automated_vapt/test_mutation_approval_api.py`
 
 Do **not** run live mutations against real customer production data during development.

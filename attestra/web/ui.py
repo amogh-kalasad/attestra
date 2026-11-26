@@ -607,6 +607,34 @@ def _elite_executions(s, eid: int, principal) -> list[dict]:
         return []
 
 
+def _mutation_approvals_for(s, eid: int, principal) -> list[dict]:
+    """Public mutation-approval rows for the engagement (tenant-filtered)."""
+    if not config.AUTOMATED_VAPT_ENABLED:
+        return []
+    if not has_permission(principal.role, "engagement.read"):
+        return []
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        eng = services.get_engagement(s, eid, principal)
+        store = ma.ApprovalStore()
+        rows = [r for r in store.list(eid) if int(r.tenant_id) == int(eng.tenant_id)]
+        # Newest first
+        rows.sort(key=lambda r: r.created_at or "", reverse=True)
+        return [r.to_public() for r in rows[:50]]
+    except Exception:  # noqa: BLE001 — never break the engagement page
+        return []
+
+
+def _production_safe_mutation_enabled() -> bool:
+    try:
+        from attestra.automated_vapt.core import mutation_approval as ma
+
+        return bool(ma.production_safe_mutation_enabled())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _engagement_ctx(
     request: Request,
     s,
@@ -714,6 +742,8 @@ def _engagement_ctx(
         "org_credits": _org_credits_for(principal, s, e.tenant_id),
         "elite_test_cases": _elite_test_cases() if config.AUTOMATED_VAPT_ENABLED else [],
         "elite_executions": _elite_executions(s, eid, principal) if config.AUTOMATED_VAPT_ENABLED else [],
+        "mutation_approvals": _mutation_approvals_for(s, eid, principal),
+        "production_safe_mutation_enabled": _production_safe_mutation_enabled(),
         # WP4: passive discovery review card + stuck-scan badge (both off/empty by default).
         "discovery_enabled": _discovery_enabled(),
         "stuck_jobs": _stuck_jobs(s),
