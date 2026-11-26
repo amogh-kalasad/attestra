@@ -58,15 +58,29 @@
 
 <div class="card" id="reports">
   <h2>Reports</h2>
+  <p class="meta" style="margin-bottom:12px">Open a signed report with full branding, or as a plain content page (no logos, Attestra / powered-by marks, or issuer chrome). The sealed original used for verify is unchanged.</p>
   <div class="table-wrap">
   <table>
     <thead>
-    <tr><th>#</th><th>Kind</th><th>Version</th><th>Status</th><th>SHA-256</th><th>Signed</th><th></th></tr>
+    <tr><th>#</th><th>Kind</th><th>Version</th><th>Status</th><th>SHA-256</th><th>Signed</th><th>Open</th></tr>
     </thead>
     <tbody>
     {% for r in reports %}
     <tr><td>{{ r.id }}</td><td>{{ r.kind|label }}</td><td>{{ r.version }}</td><td><span class="st">{{ r.status|label }}</span></td><td class="mono">{{ r.sha256[:16] }}&hellip;</td><td>{{ r.signed_at|dt if r.signed_at else "-" }}</td>
-      <td>{% if r.status == "signed" %}<a href="/reports/{{ r.id }}" target="_blank" rel="noopener">Download <span aria-hidden="true">&#8599;</span></a>{% endif %}</td></tr>
+      <td>
+        {% if r.status == "signed" or role != "client_viewer" %}
+        <form class="row" method="get" action="/reports/{{ r.id }}" target="_blank" style="gap:6px;align-items:center;margin:0">
+          <label class="sr-only" for="report-branding-{{ r.id }}">Branding</label>
+          <select id="report-branding-{{ r.id }}" name="branding" aria-label="Report branding for report {{ r.id }}">
+            <option value="branded" selected>With branding</option>
+            <option value="plain">Without branding (plain)</option>
+          </select>
+          <button type="submit" class="secondary">Open <span aria-hidden="true">&#8599;</span></button>
+        </form>
+        {% else %}
+        <span class="meta">Sign to open</span>
+        {% endif %}
+      </td></tr>
     {% else %}<tr><td colspan="7"><div class="empty">No signed reports yet.</div></td></tr>{% endfor %}
     </tbody>
   </table>

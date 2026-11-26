@@ -1367,24 +1367,52 @@ _REPORT_EXPORT_TYPES = {
 
 
 @app.get("/reports/{rid}")
-def download_report(rid: int, principal: Principal = Depends(require("report.read"))):
-    """View a report: the sealed HTML with a sign-off record added on top. The file itself is not changed."""
+def download_report(
+    rid: int,
+    branding: str | None = None,
+    principal: Principal = Depends(require("report.read")),
+):
+    """View a report: sealed HTML with a sign-off record on top. File on disk is unchanged.
+
+    ``branding=plain`` (or ``off`` / ``none``) returns a derivative content-only view:
+    logos, issuer/platform marks, and powered-by footers are stripped. The sealed
+    original and its SHA-256 are unchanged; use ``/reports/{rid}/sealed`` to download it.
+    """
     from fastapi.responses import HTMLResponse
 
     from attestra.reports.signoff import banner_html, inject
 
+    plain = (branding or "").strip().lower() in ("plain", "off", "none", "unbranded", "0", "false")
     with data_access.session() as s:
         r, path = _report_file(s, rid, principal)
         sealed = path.read_bytes()
-        banner = banner_html(
-            r,
-            verify_report(s, rid),
-            sealed_url=f"/reports/{rid}/sealed",
-            pdf_url=f"/reports/{rid}/export/pdf",
-            docs_url=f"/reports/{rid}/export/docx",
-        )
-        audit.record(s, principal.actor, "report.download", "report", r.id)
-    body = inject(sealed, banner, drop_draft_mark=(r.status == "signed"))
+        if plain:
+            from attestra.reports.plain import plain_banner_html, strip_report_branding
+
+            sealed_view = strip_report_branding(sealed)
+            banner = plain_banner_html(
+                sealed_url=f"/reports/{rid}/sealed",
+                branded_url=f"/reports/{rid}",
+            )
+            audit.record(
+                s,
+                principal.actor,
+                "report.download",
+                "report",
+                r.id,
+                branding="plain",
+            )
+            body = inject(sealed_view, banner, drop_draft_mark=(r.status == "signed"))
+        else:
+            banner = banner_html(
+                r,
+                verify_report(s, rid),
+                sealed_url=f"/reports/{rid}/sealed",
+                pdf_url=f"/reports/{rid}/export/pdf",
+                docs_url=f"/reports/{rid}/export/docx",
+            )
+            audit.record(s, principal.actor, "report.download", "report", r.id, branding="branded")
+            body = inject(sealed, banner, drop_draft_mark=(r.status == "signed"))
     return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
 

@@ -154,6 +154,8 @@ Client viewers comment, upload fix evidence, and request retests; auditors stay 
 
 [[attestra/web/portal.py]] serves `/portal`, `/portal/engagements/{eid}`, and `/portal/engagements/{eid}/findings/{fid}` (template `portal_finding.html`). `new` / `false_positive` stay hidden from `client_viewer`. Comment POST calls [[attestra/comments.py#add_comment]] (same `can_add_comment` gate). Evidence POST requires `portal.evidence`, always stores kind `client_upload` (in [[attestra/services.py#EVIDENCE_KINDS]], never `screenshot`), caps size via [[attestra/web/portal.py#PORTAL_EVIDENCE_MAX_BYTES]], and uses [[attestra/services.py#add_evidence]]. Client downloads of scanner evidence are refused ([[authorization#Evidence file security]]). Retest POST requires `portal.retest_request` and a note, then [[attestra/retest.py#request_retest]] (validated/fixed only) plus a `portal.retest_request` audit. Auditor GETs omit write forms; POSTs return 403. Cross-tenant access is 404 via [[attestra/services.py#get_engagement]]. Branding from [[attestra/web/portal.py#tenant_branding]] (tenant `ReportTemplate` logo/cover via [[attestra/library/templates.py#_pick]]); no logo keeps the Attestra shell default.
 
+Portal engagement Reports (`#reports`) offers a per-report branding dropdown: **With branding** opens `/reports/{rid}` (default); **Without branding (plain)** opens `/reports/{rid}?branding=plain`. Plain views use [[attestra/reports/plain.py#strip_report_branding]] on a copy of the sealed HTML (logos, brand spans, powered-by footer removed) and do not change the sealed file or its SHA-256.
+
 ## Public report verification
 
 Public HMAC URL to confirm a sealed report hash and signature without login.
