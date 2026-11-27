@@ -148,6 +148,12 @@ Spacing tokens (`--space-1`…`--space-7`) keep section gaps, card stacks inside
 
 [[attestra/services.py#list_scan_schedules]], [[attestra/services.py#update_scan_schedule]], and [[attestra/services.py#remove_scan_schedule]] manage cadence and due dates.
 
+## Customer self-service registration
+
+Public customer signup creates a new organization and a tenant-scoped lead (never platform admin).
+
+When `ATTESTRA_CUSTOMER_SELF_SERVICE_REGISTRATION` is on (default), `/register` and `POST /api/register` call [[attestra/users/registration.py#register_customer]]: validate username/password/email/org, create tenant (`plan=standard`) + lead + membership, bootstrap credits via the existing credit account path, audit `user.self_register` / `tenant.create`, and send a best-effort welcome via [[attestra/users/mailer.py#send_welcome]]. Rate-limited like invite accept. Login at `/login` links to register when enabled; nonfunctional SSO buttons are not shown. Invites and CLI user creation remain unchanged. Subscription feature access continues to use `SUBSCRIPTION_SERVICE` credits and RBAC — customers cannot allocate credits or change their own plan.
+
 ## Client remediation portal
 
 Client viewers comment, upload fix evidence, and request retests; auditors stay read-only; tenant branding on portal pages.

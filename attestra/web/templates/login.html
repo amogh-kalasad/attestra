@@ -34,13 +34,15 @@
         </div>
       </form>
 
+      {% if self_service_registration %}
       <div class="or" aria-hidden="true">or</div>
-      <button type="button" class="ghost" disabled title="SSO sign-in is not configured for this deployment yet">Continue with SSO</button>
-
+      <p class="note" style="margin:0"><a href="/register">Create a customer organization account</a></p>
+      {% else %}
       <div class="note">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F766E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:2px"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
         <span>There is no open sign-up. Ask a lead to send you an invite link.</span>
       </div>
+      {% endif %}
     </div>
     <div class="bottom"><span>Attestra v{{ version }}</span><span>From findings to signed attestation</span></div>
   </section>

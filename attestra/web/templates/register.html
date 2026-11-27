@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create account &middot; Attestra</title>
+<link rel="stylesheet" href="/static/attestra.css?v=13">
+<script src="/static/attestra.js?v=10" defer></script>
+</head>
+<body class="is-auth">
+<div class="login-c">
+  <section class="formside">
+    <div class="top">Already have an account? <a href="/login">Sign in</a></div>
+    <div class="formbox" role="group" aria-label="Create account">
+      <div>
+        <h1>Create your organization</h1>
+        <p class="sub">Register as a customer organization owner. You will sign in with the existing Attestra login.</p>
+      </div>
+
+      {% if error %}<div class="flash err" role="alert">{{ error }}</div>{% endif %}
+
+      <form method="post" action="/register" id="register-form" autocomplete="on">
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <label for="organization_name">Organization name *
+            <input class="field" id="organization_name" name="organization_name" type="text" required maxlength="200"
+                   value="{{ form.organization_name or '' }}" autocomplete="organization" placeholder="Acme Security Ltd">
+          </label>
+          <label for="email">Work email *
+            <input class="field" id="email" name="email" type="email" required maxlength="254"
+                   value="{{ form.email or '' }}" autocomplete="email" placeholder="you@company.com">
+          </label>
+          <label for="contact_name">Contact name
+            <input class="field" id="contact_name" name="contact_name" type="text" maxlength="200"
+                   value="{{ form.contact_name or '' }}" autocomplete="name" placeholder="Optional">
+          </label>
+          <label for="username">Username *
+            <input class="field" id="username" name="username" type="text" required maxlength="100"
+                   value="{{ form.username or '' }}" autocomplete="username" pattern="[a-zA-Z0-9][a-zA-Z0-9._@\-]{2,99}"
+                   placeholder="e.g. jordan.lead" title="3–100 characters: letters, digits, . _ @ -">
+          </label>
+          <label for="display_name">Display name
+            <input class="field" id="display_name" name="display_name" type="text" maxlength="200"
+                   value="{{ form.display_name or '' }}" autocomplete="nickname" placeholder="Optional">
+          </label>
+          <label for="password">Password * (min {{ min_password }} characters)
+            <span class="row-between"><span></span><button type="button" class="linkbtn show-pw" id="toggle-pw" aria-pressed="false">Show</button></span>
+            <input class="field" id="password" name="password" type="password" required minlength="{{ min_password }}"
+                   autocomplete="new-password" placeholder="Choose a strong password">
+          </label>
+          <label for="confirm">Confirm password *
+            <input class="field" id="confirm" name="confirm" type="password" required minlength="{{ min_password }}"
+                   autocomplete="new-password" placeholder="Re-enter password">
+          </label>
+          <button type="submit" class="primary">Create account</button>
+        </div>
+      </form>
+
+      <div class="note">
+        <span>Creates a new organization with a <b>lead</b> role for your tenant only. Platform admin accounts cannot be created here. Invited users continue to use invite links.</span>
+      </div>
+    </div>
+    <div class="bottom"><span>Attestra v{{ version }}</span><span>Customer self-service registration</span></div>
+  </section>
+  <section class="story ls" aria-label="About registration">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg class="ri-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>Attestra</div>
+    <h2>Self-service for customer organizations.</h2>
+    <p>Register your organization, then sign in with the same Attestra login used by invited users. Feature access follows your organization subscription and credits — you cannot change subscription permissions yourself.</p>
+    <div class="ls-grid">
+      <div class="ls-card">
+        <h3>What you get</h3>
+        <ol class="ls-steps">
+          <li><b>01</b><div><strong>Organization</strong><span>A dedicated tenant with your contact email on file.</span></div></li>
+          <li><b>02</b><div><strong>Lead access</strong><span>Tenant-scoped lead role — not platform admin.</span></div></li>
+          <li><b>03</b><div><strong>Credits</strong><span>Initial test-run credits from the existing subscription setup.</span></div></li>
+          <li><b>04</b><div><strong>Welcome email</strong><span>Acknowledgement with your username and sign-in link when SMTP is configured.</span></div></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

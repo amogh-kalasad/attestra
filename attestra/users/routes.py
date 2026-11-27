@@ -328,3 +328,114 @@ def ui_reset_submit(request: Request, token: str, password: str = Form(...), con
     except us.UserAdminError as e:
         return _token_page(request, token, "reset", "invite_reset.html", str(e))
     return _back("/login", msg="Password updated. Sign in with your new password.")
+
+
+# ---------------------------------------------------------------- Customer self-service registration
+
+
+class RegisterIn(BaseModel):
+    username: str = Field(max_length=100)
+    password: str = Field(max_length=500)
+    email: str = Field(max_length=254)
+    organization_name: str = Field(max_length=200)
+    display_name: str = Field(default="", max_length=200)
+    contact_name: str = Field(default="", max_length=200)
+
+
+def _registration_enabled() -> bool:
+    from attestra.users.registration import self_service_registration_enabled
+
+    return self_service_registration_enabled()
+
+
+@api_router.post("/register", status_code=201, dependencies=[Depends(_rate_limit)])
+def api_register(body: RegisterIn):
+    """Public customer self-service registration (new tenant + lead). Never creates admin."""
+    from attestra.users import registration as reg
+
+    if not reg.self_service_registration_enabled():
+        raise HTTPException(404, "registration is disabled")
+    try:
+        with _uow() as uow:
+            out = reg.register_customer(
+                uow,
+                username=body.username,
+                password=body.password,
+                email=body.email,
+                organization_name=body.organization_name,
+                display_name=body.display_name,
+                contact_name=body.contact_name,
+            )
+    except us.UserAdminError as e:
+        raise HTTPException(400, str(e)) from e
+    user = out["user"]
+    tenant = out["tenant"]
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "tenant_id": tenant["id"],
+        "organization": tenant["name"],
+        "emailed": out["emailed"],
+    }
+
+
+@ui_router.get("/register", response_class=HTMLResponse)
+def ui_register_form(request: Request):
+    from attestra.users.registration import self_service_registration_enabled
+    from attestra.users.service import MIN_PASSWORD_LENGTH
+
+    if not self_service_registration_enabled():
+        return _back("/login", error="Customer registration is disabled on this deployment.")
+    return _render(
+        request,
+        "register.html",
+        {"error": None, "form": {}, "min_password": MIN_PASSWORD_LENGTH},
+    )
+
+
+@ui_router.post("/register", dependencies=[Depends(_rate_limit)])
+async def ui_register(request: Request):
+    from attestra.users import registration as reg
+    from attestra.users.service import MIN_PASSWORD_LENGTH
+
+    if not reg.self_service_registration_enabled():
+        return _back("/login", error="Customer registration is disabled on this deployment.")
+    form = await request.form()
+    data = {
+        "username": str(form.get("username") or ""),
+        "password": str(form.get("password") or ""),
+        "confirm": str(form.get("confirm") or ""),
+        "email": str(form.get("email") or ""),
+        "organization_name": str(form.get("organization_name") or ""),
+        "display_name": str(form.get("display_name") or ""),
+        "contact_name": str(form.get("contact_name") or ""),
+    }
+    ctx = {
+        "error": None,
+        "form": {k: v for k, v in data.items() if k not in ("password", "confirm")},
+        "min_password": MIN_PASSWORD_LENGTH,
+    }
+    if data["password"] != data["confirm"]:
+        ctx["error"] = "Passwords do not match."
+        return _render(request, "register.html", ctx)
+    try:
+        with _uow() as uow:
+            out = reg.register_customer(
+                uow,
+                username=data["username"],
+                password=data["password"],
+                email=data["email"],
+                organization_name=data["organization_name"],
+                display_name=data["display_name"],
+                contact_name=data["contact_name"],
+            )
+    except us.UserAdminError as e:
+        ctx["error"] = str(e)
+        return _render(request, "register.html", ctx)
+    msg = "Account created. Sign in with your username and password."
+    if out.get("emailed"):
+        msg += " A welcome email was sent."
+    elif out.get("email"):
+        msg += " (Welcome email was not sent — SMTP may be unset.)"
+    return _back("/login", msg=msg)

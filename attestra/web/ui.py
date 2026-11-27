@@ -296,10 +296,21 @@ def login_form(request: Request, next: str = "/"):
         fw_names = [v["name"] for v in load_library().frameworks.values()]
     except Exception:  # the sign-in page must render even if the library fails to load
         fw_names = []
+    try:
+        from attestra.users.registration import self_service_registration_enabled
+
+        signup_on = self_service_registration_enabled()
+    except Exception:  # noqa: BLE001 — login must render even if registration module fails
+        signup_on = False
     return _render(
         request,
         "login.html",
-        {"next_url": _safe_next(next), "login_frameworks": fw_names, "login_formats": list(IMPORT_FORMAT_LABELS.values())},
+        {
+            "next_url": _safe_next(next),
+            "login_frameworks": fw_names,
+            "login_formats": list(IMPORT_FORMAT_LABELS.values()),
+            "self_service_registration": signup_on,
+        },
     )
 
 

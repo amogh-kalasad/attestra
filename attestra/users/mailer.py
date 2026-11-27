@@ -92,3 +92,43 @@ def send_link(to: str, link: str, *, purpose: str = "invite") -> bool:
         subject = "You are invited to Attestra"
         text = f"Use this one-time link to create your account:\n\n{link}\n"
     return send_email(to, subject, text)
+
+
+def send_welcome(
+    to: str,
+    *,
+    username: str,
+    organization_name: str,
+    display_name: str = "",
+    login_url: str | None = None,
+) -> bool:
+    """Welcome acknowledgement after customer self-service registration.
+
+    Includes username and organization name only — never the password. Uses the
+    existing SMTP / test deliver path. Returns True when handed to the deliverer.
+    """
+    if not to:
+        return False
+    base = (login_url or os.environ.get("ATTESTRA_PUBLIC_URL", "") or "").rstrip("/")
+    sign_in = f"{base}/login" if base else "/login"
+    who = (display_name or username or "").strip() or username
+    subject = "Welcome to Attestra"
+    text = (
+        f"Hello {who},\n\n"
+        f"Your Attestra account was created successfully.\n\n"
+        f"Organization: {organization_name}\n"
+        f"Username: {username}\n\n"
+        f"Sign in here:\n{sign_in}\n\n"
+        f"If you did not register for Attestra, contact your administrator.\n"
+    )
+    html = (
+        f"<p>Hello {who},</p>"
+        f"<p>Your Attestra account was created successfully.</p>"
+        f"<ul>"
+        f"<li><strong>Organization:</strong> {organization_name}</li>"
+        f"<li><strong>Username:</strong> {username}</li>"
+        f"</ul>"
+        f'<p><a href="{sign_in}">Sign in to Attestra</a></p>'
+        f"<p>If you did not register for Attestra, contact your administrator.</p>"
+    )
+    return send_email(to, subject, text, html=html)
